@@ -1,0 +1,6 @@
+/target
+screenshots/
+wasm/models/
+__pycache__/
+*.pyc
+.ruff_cache/
