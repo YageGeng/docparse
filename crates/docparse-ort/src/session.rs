@@ -3,8 +3,10 @@
 use std::sync::Mutex;
 
 use docparse_core::{
-    LayoutAnalyzer, LayoutError, LayoutPage, PostprocessOptions,
-    PreprocessOptions, postprocess_fetch_rows_batch, preprocess_images,
+    LayoutAnalyzer, LayoutError, LayoutPage, MODEL_INPUT_IM_SHAPE,
+    MODEL_INPUT_IMAGE, MODEL_INPUT_SCALE_FACTOR, MODEL_OUTPUT_FETCH_ROW_COUNTS,
+    MODEL_OUTPUT_FETCH_ROWS, PostprocessOptions, PreprocessOptions,
+    postprocess_fetch_rows_batch, preprocess_images,
 };
 use ort::{session::Session, value::TensorRef};
 
@@ -94,24 +96,24 @@ impl OrtLayoutAnalyzer {
         })?;
         let outputs = session
             .run(ort::inputs! {
-                "im_shape" => im_shape_tensor,
-                "image" => image_tensor,
-                "scale_factor" => scale_factor_tensor,
+                MODEL_INPUT_IM_SHAPE => im_shape_tensor,
+                MODEL_INPUT_IMAGE => image_tensor,
+                MODEL_INPUT_SCALE_FACTOR => scale_factor_tensor,
             })
             .map_err(|error| {
                 LayoutError::Backend(format!(
                     "failed to run ONNX inference: {error}"
                 ))
             })?;
-        let fetch = outputs.get("fetch_name_0").ok_or_else(|| {
-            LayoutError::Backend(
-                "ONNX output fetch_name_0 is missing".to_owned(),
-            )
+        let fetch = outputs.get(MODEL_OUTPUT_FETCH_ROWS).ok_or_else(|| {
+            LayoutError::Backend(format!(
+                "ONNX output {MODEL_OUTPUT_FETCH_ROWS} is missing"
+            ))
         })?;
         let (shape, values) =
             fetch.try_extract_tensor::<f32>().map_err(|error| {
                 LayoutError::Backend(format!(
-                    "failed to extract fetch_name_0 tensor: {error}"
+                    "failed to extract {MODEL_OUTPUT_FETCH_ROWS} tensor: {error}"
                 ))
             })?;
         let columns = shape
@@ -119,7 +121,7 @@ impl OrtLayoutAnalyzer {
             .and_then(|value| usize::try_from(*value).ok())
             .ok_or_else(|| {
                 LayoutError::Postprocess(format!(
-                    "fetch_name_0 has invalid shape: {shape}"
+                    "{MODEL_OUTPUT_FETCH_ROWS} has invalid shape: {shape}"
                 ))
             })?;
         let row_counts = extract_fetch_row_counts(&outputs)?;
@@ -140,7 +142,7 @@ impl LayoutAnalyzer for OrtLayoutAnalyzer {
         image: &image::DynamicImage,
     ) -> Result<LayoutPage, LayoutError> {
         // Route the legacy single-image API through the batch path so both
-        // code paths consume fetch_name_1 and decode model output identically.
+        // code paths consume the row-count output and decode model output identically.
         let pages = self.analyze_images(std::slice::from_ref(image)).await?;
         pages.into_iter().next().ok_or_else(|| {
             LayoutError::Backend(
@@ -154,13 +156,16 @@ impl LayoutAnalyzer for OrtLayoutAnalyzer {
 fn extract_fetch_row_counts(
     outputs: &ort::session::SessionOutputs<'_>,
 ) -> Result<Vec<usize>, LayoutError> {
-    let fetch = outputs.get("fetch_name_1").ok_or_else(|| {
-        LayoutError::Backend("ONNX output fetch_name_1 is missing".to_owned())
-    })?;
+    let fetch =
+        outputs.get(MODEL_OUTPUT_FETCH_ROW_COUNTS).ok_or_else(|| {
+            LayoutError::Backend(format!(
+                "ONNX output {MODEL_OUTPUT_FETCH_ROW_COUNTS} is missing"
+            ))
+        })?;
     let (_shape, values) =
         fetch.try_extract_tensor::<i32>().map_err(|error| {
             LayoutError::Backend(format!(
-                "failed to extract fetch_name_1 tensor: {error}"
+                "failed to extract {MODEL_OUTPUT_FETCH_ROW_COUNTS} tensor: {error}"
             ))
         })?;
     values
@@ -168,7 +173,7 @@ fn extract_fetch_row_counts(
         .map(|value| {
             usize::try_from(*value).map_err(|error| {
                 LayoutError::Postprocess(format!(
-                    "fetch_name_1 contains an invalid row count {value}: {error}"
+                    "{MODEL_OUTPUT_FETCH_ROW_COUNTS} contains an invalid row count {value}: {error}"
                 ))
             })
         })

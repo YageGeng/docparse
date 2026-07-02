@@ -1,5 +1,20 @@
 //! Backend-neutral model input and output containers.
 
+/// PP-StructureV3 image input tensor name used by ONNX Runtime sessions.
+pub const MODEL_INPUT_IMAGE: &str = "image";
+
+/// PP-StructureV3 image-shape input tensor name used by ONNX Runtime sessions.
+pub const MODEL_INPUT_IM_SHAPE: &str = "im_shape";
+
+/// PP-StructureV3 scale-factor input tensor name used by ONNX Runtime sessions.
+pub const MODEL_INPUT_SCALE_FACTOR: &str = "scale_factor";
+
+/// PP-StructureV3 detection rows output tensor name used by ONNX Runtime sessions.
+pub const MODEL_OUTPUT_FETCH_ROWS: &str = "fetch_name_0";
+
+/// PP-StructureV3 per-image row-count output tensor name used by batched inference.
+pub const MODEL_OUTPUT_FETCH_ROW_COUNTS: &str = "fetch_name_1";
+
 /// PP-StructureV3 model input tensors.
 pub struct LayoutInput {
     /// Image tensor in NCHW format.
