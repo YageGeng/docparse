@@ -9,4 +9,4 @@ pub use session::{WebExecutionProvider, WebLayoutAnalyzer, WebLayoutConfig};
 #[cfg(target_arch = "wasm32")]
 pub use pdf::{WasmPdfPage, render_pdf_to_png_pages};
 #[cfg(target_arch = "wasm32")]
-pub use session::WasmLayoutAnalyzer;
+pub use session::{WasmLayoutAnalyzer, layout_label_color};

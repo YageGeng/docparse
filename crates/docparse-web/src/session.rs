@@ -3,7 +3,7 @@
 use docparse_core::{LayoutAnalyzer, LayoutError, LayoutPage};
 #[cfg(target_arch = "wasm32")]
 use docparse_core::{
-    PostprocessOptions, PreprocessOptions, postprocess_fetch_rows,
+    LayoutLabel, PostprocessOptions, PreprocessOptions, postprocess_fetch_rows,
     preprocess_image,
 };
 #[cfg(target_arch = "wasm32")]
@@ -118,23 +118,85 @@ impl WasmLayoutAnalyzer {
         &mut self,
         image_bytes: &[u8],
     ) -> Result<String, wasm_bindgen::JsValue> {
+        self.analyze_image_bytes_with_threshold(
+            image_bytes,
+            PostprocessOptions::default().threshold,
+        )
+        .await
+    }
+
+    /// Analyzes image bytes with a caller-provided confidence threshold.
+    pub async fn analyze_image_bytes_with_threshold(
+        &mut self,
+        image_bytes: &[u8],
+        threshold: f32,
+    ) -> Result<String, wasm_bindgen::JsValue> {
+        self.analyze_image_bytes_with_options(
+            image_bytes,
+            threshold,
+            PostprocessOptions::default().nms_iou_threshold,
+            PostprocessOptions::default().cross_label_iou_threshold,
+        )
+        .await
+    }
+
+    /// Analyzes image bytes with caller-provided postprocessing thresholds.
+    pub async fn analyze_image_bytes_with_options(
+        &mut self,
+        image_bytes: &[u8],
+        threshold: f32,
+        nms_iou_threshold: f32,
+        cross_label_iou_threshold: f32,
+    ) -> Result<String, wasm_bindgen::JsValue> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "threshold must be between 0 and 1",
+            ));
+        }
+        if !(0.0..=1.0).contains(&nms_iou_threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "nms_iou_threshold must be between 0 and 1",
+            ));
+        }
+        if !(0.0..=1.0).contains(&cross_label_iou_threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "cross_label_iou_threshold must be between 0 and 1",
+            ));
+        }
         let image = image::load_from_memory(image_bytes).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!(
                 "failed to decode image bytes: {error}"
             ))
         })?;
-        let page = analyze_image_with_session(&mut self.session, &image)
-            .await
-            .map_err(|error| {
-                wasm_bindgen::JsValue::from_str(&error.to_string())
-            })?;
+        let page = analyze_image_with_session(
+            &mut self.session,
+            &image,
+            PostprocessOptions {
+                threshold,
+                nms_iou_threshold,
+                cross_label_iou_threshold,
+                ..PostprocessOptions::default()
+            },
+        )
+        .await
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
 
-        serde_json::to_string_pretty(&page).map_err(|error| {
+        serde_json::to_string(&page).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!(
                 "failed to serialize layout result: {error}"
             ))
         })
     }
+}
+
+/// Returns the Rust-defined display color for a serialized layout label.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn layout_label_color(label: &str) -> String {
+    LayoutLabel::try_from(label)
+        .unwrap_or(LayoutLabel::Unknown)
+        .color()
+        .to_owned()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -150,6 +212,7 @@ async fn init_ort_webgpu() -> Result<(), wasm_bindgen::JsValue> {
 async fn analyze_image_with_session(
     session: &mut Session,
     image: &image::DynamicImage,
+    postprocess_options: PostprocessOptions,
 ) -> Result<LayoutPage, LayoutError> {
     let input = preprocess_image(image, PreprocessOptions::default())?;
     let image_tensor =
@@ -214,7 +277,7 @@ async fn analyze_image_with_session(
         columns,
         input.original_width,
         input.original_height,
-        PostprocessOptions::default(),
+        postprocess_options,
     )
 }
 

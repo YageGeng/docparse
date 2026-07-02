@@ -5,11 +5,7 @@ edition = "2024"
 
 [workspace]
 resolver = "3"
-members = [
-    "crates/docparse-core",
-    "crates/docparse-ort",
-    "crates/docparse-web",
-]
+members = ["crates/docparse-core", "crates/docparse-ort", "crates/docparse-web"]
 
 [workspace.package]
 edition = "2024"
@@ -84,6 +80,10 @@ tracing = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
+
+[profile.release]
+# Keep wasm release builds explicitly aligned with Rust's O3 optimization level.
+opt-level = 3
 
 [dependencies]
 anyhow = { workspace = true }

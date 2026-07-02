@@ -19,7 +19,7 @@
       }
 
       main {
-        max-width: 980px;
+        max-width: 1280px;
         margin: 0 auto;
         padding: 32px 20px;
       }
@@ -48,7 +48,7 @@
 
       .pdf-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 120px 120px auto;
+        grid-template-columns: minmax(0, 1fr) 120px 120px 120px 120px 120px auto;
         gap: 12px;
         align-items: end;
       }
@@ -133,15 +133,16 @@
 
       .preview {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        gap: 12px;
+        /* Detection pages are the main output, so keep them large and stacked for review. */
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
       }
 
       .page {
         position: relative;
         border: 1px solid #d8dde6;
         border-radius: 6px;
-        padding: 8px;
+        padding: 12px;
         background: #fff;
       }
 
@@ -165,6 +166,54 @@
         height: auto;
         border: 1px solid #e2e6ee;
         background: #fff;
+      }
+
+      .page-preview-button {
+        display: block;
+        width: 100%;
+        min-height: 0;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .page-preview-button:focus-visible {
+        outline: 3px solid #2457d6;
+        outline-offset: 3px;
+      }
+
+      .layout-json {
+        display: none;
+        min-height: 0;
+        max-height: 320px;
+        margin-top: 8px;
+      }
+
+      .page.is-json-visible .layout-json {
+        display: block;
+      }
+
+      .json-actions {
+        display: none;
+        justify-content: flex-end;
+        margin-top: 10px;
+      }
+
+      .page.is-json-visible .json-actions {
+        display: flex;
+      }
+
+      .copy-json-button {
+        min-height: 32px;
+        border: 1px solid #c9d0db;
+        border-radius: 6px;
+        padding: 0 10px;
+        background: #fff;
+        color: #20242c;
+        font-size: 12px;
       }
 
       @media (max-width: 720px) {
@@ -205,11 +254,44 @@
           </div>
           <div>
             <label for="max-pages">Max Pages</label>
-            <input id="max-pages" type="number" min="1" value="1" />
+            <input id="max-pages" type="number" min="1" value="1024" />
           </div>
           <div>
             <label for="pdf-dpi">DPI</label>
             <input id="pdf-dpi" type="number" min="1" value="144" />
+          </div>
+          <div>
+            <label for="threshold">Threshold</label>
+            <input
+              id="threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.2"
+            />
+          </div>
+          <div>
+            <label for="nms-threshold">NMS</label>
+            <input
+              id="nms-threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.5"
+            />
+          </div>
+          <div>
+            <label for="cross-label-threshold">Cross Label</label>
+            <input
+              id="cross-label-threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.9"
+            />
           </div>
           <button id="detect-button" type="button">Run Detection</button>
         </div>
@@ -231,10 +313,6 @@
       </section>
 
       <section class="panel">
-        <pre id="log"></pre>
-      </section>
-
-      <section class="panel">
         <div id="preview" class="preview"></div>
       </section>
     </main>
@@ -242,14 +320,17 @@
     <script type="module">
       import init, {
         WasmLayoutAnalyzer,
+        layout_label_color,
         render_pdf_to_png_pages,
       } from "./pkg/docparse_web.js";
 
-      const logEl = document.querySelector("#log");
       const modelUrlEl = document.querySelector("#model-url");
       const sourceFileEl = document.querySelector("#source-file");
       const maxPagesEl = document.querySelector("#max-pages");
       const pdfDpiEl = document.querySelector("#pdf-dpi");
+      const thresholdEl = document.querySelector("#threshold");
+      const nmsThresholdEl = document.querySelector("#nms-threshold");
+      const crossLabelThresholdEl = document.querySelector("#cross-label-threshold");
       const detectButton = document.querySelector("#detect-button");
       const previewEl = document.querySelector("#preview");
       const webgpuStatus = document.querySelector("#webgpu-status");
@@ -262,15 +343,12 @@
       let previewPages = [];
 
       function log(message, data) {
-        const timestamp = new Date().toISOString();
-        const line =
-          data === undefined
-            ? `[${timestamp}] ${message}`
-            : `[${timestamp}] ${message}\n${JSON.stringify(data, null, 2)}`;
-        logEl.textContent = logEl.textContent
-          ? `${logEl.textContent}\n${line}`
-          : line;
-        logEl.scrollTop = logEl.scrollHeight;
+        // Keep diagnostics in devtools because the HTML view is reserved for visual results.
+        if (data === undefined) {
+          console.info(`[docparse] ${message}`);
+        } else {
+          console.info(`[docparse] ${message}`, data);
+        }
       }
 
       async function ensureWasmReady() {
@@ -317,6 +395,55 @@
         return file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
       }
 
+      function readThreshold() {
+        // Validate here before inference so bad UI input fails fast with a clear message.
+        const threshold = Number.parseFloat(thresholdEl.value);
+        if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+          throw new Error("threshold must be between 0 and 1");
+        }
+        return threshold;
+      }
+
+      function readNmsThreshold() {
+        // NMS is a postprocess setting, so validate it alongside the confidence threshold.
+        const threshold = Number.parseFloat(nmsThresholdEl.value);
+        if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+          throw new Error("NMS threshold must be between 0 and 1");
+        }
+        return threshold;
+      }
+
+      function readCrossLabelThreshold() {
+        // This controls when different labels are treated as the same layout box.
+        const threshold = Number.parseFloat(crossLabelThresholdEl.value);
+        if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+          throw new Error("cross label threshold must be between 0 and 1");
+        }
+        return threshold;
+      }
+
+      function normalizedReadingOrderMap(blocks) {
+        // Normalize sparse model reading-order values into compact display ranks from 0.
+        const orders = Array.from(
+          new Set(
+            (blocks ?? [])
+              .map((block) => block.order)
+              .filter((order) => Number.isFinite(order)),
+          ),
+        ).sort((left, right) => left - right);
+        return new Map(orders.map((order, index) => [order, index]));
+      }
+
+      function detectionCanvasLabel(block, readingOrderMap) {
+        // Draw the normalized reading order before the semantic label when available.
+        const normalizedOrder = Number.isFinite(block.order)
+          ? readingOrderMap.get(block.order)
+          : undefined;
+        const orderPrefix =
+          normalizedOrder === undefined ? "" : `${normalizedOrder} · `;
+        return `${orderPrefix}${block.label} ${block.score.toFixed(3)}`;
+      }
+
       function drawDetectionCanvas(page, result) {
         const canvas = document.createElement("canvas");
         canvas.className = "page-canvas";
@@ -327,23 +454,81 @@
         ctx.lineWidth = Math.max(2, Math.round(page.width / 500));
         ctx.font = `${Math.max(12, Math.round(page.width / 60))}px system-ui`;
         ctx.textBaseline = "top";
+        const readingOrderMap = normalizedReadingOrderMap(result.blocks);
 
         for (const block of result.blocks ?? []) {
           const { x, y, width, height } = block.bbox;
-          ctx.strokeStyle = "#d62445";
-          ctx.fillStyle = "rgba(214, 36, 69, 0.12)";
+          const color = layout_label_color(block.label);
+          ctx.strokeStyle = color;
+          ctx.fillStyle = color;
+          // Use the Rust label color for both fill and stroke so every label is visually distinct.
+          ctx.globalAlpha = 0.12;
           ctx.fillRect(x, y, width, height);
+          ctx.globalAlpha = 1;
           ctx.strokeRect(x, y, width, height);
-          const label = `${block.label} ${block.score.toFixed(3)}`;
+          const label = detectionCanvasLabel(block, readingOrderMap);
           const labelWidth = ctx.measureText(label).width + 8;
           const labelHeight = Math.max(18, Math.round(page.width / 45));
-          ctx.fillStyle = "#d62445";
+          ctx.fillStyle = color;
           ctx.fillRect(x, Math.max(0, y - labelHeight), labelWidth, labelHeight);
           ctx.fillStyle = "#fff";
           ctx.fillText(label, x + 4, Math.max(0, y - labelHeight) + 2);
         }
 
         return canvas;
+      }
+
+      function createDetectionFigure(page, result) {
+        // The canvas is wrapped in a button so clicking the drawn page toggles its parsed JSON.
+        const figure = document.createElement("figure");
+        figure.className = "page";
+
+        const previewButton = document.createElement("button");
+        previewButton.className = "page-preview-button";
+        previewButton.type = "button";
+        previewButton.title = "Show layout JSON";
+        previewButton.append(drawDetectionCanvas(page, result));
+
+        const caption = document.createElement("figcaption");
+        caption.textContent = `${page.source} · ${result.blocks.length} blocks`;
+
+        const jsonActions = document.createElement("div");
+        jsonActions.className = "json-actions";
+        const copyButton = document.createElement("button");
+        copyButton.className = "copy-json-button";
+        copyButton.type = "button";
+        copyButton.textContent = "Copy JSON";
+
+        const json = document.createElement("pre");
+        json.className = "layout-json";
+        json.textContent = "";
+
+        let prettyJson = null;
+        const getPrettyJson = () => {
+          // Defer pretty formatting until the JSON panel is used; large PDFs can have many pages.
+          prettyJson ??= JSON.stringify(result, null, 2);
+          return prettyJson;
+        };
+
+        previewButton.addEventListener("click", () => {
+          const isVisible = figure.classList.toggle("is-json-visible");
+          previewButton.title = isVisible ? "Hide layout JSON" : "Show layout JSON";
+          if (isVisible && !json.textContent) {
+            json.textContent = getPrettyJson();
+          }
+        });
+
+        copyButton.addEventListener("click", async () => {
+          await navigator.clipboard.writeText(getPrettyJson());
+          copyButton.textContent = "Copied";
+          window.setTimeout(() => {
+            copyButton.textContent = "Copy JSON";
+          }, 1200);
+        });
+
+        jsonActions.append(copyButton);
+        figure.append(previewButton, caption, jsonActions, json);
+        return figure;
       }
 
       async function imageElementFromBytes(bytes, mimeType) {
@@ -355,18 +540,10 @@
         return { img, url };
       }
 
-      async function setImagePreview(file) {
+      async function loadImageDetectionPage(file) {
+        // Only prepare image bytes for detection; raw input previews are intentionally not rendered.
         const bytes = new Uint8Array(await file.arrayBuffer());
         const { img, url } = await imageElementFromBytes(bytes, file.type || "image/png");
-        previewEl.replaceChildren();
-        const figure = document.createElement("figure");
-        figure.className = "page";
-        img.alt = file.name;
-        figure.append(img);
-        const caption = document.createElement("figcaption");
-        caption.textContent = `${file.name} · ${img.naturalWidth} x ${img.naturalHeight}`;
-        figure.append(caption);
-        previewEl.append(figure);
         previewPages = [
           {
             pageIndex: 0,
@@ -386,9 +563,9 @@
         });
       }
 
-      async function renderPdfPreview(file) {
+      async function loadPdfDetectionPages(file) {
+        // Render PDF pages only as analyzer inputs; the UI shows detection canvases after inference.
         await ensureWasmReady();
-        previewEl.replaceChildren();
         previewPages = [];
 
         const maxPages = Number.parseInt(maxPagesEl.value, 10);
@@ -405,13 +582,6 @@
         for (const page of pages) {
           const png = page.png_data;
           const { img, url } = await imageElementFromBytes(png, "image/png");
-          const figure = document.createElement("figure");
-          figure.className = "page";
-          img.alt = `Rendered PDF page ${page.page_index + 1}`;
-          const caption = document.createElement("figcaption");
-          caption.textContent = `Page ${page.page_index + 1} · ${page.width} x ${page.height}`;
-          figure.append(img, caption);
-          previewEl.append(figure);
           previewPages.push({
             pageIndex: page.page_index,
             width: page.width,
@@ -444,7 +614,10 @@
           }
 
           if (isImageFile(file)) {
-            await setImagePreview(file);
+            log("image selected; it will render after detection", {
+              name: file.name,
+              bytes: file.size,
+            });
           } else if (isPdfFile(file)) {
             log("PDF selected; it will render when detection starts", {
               name: file.name,
@@ -473,22 +646,36 @@
           }
 
           if (isImageFile(file)) {
-            await setImagePreview(file);
+            await loadImageDetectionPage(file);
           } else if (isPdfFile(file)) {
-            await renderPdfPreview(file);
+            await loadPdfDetectionPages(file);
           } else {
             throw new Error("choose a PDF, PNG, JPEG, or WebP file");
           }
 
           const activeAnalyzer = await ensureAnalyzerReady();
+          const threshold = readThreshold();
+          const nmsThreshold = readNmsThreshold();
+          const crossLabelThreshold = readCrossLabelThreshold();
           const results = [];
           const startedAt = performance.now();
-          log("running layout detection", { pages: previewPages.length });
+          log("running layout detection", {
+            pages: previewPages.length,
+            threshold,
+            nmsThreshold,
+            crossLabelThreshold,
+          });
 
           previewEl.replaceChildren();
           for (const page of previewPages) {
             const pageStartedAt = performance.now();
-            const resultJson = await activeAnalyzer.analyze_image_bytes(page.bytes);
+            const resultJson =
+              await activeAnalyzer.analyze_image_bytes_with_options(
+                page.bytes,
+                threshold,
+                nmsThreshold,
+                crossLabelThreshold,
+              );
             const result = JSON.parse(resultJson);
             results.push({
               pageIndex: page.pageIndex,
@@ -497,13 +684,7 @@
               elapsedMs: Math.round(performance.now() - pageStartedAt),
             });
 
-            const figure = document.createElement("figure");
-            figure.className = "page";
-            figure.append(drawDetectionCanvas(page, result));
-            const caption = document.createElement("figcaption");
-            caption.textContent = `${page.source} · ${result.blocks.length} blocks`;
-            figure.append(caption);
-            previewEl.append(figure);
+            previewEl.append(createDetectionFigure(page, result));
           }
 
           log("layout detection complete", {
