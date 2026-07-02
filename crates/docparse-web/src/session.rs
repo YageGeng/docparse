@@ -13,6 +13,8 @@ use ort::{
     session::{RunOptions, Session},
     value::TensorRef,
 };
+#[cfg(target_arch = "wasm32")]
+use std::sync::Once;
 
 /// Browser execution provider preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,11 +88,15 @@ impl WasmLayoutAnalyzer {
     pub async fn create_webgpu(
         model_url: String,
     ) -> Result<WasmLayoutAnalyzer, wasm_bindgen::JsValue> {
+        init_wasm_tracing();
+        let started_at = js_sys::Date::now();
         init_ort_webgpu().await?;
-        web_sys::console::log_1(
-            &"docparse-web: initialized ORT Web with WebGPU".into(),
+        tracing::info!(
+            elapsed_ms = js_sys::Date::now() - started_at,
+            "initialized ORT Web with WebGPU"
         );
 
+        let load_started_at = js_sys::Date::now();
         let session = Session::builder()
             .map_err(to_js_error)?
             .with_execution_providers([ort::ep::WebGPU::default().build()])
@@ -98,7 +104,11 @@ impl WasmLayoutAnalyzer {
             .commit_from_url(&model_url)
             .await
             .map_err(to_js_error)?;
-        web_sys::console::log_1(&"docparse-web: loaded ONNX model".into());
+        tracing::info!(
+            model_url_len = model_url.len(),
+            elapsed_ms = js_sys::Date::now() - load_started_at,
+            "loaded layout ONNX model"
+        );
 
         Ok(Self {
             config: WebLayoutConfig {
@@ -165,11 +175,19 @@ impl WasmLayoutAnalyzer {
                 "cross_label_iou_threshold must be between 0 and 1",
             ));
         }
+        let decode_started_at = js_sys::Date::now();
         let image = image::load_from_memory(image_bytes).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!(
                 "failed to decode image bytes: {error}"
             ))
         })?;
+        tracing::info!(
+            bytes = image_bytes.len(),
+            width = image.width(),
+            height = image.height(),
+            elapsed_ms = js_sys::Date::now() - decode_started_at,
+            "decoded layout image bytes"
+        );
         let page = analyze_image_with_session(
             &mut self.session,
             &image,
@@ -213,16 +231,25 @@ impl WasmLayoutAnalyzer {
                 "cross_label_iou_threshold must be between 0 and 1",
             ));
         }
+        let decode_started_at = js_sys::Date::now();
         let mut images =
             Vec::with_capacity(image_bytes_batch.length() as usize);
+        let mut total_bytes = 0usize;
         for bytes in image_bytes_batch.iter() {
             let bytes = js_sys::Uint8Array::new(&bytes).to_vec();
+            total_bytes += bytes.len();
             images.push(image::load_from_memory(&bytes).map_err(|error| {
                 wasm_bindgen::JsValue::from_str(&format!(
                     "failed to decode image bytes: {error}"
                 ))
             })?);
         }
+        tracing::info!(
+            batch_size = images.len(),
+            bytes = total_bytes,
+            elapsed_ms = js_sys::Date::now() - decode_started_at,
+            "decoded layout image batch"
+        );
 
         let pages = analyze_images_with_session(
             &mut self.session,
@@ -264,6 +291,17 @@ async fn init_ort_webgpu() -> Result<(), wasm_bindgen::JsValue> {
     Ok(())
 }
 
+/// Installs the browser console tracing subscriber once for WASM diagnostics.
+#[cfg(target_arch = "wasm32")]
+fn init_wasm_tracing() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // This can fail if the host page has already installed a tracing
+        // subscriber, so initialization is best-effort instead of fatal.
+        let _ = tracing_wasm::try_set_as_global_default();
+    });
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn analyze_image_with_session(
     session: &mut Session,
@@ -292,7 +330,27 @@ async fn analyze_images_with_session(
     images: &[image::DynamicImage],
     postprocess_options: PostprocessOptions,
 ) -> Result<Vec<LayoutPage>, LayoutError> {
+    let total_started_at = js_sys::Date::now();
+    tracing::info!(
+        batch_size = images.len(),
+        threshold = postprocess_options.threshold,
+        nms_iou_threshold = postprocess_options.nms_iou_threshold,
+        cross_label_iou_threshold =
+            postprocess_options.cross_label_iou_threshold,
+        "starting layout batch analysis"
+    );
+
+    let preprocess_started_at = js_sys::Date::now();
     let input = preprocess_images(images, PreprocessOptions::default())?;
+    tracing::info!(
+        batch_size = input.original_sizes.len(),
+        input_height = input.image.shape().get(2).copied().unwrap_or(0),
+        input_width = input.image.shape().get(3).copied().unwrap_or(0),
+        elapsed_ms = js_sys::Date::now() - preprocess_started_at,
+        "prepared layout model inputs"
+    );
+
+    let tensor_started_at = js_sys::Date::now();
     let image_tensor =
         TensorRef::from_array_view(&input.image).map_err(|error| {
             LayoutError::Backend(format!(
@@ -311,9 +369,15 @@ async fn analyze_images_with_session(
             "failed to create scale_factor tensor: {error}"
         ))
     })?;
+    tracing::info!(
+        elapsed_ms = js_sys::Date::now() - tensor_started_at,
+        "created layout ORT tensors"
+    );
+
     let run_options = RunOptions::new().map_err(|error| {
         LayoutError::Backend(format!("failed to create run options: {error}"))
     })?;
+    let inference_started_at = js_sys::Date::now();
     let mut outputs = session
         .run_async(
             ort::inputs! {
@@ -329,9 +393,21 @@ async fn analyze_images_with_session(
                 "failed to run ONNX inference: {error}"
             ))
         })?;
+    tracing::info!(
+        elapsed_ms = js_sys::Date::now() - inference_started_at,
+        "completed layout ONNX inference"
+    );
+
+    let sync_started_at = js_sys::Date::now();
     ort_web::sync_outputs(&mut outputs).await.map_err(|error| {
         LayoutError::Backend(format!("failed to sync ORT Web outputs: {error}"))
     })?;
+    tracing::info!(
+        elapsed_ms = js_sys::Date::now() - sync_started_at,
+        "synced layout ORT Web outputs"
+    );
+
+    let output_started_at = js_sys::Date::now();
     let fetch = outputs.get(MODEL_OUTPUT_FETCH_ROWS).ok_or_else(|| {
         LayoutError::Backend(format!(
             "ONNX output {MODEL_OUTPUT_FETCH_ROWS} is missing"
@@ -352,14 +428,31 @@ async fn analyze_images_with_session(
             ))
         })?;
     let row_counts = extract_fetch_row_counts(&outputs)?;
+    tracing::info!(
+        columns,
+        rows = row_counts.iter().sum::<usize>(),
+        elapsed_ms = js_sys::Date::now() - output_started_at,
+        "extracted layout model outputs"
+    );
 
-    postprocess_fetch_rows_batch(
+    let postprocess_started_at = js_sys::Date::now();
+    let pages = postprocess_fetch_rows_batch(
         values,
         columns,
         &row_counts,
         &input.original_sizes,
         postprocess_options,
-    )
+    )?;
+    let total_blocks: usize = pages.iter().map(|page| page.blocks.len()).sum();
+    tracing::info!(
+        pages = pages.len(),
+        blocks = total_blocks,
+        postprocess_elapsed_ms = js_sys::Date::now() - postprocess_started_at,
+        total_elapsed_ms = js_sys::Date::now() - total_started_at,
+        "completed layout batch analysis"
+    );
+
+    Ok(pages)
 }
 
 /// Extracts per-image detection counts from the PP-StructureV3 batch output.

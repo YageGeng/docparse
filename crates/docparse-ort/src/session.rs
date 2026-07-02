@@ -1,6 +1,6 @@
 //! Native ORT analyzer session.
 
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Instant};
 
 use docparse_core::{
     LayoutAnalyzer, LayoutError, LayoutPage, MODEL_INPUT_IM_SHAPE,
@@ -28,6 +28,11 @@ impl OrtLayoutAnalyzer {
                 config.model_path.display()
             )));
         }
+        let started_at = Instant::now();
+        tracing::info!(
+            model_path = %config.model_path.display(),
+            "loading layout ONNX model"
+        );
         let session = Session::builder()
             .map_err(|error| {
                 LayoutError::Backend(format!(
@@ -41,6 +46,11 @@ impl OrtLayoutAnalyzer {
                     config.model_path.display()
                 ))
             })?;
+        tracing::info!(
+            model_path = %config.model_path.display(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "loaded layout ONNX model"
+        );
         Ok(Self {
             config,
             session: Mutex::new(session),
@@ -68,7 +78,26 @@ impl OrtLayoutAnalyzer {
         images: &[image::DynamicImage],
         postprocess_options: PostprocessOptions,
     ) -> Result<Vec<LayoutPage>, LayoutError> {
+        let total_started_at = Instant::now();
+        tracing::info!(
+            batch_size = images.len(),
+            threshold = postprocess_options.threshold,
+            nms_iou_threshold = postprocess_options.nms_iou_threshold,
+            cross_label_iou_threshold =
+                postprocess_options.cross_label_iou_threshold,
+            "starting layout batch analysis"
+        );
+
+        let preprocess_started_at = Instant::now();
         let input = preprocess_images(images, PreprocessOptions::default())?;
+        tracing::info!(
+            batch_size = input.original_sizes.len(),
+            tensor_shape = ?input.image.shape(),
+            elapsed_ms = preprocess_started_at.elapsed().as_millis(),
+            "prepared layout model inputs"
+        );
+
+        let tensor_started_at = Instant::now();
         let image_tensor =
             TensorRef::from_array_view(&input.image).map_err(|error| {
                 LayoutError::Backend(format!(
@@ -89,6 +118,12 @@ impl OrtLayoutAnalyzer {
                 "failed to create scale_factor tensor: {error}"
             ))
         })?;
+        tracing::info!(
+            elapsed_ms = tensor_started_at.elapsed().as_millis(),
+            "created layout ORT tensors"
+        );
+
+        let inference_started_at = Instant::now();
         let mut session = self.session.lock().map_err(|error| {
             LayoutError::Backend(format!(
                 "ORT session mutex is poisoned: {error}"
@@ -105,6 +140,12 @@ impl OrtLayoutAnalyzer {
                     "failed to run ONNX inference: {error}"
                 ))
             })?;
+        tracing::info!(
+            elapsed_ms = inference_started_at.elapsed().as_millis(),
+            "completed layout ONNX inference"
+        );
+
+        let output_started_at = Instant::now();
         let fetch = outputs.get(MODEL_OUTPUT_FETCH_ROWS).ok_or_else(|| {
             LayoutError::Backend(format!(
                 "ONNX output {MODEL_OUTPUT_FETCH_ROWS} is missing"
@@ -125,14 +166,34 @@ impl OrtLayoutAnalyzer {
                 ))
             })?;
         let row_counts = extract_fetch_row_counts(&outputs)?;
+        tracing::info!(
+            columns,
+            output_shape = ?shape,
+            row_counts = ?row_counts,
+            elapsed_ms = output_started_at.elapsed().as_millis(),
+            "extracted layout model outputs"
+        );
 
-        postprocess_fetch_rows_batch(
+        let postprocess_started_at = Instant::now();
+        let pages = postprocess_fetch_rows_batch(
             values,
             columns,
             &row_counts,
             &input.original_sizes,
             postprocess_options,
-        )
+        )?;
+        let total_blocks: usize =
+            pages.iter().map(|page| page.blocks.len()).sum();
+        tracing::info!(
+            pages = pages.len(),
+            blocks = total_blocks,
+            postprocess_elapsed_ms =
+                postprocess_started_at.elapsed().as_millis(),
+            total_elapsed_ms = total_started_at.elapsed().as_millis(),
+            "completed layout batch analysis"
+        );
+
+        Ok(pages)
     }
 }
 
