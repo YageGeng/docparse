@@ -1,92 +1,122 @@
 use std::path::PathBuf;
-use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
-use docparse_layout::{LayoutDetector, LayoutOptions};
-use tracing::{Level, event};
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use docparse_core::{
+    DocumentInput, LayoutAnalyzer, LayoutBlock, LoadDocumentOptions,
+    load_document_pages,
+};
+use docparse_ort::{OrtLayoutAnalyzer, OrtLayoutConfig};
+use futures::executor::block_on;
 
-/// Runs the docparse command-line interface.
-#[tokio::main]
-async fn main() -> Result<()> {
-    run_cli(std::env::args().skip(1).collect()).await
+/// Document parsing CLI.
+#[derive(Debug, Parser)]
+#[command(name = "docparse")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
-/// Dispatches top-level CLI commands.
-async fn run_cli(args: Vec<String>) -> Result<()> {
-    match args.as_slice() {
-        [command, image] if command == "layout" => {
-            run_layout(PathBuf::from(image), false).await
-        }
-        [command, flag, image]
-            if command == "layout" && flag == "--profile" =>
-        {
-            init_profile_tracing();
-            run_layout(PathBuf::from(image), true).await
-        }
-        [command, image, flag]
-            if command == "layout" && flag == "--profile" =>
-        {
-            init_profile_tracing();
-            run_layout(PathBuf::from(image), true).await
-        }
-        [command] if command == "layout" => {
-            bail!("usage: docparse layout [--profile] <image>")
-        }
-        _ => bail!("usage: docparse layout [--profile] <image>"),
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Layout analysis commands.
+    Layout {
+        #[command(subcommand)]
+        command: LayoutCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LayoutCommands {
+    /// Analyze an image or PDF and emit JSON layout detections.
+    Analyze(AnalyzeArgs),
+}
+
+#[derive(Debug, Parser)]
+struct AnalyzeArgs {
+    /// Input image or PDF path.
+    #[arg(long)]
+    input: PathBuf,
+    /// ONNX model path.
+    #[arg(long, default_value = "models/pp-structure-v3-onnx/inference.onnx")]
+    model: PathBuf,
+    /// Maximum number of PDF pages to analyze.
+    #[arg(long = "max-page", alias = "max_page", default_value_t = 1, value_parser = parse_positive_usize)]
+    max_page: usize,
+    /// PDF render DPI.
+    #[arg(long = "pdf-dpi", alias = "pdf_dpi", default_value_t = 144.0)]
+    pdf_dpi: f32,
+    /// Output JSON path. Defaults to stdout.
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AnalyzeOutput {
+    pages: Vec<AnalyzePage>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AnalyzePage {
+    page_index: usize,
+    width: u32,
+    height: u32,
+    blocks: Vec<LayoutBlock>,
+}
+
+fn main() -> Result<()> {
+    run_cli(Cli::parse())
+}
+
+fn run_cli(cli: Cli) -> Result<()> {
+    match cli.command {
+        Commands::Layout { command } => match command {
+            LayoutCommands::Analyze(args) => run_layout_analyze(args),
+        },
     }
 }
 
-/// Enables stderr tracing output for profile events.
-fn init_profile_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("docparse=info,docparse_layout=info")
-        .with_target(true)
-        .with_writer(std::io::stderr)
-        .try_init();
-}
+fn run_layout_analyze(args: AnalyzeArgs) -> Result<()> {
+    let analyzer = OrtLayoutAnalyzer::new(OrtLayoutConfig {
+        model_path: args.model,
+        ..OrtLayoutConfig::default()
+    })?;
+    let document_pages = load_document_pages(
+        &DocumentInput { path: args.input },
+        LoadDocumentOptions {
+            max_pages: args.max_page,
+            pdf_dpi: args.pdf_dpi,
+        },
+    )?;
 
-/// Loads one image and prints PP-DocLayoutV3 layout detections as JSON.
-async fn run_layout(image_path: PathBuf, profile: bool) -> Result<()> {
-    let total = Instant::now();
-    let started = Instant::now();
-    let image = image::open(&image_path)
-        .with_context(|| format!("failed to open {}", image_path.display()))?;
-    event!(
-        Level::INFO,
-        phase = "cli.open_image",
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0
-    );
-
-    let started = Instant::now();
-    let detector = LayoutDetector::new(LayoutOptions::default()).await?;
-    event!(
-        Level::INFO,
-        phase = "cli.load_detector",
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0
-    );
-
-    let started = Instant::now();
-    let page = detector.detect_image(&image)?;
-    event!(
-        Level::INFO,
-        phase = "cli.detect_image",
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
-        blocks = page.blocks.len()
-    );
-
-    let started = Instant::now();
-    println!("{}", serde_json::to_string_pretty(&page)?);
-    event!(
-        Level::INFO,
-        phase = "cli.write_json",
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0
-    );
-    if profile {
-        event!(
-            Level::INFO,
-            phase = "cli.total",
-            elapsed_ms = total.elapsed().as_secs_f64() * 1000.0
-        );
+    let mut pages = Vec::with_capacity(document_pages.len());
+    for document_page in document_pages {
+        let layout_page =
+            block_on(analyzer.analyze_image(&document_page.image))?;
+        pages.push(AnalyzePage {
+            page_index: document_page.page_index,
+            width: layout_page.width,
+            height: layout_page.height,
+            blocks: layout_page.blocks,
+        });
     }
+
+    let json = serde_json::to_string_pretty(&AnalyzeOutput { pages })?;
+    if let Some(output) = args.output {
+        std::fs::write(output, json)?;
+    } else {
+        println!("{json}");
+    }
+
     Ok(())
+}
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid unsigned integer: {error}"))?;
+    if parsed == 0 {
+        return Err("value must be greater than 0".to_owned());
+    }
+    Ok(parsed)
 }

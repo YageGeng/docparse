@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Docparse WASM Layout Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        background: #f6f7f9;
+        color: #20242c;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px;
+      }
+
+      h1 {
+        margin: 0 0 20px;
+        font-size: 26px;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .panel {
+        border: 1px solid #d8dde6;
+        border-radius: 8px;
+        background: #fff;
+        padding: 18px;
+        margin-bottom: 16px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+        align-items: end;
+      }
+
+      .pdf-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 120px 120px auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        color: #4b5565;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 40px;
+        border: 1px solid #c9d0db;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font: inherit;
+        background: #fff;
+      }
+
+      input[type="file"] {
+        padding: 6px 10px;
+      }
+
+      button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 16px;
+        font: inherit;
+        font-weight: 650;
+        background: #2457d6;
+        color: #fff;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: default;
+        background: #9aa6ba;
+      }
+
+      .status {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        border: 1px solid #e2e6ee;
+        border-radius: 6px;
+        padding: 12px;
+        background: #fbfcfe;
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        color: #657084;
+      }
+
+      .metric span {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      pre {
+        min-height: 220px;
+        overflow: auto;
+        margin: 0;
+        border-radius: 6px;
+        background: #111827;
+        color: #d6e2ff;
+        padding: 14px;
+        font-size: 13px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .preview {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .page {
+        position: relative;
+        border: 1px solid #d8dde6;
+        border-radius: 6px;
+        padding: 8px;
+        background: #fff;
+      }
+
+      .page img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid #e2e6ee;
+        background: #fff;
+      }
+
+      .page figcaption {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #4b5565;
+      }
+
+      .page-canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid #e2e6ee;
+        background: #fff;
+      }
+
+      @media (max-width: 720px) {
+        .grid,
+        .pdf-grid,
+        .status {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Docparse WASM Layout Test</h1>
+
+      <section class="panel">
+        <div class="grid">
+          <div>
+            <label for="model-url">Model URL</label>
+            <input
+              id="model-url"
+              value="../models/pp-structure-v3-onnx/inference.onnx"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="pdf-grid">
+          <div>
+            <label for="source-file">Input File</label>
+            <input
+              id="source-file"
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp"
+            />
+          </div>
+          <div>
+            <label for="max-pages">Max Pages</label>
+            <input id="max-pages" type="number" min="1" value="1" />
+          </div>
+          <div>
+            <label for="pdf-dpi">DPI</label>
+            <input id="pdf-dpi" type="number" min="1" value="144" />
+          </div>
+          <button id="detect-button" type="button">Run Detection</button>
+        </div>
+      </section>
+
+      <section class="panel status" aria-live="polite">
+        <div class="metric">
+          <strong>WebGPU</strong>
+          <span id="webgpu-status">checking</span>
+        </div>
+        <div class="metric">
+          <strong>WASM</strong>
+          <span id="wasm-status">idle</span>
+        </div>
+        <div class="metric">
+          <strong>Analyzer</strong>
+          <span id="analyzer-status">idle</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <pre id="log"></pre>
+      </section>
+
+      <section class="panel">
+        <div id="preview" class="preview"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      import init, {
+        WasmLayoutAnalyzer,
+        render_pdf_to_png_pages,
+      } from "./pkg/docparse_web.js";
+
+      const logEl = document.querySelector("#log");
+      const modelUrlEl = document.querySelector("#model-url");
+      const sourceFileEl = document.querySelector("#source-file");
+      const maxPagesEl = document.querySelector("#max-pages");
+      const pdfDpiEl = document.querySelector("#pdf-dpi");
+      const detectButton = document.querySelector("#detect-button");
+      const previewEl = document.querySelector("#preview");
+      const webgpuStatus = document.querySelector("#webgpu-status");
+      const wasmStatus = document.querySelector("#wasm-status");
+      const analyzerStatus = document.querySelector("#analyzer-status");
+
+      let wasmReady = false;
+      let analyzer = null;
+      let analyzerModelUrl = null;
+      let previewPages = [];
+
+      function log(message, data) {
+        const timestamp = new Date().toISOString();
+        const line =
+          data === undefined
+            ? `[${timestamp}] ${message}`
+            : `[${timestamp}] ${message}\n${JSON.stringify(data, null, 2)}`;
+        logEl.textContent = logEl.textContent
+          ? `${logEl.textContent}\n${line}`
+          : line;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      async function ensureWasmReady() {
+        if (wasmReady) {
+          return;
+        }
+        wasmStatus.textContent = "loading";
+        log("loading wasm package from ./pkg/docparse_web.js");
+        await init();
+        wasmReady = true;
+        wasmStatus.textContent = "loaded";
+        log("wasm package loaded");
+      }
+
+      async function ensureAnalyzerReady() {
+        await ensureWasmReady();
+        const modelUrl = modelUrlEl.value.trim();
+        if (analyzer && analyzerModelUrl === modelUrl) {
+          return analyzer;
+        }
+
+        analyzerStatus.textContent = "loading";
+        log("loading ORT Web analyzer", { modelUrl, ep: "webgpu" });
+        const startedAt = performance.now();
+        analyzer = await WasmLayoutAnalyzer.create_webgpu(modelUrl);
+        analyzerModelUrl = modelUrl;
+        analyzerStatus.textContent = "ready";
+        log("analyzer ready", {
+          modelUrl: analyzer.model_url,
+          elapsedMs: Math.round(performance.now() - startedAt),
+        });
+        return analyzer;
+      }
+
+      function setBusy(isBusy) {
+        detectButton.disabled = isBusy;
+      }
+
+      function isPdfFile(file) {
+        return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      }
+
+      function isImageFile(file) {
+        return file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
+      }
+
+      function drawDetectionCanvas(page, result) {
+        const canvas = document.createElement("canvas");
+        canvas.className = "page-canvas";
+        canvas.width = page.width;
+        canvas.height = page.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(page.image, 0, 0, page.width, page.height);
+        ctx.lineWidth = Math.max(2, Math.round(page.width / 500));
+        ctx.font = `${Math.max(12, Math.round(page.width / 60))}px system-ui`;
+        ctx.textBaseline = "top";
+
+        for (const block of result.blocks ?? []) {
+          const { x, y, width, height } = block.bbox;
+          ctx.strokeStyle = "#d62445";
+          ctx.fillStyle = "rgba(214, 36, 69, 0.12)";
+          ctx.fillRect(x, y, width, height);
+          ctx.strokeRect(x, y, width, height);
+          const label = `${block.label} ${block.score.toFixed(3)}`;
+          const labelWidth = ctx.measureText(label).width + 8;
+          const labelHeight = Math.max(18, Math.round(page.width / 45));
+          ctx.fillStyle = "#d62445";
+          ctx.fillRect(x, Math.max(0, y - labelHeight), labelWidth, labelHeight);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(label, x + 4, Math.max(0, y - labelHeight) + 2);
+        }
+
+        return canvas;
+      }
+
+      async function imageElementFromBytes(bytes, mimeType) {
+        const blob = new Blob([bytes], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        return { img, url };
+      }
+
+      async function setImagePreview(file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { img, url } = await imageElementFromBytes(bytes, file.type || "image/png");
+        previewEl.replaceChildren();
+        const figure = document.createElement("figure");
+        figure.className = "page";
+        img.alt = file.name;
+        figure.append(img);
+        const caption = document.createElement("figcaption");
+        caption.textContent = `${file.name} · ${img.naturalWidth} x ${img.naturalHeight}`;
+        figure.append(caption);
+        previewEl.append(figure);
+        previewPages = [
+          {
+            pageIndex: 0,
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+            bytes,
+            image: img,
+            objectUrl: url,
+            source: file.name,
+          },
+        ];
+        log("image preview loaded", {
+          name: file.name,
+          bytes: bytes.byteLength,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      }
+
+      async function renderPdfPreview(file) {
+        await ensureWasmReady();
+        previewEl.replaceChildren();
+        previewPages = [];
+
+        const maxPages = Number.parseInt(maxPagesEl.value, 10);
+        const dpi = Number.parseFloat(pdfDpiEl.value);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        log("rendering PDF before layout detection", {
+          name: file.name,
+          bytes: bytes.byteLength,
+          maxPages,
+          dpi,
+        });
+
+        const pages = render_pdf_to_png_pages(bytes, maxPages, dpi);
+        for (const page of pages) {
+          const png = page.png_data;
+          const { img, url } = await imageElementFromBytes(png, "image/png");
+          const figure = document.createElement("figure");
+          figure.className = "page";
+          img.alt = `Rendered PDF page ${page.page_index + 1}`;
+          const caption = document.createElement("figcaption");
+          caption.textContent = `Page ${page.page_index + 1} · ${page.width} x ${page.height}`;
+          figure.append(img, caption);
+          previewEl.append(figure);
+          previewPages.push({
+            pageIndex: page.page_index,
+            width: page.width,
+            height: page.height,
+            bytes: png,
+            image: img,
+            objectUrl: url,
+            source: `${file.name}#page=${page.page_index + 1}`,
+          });
+        }
+        log("PDF render complete", { pages: pages.length });
+      }
+
+      if ("gpu" in navigator) {
+        webgpuStatus.textContent = "available";
+        log("navigator.gpu is available");
+      } else {
+        webgpuStatus.textContent = "missing";
+        log("navigator.gpu is not available");
+      }
+
+      sourceFileEl.addEventListener("change", async () => {
+        setBusy(true);
+        try {
+          const file = sourceFileEl.files?.[0];
+          previewPages = [];
+          previewEl.replaceChildren();
+          if (!file) {
+            return;
+          }
+
+          if (isImageFile(file)) {
+            await setImagePreview(file);
+          } else if (isPdfFile(file)) {
+            log("PDF selected; it will render when detection starts", {
+              name: file.name,
+              maxPages: Number.parseInt(maxPagesEl.value, 10),
+              dpi: Number.parseFloat(pdfDpiEl.value),
+            });
+          } else {
+            throw new Error("choose a PDF, PNG, JPEG, or WebP file");
+          }
+        } catch (error) {
+          log("file selection failed", {
+            message: error?.message ?? String(error),
+            stack: error?.stack ?? null,
+          });
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      detectButton.addEventListener("click", async () => {
+        setBusy(true);
+        try {
+          const file = sourceFileEl.files?.[0];
+          if (!file) {
+            throw new Error("choose an image or PDF first");
+          }
+
+          if (isImageFile(file)) {
+            await setImagePreview(file);
+          } else if (isPdfFile(file)) {
+            await renderPdfPreview(file);
+          } else {
+            throw new Error("choose a PDF, PNG, JPEG, or WebP file");
+          }
+
+          const activeAnalyzer = await ensureAnalyzerReady();
+          const results = [];
+          const startedAt = performance.now();
+          log("running layout detection", { pages: previewPages.length });
+
+          previewEl.replaceChildren();
+          for (const page of previewPages) {
+            const pageStartedAt = performance.now();
+            const resultJson = await activeAnalyzer.analyze_image_bytes(page.bytes);
+            const result = JSON.parse(resultJson);
+            results.push({
+              pageIndex: page.pageIndex,
+              source: page.source,
+              result,
+              elapsedMs: Math.round(performance.now() - pageStartedAt),
+            });
+
+            const figure = document.createElement("figure");
+            figure.className = "page";
+            figure.append(drawDetectionCanvas(page, result));
+            const caption = document.createElement("figcaption");
+            caption.textContent = `${page.source} · ${result.blocks.length} blocks`;
+            figure.append(caption);
+            previewEl.append(figure);
+          }
+
+          log("layout detection complete", {
+            elapsedMs: Math.round(performance.now() - startedAt),
+            pages: results,
+          });
+        } catch (error) {
+          analyzerStatus.textContent = "error";
+          log("layout detection failed", {
+            message: error?.message ?? String(error),
+            stack: error?.stack ?? null,
+          });
+        } finally {
+          setBusy(false);
+        }
+      });
+    </script>
+  </body>
+</html>

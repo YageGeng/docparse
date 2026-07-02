@@ -5,7 +5,11 @@ edition = "2024"
 
 [workspace]
 resolver = "3"
-members = ["crates/docparse-layout", "crates/docparse-wasm"]
+members = [
+    "crates/docparse-core",
+    "crates/docparse-ort",
+    "crates/docparse-web",
+]
 
 [workspace.package]
 edition = "2024"
@@ -50,11 +54,43 @@ undocumented_unsafe_blocks = "warn"
 multiple_unsafe_ops_per_block = "warn"
 mem_forget = "warn"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1"
-docparse-layout = { path = "crates/docparse-layout" }
-image = "0.25"
+clap = { version = "4", features = ["derive"] }
+cc = "1"
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "png",
+    "webp",
+] }
+js-sys = "0.3"
+liteparse-pdfium = "1.3.0"
+ndarray = "0.17"
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
+    "api-24",
+    "copy-dylibs",
+    "download-binaries",
+    "ndarray",
+    "std",
+    "tls-native",
+    "tracing",
+] }
+ort-web = "0.2.1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.52", features = ["full"] }
+thiserror = "2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+image = { workspace = true }
+docparse-core = { path = "crates/docparse-core" }
+docparse-ort = { path = "crates/docparse-ort" }
+serde = { workspace = true }
+serde_json = { workspace = true }

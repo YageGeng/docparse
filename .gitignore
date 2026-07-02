@@ -3,4 +3,4 @@ screenshots/
 wasm/models/
 __pycache__/
 *.pyc
-.ruff_cache/
+models/pp-structure-v3-onnx/

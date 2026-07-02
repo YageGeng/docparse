@@ -1,0 +1,29 @@
+[package]
+name = "docparse-web"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+image = { workspace = true }
+docparse-core = { path = "../docparse-core" }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true }
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
+    "ndarray",
+    "std",
+] }
+ort-web = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = ["console"] }
+
+[build-dependencies]
+cc = { workspace = true }

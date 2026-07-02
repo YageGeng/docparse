@@ -1,0 +1,15 @@
+[package]
+name = "docparse-core"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+image = { workspace = true }
+liteparse-pdfium = { workspace = true }
+ndarray = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
