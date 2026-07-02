@@ -48,7 +48,7 @@
 
       .pdf-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 120px 120px 120px 120px 120px auto;
+        grid-template-columns: minmax(0, 1fr) 120px 120px 120px 120px 120px 120px auto;
         gap: 12px;
         align-items: end;
       }
@@ -116,6 +116,35 @@
       .metric span {
         font-size: 14px;
         font-weight: 650;
+      }
+
+      .progress-panel {
+        display: grid;
+        gap: 8px;
+      }
+
+      .progress-summary {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: #4b5565;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .progress-track {
+        overflow: hidden;
+        height: 10px;
+        border-radius: 999px;
+        background: #e8ecf3;
+      }
+
+      .progress-bar {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: #2457d6;
+        transition: width 160ms ease;
       }
 
       pre {
@@ -261,6 +290,10 @@
             <input id="pdf-dpi" type="number" min="1" value="144" />
           </div>
           <div>
+            <label for="batch-size">Batch Size</label>
+            <input id="batch-size" type="number" min="1" max="32" value="4" />
+          </div>
+          <div>
             <label for="threshold">Threshold</label>
             <input
               id="threshold"
@@ -312,6 +345,16 @@
         </div>
       </section>
 
+      <section class="panel progress-panel" aria-live="polite">
+        <div class="progress-summary">
+          <span id="progress-text">Progress 0 / 0</span>
+          <span id="elapsed-text">Elapsed 0.0s</span>
+        </div>
+        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+      </section>
+
       <section class="panel">
         <div id="preview" class="preview"></div>
       </section>
@@ -328,6 +371,7 @@
       const sourceFileEl = document.querySelector("#source-file");
       const maxPagesEl = document.querySelector("#max-pages");
       const pdfDpiEl = document.querySelector("#pdf-dpi");
+      const batchSizeEl = document.querySelector("#batch-size");
       const thresholdEl = document.querySelector("#threshold");
       const nmsThresholdEl = document.querySelector("#nms-threshold");
       const crossLabelThresholdEl = document.querySelector("#cross-label-threshold");
@@ -336,6 +380,10 @@
       const webgpuStatus = document.querySelector("#webgpu-status");
       const wasmStatus = document.querySelector("#wasm-status");
       const analyzerStatus = document.querySelector("#analyzer-status");
+      const progressText = document.querySelector("#progress-text");
+      const elapsedText = document.querySelector("#elapsed-text");
+      const progressTrack = document.querySelector(".progress-track");
+      const progressBar = document.querySelector("#progress-bar");
 
       let wasmReady = false;
       let analyzer = null;
@@ -387,6 +435,30 @@
         detectButton.disabled = isBusy;
       }
 
+      function formatElapsedMs(elapsedMs) {
+        // Keep elapsed time compact because it is shown in the always-visible status area.
+        return `${(elapsedMs / 1000).toFixed(1)}s`;
+      }
+
+      function updateProgress(donePages, totalPages, startedAt) {
+        // Update both text and aria state so long PDF runs expose progress visually and semantically.
+        const safeTotal = Math.max(0, totalPages);
+        const safeDone = Math.min(Math.max(0, donePages), safeTotal);
+        const percent = safeTotal === 0 ? 0 : Math.round((safeDone / safeTotal) * 100);
+        progressText.textContent = `Progress ${safeDone} / ${safeTotal}`;
+        elapsedText.textContent = `Elapsed ${formatElapsedMs(performance.now() - startedAt)}`;
+        progressBar.style.width = `${percent}%`;
+        progressTrack.setAttribute("aria-valuenow", String(percent));
+      }
+
+      function resetProgress() {
+        // Reset stale timing and progress when the input changes or a new run starts.
+        progressText.textContent = "Progress 0 / 0";
+        elapsedText.textContent = "Elapsed 0.0s";
+        progressBar.style.width = "0%";
+        progressTrack.setAttribute("aria-valuenow", "0");
+      }
+
       function isPdfFile(file) {
         return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
       }
@@ -402,6 +474,15 @@
           throw new Error("threshold must be between 0 and 1");
         }
         return threshold;
+      }
+
+      function readBatchSize() {
+        // Batch size is intentionally separate from max pages to keep browser memory bounded.
+        const batchSize = Number.parseInt(batchSizeEl.value, 10);
+        if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 32) {
+          throw new Error("batch size must be between 1 and 32");
+        }
+        return batchSize;
       }
 
       function readNmsThreshold() {
@@ -609,6 +690,7 @@
           const file = sourceFileEl.files?.[0];
           previewPages = [];
           previewEl.replaceChildren();
+          resetProgress();
           if (!file) {
             return;
           }
@@ -657,36 +739,53 @@
           const threshold = readThreshold();
           const nmsThreshold = readNmsThreshold();
           const crossLabelThreshold = readCrossLabelThreshold();
+          const batchSize = readBatchSize();
           const results = [];
           const startedAt = performance.now();
+          updateProgress(0, previewPages.length, startedAt);
           log("running layout detection", {
             pages: previewPages.length,
+            batchSize,
             threshold,
             nmsThreshold,
             crossLabelThreshold,
           });
 
           previewEl.replaceChildren();
-          for (const page of previewPages) {
-            const pageStartedAt = performance.now();
+          let completedPages = 0;
+          for (let offset = 0; offset < previewPages.length; offset += batchSize) {
+            const pageBatch = previewPages.slice(offset, offset + batchSize);
+            const batchStartedAt = performance.now();
+            const imageBytesBatch = pageBatch.map((page) => page.bytes);
             const resultJson =
-              await activeAnalyzer.analyze_image_bytes_with_options(
-                page.bytes,
+              await activeAnalyzer.analyze_image_bytes_batch_with_options(
+                imageBytesBatch,
                 threshold,
                 nmsThreshold,
                 crossLabelThreshold,
               );
-            const result = JSON.parse(resultJson);
-            results.push({
-              pageIndex: page.pageIndex,
-              source: page.source,
-              result,
-              elapsedMs: Math.round(performance.now() - pageStartedAt),
-            });
+            const batchResults = JSON.parse(resultJson);
+            if (batchResults.length !== pageBatch.length) {
+              throw new Error("batched analyzer returned a different page count");
+            }
 
-            previewEl.append(createDetectionFigure(page, result));
+            for (const [index, result] of batchResults.entries()) {
+              const page = pageBatch[index];
+              results.push({
+                pageIndex: page.pageIndex,
+                source: page.source,
+                result,
+                elapsedMs: Math.round(performance.now() - batchStartedAt),
+              });
+
+              previewEl.append(createDetectionFigure(page, result));
+            }
+            // Progress is updated after each batch because this is the observable unit of work.
+            completedPages += pageBatch.length;
+            updateProgress(completedPages, previewPages.length, startedAt);
           }
 
+          updateProgress(previewPages.length, previewPages.length, startedAt);
           log("layout detection complete", {
             elapsedMs: Math.round(performance.now() - startedAt),
             pages: results,

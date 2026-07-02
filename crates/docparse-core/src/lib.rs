@@ -8,7 +8,9 @@ pub use document::{
     DocumentInput, DocumentPage, LoadDocumentOptions, load_document_pages,
 };
 pub use layout::{
-    LayoutAnalyzer, LayoutBlock, LayoutBox, LayoutError, LayoutInput,
-    LayoutLabel, LayoutPage, LayoutTensor, ModelOutput, PostprocessOptions,
-    PreprocessOptions, postprocess_fetch_rows, preprocess_image,
+    LayoutAnalyzer, LayoutBatchInput, LayoutBlock, LayoutBox, LayoutError,
+    LayoutInput, LayoutLabel, LayoutPage, LayoutTensor, ModelOutput,
+    OriginalImageSize, PostprocessOptions, PreprocessOptions,
+    postprocess_fetch_rows, postprocess_fetch_rows_batch, preprocess_image,
+    preprocess_images,
 };

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use docparse_core::{
     LayoutAnalyzer, LayoutError, LayoutPage, PostprocessOptions,
-    PreprocessOptions, postprocess_fetch_rows, preprocess_image,
+    PreprocessOptions, postprocess_fetch_rows_batch, preprocess_images,
 };
 use ort::{session::Session, value::TensorRef};
 
@@ -50,14 +50,23 @@ impl OrtLayoutAnalyzer {
     pub fn config(&self) -> &OrtLayoutConfig {
         &self.config
     }
-}
 
-impl LayoutAnalyzer for OrtLayoutAnalyzer {
-    async fn analyze_image(
+    /// Analyzes multiple images in one ONNX Runtime call and returns pages in input order.
+    pub async fn analyze_images(
         &self,
-        image: &image::DynamicImage,
-    ) -> Result<LayoutPage, LayoutError> {
-        let input = preprocess_image(image, PreprocessOptions::default())?;
+        images: &[image::DynamicImage],
+    ) -> Result<Vec<LayoutPage>, LayoutError> {
+        self.analyze_images_with_options(images, PostprocessOptions::default())
+            .await
+    }
+
+    /// Analyzes multiple images with caller-provided postprocessing thresholds.
+    pub async fn analyze_images_with_options(
+        &self,
+        images: &[image::DynamicImage],
+        postprocess_options: PostprocessOptions,
+    ) -> Result<Vec<LayoutPage>, LayoutError> {
+        let input = preprocess_images(images, PreprocessOptions::default())?;
         let image_tensor =
             TensorRef::from_array_view(&input.image).map_err(|error| {
                 LayoutError::Backend(format!(
@@ -113,15 +122,57 @@ impl LayoutAnalyzer for OrtLayoutAnalyzer {
                     "fetch_name_0 has invalid shape: {shape}"
                 ))
             })?;
+        let row_counts = extract_fetch_row_counts(&outputs)?;
 
-        postprocess_fetch_rows(
+        postprocess_fetch_rows_batch(
             values,
             columns,
-            input.original_width,
-            input.original_height,
-            PostprocessOptions::default(),
+            &row_counts,
+            &input.original_sizes,
+            postprocess_options,
         )
     }
+}
+
+impl LayoutAnalyzer for OrtLayoutAnalyzer {
+    async fn analyze_image(
+        &self,
+        image: &image::DynamicImage,
+    ) -> Result<LayoutPage, LayoutError> {
+        // Route the legacy single-image API through the batch path so both
+        // code paths consume fetch_name_1 and decode model output identically.
+        let pages = self.analyze_images(std::slice::from_ref(image)).await?;
+        pages.into_iter().next().ok_or_else(|| {
+            LayoutError::Backend(
+                "ONNX batch inference returned no pages".to_owned(),
+            )
+        })
+    }
+}
+
+/// Extracts per-image detection counts from the PP-StructureV3 batch output.
+fn extract_fetch_row_counts(
+    outputs: &ort::session::SessionOutputs<'_>,
+) -> Result<Vec<usize>, LayoutError> {
+    let fetch = outputs.get("fetch_name_1").ok_or_else(|| {
+        LayoutError::Backend("ONNX output fetch_name_1 is missing".to_owned())
+    })?;
+    let (_shape, values) =
+        fetch.try_extract_tensor::<i32>().map_err(|error| {
+            LayoutError::Backend(format!(
+                "failed to extract fetch_name_1 tensor: {error}"
+            ))
+        })?;
+    values
+        .iter()
+        .map(|value| {
+            usize::try_from(*value).map_err(|error| {
+                LayoutError::Postprocess(format!(
+                    "fetch_name_1 contains an invalid row count {value}: {error}"
+                ))
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

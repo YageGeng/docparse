@@ -3,8 +3,8 @@
 use docparse_core::{LayoutAnalyzer, LayoutError, LayoutPage};
 #[cfg(target_arch = "wasm32")]
 use docparse_core::{
-    LayoutLabel, PostprocessOptions, PreprocessOptions, postprocess_fetch_rows,
-    preprocess_image,
+    LayoutLabel, PostprocessOptions, PreprocessOptions,
+    postprocess_fetch_rows_batch, preprocess_images,
 };
 #[cfg(target_arch = "wasm32")]
 use ort::{
@@ -187,6 +187,60 @@ impl WasmLayoutAnalyzer {
             ))
         })
     }
+
+    /// Analyzes a JavaScript array of image byte arrays in one batched model call.
+    pub async fn analyze_image_bytes_batch_with_options(
+        &mut self,
+        image_bytes_batch: js_sys::Array,
+        threshold: f32,
+        nms_iou_threshold: f32,
+        cross_label_iou_threshold: f32,
+    ) -> Result<String, wasm_bindgen::JsValue> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "threshold must be between 0 and 1",
+            ));
+        }
+        if !(0.0..=1.0).contains(&nms_iou_threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "nms_iou_threshold must be between 0 and 1",
+            ));
+        }
+        if !(0.0..=1.0).contains(&cross_label_iou_threshold) {
+            return Err(wasm_bindgen::JsValue::from_str(
+                "cross_label_iou_threshold must be between 0 and 1",
+            ));
+        }
+        let mut images =
+            Vec::with_capacity(image_bytes_batch.length() as usize);
+        for bytes in image_bytes_batch.iter() {
+            let bytes = js_sys::Uint8Array::new(&bytes).to_vec();
+            images.push(image::load_from_memory(&bytes).map_err(|error| {
+                wasm_bindgen::JsValue::from_str(&format!(
+                    "failed to decode image bytes: {error}"
+                ))
+            })?);
+        }
+
+        let pages = analyze_images_with_session(
+            &mut self.session,
+            &images,
+            PostprocessOptions {
+                threshold,
+                nms_iou_threshold,
+                cross_label_iou_threshold,
+                ..PostprocessOptions::default()
+            },
+        )
+        .await
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+
+        serde_json::to_string(&pages).map_err(|error| {
+            wasm_bindgen::JsValue::from_str(&format!(
+                "failed to serialize layout results: {error}"
+            ))
+        })
+    }
 }
 
 /// Returns the Rust-defined display color for a serialized layout label.
@@ -214,7 +268,29 @@ async fn analyze_image_with_session(
     image: &image::DynamicImage,
     postprocess_options: PostprocessOptions,
 ) -> Result<LayoutPage, LayoutError> {
-    let input = preprocess_image(image, PreprocessOptions::default())?;
+    // Route single-image inference through the batch decoder so fetch_name_1 is
+    // handled consistently with PDF multi-page detection.
+    let pages = analyze_images_with_session(
+        session,
+        std::slice::from_ref(image),
+        postprocess_options,
+    )
+    .await?;
+    pages.into_iter().next().ok_or_else(|| {
+        LayoutError::Backend(
+            "ORT Web batch inference returned no pages".to_owned(),
+        )
+    })
+}
+
+/// Runs one ORT Web inference for a batch of images and decodes pages in order.
+#[cfg(target_arch = "wasm32")]
+async fn analyze_images_with_session(
+    session: &mut Session,
+    images: &[image::DynamicImage],
+    postprocess_options: PostprocessOptions,
+) -> Result<Vec<LayoutPage>, LayoutError> {
+    let input = preprocess_images(images, PreprocessOptions::default())?;
     let image_tensor =
         TensorRef::from_array_view(&input.image).map_err(|error| {
             LayoutError::Backend(format!(
@@ -271,14 +347,41 @@ async fn analyze_image_with_session(
                 "fetch_name_0 has invalid shape: {shape}"
             ))
         })?;
+    let row_counts = extract_fetch_row_counts(&outputs)?;
 
-    postprocess_fetch_rows(
+    postprocess_fetch_rows_batch(
         values,
         columns,
-        input.original_width,
-        input.original_height,
+        &row_counts,
+        &input.original_sizes,
         postprocess_options,
     )
+}
+
+/// Extracts per-image detection counts from the PP-StructureV3 batch output.
+#[cfg(target_arch = "wasm32")]
+fn extract_fetch_row_counts(
+    outputs: &ort::session::SessionOutputs<'_>,
+) -> Result<Vec<usize>, LayoutError> {
+    let fetch = outputs.get("fetch_name_1").ok_or_else(|| {
+        LayoutError::Backend("ONNX output fetch_name_1 is missing".to_owned())
+    })?;
+    let (_shape, values) =
+        fetch.try_extract_tensor::<i32>().map_err(|error| {
+            LayoutError::Backend(format!(
+                "failed to extract fetch_name_1 tensor: {error}"
+            ))
+        })?;
+    values
+        .iter()
+        .map(|value| {
+            usize::try_from(*value).map_err(|error| {
+                LayoutError::Postprocess(format!(
+                    "fetch_name_1 contains an invalid row count {value}: {error}"
+                ))
+            })
+        })
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]

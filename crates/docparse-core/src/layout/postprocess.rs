@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use super::{LayoutBlock, LayoutBox, LayoutError, LayoutLabel, LayoutPage};
+use super::{
+    LayoutBlock, LayoutBox, LayoutError, LayoutLabel, LayoutPage,
+    OriginalImageSize,
+};
 
 /// Postprocessing options.
 #[derive(Debug, Clone, Copy)]
@@ -120,6 +123,76 @@ pub fn postprocess_fetch_rows(
         height: image_height,
         blocks,
     })
+}
+
+/// Splits batched model fetch rows and decodes each image into its own page.
+pub fn postprocess_fetch_rows_batch(
+    values: &[f32],
+    columns: usize,
+    row_counts: &[usize],
+    image_sizes: &[OriginalImageSize],
+    options: PostprocessOptions,
+) -> Result<Vec<LayoutPage>, LayoutError> {
+    if row_counts.len() != image_sizes.len() {
+        return Err(LayoutError::Postprocess(
+            "batch row counts must match image count".to_owned(),
+        ));
+    }
+    if columns == 0 || !values.len().is_multiple_of(columns) {
+        return Err(LayoutError::Postprocess(
+            "batched fetch row value count must be divisible by columns"
+                .to_owned(),
+        ));
+    }
+    let total_rows = values.len() / columns;
+    let counted_rows = row_counts.iter().try_fold(0usize, |total, count| {
+        total.checked_add(*count).ok_or_else(|| {
+            LayoutError::Postprocess(
+                "batch row counts overflowed usize".to_owned(),
+            )
+        })
+    })?;
+    if counted_rows != total_rows {
+        return Err(LayoutError::Postprocess(
+            "batch row counts must sum to fetch row count".to_owned(),
+        ));
+    }
+
+    let mut pages = Vec::with_capacity(image_sizes.len());
+    let mut row_offset = 0usize;
+    for (row_count, image_size) in row_counts.iter().zip(image_sizes) {
+        let value_offset =
+            row_offset.checked_mul(columns).ok_or_else(|| {
+                LayoutError::Postprocess(
+                    "batch row offset overflowed".to_owned(),
+                )
+            })?;
+        let value_len = row_count.checked_mul(columns).ok_or_else(|| {
+            LayoutError::Postprocess("batch row length overflowed".to_owned())
+        })?;
+        let value_end =
+            value_offset.checked_add(value_len).ok_or_else(|| {
+                LayoutError::Postprocess("batch row end overflowed".to_owned())
+            })?;
+        let page_values =
+            values.get(value_offset..value_end).ok_or_else(|| {
+                LayoutError::Postprocess(
+                    "batch row slice is outside fetch values".to_owned(),
+                )
+            })?;
+        pages.push(postprocess_fetch_rows(
+            page_values,
+            columns,
+            image_size.width,
+            image_size.height,
+            options,
+        )?);
+        row_offset = row_offset.checked_add(*row_count).ok_or_else(|| {
+            LayoutError::Postprocess("batch row offset overflowed".to_owned())
+        })?;
+    }
+
+    Ok(pages)
 }
 
 /// Validates that a postprocess threshold is finite and inside the unit interval.
@@ -281,9 +354,14 @@ fn bbox_overlap_metrics(
 
 #[cfg(test)]
 mod tests {
-    use super::{LayoutBlock, LayoutBox, LayoutLabel, LayoutPage};
+    use super::{
+        LayoutBlock, LayoutBox, LayoutLabel, LayoutPage, OriginalImageSize,
+    };
 
-    use super::{PostprocessOptions, postprocess_fetch_rows};
+    use super::{
+        PostprocessOptions, postprocess_fetch_rows,
+        postprocess_fetch_rows_batch,
+    };
 
     /// Returns a block by index with a readable failure message.
     fn block_at(page: &LayoutPage, index: usize) -> &LayoutBlock {
@@ -467,6 +545,66 @@ mod tests {
             error
                 .to_string()
                 .contains("threshold must be between 0 and 1")
+        );
+    }
+
+    #[test]
+    fn batch_postprocess_splits_fetch_rows_by_output_counts() {
+        let values = vec![
+            22.0, 0.95, 1.0, 2.0, 10.0, 20.0, 2.0, 8.0, 0.90, 0.0, 0.0, 5.0,
+            5.0, 1.0, 14.0, 0.88, 10.0, 10.0, 30.0, 40.0, 4.0,
+        ];
+
+        let pages = postprocess_fetch_rows_batch(
+            &values,
+            7,
+            &[2, 1],
+            &[
+                OriginalImageSize {
+                    width: 25,
+                    height: 30,
+                },
+                OriginalImageSize {
+                    width: 100,
+                    height: 80,
+                },
+            ],
+            PostprocessOptions {
+                threshold: 0.5,
+                ..PostprocessOptions::default()
+            },
+        )
+        .expect("batch postprocess should succeed");
+
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages.first().expect("first page").blocks.len(), 2);
+        assert_eq!(pages.get(1).expect("second page").blocks.len(), 1);
+        assert_eq!(
+            block_at(pages.get(1).expect("second page"), 0).label,
+            LayoutLabel::Image
+        );
+    }
+
+    #[test]
+    fn batch_postprocess_rejects_mismatched_row_counts() {
+        let values = vec![22.0, 0.95, 1.0, 2.0, 10.0, 20.0, 2.0];
+
+        let error = postprocess_fetch_rows_batch(
+            &values,
+            7,
+            &[2],
+            &[OriginalImageSize {
+                width: 25,
+                height: 30,
+            }],
+            PostprocessOptions::default(),
+        )
+        .expect_err("wrong row count sum should be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("batch row counts must sum to fetch row count")
         );
     }
 }
