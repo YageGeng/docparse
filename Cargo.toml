@@ -1,0 +1,104 @@
+[workspace]
+members = [
+  "crates/*",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/YageGeng/docparse.git"
+version = "0.1.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_import_braces = "deny"
+elided_lifetimes_in_paths = "deny"
+
+[workspace.lints.clippy]
+# Panic prevention
+string_slice = "warn"
+indexing_slicing = "warn"
+
+unwrap_used = "warn"
+panic = "warn"
+get_unwrap = "warn"
+unchecked_time_subtraction = "warn"
+panic_in_result_fn = "warn"
+
+# Silent failure prevention
+let_underscore_future = "warn"
+let_underscore_must_use = "allow"
+unused_result_ok = "warn"
+map_err_ignore = "warn"
+assertions_on_result_states = "warn"
+
+# Async/concurrency safety
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+large_futures = "warn"
+
+# Numeric safety
+float_cmp = "warn"
+float_cmp_const = "warn"
+cast_sign_loss = "warn"
+invalid_upcast_comparisons = "warn"
+
+# Unsafe code safety
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+mem_forget = "warn"
+
+[workspace.dependencies]
+# workspace crates
+pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }
+
+# error
+anyhow = "1"
+thiserror = "2"
+
+# tracing & log
+tracing = "0.1"
+tracing-futures = "0.2.5"
+tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
+
+# async
+futures = "0.3"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# serde
+figment = { version = "0.10", features = ["toml", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"
+
+# builder
+typed-builder = "0.23"
+
+# build
+bindgen = "0.71"
+flate2 = "1"
+tar = "0.4"
+ureq = "3"
+
+# wasm
+wasm-bindgen-futures = "0.4"
+
+# fs
+ignore = "0.4"
+mime = "0.3.17"
+mime_guess = "2.0.5"
+tempfile = "3"
+
+# cli
+clap = { version = "4", features = ["derive"] }
+
+# misc
+arc-swap = "1.9"
+base64 = "0.23"
+blake3 = "1"
+dirs = "6"
+libloading = "0.8"
+nanoid = "0.5"

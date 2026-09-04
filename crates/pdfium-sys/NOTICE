@@ -1,0 +1,24 @@
+docparse PDFium crates
+
+Portions of this software are derived from LiteParse:
+https://github.com/run-llama/liteparse
+
+Imported source revision:
+b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 (tag: crates-v2.14.3)
+
+Imported directories:
+- crates/pdfium
+- crates/pdfium-sys
+
+The imported files were modified for docparse. Changes include renaming the
+Rust crates and package references, integrating them into the docparse Cargo
+workspace, applying project formatting, and adding provenance and licensing
+documentation.
+
+LiteParse is distributed under the Apache License, Version 2.0. A copy of
+that license is provided in the repository's LICENSE file.
+
+The build can download PDFium binaries from run-llama/pdfium-binaries.
+PDFium and its bundled third-party components have separate license notices;
+see THIRD_PARTY_NOTICES.md and the LICENSE/licenses directory included in the
+downloaded PDFium archive.

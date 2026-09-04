@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
+[package]
+name = "docparse-pdfium-sys"
+version = "1.9.0"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+description = "Raw FFI bindings to PDFium for docparse, derived from LiteParse"
+links = "pdfium"
+
+[features]
+default = []
+bindgen = ["dep:bindgen"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libloading.workspace = true
+
+[build-dependencies]
+bindgen = { workspace = true, optional = true }
+flate2.workspace = true
+tar.workspace = true
+ureq.workspace = true

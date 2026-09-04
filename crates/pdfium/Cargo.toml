@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
+[package]
+name = "docparse-pdfium"
+version = "1.9.0"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+description = "Safe Rust wrapper around PDFium for docparse, derived from LiteParse"
+
+[dependencies]
+# workspace crates
+pdfium-sys.workspace = true
+
+[dev-dependencies]
+# misc
+blake3.workspace = true

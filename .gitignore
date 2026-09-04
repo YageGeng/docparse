@@ -1,0 +1,31 @@
+# Rust build output
+/target
+/web/dist/
+/web/node_modules/
+*.tsbuildinfo
+
+# Editor settings
+.idea/
+.vscode/
+
+# Local environment files
+.direnv/
+.env
+.env.*
+!.env.example
+
+# Local agent workspace state
+.agents/
+.claude/
+.codex/
+.superpowers/
+
+# OS and temporary files
+.DS_Store
+*.log
+*.tmp
+*.swp
+.superpowers/brainstorm/62366-1783431529/
+
+# Misc
+.pi/skills
