@@ -1,0 +1,21 @@
+{
+  "sha256": "4697900aa36f3bcd74318ef97b6360b657c20204a69ca7e6c243fa438aae0a51",
+  "page_width": 612.0,
+  "page_height": 792.0,
+  "rotation": 0,
+  "title_font_weight": 0,
+  "required_text": [
+    "DocParse Metadata Fixture",
+    "Left column baseline",
+    "Right column baseline",
+    "Italic blue text",
+    "Bold red text",
+    "Contents....................42",
+    "Rotated ninety degrees",
+    "Marked fill and stroke",
+    "Explicit line one",
+    "Explicit line two"
+  ],
+  "uri": "https://example.com/docparse",
+  "mcid": 7
+}

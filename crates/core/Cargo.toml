@@ -1,0 +1,54 @@
+[package]
+name = "docparse-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Native PDF extraction and layout-text fusion for docparse"
+
+[features]
+default = []
+layout-coreml = ["docparse-layout/coreml"]
+layout-cuda = ["docparse-layout/cuda"]
+layout-openvino = ["docparse-layout/openvino"]
+
+[dependencies]
+# workspace crates
+docparse-config.workspace = true
+docparse-layout.workspace = true
+pdfium.workspace = true
+
+# error
+thiserror.workspace = true
+
+# async
+async-trait.workspace = true
+tokio.workspace = true
+
+# config and serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# builder
+typed-builder.workspace = true
+
+# inference and image
+image.workspace = true
+
+# diagnostics
+tracing.workspace = true
+
+[dev-dependencies]
+# config and serialization
+figment.workspace = true
+
+# inference and image
+sha2.workspace = true
+
+# testing
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

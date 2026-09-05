@@ -1,0 +1,865 @@
+{
+  "samples": [
+    {
+      "detections": [],
+      "image_size": [
+        800.0,
+        800.0
+      ],
+      "input": {
+        "basename": "blank.png",
+        "color_mode": "RGB",
+        "decoded_rgb_sha256": "d883267b40e389a772f00ef4c50d49471138afed85da8f101de16ad6cf5a9d9f",
+        "height": 800,
+        "sha256": "af731bd811127257fbedff166993782949e727edb4a0ea4b0b98399877ccfd49",
+        "width": 800
+      },
+      "model_revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6",
+      "opencv_profile": {
+        "ipp": false,
+        "optimized": false,
+        "threads": 1
+      },
+      "paddlex_source_commit": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "postprocess_profile": {
+        "consume_instance_masks": false,
+        "filter_overlap_boxes": false,
+        "layout_merge_bboxes_mode": null,
+        "layout_nms": false,
+        "layout_unclip_ratio": null
+      },
+      "raw_outputs": {
+        "bbox": {
+          "dtype": "float32",
+          "max": 808.5912475585938,
+          "min": -227.73866271972656,
+          "name": "fetch_name_0",
+          "sha256": "79f69e946d7a3bd533192eec008936d45175e6ffeaca0fbf151901c36bcb9872",
+          "shape": [
+            300,
+            7
+          ]
+        },
+        "bbox_num": {
+          "dtype": "int32",
+          "max": 300.0,
+          "min": 300.0,
+          "name": "fetch_name_1",
+          "sha256": "f2dadabeae2223ad5a889fd86b220e112bad5cc37be496a1308e2c13f21d2bf4",
+          "shape": [
+            1
+          ],
+          "values": [
+            300
+          ]
+        },
+        "masks": {
+          "dtype": "int32",
+          "max": 1.0,
+          "min": 0.0,
+          "name": "fetch_name_2",
+          "sha256": "f2cda516c197882eb5be7b367f949a1426bd554d8e821a2a31f89461460bd65c",
+          "shape": [
+            300,
+            200,
+            200
+          ]
+        }
+      },
+      "scale_factor": [
+        1.0,
+        1.0
+      ],
+      "schema": {
+        "inputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "im_shape",
+            "shape": [
+              "DynamicDimension.0",
+              2
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "image",
+            "shape": [
+              "DynamicDimension.1",
+              3,
+              800,
+              800
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "scale_factor",
+            "shape": [
+              "DynamicDimension.2",
+              2
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "fetch_name_0",
+            "shape": [
+              "DynamicDimension.3",
+              7
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_1",
+            "shape": [
+              "DynamicDimension.4"
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_2",
+            "shape": [
+              "DynamicDimension.5",
+              200,
+              200
+            ]
+          }
+        ]
+      },
+      "tensor": {
+        "dtype": "float32",
+        "max": 1.0,
+        "min": 1.0,
+        "name": "image",
+        "sha256": "063f687756af0778eae4c0d45353dfeef4fa0fb3dedaa7e03ad29f0e0cfd1189",
+        "shape": [
+          1,
+          3,
+          800,
+          800
+        ]
+      },
+      "threshold": 0.5,
+      "versions": {
+        "numpy": "2.3.5",
+        "onnxruntime": "1.29.0",
+        "opencv_contrib_python": "4.10.0.84",
+        "paddleocr": "3.6.0",
+        "paddlex": "3.6.1"
+      }
+    },
+    {
+      "detections": [],
+      "image_size": [
+        800.0,
+        800.0
+      ],
+      "input": {
+        "basename": "dense-overlap.png",
+        "color_mode": "RGB",
+        "decoded_rgb_sha256": "2e57177e4f217d0ea4b3a05df568719b03fab68aacb1590cf843bf7edacc57e9",
+        "height": 900,
+        "sha256": "2da0ca1f2a9c63fe47d4fca7c64229e083cea33f6fa0d37ad60a8b4ae911fece",
+        "width": 900
+      },
+      "model_revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6",
+      "opencv_profile": {
+        "ipp": false,
+        "optimized": false,
+        "threads": 1
+      },
+      "paddlex_source_commit": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "postprocess_profile": {
+        "consume_instance_masks": false,
+        "filter_overlap_boxes": false,
+        "layout_merge_bboxes_mode": null,
+        "layout_nms": false,
+        "layout_unclip_ratio": null
+      },
+      "raw_outputs": {
+        "bbox": {
+          "dtype": "float32",
+          "max": 909.6492919921875,
+          "min": -5.3513288497924805,
+          "name": "fetch_name_0",
+          "sha256": "6dc0809d7439bdb05c87e18e0f2026b9dd3c049707e2ef036af01451367a0956",
+          "shape": [
+            300,
+            7
+          ]
+        },
+        "bbox_num": {
+          "dtype": "int32",
+          "max": 300.0,
+          "min": 300.0,
+          "name": "fetch_name_1",
+          "sha256": "f2dadabeae2223ad5a889fd86b220e112bad5cc37be496a1308e2c13f21d2bf4",
+          "shape": [
+            1
+          ],
+          "values": [
+            300
+          ]
+        },
+        "masks": {
+          "dtype": "int32",
+          "max": 1.0,
+          "min": 0.0,
+          "name": "fetch_name_2",
+          "sha256": "f333bb7301f03427cf3d68309afd8b3ee3f80d21d6bfbcdacf64c1f240b034fe",
+          "shape": [
+            300,
+            200,
+            200
+          ]
+        }
+      },
+      "scale_factor": [
+        0.8888888955116272,
+        0.8888888955116272
+      ],
+      "schema": {
+        "inputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "im_shape",
+            "shape": [
+              "DynamicDimension.0",
+              2
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "image",
+            "shape": [
+              "DynamicDimension.1",
+              3,
+              800,
+              800
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "scale_factor",
+            "shape": [
+              "DynamicDimension.2",
+              2
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "fetch_name_0",
+            "shape": [
+              "DynamicDimension.3",
+              7
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_1",
+            "shape": [
+              "DynamicDimension.4"
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_2",
+            "shape": [
+              "DynamicDimension.5",
+              200,
+              200
+            ]
+          }
+        ]
+      },
+      "tensor": {
+        "dtype": "float32",
+        "max": 1.0,
+        "min": 0.0,
+        "name": "image",
+        "sha256": "b1c00beb1671426fad0638114fd28517e347cdc3cf9a2898baca435210035234",
+        "shape": [
+          1,
+          3,
+          800,
+          800
+        ]
+      },
+      "threshold": 0.5,
+      "versions": {
+        "numpy": "2.3.5",
+        "onnxruntime": "1.29.0",
+        "opencv_contrib_python": "4.10.0.84",
+        "paddleocr": "3.6.0",
+        "paddlex": "3.6.1"
+      }
+    },
+    {
+      "detections": [
+        {
+          "bbox": [
+            55,
+            108,
+            603,
+            157
+          ],
+          "class_id": 17,
+          "label": "paragraph_title",
+          "order_seq": 69,
+          "score": 0.8130124807357788,
+          "source_detection_index": 0
+        },
+        {
+          "bbox": [
+            532,
+            250,
+            758,
+            284
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 174,
+          "score": 0.500709056854248,
+          "source_detection_index": 6
+        },
+        {
+          "bbox": [
+            532,
+            298,
+            761,
+            332
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 190,
+          "score": 0.5125539302825928,
+          "source_detection_index": 3
+        },
+        {
+          "bbox": [
+            532,
+            395,
+            761,
+            428
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 225,
+          "score": 0.5017935037612915,
+          "source_detection_index": 5
+        },
+        {
+          "bbox": [
+            50,
+            491,
+            266,
+            523
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 238,
+          "score": 0.5130764245986938,
+          "source_detection_index": 2
+        },
+        {
+          "bbox": [
+            532,
+            443,
+            760,
+            476
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 245,
+          "score": 0.506818950176239,
+          "source_detection_index": 4
+        },
+        {
+          "bbox": [
+            531,
+            491,
+            761,
+            523
+          ],
+          "class_id": 22,
+          "label": "text",
+          "order_seq": 256,
+          "score": 0.5418792963027954,
+          "source_detection_index": 1
+        }
+      ],
+      "image_size": [
+        800.0,
+        800.0
+      ],
+      "input": {
+        "basename": "input.png",
+        "color_mode": "RGB",
+        "decoded_rgb_sha256": "148f803d72022f98ee28a4e1a0b5a986daafcf0521abd866e959402d55887923",
+        "height": 640,
+        "sha256": "70ed25cf1df46fb402ac3242078c78411a105f66aeb5f02b892fb79fe0c71f41",
+        "width": 1024
+      },
+      "model_revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6",
+      "opencv_profile": {
+        "ipp": false,
+        "optimized": false,
+        "threads": 1
+      },
+      "paddlex_source_commit": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "postprocess_profile": {
+        "consume_instance_masks": false,
+        "filter_overlap_boxes": false,
+        "layout_merge_bboxes_mode": null,
+        "layout_nms": false,
+        "layout_unclip_ratio": null
+      },
+      "raw_outputs": {
+        "bbox": {
+          "dtype": "float32",
+          "max": 1025.049560546875,
+          "min": -1.8763065338134766,
+          "name": "fetch_name_0",
+          "sha256": "bd0d574cd344d7be690fecdaf724233960510095ad437668e5b114958e64c25d",
+          "shape": [
+            300,
+            7
+          ]
+        },
+        "bbox_num": {
+          "dtype": "int32",
+          "max": 300.0,
+          "min": 300.0,
+          "name": "fetch_name_1",
+          "sha256": "f2dadabeae2223ad5a889fd86b220e112bad5cc37be496a1308e2c13f21d2bf4",
+          "shape": [
+            1
+          ],
+          "values": [
+            300
+          ]
+        },
+        "masks": {
+          "dtype": "int32",
+          "max": 1.0,
+          "min": 0.0,
+          "name": "fetch_name_2",
+          "sha256": "89d5bf28d211b9f8d61b9604ba20c4030e695e25f277245a95ac72a810dc6135",
+          "shape": [
+            300,
+            200,
+            200
+          ]
+        }
+      },
+      "scale_factor": [
+        1.25,
+        0.78125
+      ],
+      "schema": {
+        "inputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "im_shape",
+            "shape": [
+              "DynamicDimension.0",
+              2
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "image",
+            "shape": [
+              "DynamicDimension.1",
+              3,
+              800,
+              800
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "scale_factor",
+            "shape": [
+              "DynamicDimension.2",
+              2
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "fetch_name_0",
+            "shape": [
+              "DynamicDimension.3",
+              7
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_1",
+            "shape": [
+              "DynamicDimension.4"
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_2",
+            "shape": [
+              "DynamicDimension.5",
+              200,
+              200
+            ]
+          }
+        ]
+      },
+      "tensor": {
+        "dtype": "float32",
+        "max": 1.0,
+        "min": 0.0,
+        "name": "image",
+        "sha256": "aed9197448480996c2f5a6265849ba187f092765b9b53d564ae4fe85b66472a8",
+        "shape": [
+          1,
+          3,
+          800,
+          800
+        ]
+      },
+      "threshold": 0.5,
+      "versions": {
+        "numpy": "2.3.5",
+        "onnxruntime": "1.29.0",
+        "opencv_contrib_python": "4.10.0.84",
+        "paddleocr": "3.6.0",
+        "paddlex": "3.6.1"
+      }
+    },
+    {
+      "detections": [
+        {
+          "bbox": [
+            0,
+            115,
+            1197,
+            610
+          ],
+          "class_id": 6,
+          "label": "doc_title",
+          "order_seq": 32,
+          "score": 0.5961056351661682,
+          "source_detection_index": 0
+        }
+      ],
+      "image_size": [
+        800.0,
+        800.0
+      ],
+      "input": {
+        "basename": "landscape.png",
+        "color_mode": "RGB",
+        "decoded_rgb_sha256": "95ba900b32ec19f04274cc298ef76989f4778f031c3282da40c6f1f34a5beca6",
+        "height": 700,
+        "sha256": "3fa1f2e0316d9167896ad4b337e8d1641470e2d442ed8cd904415adfbbe90ebb",
+        "width": 1200
+      },
+      "model_revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6",
+      "opencv_profile": {
+        "ipp": false,
+        "optimized": false,
+        "threads": 1
+      },
+      "paddlex_source_commit": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "postprocess_profile": {
+        "consume_instance_masks": false,
+        "filter_overlap_boxes": false,
+        "layout_merge_bboxes_mode": null,
+        "layout_nms": false,
+        "layout_unclip_ratio": null
+      },
+      "raw_outputs": {
+        "bbox": {
+          "dtype": "float32",
+          "max": 1223.694091796875,
+          "min": -13.426852226257324,
+          "name": "fetch_name_0",
+          "sha256": "4be5b5e60a5879fa256c1550df9283434e7d59b5c13db618401d4419c164f1e4",
+          "shape": [
+            300,
+            7
+          ]
+        },
+        "bbox_num": {
+          "dtype": "int32",
+          "max": 300.0,
+          "min": 300.0,
+          "name": "fetch_name_1",
+          "sha256": "f2dadabeae2223ad5a889fd86b220e112bad5cc37be496a1308e2c13f21d2bf4",
+          "shape": [
+            1
+          ],
+          "values": [
+            300
+          ]
+        },
+        "masks": {
+          "dtype": "int32",
+          "max": 1.0,
+          "min": 0.0,
+          "name": "fetch_name_2",
+          "sha256": "5d5defbb659d372c6f20964d5d57c2ed0f32edc36e380b14058d722b7443c4ba",
+          "shape": [
+            300,
+            200,
+            200
+          ]
+        }
+      },
+      "scale_factor": [
+        1.1428571939468384,
+        0.6666666865348816
+      ],
+      "schema": {
+        "inputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "im_shape",
+            "shape": [
+              "DynamicDimension.0",
+              2
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "image",
+            "shape": [
+              "DynamicDimension.1",
+              3,
+              800,
+              800
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "scale_factor",
+            "shape": [
+              "DynamicDimension.2",
+              2
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "fetch_name_0",
+            "shape": [
+              "DynamicDimension.3",
+              7
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_1",
+            "shape": [
+              "DynamicDimension.4"
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_2",
+            "shape": [
+              "DynamicDimension.5",
+              200,
+              200
+            ]
+          }
+        ]
+      },
+      "tensor": {
+        "dtype": "float32",
+        "max": 1.0,
+        "min": 0.0,
+        "name": "image",
+        "sha256": "60f91825c8ef45a77b6821a16013dd8c0a0cc0ba49f4142f3839ea80e88f8df0",
+        "shape": [
+          1,
+          3,
+          800,
+          800
+        ]
+      },
+      "threshold": 0.5,
+      "versions": {
+        "numpy": "2.3.5",
+        "onnxruntime": "1.29.0",
+        "opencv_contrib_python": "4.10.0.84",
+        "paddleocr": "3.6.0",
+        "paddlex": "3.6.1"
+      }
+    },
+    {
+      "detections": [
+        {
+          "bbox": [
+            0,
+            24,
+            579,
+            712
+          ],
+          "class_id": 6,
+          "label": "doc_title",
+          "order_seq": 14,
+          "score": 0.5474966764450073,
+          "source_detection_index": 0
+        }
+      ],
+      "image_size": [
+        800.0,
+        800.0
+      ],
+      "input": {
+        "basename": "portrait.png",
+        "color_mode": "RGB",
+        "decoded_rgb_sha256": "da1345c8910846ac195bd20471f4abfd02b047706f01ad64136b876596009f64",
+        "height": 900,
+        "sha256": "4a5300f21550d97459d9b05ccce4a0a95eb378af1d20b1b942789ad5c6f24adb",
+        "width": 640
+      },
+      "model_revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6",
+      "opencv_profile": {
+        "ipp": false,
+        "optimized": false,
+        "threads": 1
+      },
+      "paddlex_source_commit": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "postprocess_profile": {
+        "consume_instance_masks": false,
+        "filter_overlap_boxes": false,
+        "layout_merge_bboxes_mode": null,
+        "layout_nms": false,
+        "layout_unclip_ratio": null
+      },
+      "raw_outputs": {
+        "bbox": {
+          "dtype": "float32",
+          "max": 883.708984375,
+          "min": -37.37955856323242,
+          "name": "fetch_name_0",
+          "sha256": "a2f3c3451860eec207a4e733b2134fc08c0f446e468456e75c4c5f86ca6e7888",
+          "shape": [
+            300,
+            7
+          ]
+        },
+        "bbox_num": {
+          "dtype": "int32",
+          "max": 300.0,
+          "min": 300.0,
+          "name": "fetch_name_1",
+          "sha256": "f2dadabeae2223ad5a889fd86b220e112bad5cc37be496a1308e2c13f21d2bf4",
+          "shape": [
+            1
+          ],
+          "values": [
+            300
+          ]
+        },
+        "masks": {
+          "dtype": "int32",
+          "max": 1.0,
+          "min": 0.0,
+          "name": "fetch_name_2",
+          "sha256": "5198477f18886cc18d499a745e45a8a84b57bd42987e5b366e62f053a7fc819d",
+          "shape": [
+            300,
+            200,
+            200
+          ]
+        }
+      },
+      "scale_factor": [
+        0.8888888955116272,
+        1.25
+      ],
+      "schema": {
+        "inputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "im_shape",
+            "shape": [
+              "DynamicDimension.0",
+              2
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "image",
+            "shape": [
+              "DynamicDimension.1",
+              3,
+              800,
+              800
+            ]
+          },
+          {
+            "dtype": "tensor(float)",
+            "name": "scale_factor",
+            "shape": [
+              "DynamicDimension.2",
+              2
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "dtype": "tensor(float)",
+            "name": "fetch_name_0",
+            "shape": [
+              "DynamicDimension.3",
+              7
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_1",
+            "shape": [
+              "DynamicDimension.4"
+            ]
+          },
+          {
+            "dtype": "tensor(int32)",
+            "name": "fetch_name_2",
+            "shape": [
+              "DynamicDimension.5",
+              200,
+              200
+            ]
+          }
+        ]
+      },
+      "tensor": {
+        "dtype": "float32",
+        "max": 1.0,
+        "min": 0.0,
+        "name": "image",
+        "sha256": "b16882e3d57beae58084218855a45eeea2d12fe11182f7e205f055bff4a4abe1",
+        "shape": [
+          1,
+          3,
+          800,
+          800
+        ]
+      },
+      "threshold": 0.5,
+      "versions": {
+        "numpy": "2.3.5",
+        "onnxruntime": "1.29.0",
+        "opencv_contrib_python": "4.10.0.84",
+        "paddleocr": "3.6.0",
+        "paddlex": "3.6.1"
+      }
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,65 @@
+{
+  "inputs": [
+    {
+      "name": "im_shape",
+      "dtype": "f32",
+      "shape": [
+        "DynamicDimension.0",
+        2
+      ]
+    },
+    {
+      "name": "image",
+      "dtype": "f32",
+      "shape": [
+        "DynamicDimension.1",
+        3,
+        800,
+        800
+      ]
+    },
+    {
+      "name": "scale_factor",
+      "dtype": "f32",
+      "shape": [
+        "DynamicDimension.2",
+        2
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "fetch_name_0",
+      "dtype": "f32",
+      "shape": [
+        "DynamicDimension.3",
+        7
+      ]
+    },
+    {
+      "name": "fetch_name_1",
+      "dtype": "i32",
+      "shape": [
+        "DynamicDimension.4"
+      ]
+    },
+    {
+      "name": "fetch_name_2",
+      "dtype": "i32",
+      "shape": [
+        "DynamicDimension.5",
+        200,
+        200
+      ]
+    }
+  ],
+  "metadata": {
+    "name": "PaddlePaddle Graph in PIR mode",
+    "producer": "",
+    "domain": "",
+    "description": "",
+    "graph_description": "",
+    "version": 9223372036854775807,
+    "custom": {}
+  }
+}

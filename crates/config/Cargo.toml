@@ -1,0 +1,30 @@
+[package]
+name = "docparse-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Configuration loading and validation for docparse"
+
+[dependencies]
+# error
+thiserror.workspace = true
+
+# config and serialization
+figment.workspace = true
+serde.workspace = true
+serde_path_to_error.workspace = true
+
+# builder
+typed-builder.workspace = true
+
+[dev-dependencies]
+# config and serialization
+serde_json.workspace = true
+
+# testing
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -52,53 +52,56 @@ mem_forget = "warn"
 
 [workspace.dependencies]
 # workspace crates
+docparse-config = { version = "0.1.0", path = "crates/config" }
+docparse-core = { version = "0.1.0", path = "crates/core" }
+docparse-layout = { version = "0.1.0", path = "crates/layout" }
+pdfium = { package = "docparse-pdfium", version = "1.9.0", path = "crates/pdfium" }
 pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }
 
 # error
 anyhow = "1"
 thiserror = "2"
 
-# tracing & log
-tracing = "0.1"
-tracing-futures = "0.2.5"
-tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
-
 # async
-futures = "0.3"
 async-trait = "0.1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
-# serde
+# config and serialization
 figment = { version = "0.10", features = ["toml", "env"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact float parsing keeps canonical page coordinates byte-stable after JSON round trips.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 serde_path_to_error = "0.1"
+serde_yml = "0.0.13"
 
 # builder
 typed-builder = "0.23"
 
+# inference and image
+geo = "0.33.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+ndarray = "0.17"
+# Rustls makes build-time ONNX Runtime downloads portable without system TLS dependencies.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["api-28", "copy-dylibs", "download-binaries", "ndarray", "std", "tls-rustls", "tracing"] }
+sha2 = "0.11"
+
+# cli and diagnostics
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
+
 # build
-bindgen = "0.71"
+bindgen = "0.72"
 flate2 = "1"
 tar = "0.4"
 ureq = "3"
 
-# wasm
-wasm-bindgen-futures = "0.4"
+# runtime loading
+libloading = "0.9"
 
-# fs
-ignore = "0.4"
-mime = "0.3.17"
-mime_guess = "2.0.5"
-tempfile = "3"
-
-# cli
-clap = { version = "4", features = ["derive"] }
-
-# misc
-arc-swap = "1.9"
-base64 = "0.23"
+# testing
+assert_cmd = "2"
 blake3 = "1"
-dirs = "6"
-libloading = "0.8"
-nanoid = "0.5"
+predicates = "3"
+proptest = "1"
+tempfile = "3"

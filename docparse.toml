@@ -1,0 +1,38 @@
+[layout]
+model_path = "models/pp-doclayout-v3/inference.onnx"
+model_config_path = "models/pp-doclayout-v3/inference.yml"
+model_manifest_path = "models/pp-doclayout-v3/model-manifest.json"
+score_threshold = 0.5
+execution_provider = "cuda"
+session_pool_size = 1
+
+[runtime]
+page_concurrency = 4
+render_queue_capacity = 2
+blocking_task_limit = 4
+continue_on_page_error = true
+
+[render]
+dpi = 144
+max_long_edge_pixels = 2400
+
+[fusion]
+minimum_line_coverage = 0.30
+center_minimum_line_coverage = 0.10
+assignment_coverage_weight = 0.55
+assignment_center_weight = 0.20
+assignment_baseline_weight = 0.10
+assignment_confidence_weight = 0.10
+assignment_specificity_weight = 0.05
+paragraph_gap_multiplier = 1.5
+indent_tolerance_points = 6.0
+font_size_tolerance_points = 0.5
+estimated_font_size_tolerance_points = 1.5
+
+[ocr]
+policy = "disabled"
+
+[output]
+formula_placeholder = "[formula]"
+include_evidence = true
+include_diagnostics = false

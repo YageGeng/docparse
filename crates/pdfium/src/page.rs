@@ -7,7 +7,7 @@ use crate::document::{Document, FormEnvironment};
 use crate::error::PdfiumError;
 use crate::ffi;
 use crate::text_page::TextPage;
-use crate::types::{Color, RectF};
+use crate::types::{Color, RectF, TextObjectIdentity};
 
 /// Bounding box of an embedded image object on a page.
 /// Coordinates are in PDF points with top-left origin (Y-down).
@@ -428,7 +428,7 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         let bitmap = unsafe { Bitmap::new(width, height) }?;
 
         // Fill with white (ARGB: 0xFFFFFFFF)
-        bitmap.fill_rect(0, 0, width, height, 0xFFFFFFFF);
+        bitmap.fill_rect(0, 0, width, height, 0xFFFFFFFF)?;
 
         let flags = (pdfium_sys::FPDF_ANNOT | pdfium_sys::FPDF_PRINTING) as i32;
 
@@ -509,6 +509,28 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             });
         }
         bounds
+    }
+
+    /// Enumerates top-level text objects in stable PDF page-object order.
+    pub fn text_object_identities(&self) -> Vec<TextObjectIdentity<'_>> {
+        let count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut identities = Vec::new();
+        for index in 0..count {
+            // SAFETY: `index` is within the count returned for this live page.
+            let object =
+                unsafe { ffi!(FPDFPage_GetObject(self.handle, index)) };
+            if object.is_null() {
+                continue;
+            }
+            // SAFETY: `object` was returned by this live page and remains borrowed.
+            let object_type = unsafe { ffi!(FPDFPageObj_GetType(object)) };
+            if object_type == pdfium_sys::FPDF_PAGEOBJ_TEXT as i32
+                && let Some(identity) = TextObjectIdentity::from_handle(object)
+            {
+                identities.push(identity);
+            }
+        }
+        identities
     }
 
     /// Extract bounding boxes of embedded image objects on this page.

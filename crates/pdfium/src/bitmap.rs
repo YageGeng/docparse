@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 use crate::error::PdfiumError;
 use crate::ffi;
@@ -80,7 +81,10 @@ impl<'lib> Bitmap<'lib> {
         width: i32,
         height: i32,
         color: u64,
-    ) {
+    ) -> Result<(), PdfiumError> {
+        let color = checked_argb(color).ok_or(PdfiumError::InvalidArgument)?;
+        // SAFETY: `self.handle` remains owned by this live bitmap and `color` is validated to
+        // the 32-bit ARGB domain accepted by PDFium on every supported platform.
         unsafe {
             ffi!(FPDFBitmap_FillRect(
                 self.handle,
@@ -88,32 +92,45 @@ impl<'lib> Bitmap<'lib> {
                 top,
                 width,
                 height,
-                // necessary for windows -> expected `u32`, found `u64`
-                #[allow(clippy::useless_conversion)]
-                color.try_into().unwrap(),
+                color,
             ));
         }
+        Ok(())
     }
 
     /// Get the raw pixel buffer as a byte slice.
     /// Format is BGRA, row-major, with `stride()` bytes per row.
-    pub fn buffer(&self) -> &[u8] {
+    pub fn buffer(&self) -> Result<&[u8], PdfiumError> {
+        let (_, _, _, len) = self.layout()?;
         let ptr = unsafe { ffi!(FPDFBitmap_GetBuffer(self.handle)) };
-        let len = (self.stride() * self.height()) as usize;
-        unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
+        let ptr = NonNull::new(ptr.cast::<u8>())
+            .ok_or(PdfiumError::OperationFailed)?;
+        // SAFETY: validated PDFium layout metadata bounds this live bitmap allocation.
+        Ok(unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) })
     }
 
     /// Convert the BGRA buffer to RGBA in a new Vec.
-    pub fn to_rgba(&self) -> Vec<u8> {
-        let width = self.width() as usize;
-        let height = self.height() as usize;
-        let stride = self.stride() as usize;
-        let src = self.buffer();
-        let mut rgba = Vec::with_capacity(width * height * 4);
+    pub fn to_rgba(&self) -> Result<Vec<u8>, PdfiumError> {
+        let (width, height, stride, _) = self.layout()?;
+        let src = self.buffer()?;
+        let capacity = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(PdfiumError::OperationFailed)?;
+        let mut rgba = Vec::with_capacity(capacity);
 
         for y in 0..height {
-            let row = &src[y * stride..y * stride + width * 4];
-            for pixel in row.chunks_exact(4) {
+            let start =
+                y.checked_mul(stride).ok_or(PdfiumError::OperationFailed)?;
+            let end = start
+                .checked_add(
+                    width.checked_mul(4).ok_or(PdfiumError::OperationFailed)?,
+                )
+                .ok_or(PdfiumError::OperationFailed)?;
+            let row =
+                src.get(start..end).ok_or(PdfiumError::OperationFailed)?;
+            // Fixed array chunks preserve exact BGRA pixels and satisfy current Clippy guidance.
+            for pixel in row.as_chunks::<4>().0 {
                 // BGRA -> RGBA
                 rgba.push(pixel[2]); // R
                 rgba.push(pixel[1]); // G
@@ -122,21 +139,32 @@ impl<'lib> Bitmap<'lib> {
             }
         }
 
-        rgba
+        Ok(rgba)
     }
 
     /// Convert the BGRA buffer to tightly-packed RGB in a new Vec, dropping the
     /// alpha channel (pages render onto opaque white, so alpha is constant 255).
-    pub fn to_rgb(&self) -> Vec<u8> {
-        let width = self.width() as usize;
-        let height = self.height() as usize;
-        let stride = self.stride() as usize;
-        let src = self.buffer();
-        let mut rgb = Vec::with_capacity(width * height * 3);
+    pub fn to_rgb(&self) -> Result<Vec<u8>, PdfiumError> {
+        let (width, height, stride, _) = self.layout()?;
+        let src = self.buffer()?;
+        let capacity = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .ok_or(PdfiumError::OperationFailed)?;
+        let mut rgb = Vec::with_capacity(capacity);
 
         for y in 0..height {
-            let row = &src[y * stride..y * stride + width * 4];
-            for pixel in row.chunks_exact(4) {
+            let start =
+                y.checked_mul(stride).ok_or(PdfiumError::OperationFailed)?;
+            let end = start
+                .checked_add(
+                    width.checked_mul(4).ok_or(PdfiumError::OperationFailed)?,
+                )
+                .ok_or(PdfiumError::OperationFailed)?;
+            let row =
+                src.get(start..end).ok_or(PdfiumError::OperationFailed)?;
+            // Fixed array chunks preserve exact BGRA pixels and satisfy current Clippy guidance.
+            for pixel in row.as_chunks::<4>().0 {
                 // BGRA -> RGB (drop A)
                 rgb.push(pixel[2]); // R
                 rgb.push(pixel[1]); // G
@@ -144,33 +172,97 @@ impl<'lib> Bitmap<'lib> {
             }
         }
 
-        rgb
+        Ok(rgb)
     }
 
     /// Convert the BGRA buffer to tightly-packed 8-bit grayscale (1 byte/px)
     /// using Rec. 601 luma weights.
-    pub fn to_luma(&self) -> Vec<u8> {
-        let width = self.width() as usize;
-        let height = self.height() as usize;
-        let stride = self.stride() as usize;
-        let src = self.buffer();
-        let mut luma = Vec::with_capacity(width * height);
+    pub fn to_luma(&self) -> Result<Vec<u8>, PdfiumError> {
+        let (width, height, stride, _) = self.layout()?;
+        let src = self.buffer()?;
+        let capacity = width
+            .checked_mul(height)
+            .ok_or(PdfiumError::OperationFailed)?;
+        let mut luma = Vec::with_capacity(capacity);
 
         for y in 0..height {
-            let row = &src[y * stride..y * stride + width * 4];
-            for pixel in row.chunks_exact(4) {
+            let start =
+                y.checked_mul(stride).ok_or(PdfiumError::OperationFailed)?;
+            let end = start
+                .checked_add(
+                    width.checked_mul(4).ok_or(PdfiumError::OperationFailed)?,
+                )
+                .ok_or(PdfiumError::OperationFailed)?;
+            let row =
+                src.get(start..end).ok_or(PdfiumError::OperationFailed)?;
+            // Fixed array chunks preserve exact BGRA pixels and satisfy current Clippy guidance.
+            for pixel in row.as_chunks::<4>().0 {
                 let (b, g, r) =
                     (pixel[0] as u32, pixel[1] as u32, pixel[2] as u32);
                 luma.push(((77 * r + 150 * g + 29 * b) >> 8) as u8);
             }
         }
 
-        luma
+        Ok(luma)
     }
+
+    /// Validates all PDFium-reported dimensions before pixel memory access.
+    fn layout(&self) -> Result<(usize, usize, usize, usize), PdfiumError> {
+        checked_bitmap_layout(self.width(), self.height(), self.stride())
+            .ok_or(PdfiumError::OperationFailed)
+    }
+}
+
+/// Validates positive dimensions, row capacity, and total bitmap byte length.
+fn checked_bitmap_layout(
+    width: i32,
+    height: i32,
+    stride: i32,
+) -> Option<(usize, usize, usize, usize)> {
+    let width = usize::try_from(width).ok().filter(|width| *width > 0)?;
+    let height = usize::try_from(height).ok().filter(|height| *height > 0)?;
+    let stride = usize::try_from(stride).ok()?;
+    let row_bytes = width.checked_mul(4)?;
+    if stride < row_bytes {
+        return None;
+    }
+    let len = stride.checked_mul(height)?;
+    // Rust slices cannot span more than `isize::MAX` bytes, including on 32-bit targets.
+    if len > isize::MAX as usize {
+        return None;
+    }
+    Some((width, height, stride, len))
+}
+
+/// Converts public ARGB input into PDFium's platform-width color type without panicking.
+fn checked_argb(color: u64) -> Option<pdfium_sys::FPDF_DWORD> {
+    let color = u32::try_from(color).ok()?;
+    Some(pdfium_sys::FPDF_DWORD::from(color))
 }
 
 impl Drop for Bitmap<'_> {
     fn drop(&mut self) {
         unsafe { ffi!(FPDFBitmap_Destroy(self.handle)) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{checked_argb, checked_bitmap_layout};
+
+    /// Verifies bitmap dimensions and stride are checked before slice construction.
+    #[test]
+    fn bitmap_layout_rejects_invalid_stride_and_dimensions() {
+        assert_eq!(checked_bitmap_layout(10, 2, 40), Some((10, 2, 40, 80)));
+        assert_eq!(checked_bitmap_layout(10, 2, 39), None);
+        assert_eq!(checked_bitmap_layout(-1, 2, 40), None);
+        assert_eq!(checked_bitmap_layout(10, 0, 40), None);
+    }
+
+    /// Verifies the safe color boundary rejects values outside 32-bit ARGB.
+    #[test]
+    fn argb_conversion_rejects_values_above_u32() {
+        assert!(checked_argb(u64::from(u32::MAX)).is_some());
+        assert!(checked_argb(u64::from(u32::MAX) + 1).is_none());
     }
 }

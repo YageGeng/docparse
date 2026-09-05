@@ -1,0 +1,36 @@
+schema_version = 1
+
+[[documents]]
+logical_id = "arxiv-2403-01632v4"
+basename = "2403.01632v4.pdf"
+sha256 = "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431"
+size_bytes = 3111797
+page_count = 47
+
+[[documents]]
+logical_id = "arxiv-2412-05210v1"
+basename = "2412.05210v1.pdf"
+sha256 = "b10bfd72684d588666635c853ba5dffbcc1e145a4486ced67baa55b0ac3f37b6"
+size_bytes = 2792697
+page_count = 12
+
+[[documents]]
+logical_id = "arxiv-2609-04180v1"
+basename = "2609.04180v1.pdf"
+sha256 = "1e7121f407cfa6a1a2793ffd5762fbc858a984cb6d626482f38738d354d55eb7"
+size_bytes = 1218716
+page_count = 23
+
+[[documents]]
+logical_id = "arxiv-2609-04184v1"
+basename = "2609.04184v1.pdf"
+sha256 = "7c5ebfb41043bb9755cdf616700a44bd9f55e4fd04fff74a69ad7bc1876b6728"
+size_bytes = 867625
+page_count = 8
+
+[[documents]]
+logical_id = "arxiv-2609-04203v1"
+basename = "2609.04203v1.pdf"
+sha256 = "f7fc412ae9d7ae792981505f22f7de0d2e32efd742ebba305bccc394ec0ba7c5"
+size_bytes = 15514420
+page_count = 20

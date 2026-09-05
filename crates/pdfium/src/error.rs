@@ -12,6 +12,7 @@ pub enum PdfiumError {
     PasswordRequired,
     UnsupportedSecurity,
     PageNotFound,
+    InvalidArgument,
     OperationFailed,
 }
 
@@ -40,6 +41,7 @@ impl fmt::Display for PdfiumError {
                 write!(f, "unsupported security handler")
             }
             PdfiumError::PageNotFound => write!(f, "page not found"),
+            PdfiumError::InvalidArgument => write!(f, "invalid argument"),
             PdfiumError::OperationFailed => write!(f, "operation failed"),
         }
     }

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
 use crate::ffi;
+use std::marker::PhantomData;
 
 /// Wrapper around FPDF_FONT obtained from a text object.
 /// This is a borrowed handle — it does not own the font and must not outlive
 /// the page object it was obtained from.
 #[derive(Clone)]
-pub struct Font {
+pub struct Font<'object> {
     handle: pdfium_sys::FPDF_FONT,
+    _object: PhantomData<&'object ()>,
 }
 
 /// Font type enum matching PDFium's FPDF_FONT_TYPE values.
@@ -22,20 +24,24 @@ pub enum FontType {
     CidType2,
 }
 
-impl Font {
+impl Font<'_> {
     /// Create a Font from a text page object handle.
     /// Returns None if the object has no font.
     ///
     /// # Safety
     /// `obj` must be a valid `FPDF_PAGEOBJECT` handle obtained from PDFium.
-    pub unsafe fn from_text_object(
+    pub unsafe fn from_text_object<'object>(
         obj: pdfium_sys::FPDF_PAGEOBJECT,
-    ) -> Option<Self> {
+    ) -> Option<Font<'object>> {
+        // SAFETY: the caller guarantees `obj` is a live PDFium text object.
         let handle = unsafe { ffi!(FPDFTextObj_GetFont(obj)) };
         if handle.is_null() {
             None
         } else {
-            Some(Font { handle })
+            Some(Font {
+                handle,
+                _object: PhantomData,
+            })
         }
     }
 

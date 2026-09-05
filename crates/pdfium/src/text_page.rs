@@ -4,7 +4,9 @@ use std::marker::PhantomData;
 
 use crate::ffi;
 use crate::page::Page;
-use crate::types::{CharBox, Color, Matrix, RectF, TextRect};
+use crate::types::{
+    CharBox, Color, Matrix, PointF, RectF, TextObjectIdentity, TextRect,
+};
 
 /// Extracted text content of a [`Page`].
 ///
@@ -299,17 +301,17 @@ impl TextChar<'_> {
         if obj.is_null() { None } else { Some(obj) }
     }
 
-    /// Advance width of the ASCII space (char code 0x20) in this character's
-    /// font, expressed per em (i.e. for `font_size = 1.0`). Multiply by the
-    /// actual font size to get the space width in text-space points. Returns
-    /// `None` when the font or glyph is unavailable. Used to set a font-aware
-    /// threshold for detecting word boundaries when PDFium omits space glyphs.
-    pub fn font_space_width(&self) -> Option<f32> {
-        let obj = self.text_object()?;
-        let font = unsafe { crate::font::Font::from_text_object(obj)? };
-        font.glyph_width_from_char_code(0x20, 1.0)
-            .filter(|w| *w > 0.0)
-            .or_else(|| font.glyph_width(0x20, 1.0).filter(|w| *w > 0.0))
+    /// Returns an opaque identity suitable only for lookup during this page lifetime.
+    pub fn text_object_identity(&self) -> Option<TextObjectIdentity<'_>> {
+        self.text_object().and_then(TextObjectIdentity::from_handle)
+    }
+
+    /// Returns the borrowed font while tying its lifetime to this character view.
+    pub fn font(&self) -> Option<crate::Font<'_>> {
+        let object = self.text_object()?;
+        // SAFETY: the object comes from this live text page and the returned font
+        // cannot outlive the borrow of `self`.
+        unsafe { crate::Font::from_text_object(object) }
     }
 
     /// Get stroke color (r, g, b, a).
@@ -408,6 +410,22 @@ impl TextChar<'_> {
         } else {
             None
         }
+    }
+
+    /// Returns the character origin in raw PDF page space.
+    pub fn origin(&self) -> Option<PointF> {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        // SAFETY: the text page is live and `x`/`y` are valid writable outputs.
+        let ok = unsafe {
+            ffi!(FPDFText_GetCharOrigin(
+                self.text_page.handle,
+                self.index,
+                &mut x,
+                &mut y,
+            ))
+        };
+        (ok != 0).then_some(PointF { x, y })
     }
 
     pub fn loose_char_box(&self) -> Option<RectF> {

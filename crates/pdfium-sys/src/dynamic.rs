@@ -322,6 +322,13 @@ pub struct PdfiumBindings {
         std::os::raw::c_int,
         *mut FS_MATRIX,
     ) -> FPDF_BOOL,
+    // Keep origin lookup in the dynamic table so the safe wrapper never bypasses runtime loading.
+    pub FPDFText_GetCharOrigin: unsafe extern "C" fn(
+        FPDF_TEXTPAGE,
+        std::os::raw::c_int,
+        *mut f64,
+        *mut f64,
+    ) -> FPDF_BOOL,
     pub FPDFText_IsGenerated: unsafe extern "C" fn(
         FPDF_TEXTPAGE,
         std::os::raw::c_int,
@@ -875,6 +882,7 @@ impl PdfiumBindings {
             FPDFText_GetCharBox: load_fn!(lib, "FPDFText_GetCharBox"),
             FPDFText_GetLooseCharBox: load_fn!(lib, "FPDFText_GetLooseCharBox"),
             FPDFText_GetMatrix: load_fn!(lib, "FPDFText_GetMatrix"),
+            FPDFText_GetCharOrigin: load_fn!(lib, "FPDFText_GetCharOrigin"),
             FPDFText_IsGenerated: load_fn!(lib, "FPDFText_IsGenerated"),
             FPDFText_HasUnicodeMapError: load_fn!(
                 lib,

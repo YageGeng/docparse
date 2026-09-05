@@ -1,7 +1,6 @@
 # Rust build output
 /target
-/web/dist/
-/web/node_modules/
+/models/
 *.tsbuildinfo
 
 # Editor settings
@@ -25,7 +24,9 @@
 *.log
 *.tmp
 *.swp
-.superpowers/brainstorm/62366-1783431529/
+
+# Python cache
+/**/__pycache__
 
 # Misc
-.pi/skills
+output.json
