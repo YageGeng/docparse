@@ -125,19 +125,10 @@ fn nonexistent_absolute_model_paths_are_accepted() {
     assert!(validated.layout().model_manifest_path.is_absolute());
 }
 
-/// Verifies direct validation cannot accept unresolved relative artifact paths.
+/// Verifies byte-backed or injected engines do not require filesystem locations.
 #[test]
-fn relative_model_paths_are_rejected() {
+fn parameter_validation_does_not_require_model_paths() {
     let raw = RawConfig::default();
-
-    let error = ValidatedConfig::try_from(raw)
-        .expect_err("relative artifact paths must be resolved by ConfigLoader");
-
-    assert!(matches!(
-        error,
-        ConfigError::InvalidValue {
-            field: "layout.model_path",
-            ..
-        }
-    ));
+    ValidatedConfig::try_from(raw)
+        .expect("model paths belong to native artifact loading, not parameter validation");
 }

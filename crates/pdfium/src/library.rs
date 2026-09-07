@@ -2,31 +2,12 @@
 // Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
 use std::ffi::CString;
 use std::sync::Once;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::document::Document;
 use crate::error::PdfiumError;
 use crate::ffi;
 
 static INIT: Once = Once::new();
-
-/// Process-global PDFium serialization lock.
-///
-/// PDFium's FFI is **not thread-safe**: concurrent calls (even across distinct
-/// documents) corrupt internal state and cause heap UB (double-free / heap
-/// corruption). Every [`Library`] handle holds this mutex for its entire
-/// lifetime, and the owning PDFium resources ([`Document`], `Page`,
-/// `TextPage`, `Bitmap`) borrow from a [`Library`] via their `'lib` lifetime,
-/// so the borrow checker statically prevents PDFium work outside the lock.
-/// `Font` is a borrowed, non-owning handle whose lifetime is tied to its text
-/// object when obtained through the safe `TextChar::font()` API. Its raw
-/// constructor remains unsafe for low-level callers that prove the lifetime.
-#[cfg(not(target_arch = "wasm32"))]
-fn pdfium_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 /// A live, locked PDFium session.
 ///
@@ -54,31 +35,15 @@ fn pdfium_lock() -> &'static Mutex<()> {
 /// let _ = doc.page_count();
 /// ```
 pub struct Library {
-    #[cfg(not(target_arch = "wasm32"))]
-    _guard: MutexGuard<'static, ()>,
-    #[cfg(target_arch = "wasm32")]
-    _private: (),
+    _guard: crate::wasm_compat::LibraryGuard,
 }
 
 impl Library {
-    /// Acquires the process-wide PDFium lock and reports dynamic-load failure.
+    /// Acquires the platform guard before initializing PDFium exactly once.
     pub fn try_init() -> Result<Library, PdfiumError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            pdfium_sys::dynamic::load_default()
-                .map_err(|_source| PdfiumError::OperationFailed)?;
-            // Recover from poisoning so callers receive later PDFium errors instead of lock panic.
-            let guard = pdfium_lock()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            INIT.call_once(|| unsafe { ffi!(FPDF_InitLibrary()) });
-            Ok(Library { _guard: guard })
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            INIT.call_once(|| unsafe { ffi!(FPDF_InitLibrary()) });
-            Ok(Library { _private: () })
-        }
+        let guard = crate::wasm_compat::library_guard()?;
+        INIT.call_once(|| unsafe { ffi!(FPDF_InitLibrary()) });
+        Ok(Library { _guard: guard })
     }
 
     /// Acquire the process-wide PDFium lock, blocking the current thread
@@ -179,22 +144,6 @@ impl Library {
             },
             _lib: std::marker::PhantomData,
         })
-    }
-
-    /// Whether the loaded pdfium binary exports the fork's
-    /// `FPDFPage_GetUserUnit`. When it does, `Document::page` reads
-    /// `/UserUnit` through it and the byte-scan table is skipped entirely.
-    fn user_unit_api_available() -> bool {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            pdfium_sys::dynamic::pdfium().FPDFPage_GetUserUnit.is_some()
-        }
-        // Statically linked on wasm; a pinned release without the export
-        // would fail at link time, so present-at-runtime is guaranteed.
-        #[cfg(target_arch = "wasm32")]
-        {
-            true
-        }
     }
 
     /// Build the per-page `/UserUnit` table by matching scanned page objects

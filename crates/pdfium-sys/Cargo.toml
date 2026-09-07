@@ -11,13 +11,22 @@ description = "Raw FFI bindings to PDFium for docparse, derived from LiteParse"
 links = "pdfium"
 
 [features]
+wasm = []
 default = []
 bindgen = ["dep:bindgen"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# builder
+typed-builder.workspace = true
+
+# runtime loading
 libloading.workspace = true
 
 [build-dependencies]
+# inference and image
+sha2.workspace = true
+
+# build
 bindgen = { workspace = true, optional = true }
 flate2.workspace = true
 tar.workspace = true

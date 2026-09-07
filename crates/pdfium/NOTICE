@@ -20,5 +20,5 @@ that license is provided in the repository's LICENSE file.
 
 The build can download PDFium binaries from run-llama/pdfium-binaries.
 PDFium and its bundled third-party components have separate license notices;
-see THIRD_PARTY_NOTICES.md and the LICENSE/licenses directory included in the
-downloaded PDFium archive.
+see THIRD_PARTY_NOTICES.md at the repository root and the LICENSE/licenses
+directory included in the downloaded PDFium archive.

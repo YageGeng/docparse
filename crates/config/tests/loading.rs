@@ -70,15 +70,27 @@ page_concurrency = 3
     assert_eq!(config.runtime.page_concurrency, 3);
     assert_eq!(
         config.layout.model_path,
-        directory.path().join("artifacts/model.onnx")
+        directory
+            .path()
+            .canonicalize()
+            .expect("canonical temporary directory")
+            .join("artifacts/model.onnx")
     );
     assert_eq!(
         config.layout.model_config_path,
-        directory.path().join("artifacts/model.yml")
+        directory
+            .path()
+            .canonicalize()
+            .expect("canonical temporary directory")
+            .join("artifacts/model.yml")
     );
     assert_eq!(
         config.layout.model_manifest_path,
-        directory.path().join("artifacts/manifest.json")
+        directory
+            .path()
+            .canonicalize()
+            .expect("canonical temporary directory")
+            .join("artifacts/manifest.json")
     );
 }
 
@@ -185,7 +197,11 @@ fn missing_profile_file_is_rejected() {
     let directory =
         tempfile::tempdir().expect("the test directory must be created");
     let main_path = write_config(directory.path(), "docparse.toml", "");
-    let expected_path = directory.path().join("docparse.dev.toml");
+    let expected_path = directory
+        .path()
+        .canonicalize()
+        .expect("canonical temporary directory")
+        .join("docparse.dev.toml");
 
     let error = ConfigLoader::new(main_path)
         .with_profile("dev")

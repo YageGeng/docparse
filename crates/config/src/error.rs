@@ -4,6 +4,9 @@ use std::path::PathBuf;
 /// Errors produced while locating, merging, or decoding configuration sources.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// Browser parsing intentionally bounds every concurrency setting to one.
+    #[error("unsupported Web concurrency for {field}: expected 1, got {value}")]
+    UnsupportedWebConcurrency { field: &'static str, value: usize },
     /// The required primary configuration file does not exist.
     #[error("configuration file not found: {path}")]
     ConfigFileNotFound { path: PathBuf },

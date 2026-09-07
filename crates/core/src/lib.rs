@@ -1,5 +1,8 @@
 //! Native PDF extraction and layout-text fusion for docparse.
 
+pub mod wasm_compat;
+pub use wasm_compat::*;
+
 mod context;
 mod error;
 mod extract;
@@ -28,8 +31,7 @@ pub use ocr::{
 pub use parser::{DocParseError, DocParser, DocParserBuilder, PageInput};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
-    RenderError, RenderView, TextRenderer, write_pdf_overlays,
-    write_pdf_overlays_for_pages,
+    RenderError, RenderView, TextRenderer,
 };
 pub use types::*;
 pub use validate::ResultValidator;

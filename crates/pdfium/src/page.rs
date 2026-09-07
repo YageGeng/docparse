@@ -103,18 +103,6 @@ fn is_jpeg(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xff, 0xd8, 0xff]) && bytes.ends_with(&[0xff, 0xd9])
 }
 
-#[cfg(test)]
-mod image_tests {
-    use super::is_jpeg;
-
-    #[test]
-    fn validates_complete_jpeg_streams() {
-        assert!(is_jpeg(&[0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]));
-        assert!(!is_jpeg(&[0xff, 0xd8, 0xff, 0xe0]));
-        assert!(!is_jpeg(&[0x89, b'P', b'N', b'G', 0xff, 0xd9]));
-    }
-}
-
 /// Metadata for an embedded image page object retained by the extraction
 /// filters. `object_index` is its index among all image objects on the page.
 #[derive(Debug, Clone)]
@@ -1354,37 +1342,7 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
     }
 }
 
-/// The optional page-flatten API, resolved together so a build missing either
-/// half degrades to "no flattening" rather than failing the whole pdfium load.
-struct FlattenApi {
-    flatten: unsafe extern "C" fn(
-        pdfium_sys::FPDF_PAGE,
-        std::os::raw::c_int,
-    ) -> std::os::raw::c_int,
-    set_flags: unsafe extern "C" fn(
-        pdfium_sys::FPDF_ANNOTATION,
-        std::os::raw::c_int,
-    ) -> pdfium_sys::FPDF_BOOL,
-}
-
-impl FlattenApi {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn load() -> Option<Self> {
-        let bindings = pdfium_sys::dynamic::pdfium();
-        Some(Self {
-            flatten: bindings.FPDFPage_Flatten?,
-            set_flags: bindings.FPDFAnnot_SetFlags?,
-        })
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn load() -> Option<Self> {
-        Some(Self {
-            flatten: pdfium_sys::FPDFPage_Flatten,
-            set_flags: pdfium_sys::FPDFAnnot_SetFlags,
-        })
-    }
-}
+use crate::wasm_compat::FlattenApi;
 
 /// Whether the annotation's appearance paints text at its top level.
 ///
@@ -2096,6 +2054,18 @@ impl Drop for Page<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    mod image_tests {
+        use crate::page::is_jpeg;
+
+        /// Rejects incomplete JPEG streams instead of classifying a header alone.
+        #[test]
+        fn validates_complete_jpeg_streams() {
+            assert!(is_jpeg(&[0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]));
+            assert!(!is_jpeg(&[0xff, 0xd8, 0xff, 0xe0]));
+            assert!(!is_jpeg(&[0x89, b'P', b'N', b'G', 0xff, 0xd9]));
+        }
+    }
+
     use super::*;
     use crate::Library;
 

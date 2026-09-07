@@ -12,7 +12,6 @@ use docparse_layout::{
 /// Offline layout engine proving dependency injection bypasses default artifacts.
 struct EmptyLayoutEngine;
 
-#[async_trait::async_trait]
 impl LayoutEngine for EmptyLayoutEngine {
     /// Returns one stable fake engine name.
     fn name(&self) -> &str {
@@ -25,11 +24,14 @@ impl LayoutEngine for EmptyLayoutEngine {
     }
 
     /// Returns no regions so the parser exercises full XY-cut fallback.
-    async fn detect(
+    fn detect(
         &self,
         _request: LayoutRequest,
-    ) -> Result<Vec<LayoutDetection>, LayoutError> {
-        Ok(Vec::new())
+    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    > {
+        Box::pin(async move { Ok(Vec::new()) })
     }
 }
 

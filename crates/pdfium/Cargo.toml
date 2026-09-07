@@ -9,10 +9,14 @@ readme.workspace = true
 repository.workspace = true
 description = "Safe Rust wrapper around PDFium for docparse, derived from LiteParse"
 
+[features]
+default = []
+wasm = ["pdfium-sys/wasm"]
+
 [dependencies]
 # workspace crates
 pdfium-sys.workspace = true
 
 [dev-dependencies]
-# misc
+# testing
 blake3.workspace = true

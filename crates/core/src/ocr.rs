@@ -55,14 +55,19 @@ pub enum OcrError {
 }
 
 /// Public asynchronous extension point for caller-provided OCR implementations.
-#[async_trait::async_trait]
-pub trait OcrEngine: Send + Sync {
+pub trait OcrEngine:
+    docparse_layout::wasm_compat::WasmCompatSend
+    + docparse_layout::wasm_compat::WasmCompatSync
+{
     /// Returns a stable human-readable engine name for diagnostics.
     fn name(&self) -> &str;
 
     /// Recognizes text facts without constructing or mutating semantic blocks.
-    async fn recognize(
+    fn recognize(
         &self,
         request: OcrRequest,
-    ) -> Result<OcrResult, OcrError>;
+    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<OcrResult, OcrError>,
+    >;
 }

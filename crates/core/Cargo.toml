@@ -8,6 +8,7 @@ readme = "README.md"
 description = "Native PDF extraction and layout-text fusion for docparse"
 
 [features]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm", "pdfium/wasm"]
 default = []
 layout-coreml = ["docparse-layout/coreml"]
 layout-cuda = ["docparse-layout/cuda"]
@@ -23,7 +24,6 @@ pdfium.workspace = true
 thiserror.workspace = true
 
 # async
-async-trait.workspace = true
 tokio.workspace = true
 
 # config and serialization
@@ -36,7 +36,7 @@ typed-builder.workspace = true
 # inference and image
 image.workspace = true
 
-# diagnostics
+# cli and diagnostics
 tracing.workspace = true
 
 [dev-dependencies]
@@ -52,3 +52,14 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# async
+futures-util.workspace = true
+
+# browser
+wasm-bindgen-futures.workspace = true

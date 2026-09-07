@@ -73,3 +73,13 @@ Geometry intersection and validation use Rust crate `geo` version `0.33.1`.
 ## Python oracle and E2E dependencies
 
 PaddleOCR 3.6.0, PaddleX, OpenCV, NumPy, Python ONNX Runtime, psutil, and pypdf are used only by locked development/test scripts. They are not linked into or distributed with the Rust runtime crates. Their own package licenses apply to anyone redistributing those development environments.
+
+## Browser runtime and test fonts
+
+The browser package uses the pinned `ort-web` 0.3.0+1.27 source in `vendor/ort-web`, with documented Worker, fetch-selection, and resource-release changes. Its MIT and Apache-2.0 license texts are retained there and copied into the browser distribution.
+
+ONNX Runtime Web 1.27.0 is installed through the npm lockfile. Its MIT license and third-party notices are retained under `packages/web/licenses` and copied to `dist/ort`. The browser package also redistributes the pinned PDFium SDK's complete license directory.
+
+The embedded-font integration PDF includes a subset of Bitstream Vera from ReportLab. The accompanying notice is `crates/core/tests/fixtures/pdf/embedded_layout.LICENSE.txt`. This font is a test-fixture dependency, not a bundled production font replacement.
+
+The Chinese geometry fixture embeds a subset of Noto Sans SC, distributed under the SIL Open Font License 1.1. Its license and pinned source are recorded in `crates/core/tests/fixtures/pdf/embedded_cjk.LICENSE.txt` and the fixture README.

@@ -50,7 +50,6 @@ fn identity_transform() -> PageTransform {
 
 struct FakeLayoutEngine;
 
-#[async_trait::async_trait]
 impl LayoutEngine for FakeLayoutEngine {
     /// Returns the stable fake engine name.
     fn name(&self) -> &str {
@@ -63,35 +62,40 @@ impl LayoutEngine for FakeLayoutEngine {
     }
 
     /// Returns known and future labels without changing their raw strings.
-    async fn detect(
+    fn detect(
         &self,
         _request: LayoutRequest,
-    ) -> Result<Vec<LayoutDetection>, LayoutError> {
-        let bbox = Bbox::try_from([0.0, 0.0, 1.0, 1.0])?;
-        Ok(vec![
-            LayoutDetection::builder()
-                .source_detection_index(0)
-                .raw_label("text".to_owned())
-                .class_id(22)
-                .label(LayoutLabel::Text)
-                .confidence(0.9)
-                .bbox(bbox)
-                .geometry_source(GeometrySource::DerivedFromBbox)
-                .model_order(0)
-                .metadata(BTreeMap::new())
-                .build(),
-            LayoutDetection::builder()
-                .source_detection_index(1)
-                .raw_label("future_widget".to_owned())
-                .class_id(25)
-                .label(LayoutLabel::from("future_widget"))
-                .confidence(0.8)
-                .bbox(bbox)
-                .geometry_source(GeometrySource::DerivedFromBbox)
-                .model_order(1)
-                .metadata(BTreeMap::new())
-                .build(),
-        ])
+    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    > {
+        Box::pin(async move {
+            let bbox = Bbox::try_from([0.0, 0.0, 1.0, 1.0])?;
+            Ok(vec![
+                LayoutDetection::builder()
+                    .source_detection_index(0)
+                    .raw_label("text".to_owned())
+                    .class_id(22)
+                    .label(LayoutLabel::Text)
+                    .confidence(0.9)
+                    .bbox(bbox)
+                    .geometry_source(GeometrySource::DerivedFromBbox)
+                    .model_order(0)
+                    .metadata(BTreeMap::new())
+                    .build(),
+                LayoutDetection::builder()
+                    .source_detection_index(1)
+                    .raw_label("future_widget".to_owned())
+                    .class_id(25)
+                    .label(LayoutLabel::from("future_widget"))
+                    .confidence(0.8)
+                    .bbox(bbox)
+                    .geometry_source(GeometrySource::DerivedFromBbox)
+                    .model_order(1)
+                    .metadata(BTreeMap::new())
+                    .build(),
+            ])
+        })
     }
 }
 

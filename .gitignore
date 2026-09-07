@@ -30,3 +30,8 @@
 
 # Misc
 output.json
+
+# Browser build artifacts
+/packages/web/node_modules/
+/packages/web/dist/
+/packages/web/test-results/

@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::wasm_compat::{TaskError, TaskSet};
 use docparse_config::{OcrPolicy, ValidatedConfig};
 use docparse_layout::{LayoutEngine, LayoutRequest};
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
 
 use super::{
     PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage, RenderedPage,
@@ -109,8 +109,17 @@ impl ParseRuntime {
                                 return Err(ParseRuntimeError::Pdfium(error));
                             }
                         };
-                    context_builder
-                        .push_page(crate::PageProbe::from(&extracted))?;
+                    if let Err(error) = context_builder
+                        .push_page(crate::PageProbe::from(&extracted))
+                    {
+                        tracing::error!(
+                            "document context rejected page {}: {}",
+                            page_number,
+                            error
+                        );
+                        let _ = executor.close().await;
+                        return Err(error.into());
+                    }
                     extracted_pages.insert(page_number, extracted);
                     if let Some(warning) = warning {
                         pre_scan_warnings.insert(page_number, warning);
@@ -130,11 +139,21 @@ impl ParseRuntime {
                 }
             }
         }
-        let context = context_builder.build()?;
+        let context = match context_builder.build() {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::error!(
+                    "document context construction failed: {}",
+                    error
+                );
+                let _ = executor.close().await;
+                return Err(error.into());
+            }
+        };
         let (render_sender, mut render_receiver) =
             mpsc::channel(self.config.runtime().render_queue_capacity);
         let render_config = self.config.render().clone();
-        let producer = tokio::spawn(async move {
+        let producer = crate::wasm_compat::spawn(async move {
             for page_number in 1..=page_count {
                 let rendered =
                     executor.render_page(page_number, &render_config).await;
@@ -145,7 +164,7 @@ impl ParseRuntime {
             executor
         });
 
-        let mut page_tasks = JoinSet::new();
+        let mut page_tasks = TaskSet::new();
         let mut pages = Vec::with_capacity(page_count as usize);
         let mut fatal_error = None;
         let mut receiver_open = true;
@@ -324,10 +343,7 @@ impl ParseRuntime {
 
     /// Converts one joined page outcome into either a completed page or a fatal error.
     fn collect_page_task(
-        result: Result<
-            Result<PageResult, ParseRuntimeError>,
-            tokio::task::JoinError,
-        >,
+        result: Result<Result<PageResult, ParseRuntimeError>, TaskError>,
     ) -> Result<PageResult, ParseRuntimeError> {
         match result {
             Ok(Ok(page)) => Ok(page),
@@ -469,7 +485,6 @@ mod tests {
     /// Empty deterministic engine used to exercise pure-geometry fallback.
     struct EmptyLayoutEngine;
 
-    #[async_trait::async_trait]
     impl LayoutEngine for EmptyLayoutEngine {
         /// Returns one stable fake engine name.
         fn name(&self) -> &str {
@@ -482,11 +497,14 @@ mod tests {
         }
 
         /// Returns no detections without reading external model artifacts.
-        async fn detect(
+        fn detect(
             &self,
             _request: LayoutRequest,
-        ) -> Result<Vec<LayoutDetection>, LayoutError> {
-            Ok(Vec::new())
+        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+            '_,
+            Result<Vec<LayoutDetection>, LayoutError>,
+        > {
+            Box::pin(async move { Ok(Vec::new()) })
         }
     }
 
@@ -495,7 +513,6 @@ mod tests {
         calls: Arc<AtomicUsize>,
     }
 
-    #[async_trait::async_trait]
     impl LayoutEngine for PanickingLayoutEngine {
         /// Returns one stable fake engine name.
         fn name(&self) -> &str {
@@ -509,12 +526,17 @@ mod tests {
 
         /// Records the page and triggers a deterministic task-join failure.
         #[allow(clippy::panic)]
-        async fn detect(
+        fn detect(
             &self,
             _request: LayoutRequest,
-        ) -> Result<Vec<LayoutDetection>, LayoutError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            panic!("intentional test task failure")
+        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+            '_,
+            Result<Vec<LayoutDetection>, LayoutError>,
+        > {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                panic!("intentional test task failure")
+            })
         }
     }
 

@@ -30,6 +30,7 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
     if target_arch == "wasm32" {
+        verify_wasm_libraries(&lib_dir);
         // For wasm targets, pdfium is shipped as a static archive (libpdfium.a)
         // and linked statically into the final .wasm module. There is no
         // dynamic loading and no need to copy any shared library.
@@ -81,6 +82,46 @@ fn main() {
     }
 
     run_bindgen(&include_dir);
+}
+
+/// Verifies the pinned static ABI and real setjmp runtime before producing a browser artifact.
+fn verify_wasm_libraries(directory: &Path) {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    println!("cargo:rerun-if-changed=wasm-libraries.sha256");
+    for line in include_str!("wasm-libraries.sha256").lines() {
+        let (expected, name) = line
+            .split_once("  ")
+            .expect("valid pinned library checksum");
+        let path = directory.join(name);
+        let mut file = fs::File::open(&path).unwrap_or_else(|error| {
+            panic!(
+                "cannot read pinned PDFium library {}: {error}",
+                path.display()
+            )
+        });
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 65536];
+        loop {
+            let count =
+                file.read(&mut buffer).expect("read pinned PDFium library");
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+        }
+        let actual: String = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(
+            actual,
+            expected,
+            "PDFium chromium/8028 checksum mismatch for {}",
+            path.display()
+        );
+    }
 }
 
 /// Determine where pdfium lib and include dirs are.

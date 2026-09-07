@@ -8,6 +8,7 @@ readme = "README.md"
 description = "Layout detection interfaces and PP-DocLayoutV3 inference for docparse"
 
 [features]
+wasm = ["docparse-config/wasm"]
 default = []
 coreml = ["ort/coreml"]
 cuda = ["ort/cuda"]
@@ -21,7 +22,6 @@ docparse-config.workspace = true
 thiserror.workspace = true
 
 # async
-async-trait.workspace = true
 tokio.workspace = true
 
 # config and serialization
@@ -39,14 +39,14 @@ ndarray.workspace = true
 ort.workspace = true
 sha2.workspace = true
 
-# diagnostics
+# cli and diagnostics
 tracing.workspace = true
 
 [dev-dependencies]
 # error
 anyhow.workspace = true
 
-# cli
+# cli and diagnostics
 clap.workspace = true
 
 # testing
@@ -54,3 +54,18 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+# inference and image
+ort = { workspace = true, features = ["api-28", "copy-dylibs", "download-binaries", "tls-rustls"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# inference and image
+ort = { workspace = true, features = ["api-17", "alternative-backend"] }
+
+# browser
+ort-web.workspace = true
+wasm-bindgen-futures.workspace = true

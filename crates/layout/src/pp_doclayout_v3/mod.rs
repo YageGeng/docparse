@@ -1,22 +1,19 @@
-use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 
 use docparse_config::ValidatedConfig;
 use serde::Deserialize;
 
+use crate::wasm_compat::LayoutSessionPool;
 use crate::{
-    LayoutDetection, LayoutEngine, LayoutError, LayoutRequest, ModelManifest,
+    LayoutDetection, LayoutEngine, LayoutError, LayoutRequest, ModelArtifacts,
     PP_DOCLAYOUT_V3_REVISION,
 };
 
-pub(crate) mod pool;
 pub(crate) mod postprocess;
 pub(crate) mod preprocess;
 pub(crate) mod schema;
 pub(crate) mod session;
 
-use pool::LayoutSessionPool;
 use preprocess::preprocess;
 
 const LABELS: [&str; 25] = [
@@ -84,47 +81,36 @@ pub struct PpDocLayoutV3Engine {
 }
 
 impl PpDocLayoutV3Engine {
-    /// Validates all fixed artifacts and creates the configured session pool off-thread.
-    pub async fn from_config(
+    /// Verifies artifact content once before creating platform-specific sessions.
+    pub async fn from_artifacts(
         config: Arc<ValidatedConfig>,
+        artifacts: ModelArtifacts,
     ) -> Result<Self, LayoutError> {
-        let config_for_build = Arc::clone(&config);
-        tokio::task::spawn_blocking(move || Self::build(&config_for_build))
-            .await
-            .map_err(|source| LayoutError::TaskJoin { source })?
-    }
-
-    /// Performs synchronous artifact validation and session creation.
-    fn build(config: &ValidatedConfig) -> Result<Self, LayoutError> {
-        let layout = config.layout();
         tracing::info!(
-            "loading PP-DocLayoutV3 model from {}",
-            layout.model_path.display()
-        );
-        ModelManifest::load_and_verify(
-            &layout.model_path,
-            &layout.model_config_path,
-            &layout.model_manifest_path,
-        )?;
-        verify_model_config(&layout.model_config_path)?;
-        let pool = LayoutSessionPool::new(
-            &layout.model_path,
-            layout.execution_provider,
-            layout.session_pool_size,
-        )?;
-        tracing::info!(
-            "loaded PP-DocLayoutV3 revision {} with {} session(s)",
+            "loading PP-DocLayoutV3 revision {} from {} model bytes",
             PP_DOCLAYOUT_V3_REVISION,
-            layout.session_pool_size
+            artifacts.model.len()
+        );
+        let artifacts = crate::wasm_compat::run_cpu(move || {
+            artifacts.verify()?;
+            verify_model_config(&artifacts.config)?;
+            Ok::<_, LayoutError>(artifacts)
+        })
+        .await
+        .map_err(|source| LayoutError::TaskJoin { source })??;
+        let pool =
+            LayoutSessionPool::load(artifacts, Arc::clone(&config)).await?;
+        tracing::info!(
+            "loaded PP-DocLayoutV3 with {} session(s)",
+            config.layout().session_pool_size
         );
         Ok(Self {
             pool,
-            score_threshold: layout.score_threshold,
+            score_threshold: config.layout().score_threshold,
         })
     }
 }
 
-#[async_trait::async_trait]
 impl LayoutEngine for PpDocLayoutV3Engine {
     /// Returns the stable concrete engine name.
     fn name(&self) -> &str {
@@ -137,52 +123,52 @@ impl LayoutEngine for PpDocLayoutV3Engine {
     }
 
     /// Preprocesses and runs one page on a uniquely leased ORT session.
-    async fn detect(
+    fn detect(
         &self,
         request: LayoutRequest,
-    ) -> Result<Vec<LayoutDetection>, LayoutError> {
-        let page_number = request.page_number;
-        let image = Arc::clone(&request.image);
-        let transform = request.transform;
-        let threshold = self.score_threshold;
-        // CPU preprocessing happens before leasing the scarce session so later pages can prepare
-        // tensors while the current page is using the GPU.
-        let preprocess_transform = transform.clone();
-        let inputs = tokio::task::spawn_blocking(move || {
-            preprocess(image.as_ref(), &preprocess_transform)
+    ) -> crate::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    > {
+        Box::pin(async move {
+            let page_number = request.page_number;
+            let image = Arc::clone(&request.image);
+            let transform = request.transform;
+            let threshold = self.score_threshold;
+            // CPU preprocessing happens before leasing the scarce session so later pages can prepare
+            // tensors while the current page is using the GPU.
+            let preprocess_transform = transform.clone();
+            let inputs = crate::wasm_compat::run_cpu(move || {
+                preprocess(image.as_ref(), &preprocess_transform)
+            })
+            .await
+            .map_err(|source| LayoutError::TaskJoin { source })??;
+            tracing::info!(
+                "starting PP-DocLayoutV3 inference for page {}",
+                page_number
+            );
+            let outputs = Arc::clone(&self.pool).run(inputs).await?;
+            let detections = postprocess::postprocess_page(
+                outputs.boxes.view(),
+                outputs.count,
+                threshold,
+                &transform,
+            )?;
+            tracing::info!(
+                "completed PP-DocLayoutV3 inference for page {} with {} detections",
+                page_number,
+                detections.len()
+            );
+            Ok(detections)
         })
-        .await
-        .map_err(|source| LayoutError::TaskJoin { source })??;
-        let lease = Arc::clone(&self.pool).acquire().await?;
-        tracing::info!(
-            "starting PP-DocLayoutV3 inference for page {}",
-            page_number
-        );
-        let detections = tokio::task::spawn_blocking(move || {
-            lease.detect(&inputs, &transform, threshold)
-        })
-        .await
-        .map_err(|source| LayoutError::TaskJoin { source })??;
-        tracing::info!(
-            "completed PP-DocLayoutV3 inference for page {} with {} detections",
-            page_number,
-            detections.len()
-        );
-        Ok(detections)
     }
 }
 
 /// Parses and verifies the fixed preprocessing and label contract in inference.yml.
-fn verify_model_config(path: &Path) -> Result<(), LayoutError> {
-    let bytes =
-        fs::read(path).map_err(|source| LayoutError::ModelConfigRead {
-            path: path.to_path_buf(),
-            source,
-        })?;
+fn verify_model_config(bytes: &[u8]) -> Result<(), LayoutError> {
     let config: InferenceConfig =
-        serde_yml::from_slice(&bytes).map_err(|source| {
-            LayoutError::ModelConfigParse {
-                path: path.to_path_buf(),
+        serde_yml::from_slice(bytes).map_err(|source| {
+            LayoutError::ModelConfigContentParse {
                 source: Box::new(source),
             }
         })?;

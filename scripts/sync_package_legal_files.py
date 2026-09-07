@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy canonical repository legal texts into every publishable new crate."""
+"""Copy LICENSE and NOTICE into crates; keep third-party notices at the root."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 
 
 def sync(root: Path) -> None:
-    """Synchronize LICENSE, NOTICE, and third-party notices byte-for-byte."""
-    packages = ("config", "layout", "core", "cli")
-    legal_files = ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
+    """Synchronize LICENSE and NOTICE byte-for-byte without duplicating third-party notices."""
+    packages = ("config", "layout", "core", "cli", "web")
+    legal_files = ("LICENSE", "NOTICE")
     for package in packages:
         directory = root / "crates" / package
         for basename in legal_files:

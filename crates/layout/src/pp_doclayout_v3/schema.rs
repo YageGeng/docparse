@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use ort::session::Session;
 use ort::value::{Outlet, ValueType};
@@ -22,6 +21,28 @@ pub struct TensorSchema {
     pub name: String,
     pub dtype: String,
     pub shape: Vec<SchemaDimension>,
+}
+
+impl TensorSchema {
+    /// Compares tensor semantics without relying on backend-specific dynamic symbol names.
+    fn matches_contract(&self, expected: &Self) -> bool {
+        self.name == expected.name
+            && self.dtype == expected.dtype
+            && self.shape.len() == expected.shape.len()
+            && self.shape.iter().zip(&expected.shape).all(
+                |(actual, expected)| match (actual, expected) {
+                    (
+                        SchemaDimension::Fixed(actual),
+                        SchemaDimension::Fixed(expected),
+                    ) => actual == expected,
+                    (
+                        SchemaDimension::Dynamic(_),
+                        SchemaDimension::Dynamic(_),
+                    ) => true,
+                    _ => false,
+                },
+            )
+    }
 }
 
 /// Stable model metadata that excludes paths and runtime-generated values.
@@ -107,7 +128,14 @@ impl ModelSchema {
                 ],
             },
         ];
-        if self.inputs != expected_inputs {
+        if self.inputs.len() != expected_inputs.len()
+            || !self
+                .inputs
+                .iter()
+                .zip(&expected_inputs)
+                .all(|(actual, expected)| actual.matches_contract(expected))
+        {
+            tracing::error!("model input tensor contract mismatch");
             return Err(LayoutError::UnsupportedModelSchema {
                 reason: format!(
                     "input contract mismatch: expected {expected_inputs:?}, got {:?}",
@@ -115,7 +143,14 @@ impl ModelSchema {
                 ),
             });
         }
-        if self.outputs != expected_outputs {
+        if self.outputs.len() != expected_outputs.len()
+            || !self
+                .outputs
+                .iter()
+                .zip(&expected_outputs)
+                .all(|(actual, expected)| actual.matches_contract(expected))
+        {
+            tracing::error!("model output tensor contract mismatch");
             return Err(LayoutError::UnsupportedModelSchema {
                 reason: format!(
                     "output contract mismatch: expected {expected_outputs:?}, got {:?}",
@@ -141,23 +176,9 @@ impl ModelSchema {
         Ok(Self {
             inputs,
             outputs,
-            metadata: metadata_schema(session)?,
+            metadata: crate::wasm_compat::model_metadata(session)?,
         })
     }
-}
-
-/// Loads one ONNX file and returns only neutral schema information.
-pub fn inspect_model(
-    path: impl AsRef<Path>,
-) -> Result<ModelSchema, LayoutError> {
-    let path = path.as_ref();
-    if !path.is_file() {
-        return Err(LayoutError::ModelNotFound {
-            path: path.to_path_buf(),
-        });
-    }
-    let session = Session::builder()?.commit_from_file(path)?;
-    ModelSchema::from_session(&session)
 }
 
 /// Converts an ORT outlet into a stable tensor-only schema.
@@ -190,28 +211,6 @@ fn outlet_schema(outlet: &Outlet) -> Result<TensorSchema, LayoutError> {
         dtype: ty.to_string(),
         shape,
     })
-}
-
-/// Extracts stable model metadata and sorts custom keys.
-fn metadata_schema(
-    session: &Session,
-) -> Result<ModelMetadataSchema, LayoutError> {
-    let metadata = session.metadata()?;
-    let mut custom = BTreeMap::new();
-    for key in metadata.custom_keys()? {
-        if let Some(value) = metadata.custom(&key) {
-            custom.insert(key, value);
-        }
-    }
-    Ok(ModelMetadataSchema::builder()
-        .name(metadata.name())
-        .producer(metadata.producer())
-        .domain(metadata.domain())
-        .description(metadata.description())
-        .graph_description(metadata.graph_description())
-        .version(metadata.version())
-        .custom(custom)
-        .build())
 }
 
 #[cfg(test)]

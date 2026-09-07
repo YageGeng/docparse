@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use docparse_config::ValidatedConfig;
@@ -150,20 +150,20 @@ impl DocParser {
         Self::builder().config(Arc::new(config)).build().await
     }
 
-    /// Parses one filesystem PDF while retaining path context on failure.
-    pub async fn parse_path(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<DocumentResult, DocParseError> {
-        let path = path.as_ref().to_path_buf();
-        self.runtime()
-            .parse_document(PdfInput::Path(path.clone()))
+    /// Creates the same parser pipeline from verified owned model artifacts on either platform.
+    pub async fn from_artifacts(
+        config: ValidatedConfig,
+        artifacts: docparse_layout::ModelArtifacts,
+    ) -> Result<Self, DocParseError> {
+        let config = Arc::new(config);
+        let engine =
+            PpDocLayoutV3Engine::from_artifacts(Arc::clone(&config), artifacts)
+                .await?;
+        Self::builder()
+            .config(config)
+            .layout_engine(Arc::new(engine))
+            .build()
             .await
-            .map_err(DocParseError::from)
-            .map_err(|source| DocParseError::ParsePath {
-                path,
-                source: Box::new(source),
-            })
     }
 
     /// Parses one shared in-memory PDF without copying its bytes.
@@ -225,24 +225,8 @@ impl DocParser {
         })
     }
 
-    /// Runs the async path parser from an ordinary synchronous thread.
-    pub fn parse_path_blocking(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<DocumentResult, DocParseError> {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            return Err(DocParseError::BlockingInsideRuntime);
-        }
-        let path = path.as_ref().to_path_buf();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(DocParseError::BlockingRuntime)?;
-        runtime.block_on(self.parse_path(path))
-    }
-
     /// Creates one short-lived runtime facade that clones only shared ownership handles.
-    fn runtime(&self) -> ParseRuntime {
+    pub(crate) fn runtime(&self) -> ParseRuntime {
         ParseRuntime::new(
             Arc::clone(&self.config),
             Arc::clone(&self.layout_engine),

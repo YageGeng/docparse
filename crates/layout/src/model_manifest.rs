@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,19 +15,67 @@ const PP_DOCLAYOUT_V3_MODEL_SHA256: &str =
 const PP_DOCLAYOUT_V3_CONFIG_SHA256: &str =
     "506fcfac13b3b546ae40d7886b44126420f392adb694e3f8bb6a6286a1f90fdc";
 
+/// Owned immutable artifacts shared by native and browser model creation.
+#[derive(Debug, Clone)]
+pub struct ModelArtifacts {
+    pub model: Arc<[u8]>,
+    pub config: Arc<[u8]>,
+    pub manifest: Arc<[u8]>,
+}
+
+impl ModelArtifacts {
+    /// Verifies the immutable model identity and the actual bytes before session creation.
+    pub fn verify(&self) -> Result<ModelManifest, ModelManifestError> {
+        let result = (|| {
+            let manifest: ModelManifest =
+                serde_json::from_slice(&self.manifest).map_err(|source| {
+                    ModelManifestError::ContentParse { source }
+                })?;
+            let contract = ModelContract::pp_doclayout_v3();
+            manifest.verify_identity(&contract)?;
+            for (artifact, bytes, expected) in [
+                (
+                    "inference.onnx",
+                    self.model.as_ref(),
+                    &contract.model_sha256,
+                ),
+                (
+                    "inference.yml",
+                    self.config.as_ref(),
+                    &contract.config_sha256,
+                ),
+            ] {
+                let actual = lowercase_hex(Sha256::digest(bytes).as_ref());
+                if actual != *expected {
+                    return Err(ModelManifestError::ContentHashMismatch {
+                        artifact,
+                        expected: expected.clone(),
+                        actual,
+                    });
+                }
+            }
+            Ok(manifest)
+        })();
+        if let Err(error) = &result {
+            tracing::error!("model artifact verification failed: {}", error);
+        }
+        result
+    }
+}
+
 /// Fixed identity and artifact hashes expected for one supported model export.
 #[derive(Debug, Clone, PartialEq, Eq, TypedBuilder)]
-struct ModelContract {
-    repository: String,
-    revision: String,
-    license: String,
-    model_sha256: String,
-    config_sha256: String,
+pub(crate) struct ModelContract {
+    pub(crate) repository: String,
+    pub(crate) revision: String,
+    pub(crate) license: String,
+    pub(crate) model_sha256: String,
+    pub(crate) config_sha256: String,
 }
 
 impl ModelContract {
     /// Builds the immutable contract for the supported PP-DocLayoutV3 export.
-    fn pp_doclayout_v3() -> Self {
+    pub(crate) fn pp_doclayout_v3() -> Self {
         Self::builder()
             .repository(PP_DOCLAYOUT_V3_REPOSITORY.to_owned())
             .revision(PP_DOCLAYOUT_V3_REVISION.to_owned())
@@ -52,62 +99,8 @@ pub struct ModelManifest {
 }
 
 impl ModelManifest {
-    /// Loads and verifies the supported PP-DocLayoutV3 model, config, and manifest.
-    pub fn load_and_verify(
-        model_path: impl AsRef<Path>,
-        config_path: impl AsRef<Path>,
-        manifest_path: impl AsRef<Path>,
-    ) -> Result<Self, ModelManifestError> {
-        Self::load_and_verify_contract(
-            model_path.as_ref(),
-            config_path.as_ref(),
-            manifest_path.as_ref(),
-            &ModelContract::pp_doclayout_v3(),
-        )
-    }
-
-    /// Loads and verifies artifacts against an explicit internal contract.
-    fn load_and_verify_contract(
-        model_path: &Path,
-        config_path: &Path,
-        manifest_path: &Path,
-        contract: &ModelContract,
-    ) -> Result<Self, ModelManifestError> {
-        if !manifest_path.is_file() {
-            return Err(ModelManifestError::ManifestNotFound {
-                path: manifest_path.to_path_buf(),
-            });
-        }
-        let bytes = fs::read(manifest_path).map_err(|source| {
-            ModelManifestError::Read {
-                path: manifest_path.to_path_buf(),
-                source,
-            }
-        })?;
-        let manifest: Self =
-            serde_json::from_slice(&bytes).map_err(|source| {
-                ModelManifestError::Parse {
-                    path: manifest_path.to_path_buf(),
-                    source,
-                }
-            })?;
-
-        manifest.verify_identity(contract)?;
-        manifest.verify_artifact(
-            model_path,
-            "inference.onnx",
-            &contract.model_sha256,
-        )?;
-        manifest.verify_artifact(
-            config_path,
-            "inference.yml",
-            &contract.config_sha256,
-        )?;
-        Ok(manifest)
-    }
-
     /// Verifies manifest provenance and declared hashes before reading large files.
-    fn verify_identity(
+    pub(crate) fn verify_identity(
         &self,
         contract: &ModelContract,
     ) -> Result<(), ModelManifestError> {
@@ -137,38 +130,8 @@ impl ModelManifest {
         Ok(())
     }
 
-    /// Verifies one artifact exists and matches both manifest and fixed contract hashes.
-    fn verify_artifact(
-        &self,
-        path: &Path,
-        manifest_name: &'static str,
-        expected_hash: &str,
-    ) -> Result<(), ModelManifestError> {
-        if !path.is_file() {
-            return Err(ModelManifestError::ArtifactNotFound {
-                path: path.to_path_buf(),
-            });
-        }
-        let declared_hash = self
-            .files
-            .get(manifest_name)
-            .map(String::as_str)
-            .unwrap_or("<missing>");
-        Self::require_equal(manifest_name, expected_hash, declared_hash)?;
-
-        let actual_hash = Self::sha256_file(path)?;
-        if actual_hash != expected_hash {
-            return Err(ModelManifestError::ArtifactHashMismatch {
-                path: path.to_path_buf(),
-                expected: expected_hash.to_owned(),
-                actual: actual_hash,
-            });
-        }
-        Ok(())
-    }
-
     /// Compares one manifest value while retaining stable mismatch context.
-    fn require_equal(
+    pub(crate) fn require_equal(
         field: &'static str,
         expected: &str,
         actual: &str,
@@ -183,43 +146,10 @@ impl ModelManifest {
             })
         }
     }
-
-    /// Streams one artifact through SHA-256 without buffering the model in memory.
-    fn sha256_file(path: &Path) -> Result<String, ModelManifestError> {
-        let file =
-            File::open(path).map_err(|source| ModelManifestError::Read {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        let mut reader = BufReader::new(file);
-        let mut digest = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let read = reader.read(&mut buffer).map_err(|source| {
-                ModelManifestError::Read {
-                    path: path.to_path_buf(),
-                    source,
-                }
-            })?;
-            if read == 0 {
-                break;
-            }
-            let chunk = buffer.get(..read).ok_or_else(|| {
-                ModelManifestError::InvalidReadLength {
-                    path: path.to_path_buf(),
-                    read,
-                    capacity: buffer.len(),
-                }
-            })?;
-            digest.update(chunk);
-        }
-        let digest = digest.finalize();
-        Ok(lowercase_hex(digest.as_ref()))
-    }
 }
 
 /// Encodes digest bytes without relying on formatting traits removed by `sha2` 0.11.
-fn lowercase_hex(bytes: &[u8]) -> String {
+pub(crate) fn lowercase_hex(bytes: &[u8]) -> String {
     let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
         for nibble in [byte >> 4, byte & 0x0f] {
@@ -236,6 +166,24 @@ fn lowercase_hex(bytes: &[u8]) -> String {
 /// Errors produced while loading and validating fixed model artifacts.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelManifestError {
+    /// A native default model path was not resolved before loading.
+    #[error("model artifact path must be absolute: {path}")]
+    RelativePath { path: PathBuf },
+    /// In-memory provenance cannot be decoded.
+    #[error("failed to parse in-memory model manifest: {source}")]
+    ContentParse {
+        #[source]
+        source: serde_json::Error,
+    },
+    /// Content differs from the approved immutable artifact.
+    #[error(
+        "model artifact {artifact} hash mismatch: expected {expected}, got {actual}"
+    )]
+    ContentHashMismatch {
+        artifact: &'static str,
+        expected: String,
+        actual: String,
+    },
     /// The required provenance manifest is absent.
     #[error("model manifest not found: {path}")]
     ManifestNotFound { path: PathBuf },

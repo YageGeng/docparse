@@ -30,20 +30,5 @@ pub use types::*;
 /// (e.g. `FPDF_PAGEOBJECT`) returned by the safe wrappers.
 pub use pdfium_sys;
 
-/// Unified FFI call macro. On wasm, calls pdfium_sys extern functions directly.
-/// On non-wasm, calls through the runtime-loaded function pointers.
-#[cfg(not(target_arch = "wasm32"))]
-macro_rules! ffi {
-    ($fn_name:ident($($args:expr),* $(,)?)) => {
-        (pdfium_sys::dynamic::pdfium().$fn_name)($($args),*)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-macro_rules! ffi {
-    ($fn_name:ident($($args:expr),* $(,)?)) => {
-        pdfium_sys::$fn_name($($args),*)
-    }
-}
-
-pub(crate) use ffi;
+mod wasm_compat;
+pub(crate) use wasm_compat::ffi;

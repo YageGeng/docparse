@@ -1,9 +1,20 @@
 repos:
+  - repo: local
+    hooks:
+      - id: wasm-compat-boundary
+        name: "Rust platform compatibility boundary"
+        entry: python3 scripts/check_wasm_compat.py
+        language: system
+        pass_filenames: false
+        types: [rust]
   - repo: https://github.com/Narsil/pre-commit-rust
     rev: 2eed6366172ef2a5186e8785ec0e67243d7d73d0
     hooks:
       - id: fmt
         name: "Rust (fmt)"
+        # Format workspace members without forwarding vendored file paths to rustfmt.
+        args: ["--all", "--"]
+        pass_filenames: false
       - id: clippy
         name: "Rust (clippy)"
         args: ["--tests", "--examples", "--", "-Dwarnings"]

@@ -1,42 +1,42 @@
 # DocParse
 
-DocParse 是一个 Rust PDF 解析流水线：PDFium 提供原生文字事实和页面渲染，固定的 PP-DocLayoutV3 ONNX 模型提供版面区域，`docparse-core` 将两者融合为稳定、可校验的 `DocumentResult`。模型缺失或单页 layout 失败时，文字仍会通过 residual XY-cut 保留。
+DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
-每个通过校验的模型 Region 对应一个最终 Block；归属判断以 `TextItem` 为最小边界，避免部分重叠的视觉行把模型框外文字带入模型 Block。没有任何模型 owner 的文字会先重新组行，再通过 residual XY-cut 形成 `label_source = "Fallback"` 的 Block，因此模型漏检不会删除文字。
+Each validated model region produces one final block. Ownership is assigned at the `TextItem` boundary so partially overlapping visual lines cannot pull unrelated text into a model block. Unassigned text is regrouped into lines and residual XY-cut blocks with `label_source = "Fallback"`.
 
-## 准备模型
+## Prepare the model
 
-模型不随 crate 或仓库分发。使用带锁定依赖的 `uv` 脚本下载并验证固定 revision：
-
-```bash
-uv run scripts/download_models.py --output models/pp-doclayout-v3
-uv run scripts/download_models.py --output models/pp-doclayout-v3 --verify-only
-```
-
-固定来源为 `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`。manifest 会校验 ONNX 与 YAML 的 SHA-256、模型 schema 和预处理合同。
-
-## 配置
-
-仓库根目录的 `docparse.toml` 是可直接使用的默认配置。相对模型路径以主配置文件目录为基准。覆盖顺序为：代码默认值 → 主 TOML → 显式/`DOCPARSE_PROFILE` profile 文件 → `DOCPARSE_...` 环境变量 → 调用方显式覆盖。
-
-CLI 省略 `--config` 时只读取当前目录的 `./docparse.toml`，不会向父目录搜索。库 API 不隐式读取配置文件。
-
-## 构建与 CUDA
-
-CPU：
+Models are distributed separately from the repository and crates. Download and verify the pinned revision using the dependency-locked uv script:
 
 ```bash
-cargo build -p docparse-cli
+rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
+rtk uv run scripts/download_models.py --output models/pp-doclayout-v3 --verify-only
 ```
 
-NVIDIA CUDA：
+The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
+
+## Configuration
+
+The root `docparse.toml` is an example configuration. Select an execution provider available on your machine. Relative model paths resolve against the primary configuration directory. Precedence is: code defaults, primary TOML, explicit/`DOCPARSE_PROFILE` profile file, `DOCPARSE_...` environment variables, then explicit caller overrides.
+
+Without `--config`, the CLI reads only `./docparse.toml` in the current directory and does not search parents. Library APIs do not load configuration files implicitly.
+
+## Build and CUDA
+
+CPU:
 
 ```bash
-cargo build -p docparse-cli --features layout-cuda
-docparse parse input.pdf --config docparse.cuda.toml --format json
+rtk cargo build -p docparse-cli
 ```
 
-CUDA 配置使用 `execution_provider = "cuda"`。请求的 accelerator 注册失败时会明确报错，不会静默回退 CPU。`layout-cuda`、`layout-coreml` 和 `layout-openvino` 互斥；不要用 `--all-features` 构建 provider 矩阵。大型模型可能为每个 CUDA session 保留数 GB 显存，应按设备容量设置 `session_pool_size`。
+NVIDIA CUDA:
+
+```bash
+rtk cargo build -p docparse-cli --features layout-cuda
+rtk docparse parse input.pdf --config docparse.cuda.toml --format json
+```
+
+CUDA configurations use `execution_provider = "cuda"`. A requested accelerator that cannot initialize fails explicitly. `layout-cuda`, `layout-coreml`, and `layout-openvino` are mutually exclusive; do not use `--all-features` for the provider matrix. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
 ## Rust API
 
@@ -52,66 +52,96 @@ let document = parser.parse_path("input.pdf").await?;
 # }
 ```
 
-`DocParserBuilder` 可注入 `Arc<dyn LayoutEngine>` 和可选 `Arc<dyn OcrEngine>`。第一版只定义 OCR trait，不内置 OCR 模型。同步代码可用 `parse_path_blocking`；Tokio runtime 内必须使用 async API。
+`DocParserBuilder` accepts an `Arc<dyn LayoutEngine>` and optional `Arc<dyn OcrEngine>`. OCR is an extension interface; no OCR model is bundled. Synchronous callers can use `parse_path_blocking`; callers already inside Tokio must use the async API.
+
+## WebAssembly and browsers
+
+The `wasm32-unknown-unknown` build runs the same PDFium, model, preprocessing, and fusion algorithms in a dedicated module Worker. See the [Web package guide](packages/web/README.md) and [native/Web specification](docs/superpowers/specs/2026-09-07-native-web-wasm-design.md).
+
+The shared Rust entry points are `DocParser::from_artifacts(config, ModelArtifacts)` and `parse_bytes(Arc<[u8]>)`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
+
+Custom LayoutEngine/OcrEngine implementations must return `WasmBoxedFuture` instead of using async_trait. This preserves native Send/Sync bounds while allowing local browser futures:
+
+```rust,ignore
+use docparse_layout::{LayoutEngine, LayoutRequest, LayoutDetection, LayoutError, WasmBoxedFuture};
+
+impl LayoutEngine for MyEngine {
+    // name() and model_revision() retain their existing signatures.
+    /// Detects one page using the implementation's actual model.
+    fn detect(&self, request: LayoutRequest) -> WasmBoxedFuture<'_, Result<Vec<LayoutDetection>, LayoutError>> {
+        Box::pin(async move { self.detect_page(request).await })
+    }
+}
+```
+
+`ValidatedConfig::try_from` checks shared parameters. ConfigLoader and native model entry points handle paths; explicit artifacts and injected engines need no placeholder absolute paths. Native async APIs require Tokio. Direct browser hosts must initialize ort-web and WASI in the same Worker; the Web SDK handles this setup.
+
+Platform conditions are restricted to `wasm_compat.rs` and explicitly listed compatibility submodules. The browser-only `docparse-web` crate exports its API directly. Run `rtk proxy python3 scripts/check_wasm_compat.py` to check the boundary.
 
 ## CLI
 
 ```bash
-docparse parse INPUT.pdf --config docparse.toml --format json
-docparse parse INPUT.pdf --format text --view semantic
-docparse parse INPUT.pdf --format markdown --output result.md --force
-docparse parse INPUT.pdf --overlay-dir diagnostics
-docparse inspect-model --config docparse.toml
+rtk docparse parse INPUT.pdf --config docparse.toml --format json
+rtk docparse parse INPUT.pdf --format text --view semantic
+rtk docparse parse INPUT.pdf --format markdown --output result.md --force
+rtk docparse parse INPUT.pdf --overlay-dir diagnostics
+rtk docparse inspect-model --config docparse.toml
 ```
 
-JSON 保留完整 schema、evidence、warnings 和 relations。Text/Markdown 的 semantic view 仅在展示层隐藏重复 chrome；不会改写规范结果。overlay 会在解析完成后串行重开 PDF 生成 PNG/SVG，不重跑 ONNX。
+JSON preserves the complete schema, evidence, warnings, and relations. Text/Markdown semantic views suppress repeated page furniture only at presentation time. Overlays reopen the PDF serially to produce PNG/SVG files without rerunning ONNX inference.
 
-## 测试
+## Tests
 
-默认门禁离线运行：
+The workspace uses `members = ["crates/*"]`; `default-members` selects six native crates. Default checks use local fixtures without model downloads:
 
 ```bash
-cargo fmt --all -- --check
-cargo test --locked --workspace
-cargo clippy --locked --workspace --all-targets -- -D warnings
+rtk cargo fmt --all -- --check
+rtk cargo test --locked
+rtk cargo clippy --locked --all-targets -- -D warnings
 ```
 
-模型 parity：
+Explicit `--workspace` includes the browser-only crate. Add `--exclude docparse-web` for native workspace commands. Build Web separately:
 
 ```bash
-uv run scripts/reference_layout.py \
+rtk cargo build -p docparse-web --target wasm32-unknown-unknown --release --locked
+```
+
+Model parity:
+
+```bash
+rtk uv run scripts/reference_layout.py \
   --model-dir models/pp-doclayout-v3 \
   --input-dir crates/layout/tests/fixtures/model \
   --output crates/layout/tests/fixtures/model/python_outputs.json
-cargo test -p docparse-layout --test python_parity -- --ignored --nocapture
+rtk cargo test -p docparse-layout --test python_parity -- --ignored --nocapture
 ```
 
-真实 E2E 会扫描 `~/Downloads` 顶层所有大小写不敏感的常规 PDF，并要求发现集合与 `tests/e2e-corpus.toml` 的 basename、size、SHA-256、page count 完全相等。新增、删除或替换任一 PDF 都会使预检失败；更新语料时必须显式重算并审查 manifest。完整门禁禁止 `--only`，该参数只用于 smoke。
+Real-PDF E2E preflight scans regular, case-insensitive PDF files at the top level of `~/Downloads`. The discovered basenames, sizes, SHA-256 values, and page counts must exactly match `tests/e2e-corpus.toml`. Adding, removing, or replacing a PDF fails preflight until the manifest is explicitly reviewed and updated. Full acceptance prohibits `--only`; that option is for smoke runs.
 
 ```bash
-uv run scripts/run_real_pdf_e2e.py \
+rtk uv run scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
   --execution-provider cuda --page-concurrency 1 --run-id serial
-uv run scripts/run_real_pdf_e2e.py \
+rtk uv run scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
   --execution-provider cuda --page-concurrency 4 --run-id parallel \
   --write-overlays
-python scripts/compare_e2e_runs.py \
+rtk proxy python3 scripts/compare_e2e_runs.py \
   target/docparse-e2e/serial/canonical-hashes.json \
   target/docparse-e2e/parallel/canonical-hashes.json
-uv run scripts/build_visual_review.py \
+rtk uv run scripts/build_visual_review.py \
   --run-dir target/docparse-e2e/parallel
 ```
 
-E2E 默认先构建 release 测试产物，再在计时区间内直接执行测试二进制；仅排查调试行为时使用 `--cargo-profile dev`。性能数据和实际 Cargo profile 只记录在 `summary.json`，不参与跨机器阈值。规范 hash 不含耗时、绝对路径或本机信息。
+E2E builds release tests before timing their binaries directly. Use `--cargo-profile dev` only when diagnosing debug behavior. Performance and Cargo profile are recorded in `summary.json`, not used as cross-machine thresholds. Canonical hashes exclude timings, absolute paths, and host details.
 
-## 首版边界
+## Initial scope
 
-- 不识别公式 LaTeX，仅保留 inline/display formula 的位置和内容状态。
-- table 第一版提供视觉阅读顺序，不恢复完整单元格结构。
-- OCR 需要调用方注入实现。
-- 真实 PDF、模型、渲染图片和 E2E 报告均不进入 Git 或 crate 包。
+- Formula regions preserve location and content status without LaTeX recognition.
+- Tables expose visual reading order without reconstructing complete cell structures.
+- OCR requires a caller-provided implementation.
+- User PDFs, models, rendered images, and generated E2E reports are excluded from Git and crate packages. Small generated regression PDFs and their font licenses are maintained as source fixtures.
 
-## 来源与许可证
+## Provenance and licensing
 
-DocParse 采用 Apache-2.0。PDFium、PP-DocLayoutV3、ONNX Runtime、Rust/Python 开发依赖及 LiteParse 派生来源有各自条款；分发前请阅读 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+DocParse uses Apache-2.0. PDFium, PP-DocLayoutV3, ONNX Runtime, development dependencies, and source derived from LiteParse have their own terms. Read [NOTICE](NOTICE) and the single root [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before distributing artifacts.

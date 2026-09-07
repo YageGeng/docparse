@@ -1,8 +1,9 @@
 use crate::{LayoutDetection, LayoutError, LayoutRequest};
 
 /// Asynchronous, runtime-selectable page layout detection boundary.
-#[async_trait::async_trait]
-pub trait LayoutEngine: Send + Sync {
+pub trait LayoutEngine:
+    crate::wasm_compat::WasmCompatSend + crate::wasm_compat::WasmCompatSync
+{
     /// Returns a stable diagnostic engine name.
     fn name(&self) -> &str;
 
@@ -10,8 +11,11 @@ pub trait LayoutEngine: Send + Sync {
     fn model_revision(&self) -> &str;
 
     /// Detects layout regions for one rendered page image.
-    async fn detect(
+    fn detect(
         &self,
         request: LayoutRequest,
-    ) -> Result<Vec<LayoutDetection>, LayoutError>;
+    ) -> crate::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    >;
 }

@@ -68,6 +68,8 @@ pub enum ExecutionProviderConfig {
     #[serde(rename = "coreml")]
     CoreMl,
     Openvino,
+    /// Browser WebGPU execution, validated at the platform boundary.
+    WebGpu,
 }
 
 impl Default for ExecutionProviderConfig {

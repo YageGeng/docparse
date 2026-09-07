@@ -12,7 +12,6 @@ use docparse_layout::{
 /// Deterministic fake regions vary by page while never reading model artifacts.
 struct MultipageLayoutEngine;
 
-#[async_trait::async_trait]
 impl LayoutEngine for MultipageLayoutEngine {
     /// Returns one stable fake name for document context.
     fn name(&self) -> &str {
@@ -25,37 +24,42 @@ impl LayoutEngine for MultipageLayoutEngine {
     }
 
     /// Covers both columns on page one, one section on page two, and none on page three.
-    async fn detect(
+    fn detect(
         &self,
         request: LayoutRequest,
-    ) -> Result<Vec<LayoutDetection>, LayoutError> {
-        let regions = match request.page_number {
-            1 => vec![
-                region(
+    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    > {
+        Box::pin(async move {
+            let regions = match request.page_number {
+                1 => vec![
+                    region(
+                        0,
+                        LayoutLabel::DocTitle,
+                        6,
+                        [45.0, 45.0, 570.0, 95.0],
+                        0,
+                    ),
+                    region(
+                        1,
+                        LayoutLabel::Text,
+                        22,
+                        [45.0, 110.0, 570.0, 190.0],
+                        1,
+                    ),
+                ],
+                2 => vec![region(
                     0,
-                    LayoutLabel::DocTitle,
-                    6,
-                    [45.0, 45.0, 570.0, 95.0],
-                    0,
-                ),
-                region(
-                    1,
                     LayoutLabel::Text,
                     22,
-                    [45.0, 110.0, 570.0, 190.0],
-                    1,
-                ),
-            ],
-            2 => vec![region(
-                0,
-                LayoutLabel::Text,
-                22,
-                [45.0, 110.0, 285.0, 190.0],
-                0,
-            )],
-            _ => Vec::new(),
-        };
-        Ok(regions)
+                    [45.0, 110.0, 285.0, 190.0],
+                    0,
+                )],
+                _ => Vec::new(),
+            };
+            Ok(regions)
+        })
     }
 }
 

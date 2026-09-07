@@ -2,6 +2,16 @@
 members = [
   "crates/*",
 ]
+# Browser bindings are built explicitly for wasm32-unknown-unknown.
+default-members = [
+  "crates/cli",
+  "crates/config",
+  "crates/core",
+  "crates/layout",
+  "crates/pdfium",
+  "crates/pdfium-sys",
+]
+exclude = ["vendor/ort-web"]
 resolver = "3"
 
 [workspace.package]
@@ -55,6 +65,7 @@ mem_forget = "warn"
 docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
+docparse-web = { version = "0.1.0", path = "crates/web" }
 pdfium = { package = "docparse-pdfium", version = "1.9.0", path = "crates/pdfium" }
 pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }
 
@@ -64,7 +75,8 @@ thiserror = "2"
 
 # async
 async-trait = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await", "std"] }
+tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
 
 # config and serialization
 figment = { version = "0.10", features = ["toml", "env"] }
@@ -82,7 +94,7 @@ geo = "0.33.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 ndarray = "0.17"
 # Rustls makes build-time ONNX Runtime downloads portable without system TLS dependencies.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["api-28", "copy-dylibs", "download-binaries", "ndarray", "std", "tls-rustls", "tracing"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "std", "tracing"] }
 sha2 = "0.11"
 
 # cli and diagnostics
@@ -105,3 +117,14 @@ blake3 = "1"
 predicates = "3"
 proptest = "1"
 tempfile = "3"
+
+# browser
+js-sys = "=0.3.102"
+ort-web = "=0.3.0"
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "=0.2.125"
+wasm-bindgen-futures = "=0.4.75"
+web-sys = { version = "=0.3.102", features = ["console"] }
+
+[patch.crates-io]
+ort-web = { path = "vendor/ort-web" }

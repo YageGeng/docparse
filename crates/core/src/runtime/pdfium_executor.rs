@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+pub(crate) use crate::wasm_compat::PdfInput;
+use crate::wasm_compat::PdfiumWorker;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_layout::{
@@ -13,13 +13,6 @@ use typed_builder::TypedBuilder;
 
 use crate::ExtractedPage;
 use crate::extract::text::extract_page_text_items;
-
-/// Owned PDF input whose bytes remain alive for the complete worker lifetime.
-#[derive(Debug, Clone)]
-pub(crate) enum PdfInput {
-    Path(PathBuf),
-    Bytes(Arc<[u8]>),
-}
 
 /// Fully owned rendered page returned across the PDFium actor boundary.
 #[derive(Debug, Clone, TypedBuilder)]
@@ -38,6 +31,7 @@ pub(crate) struct PreScannedPage {
 
 /// Failures at the serialized PDFium runtime boundary.
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)] // Native task failures remain part of the shared runtime error vocabulary.
 pub(crate) enum PdfiumRuntimeError {
     /// The operating-system path cannot be represented by the current PDFium wrapper.
     #[error("PDF path is not valid UTF-8")]
@@ -92,7 +86,7 @@ pub(crate) enum PdfiumRuntimeError {
 }
 
 /// Commands whose payloads contain only owned values and never PDFium handles.
-enum PdfiumCommand {
+pub(crate) enum PdfiumCommand {
     PreScan {
         page_number: u32,
         response: oneshot::Sender<Result<PreScannedPage, PdfiumRuntimeError>>,
@@ -111,7 +105,7 @@ enum PdfiumCommand {
 pub(crate) struct PdfiumExecutor {
     sender: mpsc::Sender<PdfiumCommand>,
     page_count: u32,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<PdfiumWorker>,
 }
 
 impl PdfiumExecutor {
@@ -123,14 +117,7 @@ impl PdfiumExecutor {
         let capacity = limits.render_queue_capacity.max(1);
         let (sender, receiver) = mpsc::channel(capacity);
         let (ready_sender, ready_receiver) = oneshot::channel();
-        let worker = std::thread::Builder::new()
-            .name("docparse-pdfium".to_owned())
-            .spawn(move || {
-                worker_main(input, receiver, ready_sender);
-            })
-            .map_err(|error| {
-                PdfiumRuntimeError::ThreadSpawn(error.to_string())
-            })?;
+        let worker = PdfiumWorker::spawn(input, receiver, ready_sender)?;
         let page_count = ready_receiver
             .await
             .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)??;
@@ -200,10 +187,7 @@ impl PdfiumExecutor {
                 .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)?;
         }
         if let Some(worker) = self.worker.take() {
-            tokio::task::spawn_blocking(move || worker.join())
-                .await
-                .map_err(|_join_error| PdfiumRuntimeError::WorkerPanicked)?
-                .map_err(|_panic_payload| PdfiumRuntimeError::WorkerPanicked)?;
+            worker.join().await?;
         }
         if sent {
             Ok(())
@@ -229,7 +213,7 @@ impl PdfiumExecutor {
 }
 
 /// Owns the library, source bytes, and document while serving serialized commands.
-fn worker_main(
+pub(crate) async fn worker_main(
     input: PdfInput,
     mut receiver: mpsc::Receiver<PdfiumCommand>,
     ready: oneshot::Sender<Result<u32, PdfiumRuntimeError>>,
@@ -242,20 +226,11 @@ fn worker_main(
             return;
         }
     };
-    let document = match &input {
-        PdfInput::Path(path) => {
-            let Some(path) = path.to_str() else {
-                let _ = ready.send(Err(PdfiumRuntimeError::NonUtf8Path));
-                return;
-            };
-            library.load_document(path, None)
-        }
-        PdfInput::Bytes(bytes) => library.load_document_from_bytes(bytes, None),
-    };
-    let document = match document {
+    let document = match input.open(&library) {
         Ok(document) => document,
         Err(error) => {
-            let _ = ready.send(Err(PdfiumRuntimeError::OpenDocument(error)));
+            tracing::error!("failed to open PDF: {}", error);
+            let _ = ready.send(Err(error));
             return;
         }
     };
@@ -272,7 +247,7 @@ fn worker_main(
         return;
     }
 
-    while let Some(command) = receiver.blocking_recv() {
+    while let Some(command) = receiver.recv().await {
         match command {
             PdfiumCommand::PreScan {
                 page_number,

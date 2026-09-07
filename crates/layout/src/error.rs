@@ -47,6 +47,15 @@ pub enum GeometryError {
 /// Errors returned by layout engines.
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
+    /// A browser engine was requested without owned model artifacts.
+    #[error("browser model initialization requires explicit ModelArtifacts")]
+    ModelArtifactsRequired,
+    /// The in-memory YAML artifact could not be decoded.
+    #[error("failed to parse model configuration bytes: {source}")]
+    ModelConfigContentParse {
+        #[source]
+        source: Box<serde_yml::Error>,
+    },
     /// A configured ONNX model path does not exist.
     #[error("layout model not found: {path}")]
     ModelNotFound { path: std::path::PathBuf },
@@ -102,7 +111,7 @@ pub enum LayoutError {
     #[error("layout blocking task failed: {source}")]
     TaskJoin {
         #[source]
-        source: tokio::task::JoinError,
+        source: crate::wasm_compat::TaskError,
     },
 
     /// Input geometry violates the public layout contract.

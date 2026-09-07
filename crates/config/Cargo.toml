@@ -7,6 +7,10 @@ repository.workspace = true
 readme = "README.md"
 description = "Configuration loading and validation for docparse"
 
+[features]
+default = []
+wasm = []
+
 [dependencies]
 # error
 thiserror.workspace = true

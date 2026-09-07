@@ -67,42 +67,7 @@ pub struct SignatureSummary {
     pub byte_range_reaches_eof: Option<bool>,
 }
 
-/// The `fpdf_signature` entry points, resolved together. `None` when the
-/// loaded pdfium build does not export them.
-struct SignatureApi {
-    count:
-        unsafe extern "C" fn(pdfium_sys::FPDF_DOCUMENT) -> std::os::raw::c_int,
-    object: unsafe extern "C" fn(
-        pdfium_sys::FPDF_DOCUMENT,
-        std::os::raw::c_int,
-    ) -> pdfium_sys::FPDF_SIGNATURE,
-    byte_range: unsafe extern "C" fn(
-        pdfium_sys::FPDF_SIGNATURE,
-        *mut std::os::raw::c_int,
-        std::os::raw::c_ulong,
-    ) -> std::os::raw::c_ulong,
-}
-
-impl SignatureApi {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn load() -> Option<Self> {
-        let bindings = pdfium_sys::dynamic::pdfium();
-        Some(Self {
-            count: bindings.FPDF_GetSignatureCount?,
-            object: bindings.FPDF_GetSignatureObject?,
-            byte_range: bindings.FPDFSignatureObj_GetByteRange?,
-        })
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn load() -> Option<Self> {
-        Some(Self {
-            count: pdfium_sys::FPDF_GetSignatureCount,
-            object: pdfium_sys::FPDF_GetSignatureObject,
-            byte_range: pdfium_sys::FPDFSignatureObj_GetByteRange,
-        })
-    }
-}
+use crate::wasm_compat::SignatureApi;
 
 impl<'lib> Document<'lib> {
     pub fn page_count(&self) -> i32 {
@@ -152,36 +117,6 @@ impl<'lib> Document<'lib> {
             doc_handle: self.handle,
             user_unit,
             _doc: std::marker::PhantomData,
-        })
-    }
-
-    /// Read `/UserUnit` through the fork's `FPDFPage_GetUserUnit` export.
-    /// `None` when the loaded pdfium binary does not provide it.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn user_unit_from_api(page: pdfium_sys::FPDF_PAGE) -> Option<f32> {
-        let get_user_unit =
-            pdfium_sys::dynamic::pdfium().FPDFPage_GetUserUnit?;
-        let user_unit = unsafe { get_user_unit(page) };
-        // The API already clamps to >= 1.0; guard anyway so a misbehaving
-        // binary can't zero out all geometry.
-        Some(if user_unit.is_finite() && user_unit >= 1.0 {
-            user_unit
-        } else {
-            1.0
-        })
-    }
-
-    /// On wasm the export is statically linked (the pinned pdfium-binaries
-    /// release ships it), so unlike the dynamic path this can never be
-    /// absent at runtime — bumping the pin below a release that carries
-    /// `FPDFPage_GetUserUnit` would be a link error, not a silent fallback.
-    #[cfg(target_arch = "wasm32")]
-    fn user_unit_from_api(page: pdfium_sys::FPDF_PAGE) -> Option<f32> {
-        let user_unit = unsafe { pdfium_sys::FPDFPage_GetUserUnit(page) };
-        Some(if user_unit.is_finite() && user_unit >= 1.0 {
-            user_unit
-        } else {
-            1.0
         })
     }
 

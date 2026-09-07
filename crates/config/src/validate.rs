@@ -100,22 +100,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
 
     /// Validates all lexical and numeric invariants without reading model artifacts.
     fn try_from(config: RawConfig) -> Result<Self, Self::Error> {
-        for (field, path) in [
-            ("layout.model_path", &config.layout.model_path),
-            ("layout.model_config_path", &config.layout.model_config_path),
-            (
-                "layout.model_manifest_path",
-                &config.layout.model_manifest_path,
-            ),
-        ] {
-            if !path.is_absolute() {
-                return Err(ConfigError::InvalidValue {
-                    field,
-                    reason: "must be an absolute path resolved by ConfigLoader",
-                });
-            }
-        }
-
+        Self::validate_platform(&config)?;
         Self::validate_unit_interval(
             config.layout.score_threshold,
             "layout.score_threshold",

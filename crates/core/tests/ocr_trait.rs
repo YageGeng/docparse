@@ -13,7 +13,6 @@ struct FakeOcr {
     calls: AtomicUsize,
 }
 
-#[async_trait::async_trait]
 impl OcrEngine for FakeOcr {
     /// Returns a stable engine name for result diagnostics.
     fn name(&self) -> &str {
@@ -21,36 +20,41 @@ impl OcrEngine for FakeOcr {
     }
 
     /// Returns two deterministic facts without assigning DocParse identities.
-    async fn recognize(
+    fn recognize(
         &self,
         request: OcrRequest,
-    ) -> Result<OcrResult, docparse_core::OcrError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(request.page_number, 1);
-        Ok(OcrResult::builder()
-            .items(vec![
-                OcrTextItem::builder()
-                    .text("first".to_owned())
-                    .bbox(
-                        Bbox::try_from([10.0, 10.0, 40.0, 20.0])
-                            .expect("valid bbox"),
-                    )
-                    .confidence(0.9)
-                    .build(),
-                OcrTextItem::builder()
-                    .text("second".to_owned())
-                    .bbox(
-                        Bbox::try_from([10.0, 30.0, 50.0, 40.0])
-                            .expect("valid bbox"),
-                    )
-                    .confidence(0.8)
-                    .build(),
-            ])
-            .metadata(BTreeMap::from([(
-                "engine".to_owned(),
-                "fake-ocr".to_owned(),
-            )]))
-            .build())
+    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        '_,
+        Result<OcrResult, docparse_core::OcrError>,
+    > {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(request.page_number, 1);
+            Ok(OcrResult::builder()
+                .items(vec![
+                    OcrTextItem::builder()
+                        .text("first".to_owned())
+                        .bbox(
+                            Bbox::try_from([10.0, 10.0, 40.0, 20.0])
+                                .expect("valid bbox"),
+                        )
+                        .confidence(0.9)
+                        .build(),
+                    OcrTextItem::builder()
+                        .text("second".to_owned())
+                        .bbox(
+                            Bbox::try_from([10.0, 30.0, 50.0, 40.0])
+                                .expect("valid bbox"),
+                        )
+                        .confidence(0.8)
+                        .build(),
+                ])
+                .metadata(BTreeMap::from([(
+                    "engine".to_owned(),
+                    "fake-ocr".to_owned(),
+                )]))
+                .build())
+        })
     }
 }
 

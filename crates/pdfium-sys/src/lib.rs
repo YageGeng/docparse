@@ -7,5 +7,6 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod dynamic;
+mod wasm_compat;
+#[allow(unused_imports)]
+pub use wasm_compat::*;

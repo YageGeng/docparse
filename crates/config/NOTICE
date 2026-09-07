@@ -20,8 +20,8 @@ that license is provided in the repository's LICENSE file.
 
 The build can download PDFium binaries from run-llama/pdfium-binaries.
 PDFium and its bundled third-party components have separate license notices;
-see THIRD_PARTY_NOTICES.md and the LICENSE/licenses directory included in the
-downloaded PDFium archive.
+see THIRD_PARTY_NOTICES.md at the repository root and the LICENSE/licenses
+directory included in the downloaded PDFium archive.
 
 The layout implementation uses PP-DocLayoutV3 from
 PaddlePaddle/PP-DocLayoutV3_onnx at revision
@@ -30,6 +30,6 @@ downloaded separately; it is not distributed in this source repository or in
 the Rust crates.
 
 The Rust runtime integrates the ort crate and ONNX Runtime. Their licenses and
-the geo crate dual license are recorded in THIRD_PARTY_NOTICES.md. Python
-oracle dependencies are development/test tools only and are not part of the
-Rust runtime packages.
+the geo crate dual license are recorded in THIRD_PARTY_NOTICES.md at the
+repository root. Python oracle dependencies are development/test tools only
+and are not part of the Rust runtime packages.
