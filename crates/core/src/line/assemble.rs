@@ -51,177 +51,222 @@ pub(crate) trait LineAssembler {
     ) -> Result<Vec<LineFragment>, LineError>;
 }
 
+/// One source item with a temporary box aligned to its orientation group's reference direction.
+struct AlignedItem {
+    item: TextItem,
+    bbox: Bbox,
+    vertical: bool,
+}
+
+impl TryFrom<(TextItem, super::TextAxes)> for AlignedItem {
+    type Error = LineError;
+
+    /// Keeps page geometry intact while projecting into the group's shared reference axes.
+    fn try_from(
+        (item, axes): (TextItem, super::TextAxes),
+    ) -> Result<Self, Self::Error> {
+        let vertical =
+            detect_direction(std::slice::from_ref(&item), item.rotation)
+                == WritingDirection::Vertical;
+        let bbox = if axes.is_oblique() {
+            let projected = axes.project_bbox(item.bbox)?;
+            let anchor = axes.project(
+                item.baseline
+                    .map_or(item.bbox.center(), |baseline| baseline.start),
+            );
+            let height = item
+                .style
+                .as_ref()
+                .and_then(|style| style.font_height.or(style.font_size))
+                .filter(|height| height.is_finite() && *height > 0.0)
+                .unwrap_or(projected.height());
+            let flow = item
+                .baseline
+                .map(|baseline| {
+                    let start = axes.project(baseline.start).x;
+                    let end = axes.project(baseline.end).x;
+                    (start.min(end), start.max(end))
+                })
+                .filter(|(start, end)| end > start);
+            let (left, right) =
+                flow.unwrap_or((projected.left, projected.right));
+            // A slanted run's page AABB grows with its length. Its measured baseline and
+            // font height describe the cross-line band without that artificial inflation.
+            Bbox::try_from([left, anchor.y, right, anchor.y + height])?
+        } else if vertical {
+            Bbox::try_from([
+                item.bbox.top,
+                item.bbox.left,
+                item.bbox.bottom,
+                item.bbox.right,
+            ])?
+        } else {
+            item.bbox
+        };
+        Ok(Self {
+            item,
+            bbox,
+            vertical,
+        })
+    }
+}
+
 /// Geometry-first line assembler that avoids speculative cross-column merges.
 pub(crate) struct ConservativeLineAssembler;
 
 impl LineAssembler for ConservativeLineAssembler {
-    /// Forms cross-axis bands before flow-axis grouping so sub-point jitter cannot invert a line.
+    /// Forms cross-axis bands before flow-axis grouping, including non-cardinal text.
     fn fragments(
         &self,
-        mut items: Vec<TextItem>,
+        items: Vec<TextItem>,
         config: &FusionConfig,
     ) -> Result<Vec<LineFragment>, LineError> {
-        items.sort_by(|left, right| {
-            let left_vertical =
-                detect_direction(std::slice::from_ref(left), left.rotation)
-                    == WritingDirection::Vertical;
-            let right_vertical =
-                detect_direction(std::slice::from_ref(right), right.rotation)
-                    == WritingDirection::Vertical;
-            let left_cross = if left_vertical {
-                left.bbox.left
-            } else {
-                left.bbox.top
-            };
-            let right_cross = if right_vertical {
-                right.bbox.left
-            } else {
-                right.bbox.top
-            };
-            let left_flow = if left_vertical {
-                left.bbox.top
-            } else {
-                left.bbox.left
-            };
-            let right_flow = if right_vertical {
-                right.bbox.top
-            } else {
-                right.bbox.left
-            };
-            left_vertical
-                .cmp(&right_vertical)
-                .then_with(|| left.rotation.total_cmp(&right.rotation))
-                .then_with(|| left_cross.total_cmp(&right_cross))
-                .then_with(|| left_flow.total_cmp(&right_flow))
-                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
-        });
         let page_width = items
             .iter()
             .map(|item| item.bbox.right)
             .fold(0.0_f64, f64::max)
             .max(1.0);
-
-        // Banding is deliberately independent of x order: PDF glyph boxes on one baseline
-        // commonly differ by fractions of a point, so sorting by exact top first can put a
-        // right-hand item before its left-hand neighbor and make the later item look like a
-        // large backwards jump.
-        const CROSS_AXIS_SIZE_CAP: f64 = 24.0;
-        let mut bands = Vec::<Vec<TextItem>>::new();
+        // Select orientation groups before comparing positions. Every group uses its
+        // smallest source angle as a deterministic reference, so translating the page
+        // adds the same offset to all projected coordinates. Never compare coordinates
+        // computed with separate per-item angles, even when those angles are close.
+        let mut items = items;
+        items.sort_by(|left, right| {
+            left.rotation
+                .total_cmp(&right.rotation)
+                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        });
+        let mut orientations = Vec::<Vec<TextItem>>::new();
         for item in items {
-            let item_vertical =
-                detect_direction(std::slice::from_ref(&item), item.rotation)
-                    == WritingDirection::Vertical;
-            let merge = bands.last().is_some_and(|band| {
-                let Some(first) = band.first() else {
-                    return false;
-                };
-                let band_vertical = detect_direction(
-                    std::slice::from_ref(first),
-                    first.rotation,
-                ) == WritingDirection::Vertical;
-                if item_vertical != band_vertical
-                    || (item.rotation - first.rotation).abs() > 2.0
-                {
-                    return false;
-                }
-                let item_cross_start = if item_vertical {
-                    item.bbox.left
-                } else {
-                    item.bbox.top
-                };
-                let raw_item_cross_size = if item_vertical {
-                    item.bbox.width()
-                } else {
-                    item.bbox.height()
-                };
-                let band_cross_start = band
-                    .iter()
-                    .map(|member| {
-                        if item_vertical {
-                            member.bbox.left
-                        } else {
-                            member.bbox.top
-                        }
-                    })
-                    .fold(f64::INFINITY, f64::min);
-                let band_cross_size = band
-                    .iter()
-                    .map(|member| {
-                        if item_vertical {
-                            member.bbox.width()
-                        } else {
-                            member.bbox.height()
-                        }
-                    })
-                    .map(|size| size.clamp(1.0, CROSS_AXIS_SIZE_CAP))
-                    .fold(1.0_f64, f64::max);
-                let item_cross_size =
-                    raw_item_cross_size.clamp(1.0, CROSS_AXIS_SIZE_CAP);
-                // PDF font em boxes can be much taller than their visible row. Tighten
-                // the band when only the incoming horizontal item has that anomaly.
-                let inflated_height = !item_vertical
-                    && raw_item_cross_size > CROSS_AXIS_SIZE_CAP
-                    && raw_item_cross_size > band_cross_size * 2.0;
-                let tolerance_factor = if inflated_height { 0.3 } else { 0.5 };
-                (item_cross_start - band_cross_start).abs()
-                    < band_cross_size.min(item_cross_size) * tolerance_factor
-            });
-            if merge {
-                if let Some(band) = bands.last_mut() {
-                    band.push(item);
+            let same_orientation = orientations
+                .last()
+                .and_then(|group| group.first())
+                .is_some_and(|first| {
+                    (item.rotation - first.rotation).abs() <= 2.0
+                        && super::TextAxes::from(item.rotation).is_oblique()
+                            == super::TextAxes::from(first.rotation)
+                                .is_oblique()
+                });
+            if same_orientation {
+                if let Some(group) = orientations.last_mut() {
+                    group.push(item);
                 }
             } else {
-                bands.push(vec![item]);
+                orientations.push(vec![item]);
             }
         }
+        let mut groups = Vec::<Vec<AlignedItem>>::new();
+        for orientation in orientations {
+            let Some(first) = orientation.first() else {
+                continue;
+            };
+            let axes = super::TextAxes::from(first.rotation);
+            let mut items = orientation
+                .into_iter()
+                .map(|item| AlignedItem::try_from((item, axes)))
+                .collect::<Result<Vec<_>, _>>()?;
+            // Geometry orders members inside an orientation group. Sorting by each
+            // member's exact angle first would interleave otherwise parallel lines.
+            items.sort_by(|left, right| {
+                left.bbox
+                    .top
+                    .total_cmp(&right.bbox.top)
+                    .then_with(|| left.bbox.left.total_cmp(&right.bbox.left))
+                    .then_with(|| {
+                        left.item.id.as_str().cmp(right.item.id.as_str())
+                    })
+            });
 
-        let mut groups = Vec::<Vec<TextItem>>::new();
-        for mut band in bands {
-            let vertical = band.first().is_some_and(|first| {
-                detect_direction(std::slice::from_ref(first), first.rotation)
-                    == WritingDirection::Vertical
-            });
-            // LiteParse splits 90/270-degree groups when the flow-axis gap exceeds
-            // three times the tallest item in that spatial rotation cluster.
-            let vertical_gap_threshold = band
-                .iter()
-                .map(|item| item.bbox.height())
-                .fold(0.0_f64, f64::max)
-                * 3.0;
-            band.sort_by(|left, right| {
-                let ordering = if vertical {
-                    left.bbox.top.total_cmp(&right.bbox.top)
-                } else {
-                    left.bbox.left.total_cmp(&right.bbox.left)
-                };
-                ordering.then_with(|| left.id.as_str().cmp(right.id.as_str()))
-            });
-            let mut band_groups = Vec::<Vec<TextItem>>::new();
-            for item in band {
-                let merge = band_groups
-                    .last()
-                    .and_then(|group| group.last())
-                    .is_some_and(|previous| {
-                        let within_vertical_cluster = !vertical
-                            || item.bbox.top - previous.bbox.bottom
-                                <= vertical_gap_threshold;
-                        within_vertical_cluster
-                            && Self::compatible(previous, &item, config)
-                    });
+            // Cross-axis bands are independent of flow order so sub-point glyph jitter cannot
+            // make a later source item appear to jump backwards across its own line.
+            const CROSS_AXIS_SIZE_CAP: f64 = 24.0;
+            let mut bands = Vec::<Vec<AlignedItem>>::new();
+            for item in items {
+                let merge = bands.last().is_some_and(|band| {
+                    let Some(first) = band.first() else {
+                        return false;
+                    };
+                    if item.vertical != first.vertical
+                        || (item.item.rotation - first.item.rotation).abs()
+                            > 2.0
+                    {
+                        return false;
+                    }
+                    let raw_item_cross_size = item.bbox.height();
+                    let band_cross_start = band
+                        .iter()
+                        .map(|member| member.bbox.top)
+                        .fold(f64::INFINITY, f64::min);
+                    let band_cross_size = band
+                        .iter()
+                        .map(|member| member.bbox.height())
+                        .map(|size| size.clamp(1.0, CROSS_AXIS_SIZE_CAP))
+                        .fold(1.0_f64, f64::max);
+                    let item_cross_size =
+                        raw_item_cross_size.clamp(1.0, CROSS_AXIS_SIZE_CAP);
+                    let inflated_height = !item.vertical
+                        && raw_item_cross_size > CROSS_AXIS_SIZE_CAP
+                        && raw_item_cross_size > band_cross_size * 2.0;
+                    let tolerance_factor =
+                        if inflated_height { 0.3 } else { 0.5 };
+                    (item.bbox.top - band_cross_start).abs()
+                        < band_cross_size.min(item_cross_size)
+                            * tolerance_factor
+                });
                 if merge {
-                    if let Some(group) = band_groups.last_mut() {
-                        group.push(item);
+                    if let Some(band) = bands.last_mut() {
+                        band.push(item);
                     }
                 } else {
-                    band_groups.push(vec![item]);
+                    bands.push(vec![item]);
                 }
             }
-            groups.extend(band_groups);
+
+            for mut band in bands {
+                let vertical = band.first().is_some_and(|first| first.vertical);
+                // Preserve the existing cardinal vertical-text gap policy in its aligned frame.
+                let vertical_gap_threshold = band
+                    .iter()
+                    .map(|item| item.bbox.width())
+                    .fold(0.0_f64, f64::max)
+                    * 3.0;
+                band.sort_by(|left, right| {
+                    left.bbox.left.total_cmp(&right.bbox.left).then_with(|| {
+                        left.item.id.as_str().cmp(right.item.id.as_str())
+                    })
+                });
+                let mut band_groups = Vec::<Vec<AlignedItem>>::new();
+                for item in band {
+                    let merge = band_groups
+                        .last()
+                        .and_then(|group| group.last())
+                        .is_some_and(|previous| {
+                            let within_vertical_cluster = !vertical
+                                || item.bbox.left - previous.bbox.right
+                                    <= vertical_gap_threshold;
+                            within_vertical_cluster
+                                && Self::compatible(previous, &item, config)
+                        });
+                    if merge {
+                        if let Some(group) = band_groups.last_mut() {
+                            group.push(item);
+                        }
+                    } else {
+                        band_groups.push(vec![item]);
+                    }
+                }
+                groups.extend(band_groups);
+            }
         }
 
         let mut fragments: Vec<_> = groups
             .into_iter()
-            .map(|items| LineFragment::from_items(items, page_width))
+            .map(|items| {
+                LineFragment::from_items(
+                    items.into_iter().map(|aligned| aligned.item).collect(),
+                    page_width,
+                )
+            })
             .collect::<Result<_, LineError>>()?;
         // Restore canonical page order after orientation-specific band construction.
         fragments.sort_by(|left, right| {
@@ -241,36 +286,31 @@ impl LineAssembler for ConservativeLineAssembler {
 }
 
 impl ConservativeLineAssembler {
-    /// Returns whether two neighboring items are safe to merge before region assignment.
+    /// Applies overlap, font, and gap policies to boxes in the same reference frame.
     fn compatible(
-        left: &TextItem,
-        right: &TextItem,
+        left: &AlignedItem,
+        right: &AlignedItem,
         config: &FusionConfig,
     ) -> bool {
-        if (left.rotation - right.rotation).abs() > 2.0 {
+        if (left.item.rotation - right.item.rotation).abs() > 2.0 {
             return false;
         }
-        if detect_direction(std::slice::from_ref(left), left.rotation)
-            == WritingDirection::Vertical
-        {
-            let horizontal_overlap = (left.bbox.right.min(right.bbox.right)
-                - left.bbox.left.max(right.bbox.left))
-            .max(0.0);
-            return horizontal_overlap
-                / left.bbox.width().min(right.bbox.width()).max(1.0)
-                >= 0.5;
-        }
-        let vertical_overlap = (left.bbox.bottom.min(right.bbox.bottom)
+        let overlap = (left.bbox.bottom.min(right.bbox.bottom)
             - left.bbox.top.max(right.bbox.top))
         .max(0.0);
-        let overlap_ratio = vertical_overlap
-            / left.bbox.height().min(right.bbox.height()).max(1.0);
+        let overlap_ratio =
+            overlap / left.bbox.height().min(right.bbox.height()).max(1.0);
+        if left.vertical {
+            return overlap_ratio >= 0.5;
+        }
         let font_size = left
+            .item
             .style
             .as_ref()
             .and_then(|style| style.font_size)
             .unwrap_or_else(|| left.bbox.height());
         let right_font_size = right
+            .item
             .style
             .as_ref()
             .and_then(|style| style.font_size)
@@ -343,6 +383,155 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    /// Groups oblique spans by their baseline instead of page top, preserving parallel lines.
+    #[test]
+    fn oblique_spans_use_local_text_coordinates() {
+        for rotation in [45, 135, 225, 315] {
+            let items = [
+                (0, "SLANTED ", (10.0, 110.0), (40.0, 80.0)),
+                (1, "TEXT", (45.0, 75.0), (75.0, 45.0)),
+                (2, "OTHER", (30.0, 130.0), (60.0, 100.0)),
+            ]
+            .into_iter()
+            .rev()
+            .map(|(index, text, (x1, y1), (x2, y2))| {
+                let (x1, y1, x2, y2): (f64, f64, f64, f64) = match rotation {
+                    45 => (x1, 140.0 - y1, x2, 140.0 - y2),
+                    135 => (y1, x1, y2, x2),
+                    225 => (140.0 - x1, y1, 140.0 - x2, y2),
+                    _ => (x1, y1, x2, y2),
+                };
+                let mut span = item(
+                    index,
+                    text,
+                    [
+                        x1.min(x2) - 3.0,
+                        y1.min(y2) - 3.0,
+                        x1.max(x2) + 3.0,
+                        y1.max(y2) + 3.0,
+                    ],
+                    10.0,
+                );
+                span.rotation = f64::from(rotation);
+                span.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(x1, y1),
+                    end: docparse_layout::Point::new(x2, y2),
+                });
+                span
+            })
+            .collect();
+            let fragments = ConservativeLineAssembler
+                .fragments(items, &FusionConfig::default())
+                .expect("valid oblique source spans");
+            assert_eq!(fragments.len(), 2);
+            let line = fragments
+                .iter()
+                .find(|fragment| fragment.items.len() == 2)
+                .expect("the two collinear spans must share a line");
+            assert_eq!(
+                line.items
+                    .iter()
+                    .map(|item| item.raw_text.as_str())
+                    .collect::<String>(),
+                "SLANTED TEXT"
+            );
+            assert_eq!(line.rotation.to_bits(), f64::from(rotation).to_bits());
+            let delta_x = line.baseline.end.x - line.baseline.start.x;
+            let delta_y = line.baseline.end.y - line.baseline.start.y;
+            let actual = delta_y.atan2(delta_x).to_degrees().rem_euclid(360.0);
+            assert!((actual - f64::from(rotation)).abs() < 1e-6);
+        }
+    }
+
+    /// Moving slightly differing spans together cannot change their line membership.
+    #[test]
+    fn oblique_grouping_is_translation_invariant() {
+        for (shift_x, shift_y) in
+            [(0.0, 0.0), (500.0, 500.0), (500.0, 0.0), (0.0, 500.0)]
+        {
+            let mut items = Vec::new();
+            for (index, rotation, position) in
+                [(0, 45.0_f64, 10.0), (1, 46.0_f64, 35.0)]
+            {
+                let start = docparse_layout::Point::new(
+                    position + shift_x,
+                    position + shift_y,
+                );
+                let (sine, cosine) = rotation.to_radians().sin_cos();
+                let end = docparse_layout::Point::new(
+                    start.x + cosine * 28.0,
+                    start.y + sine * 28.0,
+                );
+                let mut span = item(
+                    index,
+                    "word",
+                    [start.x - 3.0, start.y - 3.0, end.x + 3.0, end.y + 3.0],
+                    10.0,
+                );
+                span.rotation = rotation;
+                span.baseline = Some(crate::Baseline { start, end });
+                items.push(span);
+            }
+            for input in [items.clone(), items.into_iter().rev().collect()] {
+                let groups = ConservativeLineAssembler
+                    .fragments(input, &FusionConfig::default())
+                    .expect("valid spans");
+                assert_eq!(
+                    groups.len(),
+                    1,
+                    "translation by ({shift_x}, {shift_y}) changed grouping"
+                );
+                assert_eq!(groups.first().expect("one line").items.len(), 2);
+            }
+        }
+    }
+
+    /// Angle jitter must not place another parallel line between adjacent source spans.
+    #[test]
+    fn oblique_grouping_keeps_parallel_bands_with_angle_jitter() {
+        let mut items = Vec::new();
+        for (index, rotation, position, offset) in [
+            (0, 45.0_f64, 10.0, 0.0),
+            (1, 46.0, 35.0, 0.0),
+            (2, 45.0, 10.0, 40.0),
+            (3, 46.0, 35.0, 40.0),
+        ] {
+            let start = docparse_layout::Point::new(
+                position + 500.0,
+                position + 500.0 + offset,
+            );
+            let (sine, cosine) = rotation.to_radians().sin_cos();
+            let end = docparse_layout::Point::new(
+                start.x + cosine * 28.0,
+                start.y + sine * 28.0,
+            );
+            let mut span = item(
+                index,
+                "word",
+                [start.x - 3.0, start.y - 3.0, end.x + 3.0, end.y + 3.0],
+                10.0,
+            );
+            span.rotation = rotation;
+            span.baseline = Some(crate::Baseline { start, end });
+            items.push(span);
+        }
+        let groups = ConservativeLineAssembler
+            .fragments(items, &FusionConfig::default())
+            .expect("parallel lines");
+        assert_eq!(groups.len(), 2);
+        let ids: Vec<_> = groups
+            .iter()
+            .map(|group| {
+                group
+                    .items
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(ids, [vec!["p1:t0", "p1:t1"], vec!["p1:t2", "p1:t3"]]);
     }
 
     /// Reproduces the sub-point y jitter that previously put a right-hand country first.

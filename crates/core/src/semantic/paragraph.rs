@@ -29,6 +29,13 @@ impl ParagraphSplitter {
         previous: &LineFragment,
         next: &LineFragment,
     ) -> ParagraphDecision {
+        let angle_difference =
+            (previous.rotation - next.rotation).abs().rem_euclid(360.0);
+        if angle_difference.min(360.0 - angle_difference) > 2.0 {
+            return ParagraphDecision::Split {
+                reason: "orientation_transition",
+            };
+        }
         let previous_centered = previous.metrics.anchor == LineAnchor::Center;
         let next_centered = next.metrics.anchor == LineAnchor::Center;
         if previous_centered != next_centered {
@@ -248,6 +255,42 @@ mod tests {
                 .between(&first, &second),
             ParagraphDecision::Split { .. }
         ));
+    }
+
+    /// Keeps independently oriented residual text out of an otherwise matching paragraph.
+    #[test]
+    fn orientation_changes_split_residual_paragraphs() {
+        let first = line(
+            0,
+            "body",
+            [10.0, 10.0, 90.0, 20.0],
+            10.0,
+            LineAnchor::Left,
+            0.0,
+            false,
+        );
+        let mut second = line(
+            1,
+            "overlay",
+            [10.0, 22.0, 90.0, 32.0],
+            10.0,
+            LineAnchor::Left,
+            0.0,
+            false,
+        );
+        let splitter = ParagraphSplitter::new(FusionConfig::default());
+        second.rotation = 315.0;
+        assert_eq!(
+            splitter.between(&first, &second),
+            ParagraphDecision::Split {
+                reason: "orientation_transition"
+            }
+        );
+        second.rotation = 359.0;
+        assert_eq!(
+            splitter.between(&first, &second),
+            ParagraphDecision::Continue
+        );
     }
 
     /// Verifies center-anchor and strong style transitions split flow text.

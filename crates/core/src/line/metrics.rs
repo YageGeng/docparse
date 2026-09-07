@@ -77,6 +77,41 @@ impl LineMetrics {
         } else {
             LineAnchor::Right
         };
+        let axes = super::TextAxes::from(first.rotation);
+        let baseline = if axes.is_oblique() {
+            match (first.baseline, items.last().and_then(|item| item.baseline))
+            {
+                (Some(first), Some(last)) => Baseline {
+                    start: first.start,
+                    end: last.end,
+                },
+                _ => {
+                    // Estimate only when measured anchors are unavailable, using the text
+                    // direction through the box center rather than a horizontal bottom edge.
+                    let unit =
+                        axes.unproject(docparse_layout::Point::new(1.0, 0.0));
+                    let half_length = 0.5
+                        * (bbox.width() / unit.x.abs())
+                            .min(bbox.height() / unit.y.abs());
+                    let center = bbox.center();
+                    Baseline {
+                        start: docparse_layout::Point::new(
+                            center.x - unit.x * half_length,
+                            center.y - unit.y * half_length,
+                        ),
+                        end: docparse_layout::Point::new(
+                            center.x + unit.x * half_length,
+                            center.y + unit.y * half_length,
+                        ),
+                    }
+                }
+            }
+        } else {
+            Baseline {
+                start: docparse_layout::Point::new(bbox.left, bbox.bottom),
+                end: docparse_layout::Point::new(bbox.right, bbox.bottom),
+            }
+        };
         Ok(Self::builder()
             .font_size(font_size)
             .font_size_estimated(font_size_estimated)
@@ -85,10 +120,7 @@ impl LineMetrics {
                 italic_characters as f64 / character_count.max(1) as f64,
             )
             .bbox(bbox)
-            .baseline(Baseline {
-                start: docparse_layout::Point::new(bbox.left, bbox.bottom),
-                end: docparse_layout::Point::new(bbox.right, bbox.bottom),
-            })
+            .baseline(baseline)
             .anchor(anchor)
             .indent(bbox.left)
             .build())

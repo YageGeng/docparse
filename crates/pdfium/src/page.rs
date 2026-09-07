@@ -2002,6 +2002,15 @@ pub struct ViewportTransform {
 }
 
 impl ViewportTransform {
+    /// Transforms a page-space direction without applying the viewport translation.
+    #[inline]
+    pub fn transform_vector(&self, page_x: f32, page_y: f32) -> (f32, f32) {
+        (
+            self.a * page_x + self.b * page_y,
+            self.c * page_x + self.d * page_y,
+        )
+    }
+
     /// Transform a single point from page space to viewport space.
     #[inline]
     pub fn transform_point(&self, page_x: f32, page_y: f32) -> (f32, f32) {

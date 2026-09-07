@@ -2,9 +2,11 @@
 // Segmentation behavior is derived from LiteParse revision
 // b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and adapted to DocParse facts.
 
-use docparse_layout::Bbox;
+use docparse_layout::{Bbox, Point};
 use pdfium::{Page, RectF, TextPage};
 use typed_builder::TypedBuilder;
+
+use crate::line::TextAxes;
 
 use crate::{
     ExtractError, PdfProvenance, RepairAction, TextItem, TextItemId,
@@ -20,6 +22,8 @@ pub(crate) struct TextCharFact {
     pub(crate) character: char,
     pub(crate) bbox: Bbox,
     pub(crate) loose_bbox: Bbox,
+    #[builder(default)]
+    pub(crate) origin: Option<Point>,
     #[builder(default)]
     pub(crate) font_name: Option<String>,
     #[builder(default)]
@@ -66,6 +70,8 @@ pub(crate) struct TextItemDraft {
     pub(crate) id: TextItemId,
     pub(crate) raw_text: String,
     pub(crate) bbox: Bbox,
+    #[builder(default)]
+    pub(crate) baseline: Option<crate::Baseline>,
     pub(crate) rotation: f64,
     #[builder(default)]
     pub(crate) font_name: Option<String>,
@@ -144,6 +150,7 @@ impl TryFrom<TextItemDraft> for TextItem {
             .raw_text(draft.raw_text)
             .raw_bbox(Some(draft.bbox))
             .bbox(draft.bbox)
+            .baseline(draft.baseline)
             .rotation(draft.rotation)
             .source(TextSource::Native)
             .extraction_order(draft.extraction_order)
@@ -160,6 +167,8 @@ pub(crate) struct CurrentSegment {
     raw_text: String,
     bbox: Bbox,
     last_bbox: Bbox,
+    #[builder(default)]
+    baseline: Option<crate::Baseline>,
     width_sum: f64,
     character_count: usize,
     rotation: f64,
@@ -205,10 +214,12 @@ impl CurrentSegment {
     /// Starts one segment from its first visible character fact.
     fn from_fact(fact: TextCharFact) -> Self {
         let character = fact.character.to_string();
+        let baseline = fact.oblique_baseline();
         Self::builder()
             .raw_text(character)
             .bbox(fact.loose_bbox)
             .last_bbox(fact.bbox)
+            .baseline(baseline)
             .width_sum(fact.bbox.width())
             .character_count(1)
             .rotation(fact.rotation)
@@ -233,12 +244,46 @@ impl CurrentSegment {
 
     /// Returns whether an incoming visible character must start a new segment.
     fn must_split(&self, fact: &TextCharFact) -> bool {
-        let vertical_shift = (fact.bbox.top - self.last_bbox.top).abs();
-        let line_threshold =
-            (self.last_bbox.height().max(fact.bbox.height()) * 0.5).max(2.0);
-        let gap = fact.bbox.left - self.last_bbox.right;
-        let backtrack =
-            fact.bbox.left + self.average_width() * 0.5 < self.last_bbox.left;
+        let axes = TextAxes::from(self.rotation);
+        let (previous, incoming) = if axes.is_oblique() {
+            let (Ok(previous), Ok(incoming)) = (
+                axes.project_bbox(self.last_bbox),
+                axes.project_bbox(fact.bbox),
+            ) else {
+                return true;
+            };
+            (previous, incoming)
+        } else {
+            (self.last_bbox, fact.bbox)
+        };
+        // Oblique glyphs advance on a tilted baseline; page-y motion is not a line break.
+        let vertical_shift = if axes.is_oblique() {
+            match (self.baseline, fact.origin) {
+                (Some(baseline), Some(origin)) => (axes.project(origin).y
+                    - axes.project(baseline.start).y)
+                    .abs(),
+                _ => (incoming.center().y - previous.center().y).abs(),
+            }
+        } else {
+            (incoming.top - previous.top).abs()
+        };
+        let line_threshold = if axes.is_oblique()
+            && self.baseline.is_some()
+            && fact.origin.is_some()
+        {
+            // Measured origins share a baseline within PDFium's sub-point rounding; an
+            // inflated rotated glyph box must not join a neighboring parallel line.
+            2.0
+        } else {
+            (previous.height().max(incoming.height()) * 0.5).max(2.0)
+        };
+        let gap = incoming.left - previous.right;
+        let average_width = if axes.is_oblique() {
+            previous.width()
+        } else {
+            self.average_width()
+        };
+        let backtrack = incoming.left + average_width * 0.5 < previous.left;
         let style_changed = self.font_name != fact.font_name
             || self.font_flags != fact.font_flags;
         vertical_shift > line_threshold
@@ -260,6 +305,10 @@ impl CurrentSegment {
 
     /// Appends one visible source character without inferring missing text.
     fn push_visible(&mut self, fact: TextCharFact) {
+        match (&mut self.baseline, fact.oblique_baseline()) {
+            (Some(baseline), Some(next)) => baseline.end = next.end,
+            _ => self.baseline = None,
+        }
         self.raw_text.push(fact.character);
         self.bbox = Self::union(self.bbox, fact.loose_bbox);
         self.last_bbox = fact.bbox;
@@ -343,6 +392,7 @@ impl CurrentSegment {
             .id(TextItemId::native(page_number, extraction_order))
             .raw_text(self.raw_text)
             .bbox(self.bbox)
+            .baseline(self.baseline)
             .rotation(self.rotation)
             .font_name(self.font_name)
             .font_size(self.font_size)
@@ -364,6 +414,23 @@ impl CurrentSegment {
             .repair_actions(self.repair_actions)
             .extraction_order(extraction_order)
             .build()
+    }
+}
+
+impl TextCharFact {
+    /// Extends the measured oblique origin to the glyph's projected visible extent.
+    fn oblique_baseline(&self) -> Option<crate::Baseline> {
+        let axes = TextAxes::from(self.rotation);
+        if !axes.is_oblique() {
+            return None;
+        }
+        let origin = self.origin?;
+        let local = axes.project(origin);
+        let bounds = axes.project_bbox(self.bbox).ok()?;
+        Some(crate::Baseline {
+            start: origin,
+            end: axes.unproject(Point::new(bounds.right.max(local.x), local.y)),
+        })
     }
 }
 
@@ -476,6 +543,7 @@ pub(crate) fn extract_page_text_items(
     page_number: u32,
 ) -> Result<Vec<TextItem>, ExtractError> {
     let mut builder = SegmentBuilder::new(page_number);
+    let viewport = page.viewport_transform(view_box);
     let object_indices: std::collections::HashMap<_, _> = page
         .text_object_identities()
         .into_iter()
@@ -546,9 +614,27 @@ pub(crate) fn extract_page_text_items(
             });
         let angle = character.angle();
         let rotation = if angle >= 0.0 {
-            f64::from(angle.to_degrees())
+            // PDFium reports clockwise character angles before the page's /Rotate.
+            // Recover a direction in PDF's y-up coordinates, then use the same
+            // affine map as the glyph bounds. Applying translation to a direction
+            // would make the result depend on the CropBox's position.
+            let (sine, cosine) = angle.sin_cos();
+            let (x, y) = viewport.transform_vector(cosine, -sine);
+            f64::from(y.atan2(x).to_degrees()).rem_euclid(360.0)
         } else {
             0.0
+        };
+        let origin = if TextAxes::from(rotation).is_oblique() {
+            character.origin().map(|origin| {
+                let (x, y) = page.page_to_viewport(
+                    view_box,
+                    origin.x as f32,
+                    origin.y as f32,
+                );
+                Point::new(f64::from(x), f64::from(y))
+            })
+        } else {
+            None
         };
         let font_size = character.font_size();
         let font = character.font();
@@ -597,6 +683,7 @@ pub(crate) fn extract_page_text_items(
                 .character(value)
                 .bbox(strict)
                 .loose_bbox(loose)
+                .origin(origin)
                 .font_name(font_name)
                 .font_size(font_size)
                 .font_height(font_height)
@@ -617,11 +704,19 @@ pub(crate) fn extract_page_text_items(
                 .build(),
         )?;
     }
-    builder
-        .finish()?
-        .into_iter()
-        .map(TextItem::try_from)
-        .collect()
+    let drafts = builder.finish()?;
+    let oblique_count = drafts
+        .iter()
+        .filter(|item| TextAxes::from(item.rotation).is_oblique())
+        .count();
+    if oblique_count > 0 {
+        tracing::debug!(
+            "extracted {} oblique text runs on page {}",
+            oblique_count,
+            page_number
+        );
+    }
+    drafts.into_iter().map(TextItem::try_from).collect()
 }
 
 /// Converts a PDFium viewport rectangle into a validated canonical box.
@@ -724,6 +819,51 @@ mod tests {
         assert!(item.repair_actions.is_empty());
     }
 
+    /// Keeps slanted glyphs on their measured baseline despite changes in page-axis box tops.
+    #[test]
+    fn oblique_glyphs_follow_the_text_axis() {
+        let mut first = fact('A', 0.0, 0.0);
+        first.rotation = 315.0;
+        first.font_size = 48.0;
+        first.bbox = Bbox::try_from([8.435, 645.337, 55.410, 692.312])
+            .expect("valid first oblique glyph");
+        first.loose_bbox = first.bbox;
+        first.origin = Some(docparse_layout::Point::new(32.737, 692.312));
+        let mut next = fact('C', 0.0, 0.0);
+        next.rotation = 315.0;
+        next.font_size = 48.0;
+        next.bbox = Bbox::try_from([32.364, 621.782, 78.931, 668.349])
+            .expect("valid second oblique glyph");
+        next.loose_bbox = next.bbox;
+        next.origin = Some(docparse_layout::Point::new(55.376, 669.673));
+
+        let items = build([first, next.clone()]);
+
+        assert_eq!(items.len(), 1);
+        let item = items.first().expect("one continuous source run");
+        assert_eq!(item.raw_text, "AC");
+        assert_eq!(item.rotation.to_bits(), 315.0_f64.to_bits());
+        let baseline = item.baseline.expect("measured oblique baseline");
+        assert!(baseline.end.x > baseline.start.x);
+        assert!(baseline.end.y < baseline.start.y);
+
+        // Parallel baselines must remain separate even when their rotated page boxes overlap.
+        let mut parallel = next.clone();
+        let shift = 30.0 / 2.0_f64.sqrt();
+        parallel.bbox = Bbox::try_from([
+            next.bbox.left + shift,
+            next.bbox.top + shift,
+            next.bbox.right + shift,
+            next.bbox.bottom + shift,
+        ])
+        .expect("valid parallel glyph");
+        parallel.loose_bbox = parallel.bbox;
+        parallel.origin = next.origin.map(|origin| {
+            docparse_layout::Point::new(origin.x + shift, origin.y + shift)
+        });
+        assert_eq!(build([next, parallel]).len(), 2);
+    }
+
     /// Verifies source spaces and dot leaders remain literal extraction facts.
     #[test]
     fn source_spaces_and_dot_leaders_are_preserved() {
@@ -804,6 +944,90 @@ mod tests {
 
         assert_eq!(item.unicode_mapping, UnicodeMappingStatus::Missing);
         assert_eq!(item.raw_text, "?");
+    }
+
+    /// Builds a valid in-memory PDF with independent text and page rotations.
+    fn oblique_pdf(page_rotation: i32, text_angle: f64) -> Vec<u8> {
+        let (sine, cosine) = text_angle.to_radians().sin_cos();
+        let content = format!(
+            "BT /F1 20 Tf {cosine} {sine} {} {cosine} 200 250 Tm (ACME) Tj ET",
+            -sine
+        );
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /CropBox [10 20 590 780] /UserUnit 2 /Rotate {page_rotation} /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            ),
+        ];
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(
+                format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes(),
+            );
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(
+                format!("{offset:010} 00000 n \n").as_bytes(),
+            );
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    /// Preserves a complete oblique run and its measured direction under every page rotation.
+    #[test]
+    fn oblique_extraction_composes_page_rotation() {
+        let library = Library::init();
+        for text_angle in [15.0, 45.0, 135.0, 225.0, 315.0] {
+            for page_rotation in [0, 90, 180, 270] {
+                let bytes = oblique_pdf(page_rotation, text_angle);
+                let document = library
+                    .load_document_from_bytes(&bytes, None)
+                    .expect("synthetic rotated PDF must open");
+                let page = document.page(0).expect("page must open");
+                let view_box = page.view_box().expect("crop box must exist");
+                let text_page = page.text().expect("text must load");
+                let items =
+                    extract_page_text_items(&page, &text_page, &view_box, 1)
+                        .expect("rotated extraction must succeed");
+                assert_eq!(
+                    items.len(),
+                    1,
+                    "text angle {text_angle}, page rotation {page_rotation}"
+                );
+                let item = items.first().expect("one complete oblique run");
+                assert_eq!(item.raw_text, "ACME");
+                let expected =
+                    (f64::from(page_rotation) - text_angle).rem_euclid(360.0);
+                assert!(
+                    (item.rotation - expected).abs() < 0.01,
+                    "expected {expected}, got {}",
+                    item.rotation
+                );
+                let baseline =
+                    item.baseline.expect("measured baseline must exist");
+                let axes = crate::line::TextAxes::from(expected);
+                let start = axes.project(baseline.start);
+                let end = axes.project(baseline.end);
+                assert!(end.x > start.x);
+                assert!((end.y - start.y).abs() < 0.01);
+            }
+        }
     }
 
     /// Verifies repeated real PDF extraction preserves IDs, text, and geometry order.

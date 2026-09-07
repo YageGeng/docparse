@@ -277,9 +277,48 @@ impl OrderGraph {
                 }
             }
             // Independent SCCs each lose one edge in stable component order, matching prior policy.
-            for edge_index in selected {
-                let edge_index =
-                    edge_index.ok_or(OrderError::InternalOrderConflict)?;
+            for (component_index, edge_index) in
+                selected.into_iter().enumerate()
+            {
+                let Some(edge_index) = edge_index else {
+                    // Bound diagnostics to the failed component and omit all document text.
+                    let constraints = self
+                        .edges
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| {
+                            active_edges.get(*index).copied().unwrap_or(false)
+                                && indexed.endpoints.get(*index).is_some_and(
+                                    |&(from, to)| {
+                                        memberships.get(from)
+                                            == Some(&Some(component_index))
+                                            && memberships.get(to)
+                                                == Some(&Some(component_index))
+                                    },
+                                )
+                        })
+                        .take(8)
+                        .map(|(_, edge)| {
+                            format!(
+                                "{} -> {} ({:?}: {}), boxes {:?} -> {:?}",
+                                edge.from.as_str(),
+                                edge.to.as_str(),
+                                edge.source,
+                                edge.reason,
+                                self.nodes
+                                    .get(&edge.from)
+                                    .map(|node| node.bbox),
+                                self.nodes.get(&edge.to).map(|node| node.bbox),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    tracing::error!(
+                        "irreducible page-order cycle contains {} blocks; up to eight active constraints: {}",
+                        components.get(component_index).map_or(0, Vec::len),
+                        constraints.join("; ")
+                    );
+                    return Err(OrderError::InternalOrderConflict);
+                };
                 let active = active_edges
                     .get_mut(edge_index)
                     .ok_or(OrderError::InternalOrderConflict)?;
@@ -696,11 +735,25 @@ impl OrderGraph {
         }
     }
 
-    /// Adds only nearest unambiguous neighbors to keep geometry edges linear in nodes.
+    /// Connects nearest unambiguous neighbors within the main reading flow.
     fn add_geometry_edges(&mut self, blocks: &[Block]) {
-        for source in blocks {
-            let below = blocks
+        // Marginal blocks already follow a dedicated trailing chain. Geometric links back
+        // into the main flow would contradict that chain when a main block lies below them.
+        let main_flow: Vec<_> = blocks
+            .iter()
+            .filter(|block| !Self::is_rotated_marginal(block))
+            .collect();
+        if main_flow.len() != blocks.len() {
+            tracing::debug!(
+                "building geometry order for {} main-flow blocks; {} marginal blocks follow their dedicated constraints",
+                main_flow.len(),
+                blocks.len() - main_flow.len()
+            );
+        }
+        for source in &main_flow {
+            let below = main_flow
                 .iter()
+                .copied()
                 .filter(|candidate| {
                     candidate.id != source.id
                         && source.bbox.bottom <= candidate.bbox.top
@@ -730,8 +783,9 @@ impl OrderGraph {
                 );
             }
 
-            let right = blocks
+            let right = main_flow
                 .iter()
+                .copied()
                 .filter(|candidate| {
                     if candidate.id == source.id
                         || source.bbox.right > candidate.bbox.left
@@ -1214,5 +1268,44 @@ mod tests {
             ordered.blocks.last().expect("margin must be last").label,
             LayoutLabel::AsideText
         );
+    }
+
+    /// Keeps the trailing margin chain separate from conflicting vertical page geometry.
+    #[test]
+    fn marginal_order_excludes_reverse_page_geometry() {
+        // These three boxes reproduce the page-42 cycle without retaining document content.
+        let blocks: Vec<_> = [
+            (0, LayoutLabel::AsideText, [575.5, 29.5, 588.5, 198.5]),
+            (1, LayoutLabel::AsideText, [579.5, 684.0, 590.0, 719.0]),
+            (4, LayoutLabel::AsideText, [579.0, 756.0, 586.5, 766.5]),
+        ]
+        .into_iter()
+        .map(|(index, label, bbox)| {
+            let mut block = block(index);
+            block.id = BlockId::model(1, index, 0);
+            block.label = label;
+            block.label_source = LabelSource::Model;
+            block.model_region_id = Some(ModelRegionId::detected(1, index));
+            block.model_order = Some(i64::from(index));
+            block.bbox =
+                Bbox::try_from(bbox).expect("valid regression geometry");
+            block
+        })
+        .collect();
+        let mut reversed = blocks.clone();
+        reversed.reverse();
+        for input in [blocks, reversed] {
+            let ordered = super::order_blocks(input)
+                .expect("separate reading flows must remain acyclic");
+            assert_eq!(
+                ordered
+                    .blocks
+                    .iter()
+                    .map(|block| block.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["p1:b:m4:s0", "p1:b:m0:s0", "p1:b:m1:s0"]
+            );
+            assert!(ordered.removed_edges.is_empty());
+        }
     }
 }

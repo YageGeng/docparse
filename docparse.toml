@@ -3,7 +3,8 @@ model_path = "models/pp-doclayout-v3/inference.onnx"
 model_config_path = "models/pp-doclayout-v3/inference.yml"
 model_manifest_path = "models/pp-doclayout-v3/model-manifest.json"
 score_threshold = 0.5
-execution_provider = "cuda"
+# execution_provider = "cuda"
+execution_provider = "coreml"
 session_pool_size = 1
 
 [runtime]

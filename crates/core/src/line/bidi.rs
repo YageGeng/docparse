@@ -47,6 +47,23 @@ pub(crate) fn detect_direction(
 
 /// Orders text item containers without mutating text within an item.
 pub(crate) fn order_items(items: &mut [TextItem], direction: WritingDirection) {
+    let axes =
+        super::TextAxes::from(items.first().map_or(0.0, |item| item.rotation));
+    if axes.is_oblique() {
+        items.sort_by(|left, right| {
+            let ordering = axes
+                .project(left.bbox.center())
+                .x
+                .total_cmp(&axes.project(right.bbox.center()).x);
+            let ordering = if direction == WritingDirection::RightToLeft {
+                ordering.reverse()
+            } else {
+                ordering
+            };
+            ordering.then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        });
+        return;
+    }
     let rotation = items
         .first()
         .map_or(0, |item| canonical_rotation(item.rotation));

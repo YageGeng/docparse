@@ -7,8 +7,10 @@ use docparse_layout::{
 };
 use typed_builder::TypedBuilder;
 
-use crate::line::LineFragment;
-use crate::{LineError, ModelRegionId, TextItem};
+use crate::line::{
+    ConservativeLineAssembler, LineAssembler, LineFragment, TextAxes,
+};
+use crate::{LineError, ModelRegionId, TextItem, TextSource};
 
 /// Reasons that an untrusted model detection cannot become a fusion seed.
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +58,7 @@ impl ModelSeedInput {
 /// Exact assignment score components retained for diagnostics and tie-breaking.
 #[derive(Debug, Clone, PartialEq, TypedBuilder)]
 pub(crate) struct AssignmentScore {
+    /// Native oblique lines use baseline coverage; other fragments use box-area coverage.
     pub(crate) coverage: f64,
     pub(crate) center_inside: f64,
     pub(crate) baseline_intersection: f64,
@@ -178,11 +181,36 @@ impl BlockSeed {
         {
             return None;
         }
-        let coverage = (self.geometry.intersection_area(fragment.bbox)
-            / line_area)
-            .clamp(0.0, 1.0);
-        let center_is_inside =
-            self.geometry.contains_point(fragment.bbox.center());
+        let baseline_length =
+            segment_length(fragment.baseline.start, fragment.baseline.end);
+        let inside_length = self.geometry.baseline_inside_length(
+            fragment.baseline.start,
+            fragment.baseline.end,
+        );
+        let native_oblique = TextAxes::from(fragment.rotation).is_oblique()
+            && fragment
+                .items
+                .iter()
+                .all(|item| item.source == TextSource::Native);
+        // A long slanted line's AABB includes large empty triangles. Their area must
+        // not penalize a model polygon that tightly encloses the actual text. Baseline
+        // coverage works for both one long source item and a line assembled from many
+        // short items; averaging item AABBs would still fail for the single-item case.
+        let coverage = if native_oblique && baseline_length > 0.0 {
+            inside_length / baseline_length
+        } else {
+            self.geometry.intersection_area(fragment.bbox) / line_area
+        }
+        .clamp(0.0, 1.0);
+        let center = if native_oblique {
+            Point::new(
+                (fragment.baseline.start.x + fragment.baseline.end.x) * 0.5,
+                (fragment.baseline.start.y + fragment.baseline.end.y) * 0.5,
+            )
+        } else {
+            fragment.bbox.center()
+        };
+        let center_is_inside = self.geometry.contains_point(center);
         let center_inside = if center_is_inside { 1.0 } else { 0.0 };
         if coverage < config.minimum_line_coverage
             && !(center_is_inside
@@ -190,14 +218,57 @@ impl BlockSeed {
         {
             return None;
         }
-        let baseline_length =
-            segment_length(fragment.baseline.start, fragment.baseline.end);
+        if native_oblique {
+            // A rotated AABB can overlap several unrelated regions. Require one owner
+            // to contain the complete reconstructed baseline, allowing only two points
+            // of endpoint rounding. Do not clip the line to the page here: text that
+            // continues outside a cropped figure is not evidence of figure ownership.
+            if baseline_length <= 0.0 || baseline_length - inside_length > 2.0 {
+                return None;
+            }
+            let text_region = matches!(
+                self.label,
+                LayoutLabel::Abstract
+                    | LayoutLabel::AsideText
+                    | LayoutLabel::Content
+                    | LayoutLabel::DocTitle
+                    | LayoutLabel::FigureTitle
+                    | LayoutLabel::Footer
+                    | LayoutLabel::Footnote
+                    | LayoutLabel::Header
+                    | LayoutLabel::Number
+                    | LayoutLabel::ParagraphTitle
+                    | LayoutLabel::Reference
+                    | LayoutLabel::ReferenceContent
+                    | LayoutLabel::Text
+                    | LayoutLabel::VerticalText
+                    | LayoutLabel::VisionFootnote
+            );
+            // Ordinary source facts are assigned first. Crossing an established text
+            // flow in a different direction makes this an independent line, regardless
+            // of opacity or page-relative size. Graphics, tables and formulas may mix
+            // orientations; contained titles without crossing body text keep their owner.
+            if text_region
+                && self.fragments.iter().any(|existing| {
+                    let delta = (existing.rotation - fragment.rotation)
+                        .abs()
+                        .rem_euclid(360.0);
+                    delta.min(360.0 - delta) > 2.0
+                        && rectangle_polygon(existing.bbox).is_ok_and(
+                            |bounds| {
+                                bounds.baseline_inside_length(
+                                    fragment.baseline.start,
+                                    fragment.baseline.end,
+                                ) > 0.0
+                            },
+                        )
+                })
+            {
+                return None;
+            }
+        }
         let baseline_intersection = if baseline_length > 0.0 {
-            (self.geometry.baseline_inside_length(
-                fragment.baseline.start,
-                fragment.baseline.end,
-            ) / baseline_length)
-                .clamp(0.0, 1.0)
+            (inside_length / baseline_length).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -305,13 +376,23 @@ impl AssignmentEngine {
         inline_formulas
             .sort_by_key(|detection| detection.source_detection_index);
 
-        // Ownership is decided at the smallest retained text-fact boundary. A visual
-        // line can straddle an incomplete or inaccurate model box, so assigning the
-        // preassembled union would incorrectly pull outside items into that region.
+        // Preserve per-item ownership for ordinary text, whose horizontal lines may
+        // straddle columns. Native oblique runs are reconstructed before assignment so
+        // separate PDF text objects cannot send parts of one crossing line to different
+        // owners. Moving the original facts preserves unique ownership without clones.
         let mut residual = Vec::with_capacity(items.len());
-        for item in items {
-            let fragment =
-                LineFragment::from_items(vec![item], self.page_bbox.width())?;
+        let (oblique, ordinary): (Vec<_>, Vec<_>) =
+            items.into_iter().partition(|item| {
+                item.source == TextSource::Native
+                    && TextAxes::from(item.rotation).is_oblique()
+            });
+        let ordinary = ordinary.into_iter().map(|item| {
+            LineFragment::from_items(vec![item], self.page_bbox.width())
+        });
+        let oblique =
+            ConservativeLineAssembler.fragments(oblique, &self.config)?;
+        for fragment in ordinary.chain(oblique.into_iter().map(Ok)) {
+            let fragment = fragment?;
             let mut owner = None;
             let mut candidate_count = 0_usize;
             // Select the stable maximum in one pass so each fragment avoids allocating and
@@ -358,6 +439,17 @@ impl AssignmentEngine {
         }
         for seed in &mut model_seeds {
             seed.fragments.sort_by(fragment_order);
+        }
+        let independent_lines = residual
+            .iter()
+            .filter(|fragment| TextAxes::from(fragment.rotation).is_oblique())
+            .count();
+        if independent_lines > 0 {
+            tracing::debug!(
+                "kept {} oblique lines without a compatible enclosing model region independent on page {}",
+                independent_lines,
+                self.page_number
+            );
         }
 
         Ok(AssignmentResult::builder()
@@ -733,5 +825,231 @@ mod tests {
 
         assert_eq!(model_ids, vec!["p1:t0"]);
         assert_eq!(residual_ids, vec!["p1:t1"]);
+    }
+
+    /// Builds a slanted source item independently of its paint style.
+    fn oblique_item(
+        index: u32,
+        points: [f64; 4],
+        alpha: Option<u8>,
+    ) -> TextItem {
+        let [x1, y1, x2, y2] = points;
+        TextItem::builder()
+            .id(TextItemId::native(1, index))
+            .raw_text(format!("part-{index}"))
+            .bbox(bbox([
+                x1.min(x2) - 3.0,
+                y1.min(y2) - 3.0,
+                x1.max(x2) + 3.0,
+                y1.max(y2) + 3.0,
+            ]))
+            .baseline(Some(Baseline {
+                start: Point::new(x1, y1),
+                end: Point::new(x2, y2),
+            }))
+            .rotation((y2 - y1).atan2(x2 - x1).to_degrees().rem_euclid(360.0))
+            .source(TextSource::Native)
+            .style(Some(
+                crate::TextStyle::builder()
+                    .font_size(Some(20.0))
+                    .fill_color(alpha.map(|value| [20, 40, 100, value]))
+                    .build(),
+            ))
+            .build()
+    }
+
+    /// A contained slanted title retains its model owner regardless of size or opacity.
+    #[test]
+    fn oblique_assignment_preserves_contained_titles() {
+        for alpha in [None, Some(51), Some(254), Some(255)] {
+            for points in
+                [[10.0, 190.0, 190.0, 10.0], [70.0, 100.0, 100.0, 95.0]]
+            {
+                let mut title = detection(0, [0.0, 0.0, 200.0, 200.0], 0.9, 0);
+                title.label = LayoutLabel::DocTitle;
+                title.class_id = 6;
+                title.raw_label = "doc_title".to_owned();
+                let result = AssignmentEngine::new(
+                    1,
+                    bbox([0.0, 0.0, 200.0, 200.0]),
+                    FusionConfig::default(),
+                )
+                .assign(vec![oblique_item(0, points, alpha)], vec![title])
+                .expect("title assignment must succeed");
+                assert!(
+                    result.residual.is_empty(),
+                    "contained title with alpha {alpha:?} must keep its model owner"
+                );
+                assert_eq!(
+                    result
+                        .model_seeds
+                        .first()
+                        .expect("title region")
+                        .fragments
+                        .len(),
+                    1
+                );
+            }
+        }
+    }
+
+    /// Small overlays cannot merge into an intersecting paragraph with a different direction.
+    #[test]
+    fn oblique_assignment_separates_crossing_text_flows() {
+        for alpha in [None, Some(51), Some(254), Some(255)] {
+            let overlay = oblique_item(1, [70.0, 110.0, 120.0, 85.0], alpha);
+            let body = fragment(0, [20.0, 90.0, 180.0, 105.0]).items.remove(0);
+            for items in [
+                vec![body.clone(), overlay.clone()],
+                vec![overlay.clone(), body.clone()],
+            ] {
+                let result = AssignmentEngine::new(
+                    1,
+                    bbox([0.0, 0.0, 200.0, 200.0]),
+                    FusionConfig::default(),
+                )
+                .assign(
+                    items,
+                    vec![detection(0, [10.0, 70.0, 190.0, 130.0], 0.9, 0)],
+                )
+                .expect("crossing flow assignment must succeed");
+                assert_eq!(
+                    result.residual.len(),
+                    1,
+                    "crossing text with alpha {alpha:?} must stay independent"
+                );
+                let independent =
+                    result.residual.first().expect("independent line");
+                assert_eq!(
+                    independent.items.first().expect("source item").id.as_str(),
+                    "p1:t1"
+                );
+                assert_eq!(
+                    result
+                        .model_seeds
+                        .first()
+                        .expect("body region")
+                        .fragments
+                        .len(),
+                    1
+                );
+            }
+        }
+    }
+
+    /// Separate source objects on one slanted baseline cannot acquire different region owners.
+    #[test]
+    fn oblique_assignment_keeps_cross_region_runs_whole() {
+        for alpha in [None, Some(51), Some(255)] {
+            let result = AssignmentEngine::new(
+                1,
+                bbox([0.0, 0.0, 200.0, 200.0]),
+                FusionConfig::default(),
+            )
+            .assign(
+                vec![
+                    oblique_item(0, [50.0, 110.0, 78.0, 96.0], alpha),
+                    oblique_item(1, [82.0, 94.0, 110.0, 80.0], alpha),
+                ],
+                vec![
+                    detection(0, [45.0, 90.0, 80.0, 115.0], 0.9, 0),
+                    detection(1, [80.0, 75.0, 115.0, 98.0], 0.9, 1),
+                ],
+            )
+            .expect("cross-region assignment must succeed");
+            assert!(
+                result
+                    .model_seeds
+                    .iter()
+                    .all(|seed| seed.fragments.is_empty())
+            );
+            assert_eq!(result.residual.len(), 1);
+            assert_eq!(
+                result
+                    .residual
+                    .first()
+                    .expect("complete crossing line")
+                    .items
+                    .len(),
+                2
+            );
+        }
+    }
+
+    /// An accurate oriented title polygon retains both short spans and one long source run.
+    #[test]
+    fn oblique_assignment_preserves_tight_polygon_owner() {
+        let page = bbox([0.0, 0.0, 400.0, 400.0]);
+        let mut title = detection(0, [16.0, 16.0, 304.0, 304.0], 0.99, 0);
+        title.label = LayoutLabel::DocTitle;
+        title.raw_label = "doc_title".to_owned();
+        title.class_id = 6;
+        title.polygon = Some(
+            Polygon::try_from(vec![
+                Point::new(16.0, 296.0),
+                Point::new(296.0, 16.0),
+                Point::new(304.0, 24.0),
+                Point::new(24.0, 304.0),
+            ])
+            .expect("tight title polygon"),
+        );
+        let config = FusionConfig::default();
+        let spans: Vec<_> = (0..8)
+            .map(|index| {
+                let x = 20.0 + 35.0 * f64::from(index);
+                let y = 300.0 - 35.0 * f64::from(index);
+                oblique_item(index, [x, y, x + 32.0, y - 32.0], None)
+            })
+            .collect();
+        for items in [
+            spans,
+            vec![oblique_item(0, [20.0, 300.0, 297.0, 23.0], None)],
+        ] {
+            let count = items.len();
+            let result = AssignmentEngine::new(1, page, config.clone())
+                .assign(items, vec![title.clone()])
+                .expect("title assignment");
+            assert!(
+                result.residual.is_empty(),
+                "a title with {count} source items must retain its accurate polygon owner"
+            );
+            let seed = result.model_seeds.first().expect("title region");
+            assert_eq!(seed.label, LayoutLabel::DocTitle);
+            assert_eq!(
+                seed.fragments
+                    .iter()
+                    .map(|fragment| fragment.items.len())
+                    .sum::<usize>(),
+                count
+            );
+        }
+    }
+
+    /// Charts may contain differently oriented labels when each complete line is enclosed.
+    #[test]
+    fn oblique_assignment_preserves_chart_labels() {
+        let mut chart = detection(0, [0.0, 0.0, 200.0, 200.0], 0.9, 0);
+        chart.label = LayoutLabel::Chart;
+        chart.class_id = 3;
+        chart.raw_label = "chart".to_owned();
+        let mut items = fragment(0, [20.0, 90.0, 180.0, 105.0]).items;
+        items.push(oblique_item(1, [10.0, 190.0, 190.0, 10.0], Some(51)));
+        let result = AssignmentEngine::new(
+            1,
+            bbox([0.0, 0.0, 200.0, 200.0]),
+            FusionConfig::default(),
+        )
+        .assign(items, vec![chart])
+        .expect("chart label assignment must succeed");
+        assert!(result.residual.is_empty());
+        assert_eq!(
+            result
+                .model_seeds
+                .first()
+                .expect("chart region")
+                .fragments
+                .len(),
+            2
+        );
     }
 }
