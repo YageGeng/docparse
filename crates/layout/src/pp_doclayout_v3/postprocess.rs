@@ -7,8 +7,6 @@ use crate::{
     PostprocessError,
 };
 
-use super::LABELS;
-
 /// Converts one page's exported bbox rows into stable neutral detections.
 pub(crate) fn postprocess_page(
     rows: ArrayView2<'_, f32>,
@@ -62,10 +60,7 @@ pub(crate) fn postprocess_page(
             continue;
         }
         let class_id = *class_value as i64;
-        let Ok(class_index) = usize::try_from(class_id) else {
-            continue;
-        };
-        let Some(raw_label) = LABELS.get(class_index).copied() else {
+        let Ok(label) = LayoutLabel::try_from(class_id) else {
             continue;
         };
         if [xmin, ymin, xmax, ymax]
@@ -103,9 +98,9 @@ pub(crate) fn postprocess_page(
         detections.push(
             LayoutDetection::builder()
                 .source_detection_index(source_detection_index)
-                .raw_label(raw_label.to_owned())
+                .raw_label(label.to_str().to_owned())
                 .class_id(class_id)
-                .label(LayoutLabel::from(raw_label))
+                .label(label)
                 .confidence(f64::from(*score))
                 .bbox(bbox)
                 .geometry_source(GeometrySource::DerivedFromBbox)
@@ -197,6 +192,27 @@ mod tests {
             .collect();
 
         assert_eq!(keys, vec![(3, 1), (3, 2), (7, 0)]);
+    }
+
+    /// Filters invalid numeric classes while keeping the original row index and typed label.
+    #[test]
+    fn invalid_class_values_do_not_produce_detections() {
+        let rows = array![
+            [-1.0, 0.9, 0.0, 0.0, 20.0, 20.0, 0.0],
+            [25.0, 0.9, 0.0, 0.0, 20.0, 20.0, 1.0],
+            [f32::MAX, 0.9, 0.0, 0.0, 20.0, 20.0, 2.0],
+            [f32::NAN, 0.9, 0.0, 0.0, 20.0, 20.0, 3.0],
+            [0.5, 0.9, 0.0, 0.0, 20.0, 20.0, 4.0],
+            [24.0, 0.9, 0.0, 0.0, 20.0, 20.0, 5.0],
+        ];
+        let detections = postprocess_page(rows.view(), 6, 0.5, &transform())
+            .expect("invalid classes must be filtered");
+        assert_eq!(detections.len(), 1);
+        let detection = detections.first().expect("one valid model row");
+        assert_eq!(detection.source_detection_index, 5);
+        assert_eq!(detection.class_id, 24);
+        assert_eq!(detection.raw_label, "vision_footnote");
+        assert_eq!(detection.label, LayoutLabel::VisionFootnote);
     }
 
     /// Verifies malformed output shapes and counts fail before row access.

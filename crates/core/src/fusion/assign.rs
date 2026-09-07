@@ -10,8 +10,6 @@ use typed_builder::TypedBuilder;
 use crate::line::LineFragment;
 use crate::{LineError, ModelRegionId, TextItem};
 
-const MODEL_CLASS_COUNT: i64 = 25;
-
 /// Reasons that an untrusted model detection cannot become a fusion seed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SeedError {
@@ -109,9 +107,8 @@ impl TryFrom<ModelSeedInput> for BlockSeed {
         if page_number == 0 {
             return Err(SeedError::InvalidPageNumber);
         }
-        if !(0..MODEL_CLASS_COUNT).contains(&detection.class_id) {
-            return Err(SeedError::InvalidClass(detection.class_id));
-        }
+        LayoutLabel::try_from(detection.class_id)
+            .map_err(|_source| SeedError::InvalidClass(detection.class_id))?;
         if !detection.confidence.is_finite()
             || !(0.0..=1.0).contains(&detection.confidence)
         {

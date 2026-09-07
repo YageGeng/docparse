@@ -44,6 +44,14 @@ pub enum GeometryError {
     InvalidPolygon { reason: String },
 }
 
+/// A numeric index outside the fixed PP-DocLayoutV3 label set.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("layout label index {index} is outside the fixed model label set")]
+pub struct LayoutLabelIndexError {
+    /// The original numeric input, preserved across signed and unsigned conversions.
+    pub index: String,
+}
+
 /// Errors returned by layout engines.
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {

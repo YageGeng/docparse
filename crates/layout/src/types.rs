@@ -4,7 +4,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;
 
-use crate::{Bbox, PageImageError, PageTransform, Polygon};
+use crate::{
+    Bbox, LayoutLabelIndexError, PageImageError, PageTransform, Polygon,
+};
 
 /// Pixel layouts supported by layout and optional OCR engines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,44 +133,128 @@ pub enum LayoutLabel {
     Unknown(String),
 }
 
+impl LayoutLabel {
+    /// Known labels in the exact numeric class order exported by PP-DocLayoutV3.
+    pub const ALL: [Self; 25] = [
+        Self::Abstract,
+        Self::Algorithm,
+        Self::AsideText,
+        Self::Chart,
+        Self::Content,
+        Self::DisplayFormula,
+        Self::DocTitle,
+        Self::FigureTitle,
+        Self::Footer,
+        Self::FooterImage,
+        Self::Footnote,
+        Self::FormulaNumber,
+        Self::Header,
+        Self::HeaderImage,
+        Self::Image,
+        Self::InlineFormula,
+        Self::Number,
+        Self::ParagraphTitle,
+        Self::Reference,
+        Self::ReferenceContent,
+        Self::Seal,
+        Self::Table,
+        Self::Text,
+        Self::VerticalText,
+        Self::VisionFootnote,
+    ];
+
+    /// Returns the canonical model name or the original unknown label without allocation.
+    pub fn to_str(&self) -> &str {
+        match self {
+            Self::Abstract => "abstract",
+            Self::Algorithm => "algorithm",
+            Self::AsideText => "aside_text",
+            Self::Chart => "chart",
+            Self::Content => "content",
+            Self::DisplayFormula => "display_formula",
+            Self::DocTitle => "doc_title",
+            Self::FigureTitle => "figure_title",
+            Self::Footer => "footer",
+            Self::FooterImage => "footer_image",
+            Self::Footnote => "footnote",
+            Self::FormulaNumber => "formula_number",
+            Self::Header => "header",
+            Self::HeaderImage => "header_image",
+            Self::Image => "image",
+            Self::InlineFormula => "inline_formula",
+            Self::Number => "number",
+            Self::ParagraphTitle => "paragraph_title",
+            Self::Reference => "reference",
+            Self::ReferenceContent => "reference_content",
+            Self::Seal => "seal",
+            Self::Table => "table",
+            Self::Text => "text",
+            Self::VerticalText => "vertical_text",
+            Self::VisionFootnote => "vision_footnote",
+            Self::Unknown(value) => value,
+        }
+    }
+
+    /// Returns the fixed-model class index; unknown labels have no model index.
+    pub fn idx(&self) -> Option<usize> {
+        Self::ALL.iter().position(|label| label == self)
+    }
+}
+
+impl TryFrom<usize> for LayoutLabel {
+    type Error = LayoutLabelIndexError;
+
+    /// Resolves a checked array index without accepting unsupported classes.
+    fn try_from(index: usize) -> Result<Self, Self::Error> {
+        Self::ALL
+            .get(index)
+            .cloned()
+            .ok_or_else(|| LayoutLabelIndexError {
+                index: index.to_string(),
+            })
+    }
+}
+
+impl TryFrom<i64> for LayoutLabel {
+    type Error = LayoutLabelIndexError;
+
+    /// Rejects negative or out-of-range model class IDs before indexing.
+    fn try_from(index: i64) -> Result<Self, Self::Error> {
+        let index = usize::try_from(index).map_err(|_source| {
+            LayoutLabelIndexError {
+                index: index.to_string(),
+            }
+        })?;
+        Self::try_from(index)
+    }
+}
+
+impl TryFrom<i32> for LayoutLabel {
+    type Error = LayoutLabelIndexError;
+
+    /// Accepts ordinary integer literals through the same checked class-ID conversion.
+    fn try_from(index: i32) -> Result<Self, Self::Error> {
+        Self::try_from(i64::from(index))
+    }
+}
+
 impl From<&str> for LayoutLabel {
     /// Maps known raw labels while preserving any future model label verbatim.
     fn from(value: &str) -> Self {
-        match value {
-            "abstract" => Self::Abstract,
-            "algorithm" => Self::Algorithm,
-            "aside_text" => Self::AsideText,
-            "chart" => Self::Chart,
-            "content" => Self::Content,
-            "display_formula" => Self::DisplayFormula,
-            "doc_title" => Self::DocTitle,
-            "figure_title" => Self::FigureTitle,
-            "footer" => Self::Footer,
-            "footer_image" => Self::FooterImage,
-            "footnote" => Self::Footnote,
-            "formula_number" => Self::FormulaNumber,
-            "header" => Self::Header,
-            "header_image" => Self::HeaderImage,
-            "image" => Self::Image,
-            "inline_formula" => Self::InlineFormula,
-            "number" => Self::Number,
-            "paragraph_title" => Self::ParagraphTitle,
-            "reference" => Self::Reference,
-            "reference_content" => Self::ReferenceContent,
-            "seal" => Self::Seal,
-            "table" => Self::Table,
-            "text" => Self::Text,
-            "vertical_text" => Self::VerticalText,
-            "vision_footnote" => Self::VisionFootnote,
-            unknown => Self::Unknown(unknown.to_owned()),
-        }
+        Self::ALL
+            .into_iter()
+            .find(|label| label.to_str() == value)
+            .unwrap_or_else(|| Self::Unknown(value.to_owned()))
     }
 }
 
 impl From<String> for LayoutLabel {
     /// Maps an owned raw label without losing unknown text.
     fn from(value: String) -> Self {
-        Self::from(value.as_str())
+        Self::ALL
+            .into_iter()
+            .find(|label| label.to_str() == value)
+            .unwrap_or(Self::Unknown(value))
     }
 }
 

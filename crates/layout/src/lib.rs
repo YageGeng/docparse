@@ -12,8 +12,8 @@ mod types;
 
 pub use engine::LayoutEngine;
 pub use error::{
-    GeometryError, LayoutError, PageImageError, PostprocessError,
-    PreprocessError,
+    GeometryError, LayoutError, LayoutLabelIndexError, PageImageError,
+    PostprocessError, PreprocessError,
 };
 pub use geometry::{
     AffineTransform, Bbox, PageRotation, PageTransform, PageTransformInput,

@@ -5,8 +5,8 @@ use serde::Deserialize;
 
 use crate::wasm_compat::LayoutSessionPool;
 use crate::{
-    LayoutDetection, LayoutEngine, LayoutError, LayoutRequest, ModelArtifacts,
-    PP_DOCLAYOUT_V3_REVISION,
+    LayoutDetection, LayoutEngine, LayoutError, LayoutLabel, LayoutRequest,
+    ModelArtifacts, PP_DOCLAYOUT_V3_REVISION,
 };
 
 pub(crate) mod postprocess;
@@ -15,34 +15,6 @@ pub(crate) mod schema;
 pub(crate) mod session;
 
 use preprocess::preprocess;
-
-const LABELS: [&str; 25] = [
-    "abstract",
-    "algorithm",
-    "aside_text",
-    "chart",
-    "content",
-    "display_formula",
-    "doc_title",
-    "figure_title",
-    "footer",
-    "footer_image",
-    "footnote",
-    "formula_number",
-    "header",
-    "header_image",
-    "image",
-    "inline_formula",
-    "number",
-    "paragraph_title",
-    "reference",
-    "reference_content",
-    "seal",
-    "table",
-    "text",
-    "vertical_text",
-    "vision_footnote",
-];
 
 #[derive(Debug, Deserialize)]
 struct InferenceConfig {
@@ -214,7 +186,15 @@ fn verify_model_config(bytes: &[u8]) -> Result<(), LayoutError> {
             reason: "resize or normalization contract mismatch".to_owned(),
         });
     }
-    if !config.label_list.iter().map(String::as_str).eq(LABELS) {
+    if !config
+        .label_list
+        .iter()
+        .map(String::as_str)
+        .eq(LayoutLabel::ALL.iter().map(LayoutLabel::to_str))
+    {
+        tracing::error!(
+            "PP-DocLayoutV3 label list does not match the fixed class order"
+        );
         return Err(LayoutError::UnsupportedModelConfig {
             reason: "label list mismatch".to_owned(),
         });
