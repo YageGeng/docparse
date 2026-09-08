@@ -184,6 +184,28 @@ pub struct PdfiumBindings {
     ) -> FPDF_BOOL,
     pub FPDFPageObj_GetMarkedContentID:
         unsafe extern "C" fn(FPDF_PAGEOBJECT) -> std::os::raw::c_int,
+    pub FPDFPageObj_GetRotatedBounds:
+        unsafe extern "C" fn(FPDF_PAGEOBJECT, *mut FS_QUADPOINTSF) -> FPDF_BOOL,
+    pub FPDFPageObj_CountMarks:
+        unsafe extern "C" fn(FPDF_PAGEOBJECT) -> std::os::raw::c_int,
+    pub FPDFPageObj_GetMark: unsafe extern "C" fn(
+        FPDF_PAGEOBJECT,
+        std::os::raw::c_ulong,
+    ) -> FPDF_PAGEOBJECTMARK,
+    pub FPDFPageObjMark_GetName: unsafe extern "C" fn(
+        FPDF_PAGEOBJECTMARK,
+        *mut FPDF_WCHAR,
+        std::os::raw::c_ulong,
+        *mut std::os::raw::c_ulong,
+    ) -> FPDF_BOOL,
+    pub FPDFPageObjMark_GetParamStringValue: unsafe extern "C" fn(
+        FPDF_PAGEOBJECTMARK,
+        FPDF_BYTESTRING,
+        *mut FPDF_WCHAR,
+        std::os::raw::c_ulong,
+        *mut std::os::raw::c_ulong,
+    )
+        -> FPDF_BOOL,
     pub FPDFImageObj_GetRenderedBitmap: unsafe extern "C" fn(
         FPDF_DOCUMENT,
         FPDF_PAGE,
@@ -814,6 +836,17 @@ impl PdfiumBindings {
             FPDFPage_GetObject: load_fn!(lib, "FPDFPage_GetObject"),
             FPDFPageObj_GetType: load_fn!(lib, "FPDFPageObj_GetType"),
             FPDFPageObj_GetBounds: load_fn!(lib, "FPDFPageObj_GetBounds"),
+            FPDFPageObj_GetRotatedBounds: load_fn!(
+                lib,
+                "FPDFPageObj_GetRotatedBounds"
+            ),
+            FPDFPageObj_CountMarks: load_fn!(lib, "FPDFPageObj_CountMarks"),
+            FPDFPageObj_GetMark: load_fn!(lib, "FPDFPageObj_GetMark"),
+            FPDFPageObjMark_GetName: load_fn!(lib, "FPDFPageObjMark_GetName"),
+            FPDFPageObjMark_GetParamStringValue: load_fn!(
+                lib,
+                "FPDFPageObjMark_GetParamStringValue"
+            ),
             FPDFPageObj_GetMarkedContentID: load_fn!(
                 lib,
                 "FPDFPageObj_GetMarkedContentID"

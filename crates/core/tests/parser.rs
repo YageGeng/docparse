@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use docparse_config::{RawConfig, ValidatedConfig};
-use docparse_core::{DocParser, LabelSource, ResultValidator};
+use docparse_core::{
+    DocParser, LabelSource, ParseObserver, ParseProgress, ResultValidator,
+};
 use docparse_layout::{
     Bbox, GeometrySource, LayoutDetection, LayoutEngine, LayoutError,
     LayoutLabel, LayoutRequest,
@@ -155,4 +158,74 @@ async fn multipage_pipeline_is_offline_and_concurrency_deterministic() {
             .any(|block| block.label_source == LabelSource::Fallback)
     }));
     ResultValidator::validate(&serial).expect("multipage result must validate");
+}
+
+/// Records actual pipeline boundaries and validates borrowed PDFium image buffers.
+#[derive(Default)]
+struct RecordingObserver {
+    progress: Mutex<Vec<ParseProgress>>,
+    images: Mutex<Vec<u32>>,
+}
+
+impl ParseObserver for RecordingObserver {
+    /// Retains ordered progress events without changing parser behavior.
+    fn on_progress(&self, progress: ParseProgress) {
+        self.progress.lock().expect("progress lock").push(progress);
+    }
+
+    /// Checks the image contract before the pipeline releases its page buffer.
+    fn on_page_image(
+        &self,
+        page_number: u32,
+        image: &docparse_layout::PageImage,
+    ) {
+        assert!(image.width() > 0 && image.height() > 0);
+        assert_eq!(
+            image.data().len(),
+            image.width() as usize * image.height() as usize * 3
+        );
+        self.images.lock().expect("images lock").push(page_number);
+    }
+}
+
+/// Observed parsing reports real completion counts and preserves the ordinary result.
+#[tokio::test]
+async fn progress_and_page_images_preserve_parse_results() {
+    let parser = parser(3).await;
+    let bytes = Arc::<[u8]>::from(
+        std::fs::read(fixture_path()).expect("fixture bytes"),
+    );
+    let expected = parser
+        .parse_bytes(Arc::clone(&bytes))
+        .await
+        .expect("plain parse");
+    let observer = RecordingObserver::default();
+    let actual = parser
+        .parse_bytes_with_observer(bytes, &observer)
+        .await
+        .expect("observed parse");
+    assert_eq!(actual, expected);
+    assert_eq!(*observer.images.lock().expect("images lock"), [1, 2, 3]);
+    let events = observer.progress.lock().expect("progress lock").clone();
+    assert_eq!(events.first(), Some(&ParseProgress::Opening));
+    assert_eq!(events.last(), Some(&ParseProgress::Complete { total: 3 }));
+    for completed in 0..=3 {
+        assert!(events.contains(&ParseProgress::Scanning {
+            completed,
+            total: 3
+        }));
+        assert!(events.contains(&ParseProgress::Analyzing {
+            completed,
+            total: 3
+        }));
+    }
+    let failed = RecordingObserver::default();
+    parser
+        .parse_bytes_with_observer(Arc::from([1_u8, 2, 3]), &failed)
+        .await
+        .expect_err("invalid PDF must fail before completion");
+    assert_eq!(
+        *failed.progress.lock().expect("progress lock"),
+        [ParseProgress::Opening]
+    );
 }

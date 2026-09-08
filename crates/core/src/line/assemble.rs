@@ -307,13 +307,27 @@ impl ConservativeLineAssembler {
             .item
             .style
             .as_ref()
-            .and_then(|style| style.font_size)
+            // Oblique PDF objects may use Tf=1 with a large text matrix. Their
+            // overlap allowance must use the displayed cross-line height.
+            .and_then(|style| {
+                if super::TextAxes::from(left.item.rotation).is_oblique() {
+                    style.font_height.or(style.font_size)
+                } else {
+                    style.font_size
+                }
+            })
             .unwrap_or_else(|| left.bbox.height());
         let right_font_size = right
             .item
             .style
             .as_ref()
-            .and_then(|style| style.font_size)
+            .and_then(|style| {
+                if super::TextAxes::from(right.item.rotation).is_oblique() {
+                    style.font_height.or(style.font_size)
+                } else {
+                    style.font_size
+                }
+            })
             .unwrap_or_else(|| right.bbox.height());
         let font_compatible = (font_size - right_font_size).abs()
             <= config.estimated_font_size_tolerance_points.max(0.5);
@@ -382,6 +396,45 @@ mod tests {
                 .items
                 .len(),
             1
+        );
+    }
+
+    /// Groups oblique spans by their baseline instead of page top, preserving parallel lines.
+    #[test]
+    fn scaled_oblique_glyphs_use_physical_font_height() {
+        let mut items = Vec::new();
+        for (index, x) in [20.0_f64, 40.0].into_iter().enumerate() {
+            let mut glyph = item(
+                index as u32,
+                if index == 0 { "A" } else { "B" },
+                [x - 8.0, 100.0 - x - 8.0, x + 38.0, 100.0 - x + 38.0],
+                1.0,
+            );
+            glyph.rotation = 315.0;
+            glyph.style.as_mut().expect("style").font_height = Some(48.0);
+            glyph.baseline = Some(crate::Baseline {
+                start: docparse_layout::Point::new(x, 100.0 - x),
+                end: docparse_layout::Point::new(x + 30.0, 70.0 - x),
+            });
+            items.push(glyph);
+        }
+        let fragments = ConservativeLineAssembler
+            .fragments(items, &FusionConfig::default())
+            .expect("scaled text");
+        assert_eq!(
+            fragments.len(),
+            1,
+            "glyph overlap is relative to displayed size, not raw Tf=1"
+        );
+        assert_eq!(
+            fragments
+                .first()
+                .expect("line")
+                .items
+                .iter()
+                .map(|item| item.raw_text.as_str())
+                .collect::<String>(),
+            "AB"
         );
     }
 

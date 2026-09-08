@@ -2,7 +2,7 @@
 
 DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
-Each validated model region produces one final block. Ownership is assigned at the `TextItem` boundary so partially overlapping visual lines cannot pull unrelated text into a model block. Unassigned text is regrouped into lines and residual XY-cut blocks with `label_source = "Fallback"`.
+Each validated model region produces one final block. Ownership is assigned at the `TextItem` boundary so partially overlapping visual lines cannot pull unrelated text into a model block. Unassigned text is partitioned by residual XY-cut before line assembly, so narrow column gutters are not swallowed as inline gaps. Lines are then rebuilt within each leaf and emitted with `label_source = "Fallback"`.
 
 ## Prepare the model
 
@@ -89,6 +89,27 @@ rtk docparse inspect-model --config docparse.toml
 ```
 
 JSON preserves the complete schema, evidence, warnings, and relations. Text/Markdown semantic views suppress repeated page furniture only at presentation time. Overlays reopen the PDF serially to produce PNG/SVG files without rerunning ONNX inference.
+
+## Watermarks and rotated bounds
+
+Watermarks are detached before body statistics, layout assignment, XY-cut, paragraph
+assembly, formula attachment, and reading-order constraints. They remain independent
+`watermark` blocks at the end of each page; text and Markdown retain their text.
+The derived label has no PP-DocLayoutV3 class index. Original text facts remain uniquely
+owned and carry `watermark` source metadata plus rule evidence when applicable.
+
+PDFium content marks and Watermark annotations take precedence over conservative
+cross-page/paint/geometry rules. A generic `Artifact` mark is not sufficient. The pinned
+PDFium API can read string-valued mark parameters but cannot expose PDF Name values
+such as `/Subtype /Watermark`; those cases require the fallback rules. Annotation
+`Contents` is not appearance text, so a watermark annotation without extracted native
+text produces a region rather than invented text.
+
+`Quad` validates four convex, ordered corners. Native text contours come from PDFium's
+`FPDFPageObj_GetRotatedBounds`, with nested form and page transforms applied. Results
+keep a conservative `bbox` and an optional precise `polygon`; overlays and hit testing
+prefer the polygon. Raster inputs remain unchanged, so model detections can still be
+visually affected by a watermark even though its recognized text is isolated from fusion.
 
 ## Tests
 

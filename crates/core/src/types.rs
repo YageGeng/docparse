@@ -183,6 +183,18 @@ impl FallbackRegionId {
 }
 
 impl BlockId {
+    /// Identifies a detached watermark without consuming a model or fallback region identity.
+    pub(crate) fn watermark(
+        page_number: u32,
+        ordinal: u32,
+        annotation: bool,
+    ) -> Self {
+        Self(format!(
+            "p{page_number}:b:w{}:{ordinal}",
+            if annotation { "a" } else { "t" }
+        ))
+    }
+
     /// Builds a model-backed block ID from source and split indices.
     pub fn model(
         page_number: u32,
@@ -218,6 +230,7 @@ impl LineId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LabelSource {
     Model,
+    Pdf,
     Heuristic,
     Fallback,
 }
@@ -227,6 +240,14 @@ pub enum LabelSource {
 pub enum TextSource {
     Native,
     Ocr,
+}
+
+/// Positive watermark evidence; absence leaves an ordinary text fact eligible for fusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatermarkSource {
+    PdfMarkedContent,
+    TextPattern,
 }
 
 /// Final inline ordering direction for a line.
@@ -368,6 +389,12 @@ pub struct TextItem {
     #[builder(default)]
     pub raw_bbox: Option<Bbox>,
     pub bbox: Bbox,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polygon: Option<Polygon>,
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<WatermarkSource>,
     #[builder(default)]
     pub baseline: Option<Baseline>,
     #[builder(default)]

@@ -172,7 +172,19 @@ impl DocParser {
         bytes: Arc<[u8]>,
     ) -> Result<DocumentResult, DocParseError> {
         self.runtime()
-            .parse_document(PdfInput::Bytes(bytes))
+            .parse_document(PdfInput::Bytes(bytes), None)
+            .await
+            .map_err(DocParseError::from)
+    }
+
+    /// Parses shared PDF bytes while reporting real progress and the inference page rasters.
+    pub async fn parse_bytes_with_observer(
+        &self,
+        bytes: Arc<[u8]>,
+        observer: &dyn crate::ParseObserver,
+    ) -> Result<DocumentResult, DocParseError> {
+        self.runtime()
+            .parse_document(PdfInput::Bytes(bytes), Some(observer))
             .await
             .map_err(DocParseError::from)
     }
@@ -180,9 +192,23 @@ impl DocParser {
     /// Parses one already extracted and rendered page with a one-page context.
     pub async fn parse_page(
         &self,
-        input: PageInput,
+        mut input: PageInput,
     ) -> Result<PageResult, DocParseError> {
         let source_page_number = input.extracted.page_number;
+        crate::watermark::classify(
+            std::iter::once(&mut input.extracted),
+            self.config.fusion(),
+        )
+        .map_err(|source| {
+            tracing::error!(
+                "watermark classification failed on standalone page {}: {}",
+                source_page_number,
+                source
+            );
+            DocParseError::ParsePage {
+                source: Box::new(source),
+            }
+        })?;
         let mut context_builder = DocumentContextBuilder::builder()
             .page_count(1)
             .metadata(BTreeMap::from([(

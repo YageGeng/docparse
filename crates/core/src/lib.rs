@@ -12,11 +12,13 @@ mod line;
 mod ocr;
 mod page;
 mod parser;
+mod progress;
 mod render;
 mod runtime;
 mod semantic;
 mod types;
 mod validate;
+mod watermark;
 
 pub use context::{DocumentContextBuilder, DocumentLinker};
 pub use error::{
@@ -29,6 +31,7 @@ pub use ocr::{
     OcrContentStatus, OcrEngine, OcrError, OcrRequest, OcrResult, OcrTextItem,
 };
 pub use parser::{DocParseError, DocParser, DocParserBuilder, PageInput};
+pub use progress::{ParseObserver, ParseProgress};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
     RenderError, RenderView, TextRenderer,

@@ -11,7 +11,7 @@ impl DocParser {
     ) -> Result<DocumentResult, DocParseError> {
         let path = path.as_ref().to_path_buf();
         self.runtime()
-            .parse_document(PdfInput::Path(path.clone()))
+            .parse_document(PdfInput::Path(path.clone()), None)
             .await
             .map_err(DocParseError::from)
             .map_err(|source| DocParseError::ParsePath {

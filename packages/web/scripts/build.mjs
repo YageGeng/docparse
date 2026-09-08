@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, copyFile, readdir, stat, cp } from "node:fs/promises";
+import { mkdir, readFile, writeFile, copyFile, readdir, stat, cp, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,8 @@ function run(command, args, cwd = root) {
 
 await mkdir(join(dist, "pkg"), { recursive: true });
 await mkdir(join(dist, "ort"), { recursive: true });
+// Remove only the retired demo entry points from older combined SDK/example builds.
+for (const name of ["example.js", "example.d.ts"]) await rm(join(dist, name), { force: true });
 const version = spawnSync("wasm-bindgen", ["--version"], { encoding: "utf8" });
 if (version.status !== 0 || version.stdout.trim() !== "wasm-bindgen 0.2.125") {
   throw new Error("Install the pinned CLI: cargo install wasm-bindgen-cli --version 0.2.125 --locked");
@@ -32,6 +34,30 @@ glue = glue.replace(/^import \* as (\w+) from ['"](env|wasi_snapshot_preview1)['
   return `const ${name} = ${module === "env" ? "createEnvImports()" : "createWasiImports(() => wasm.memory)"};`;
 });
 if (!patched) throw new Error("wasm-bindgen glue has no recognized WASI imports; review the generated ABI before updating the patch");
+// WebIDL text codecs reject resizable buffers even though typed-array operations accept
+// them. Snapshot only UTF-8 strings at these two boundaries; tensor views remain borrowed.
+// Match the pinned generator exactly so an upgrade cannot silently skip this adaptation.
+const stringBoundaries = [
+  [
+    "return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));",
+    "const view = getUint8ArrayMemory0().subarray(ptr, ptr + len);\n    return cachedTextDecoder.decode(view.buffer.resizable ? view.slice() : view);",
+  ],
+  [
+    "const ret = cachedTextEncoder.encodeInto(arg, view);",
+    `let ret;
+        if (view.buffer.resizable) {
+            const bytes = cachedTextEncoder.encode(arg);
+            view.set(bytes);
+            ret = { written: bytes.length };
+        } else {
+            ret = cachedTextEncoder.encodeInto(arg, view);
+        }`,
+  ],
+];
+for (const [original, replacement] of stringBoundaries) {
+  if (glue.split(original).length !== 2) throw new Error("Unexpected wasm-bindgen text codec glue; review resizable-memory support before updating the patch");
+  glue = glue.replace(original, replacement);
+}
 glue = 'import { createWasiImports, createEnvImports } from "../wasm_imports.js";\n' + glue;
 await writeFile(gluePath, glue);
 run(process.execPath, [join(packageRoot, "node_modules/typescript/bin/tsc")], packageRoot);

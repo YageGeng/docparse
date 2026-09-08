@@ -130,6 +130,22 @@ impl ResultValidator {
                 return Err(Self::invalid(&block_path, "duplicate BlockId"));
             }
             Self::validate_bbox(block.bbox, &format!("{block_path}.bbox"))?;
+            if let Some(polygon) = &block.polygon
+                && !Self::bbox_contains(block.bbox, polygon.bbox())
+            {
+                return Err(Self::invalid(
+                    format!("{block_path}.polygon"),
+                    "polygon must stay inside the conservative Block bbox",
+                ));
+            }
+            if block.label == docparse_layout::LayoutLabel::Watermark
+                && block.model_region_id.is_some()
+            {
+                return Err(Self::invalid(
+                    &block_path,
+                    "watermark must not own a model region",
+                ));
+            }
             Self::validate_optional_confidence(
                 block.confidence,
                 &format!("{block_path}.confidence"),
@@ -222,6 +238,23 @@ impl ResultValidator {
                         item.bbox,
                         &format!("{item_path}.bbox"),
                     )?;
+                    if item.watermark.is_some()
+                        != (block.label
+                            == docparse_layout::LayoutLabel::Watermark)
+                    {
+                        return Err(Self::invalid(
+                            &item_path,
+                            "watermark facts must belong exclusively to a watermark block",
+                        ));
+                    }
+                    if let Some(polygon) = &item.polygon
+                        && !Self::bbox_contains(item.bbox, polygon.bbox())
+                    {
+                        return Err(Self::invalid(
+                            &item_path,
+                            "text polygon must stay inside its bbox",
+                        ));
+                    }
                     if !Self::bbox_contains(line.bbox, item.bbox) {
                         return Err(Self::invalid(
                             format!("{item_path}.bbox"),

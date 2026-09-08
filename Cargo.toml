@@ -22,7 +22,7 @@ repository = "https://github.com/YageGeng/docparse.git"
 version = "0.1.0"
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+# unsafe_code = "deny"
 unused_import_braces = "deny"
 elided_lifetimes_in_paths = "deny"
 

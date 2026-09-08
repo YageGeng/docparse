@@ -3,9 +3,29 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist", "README.md"],
-  "scripts": { "build": "node scripts/build.mjs", "check": "tsc --noEmit" },
-  "dependencies": { "onnxruntime-web": "1.27.0" },
-  "devDependencies": { "typescript": "5.9.3" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:example": "tsc -p example/tsconfig.json",
+    "check": "tsc --noEmit",
+    "check:example": "tsc -p example/tsconfig.json --noEmit",
+    "example": "npm run build:example && node scripts/serve-example.mjs",
+    "test:e2e": "node tests/run.e2e.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.27.0"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "typescript": "5.9.3"
+  }
 }

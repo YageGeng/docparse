@@ -9,4 +9,7 @@ fn main() {
     }
     // The pinned PDFium archive supplies the real longjmp implementation.
     println!("cargo:rustc-link-arg=--allow-multiple-definition");
+    // A declared wasm32 address-space ceiling enables growable JavaScript views.
+    // This is only a maximum; the linker does not allocate or commit 4 GiB up front.
+    println!("cargo:rustc-link-arg-cdylib=--max-memory=4294967296");
 }

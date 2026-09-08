@@ -54,7 +54,8 @@ impl From<&LayoutLabel> for LabelPolicy {
             | LayoutLabel::FooterImage
             | LayoutLabel::HeaderImage
             | LayoutLabel::Image
-            | LayoutLabel::Seal => Self::Atomic,
+            | LayoutLabel::Seal
+            | LayoutLabel::Watermark => Self::Atomic,
             LayoutLabel::DisplayFormula
             | LayoutLabel::FormulaNumber
             | LayoutLabel::InlineFormula => Self::Formula,

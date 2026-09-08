@@ -34,6 +34,11 @@ impl TextRenderer {
                 if hidden.contains(block.id.as_str()) {
                     continue;
                 }
+                if block.label == docparse_layout::LayoutLabel::Watermark
+                    && !lines.is_empty()
+                {
+                    lines.push(String::new());
+                }
                 lines.extend(
                     block
                         .lines

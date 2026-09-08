@@ -35,6 +35,9 @@ impl From<&ExtractedPage> for PageProbe {
         let mut page_number_candidates = Vec::new();
         let mut title_font_sizes = Vec::new();
         for item in &page.text_items {
+            if item.watermark.is_some() {
+                continue;
+            }
             let text = item.raw_text.trim().to_lowercase();
             if text.is_empty() {
                 continue;

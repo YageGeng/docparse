@@ -13,6 +13,9 @@ globalThis.Worker = class extends NativeWorker {
     const instrumented = new URL("./instrumented-worker.js", import.meta.url);
     instrumented.searchParams.set("worker", String(url));
     if (parameters.has("noGpu")) instrumented.searchParams.set("noGpu", "1");
+    if (parameters.has("failGpuInit")) instrumented.searchParams.set("failGpuInit", "1");
+    if (parameters.has("growMemory")) instrumented.searchParams.set("growMemory", "1");
+    if (parameters.has("legacyMemory")) instrumented.searchParams.set("legacyMemory", "1");
     super(instrumented, options);
     this.addEventListener("message", event => {
       if (event.data.metrics) { report.metrics.push(event.data.metrics); render(); }
@@ -64,13 +67,23 @@ async function verifyReferenceInput(bytes, name) {
 
 const base = new URL("../../../", import.meta.url);
 const options = { artifacts: { kind: "urls", model: new URL("models/pp-doclayout-v3/inference.onnx", base).href, config: new URL("models/pp-doclayout-v3/inference.yml", base).href, manifest: new URL("models/pp-doclayout-v3/model-manifest.json", base).href } };
-if (parameters.get("provider") === "webgpu") options.executionProvider = "webgpu";
+options.executionProvider = parameters.get("provider") === "webgpu" ? "webgpu" : "wasm";
 if (parameters.has("fallback")) options.allowCpuFallback = true;
 let parser;
 let parityFailures = 0;
-try {
+const gpuUnavailable = parameters.has("noGpu") || parameters.has("failGpuInit");
+if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCpuFallback) {
+  try {
+    await rejects(createParser(options), parameters.has("noGpu") ? "ExecutionProviderUnavailable" : "ExecutionProviderInitializationFailed");
+    report.tests.push("PASS: unavailable WebGPU fails explicitly without CPU fallback");
+    report.status = "passed";
+  } catch (error) { report.status = "failed"; report.error = error.stack ?? String(error); }
+  report.elapsedMs = Math.round(performance.now() - start); render();
+} else try {
   const initialization = new AbortController();
   parser = await createParser({ ...options, signal: initialization.signal });
+  report.executionProvider = parser.executionProvider;
+  assert(parser.executionProvider === (gpuUnavailable ? "wasm" : options.executionProvider), "Reported backend differs from the initialized backend");
   initialization.abort();
   report.tests.push("PASS: actual module Worker initialization and detached initialization signal"); render();
   const bytes = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/extraction_metadata.pdf", base))).arrayBuffer());
@@ -78,6 +91,26 @@ try {
   const parsing = parser.parse(storage.subarray(8, 8 + bytes.length));
   await rejects(parser.parse(bytes), "ParserBusy");
   const document = await parsing;
+  assert(!document.pages.some(page => page.warnings.some(warning => warning.code === "LayoutUnavailable")), "Real-model acceptance must not silently use layout fallback");
+  if (parameters.has("growMemory")) assert(report.metrics.at(-1).forcedMemoryGrowth > 0, "Parser heap growth was not exercised");
+  const inferenceMetrics = report.metrics.at(-1);
+  const expectViews = parameters.has("expectViews") || (!parameters.has("legacyMemory") && typeof WebAssembly.Memory.prototype.toResizableBuffer === "function");
+  if (expectViews) {
+    assert(inferenceMetrics.resizableMemory, "Parser memory is not resizable");
+    assert(inferenceMetrics.memoryConversion.before === inferenceMetrics.memoryConversion.after, "Enabling stable views changed the allocated memory size");
+    assert(inferenceMetrics.memoryConversion.maximum === 4294967296, "Parser memory does not declare the wasm32 ceiling");
+    assert(inferenceMetrics.borrowedInputBytes > 0 && inferenceMetrics.copiedInputBytes === 0, "Inference inputs still require intermediate copies");
+    report.tests.push("PASS: growing parser memory retains borrowed inputs with zero intermediate copied bytes");
+  }
+  if (parameters.has("legacyMemory")) {
+    assert(!inferenceMetrics.resizableMemory && inferenceMetrics.copiedInputBytes > 0 && inferenceMetrics.borrowedInputBytes === 0, "Legacy memory did not use safe input snapshots");
+    report.tests.push("PASS: legacy memory retains safe inputs across heap growth");
+  }
+  const actualProviders = inferenceMetrics.providers.map(provider => typeof provider === "string" ? provider : provider.name);
+  assert(actualProviders.includes(parser.executionProvider), "ORT did not receive the selected backend");
+  if (parser.executionProvider === "webgpu") assert(inferenceMetrics.gpuSubmissions > 0, "WebGPU parse submitted no GPU commands");
+  else assert(inferenceMetrics.gpuSubmissions === 0, "CPU parse unexpectedly submitted GPU commands");
+  report.tests.push(`PASS: actual ${parser.executionProvider} backend and GPU command submission contract`);
   assert(storage.byteLength === bytes.length + 16, "Caller buffer was detached");
   assert(document.pages.length === 1 && document.errors.length === 0, "Single-page parsing degraded or failed");
   assert((await parser.render(document, "text")).length > 0, "Rust text renderer returned no content");
@@ -113,8 +146,27 @@ try {
   report.tests.push(`PASS: ${cycles} repeat parses, bad-PDF recovery, zero retained tensors, exactly two runtime fetches`); render();
 
   const multiple = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/multipage_layout.pdf", base))).arrayBuffer());
-  const multiResult = await parser.parse(multiple);
+  const progressEvents = [], pageImages = [];
+  let settled = false, lateEvent = false;
+  const multiResult = await parser.parse(multiple, {
+    onProgress: event => { lateEvent ||= settled; progressEvents.push(event); },
+    onPageImage: image => { lateEvent ||= settled; pageImages.push(image); },
+  });
+  settled = true;
   assert(multiResult.pages.length === 3 && multiResult.errors.length === 0, "Three-page parsing degraded or failed");
+  assert(progressEvents[0].stage === "opening" && progressEvents.at(-1).stage === "complete", "Progress boundaries are missing");
+  for (const stage of ["scanning", "analyzing"]) {
+    assert(JSON.stringify(progressEvents.filter(event => event.stage === stage).map(event => event.completed)) === "[0,1,2,3]", `${stage} progress is not based on actual page completion`);
+  }
+  assert(JSON.stringify(pageImages.map(image => image.pageNumber).sort()) === "[1,2,3]", "Missing or duplicate PDFium page images");
+  for (const image of pageImages) {
+    assert(image.blob instanceof Blob && image.blob.type === "image/png", "Page image is not a PNG Blob");
+    const bitmap = await createImageBitmap(image.blob);
+    assert(bitmap.width === image.width && bitmap.height === image.height, "PNG dimensions differ from the PDFium raster");
+    bitmap.close();
+  }
+  assert(!lateEvent, "Observer events arrived after settlement");
+  report.tests.push("PASS: real page progress, PNG image delivery before settlement, and valid image dimensions"); render();
   await verifyReferenceInput(multiple, "multipage_layout");
   const multiReference = await (await fetch(new URL("../test-results/native/multipage_layout.json", import.meta.url))).json();
   assert(JSON.stringify(textFacts(multiResult)) === JSON.stringify(textFacts(multiReference)), "Unembedded-font multipage parsing lost or reordered raw text");
@@ -170,6 +222,8 @@ try {
   try { assert((await replacement.parse(bytes)).pages.length === 1, "New Worker failed after cancellation"); }
   finally { await replacement.close(); }
   report.tests.push("PASS: filesystem configuration rejection and explicit recreation after cancellation");
+  if (expectViews) assert(report.metrics.every(metrics => metrics.copiedInputBytes === 0), "Lifecycle acceptance introduced intermediate input copies");
+  if (parameters.has("legacyMemory")) assert(report.metrics.every(metrics => metrics.borrowedInputBytes === 0), "Legacy inference retained a detachable input view");
   report.status = parityFailures ? "failed" : "passed";
 } catch (error) { report.status = "failed"; report.error = error.stack ?? String(error); }
 finally { if (parser) await parser.close(); report.elapsedMs = Math.round(performance.now() - start); render(); }

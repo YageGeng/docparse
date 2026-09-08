@@ -68,7 +68,11 @@ impl ParseRuntime {
     pub(crate) async fn parse_document(
         &self,
         input: PdfInput,
+        observer: Option<&dyn crate::ParseObserver>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Opening);
+        }
         tracing::info!(
             "starting document parse with layout engine {}",
             self.layout_engine.name()
@@ -76,6 +80,12 @@ impl ParseRuntime {
         let executor =
             PdfiumExecutor::open(input, self.config.runtime()).await?;
         let page_count = executor.page_count();
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Scanning {
+                completed: 0,
+                total: page_count,
+            });
+        }
         let mut extracted_pages = BTreeMap::new();
         let mut pre_scan_warnings = BTreeMap::new();
         let mut page_errors = Vec::new();
@@ -109,23 +119,18 @@ impl ParseRuntime {
                                 return Err(ParseRuntimeError::Pdfium(error));
                             }
                         };
-                    if let Err(error) = context_builder
-                        .push_page(crate::PageProbe::from(&extracted))
-                    {
-                        tracing::error!(
-                            "document context rejected page {}: {}",
-                            page_number,
-                            error
-                        );
-                        let _ = executor.close().await;
-                        return Err(error.into());
-                    }
                     extracted_pages.insert(page_number, extracted);
                     if let Some(warning) = warning {
                         pre_scan_warnings.insert(page_number, warning);
                     }
                     if let Some(page_error) = page_error {
                         page_errors.push(page_error);
+                    }
+                    if let Some(observer) = observer {
+                        observer.on_progress(crate::ParseProgress::Scanning {
+                            completed: page_number,
+                            total: page_count,
+                        });
                     }
                 }
                 Err(error) => {
@@ -139,6 +144,28 @@ impl ParseRuntime {
                 }
             }
         }
+        // Freeze watermark decisions before body-font/chrome statistics or any page fusion.
+        if let Err(error) = crate::watermark::classify(
+            extracted_pages.values_mut(),
+            self.config.fusion(),
+        ) {
+            tracing::error!("watermark classification failed: {}", error);
+            let _ = executor.close().await;
+            return Err(PageAnalysisError::Line(error).into());
+        }
+        for extracted in extracted_pages.values() {
+            if let Err(error) =
+                context_builder.push_page(crate::PageProbe::from(extracted))
+            {
+                tracing::error!(
+                    "document context rejected page {}: {}",
+                    extracted.page_number,
+                    error
+                );
+                let _ = executor.close().await;
+                return Err(error.into());
+            }
+        }
         let context = match context_builder.build() {
             Ok(context) => context,
             Err(error) => {
@@ -150,6 +177,12 @@ impl ParseRuntime {
                 return Err(error.into());
             }
         };
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Analyzing {
+                completed: 0,
+                total: page_count,
+            });
+        }
         let (render_sender, mut render_receiver) =
             mpsc::channel(self.config.runtime().render_queue_capacity);
         let render_config = self.config.render().clone();
@@ -172,7 +205,17 @@ impl ParseRuntime {
             if page_tasks.len() >= self.config.runtime().page_concurrency {
                 if let Some(result) = page_tasks.join_next().await {
                     match Self::collect_page_task(result) {
-                        Ok(page) => pages.push(page),
+                        Ok(page) => {
+                            pages.push(page);
+                            if let Some(observer) = observer {
+                                observer.on_progress(
+                                    crate::ParseProgress::Analyzing {
+                                        completed: pages.len() as u32,
+                                        total: page_count,
+                                    },
+                                );
+                            }
+                        }
                         Err(error) => {
                             fatal_error = Some(error);
                             break 'processing;
@@ -185,7 +228,12 @@ impl ParseRuntime {
                 result = page_tasks.join_next(), if !page_tasks.is_empty() => {
                     if let Some(result) = result {
                         match Self::collect_page_task(result) {
-                            Ok(page) => pages.push(page),
+                            Ok(page) => {
+                                pages.push(page);
+                                if let Some(observer) = observer {
+                                    observer.on_progress(crate::ParseProgress::Analyzing { completed: pages.len() as u32, total: page_count });
+                                }
+                            },
                             Err(error) => {
                                 fatal_error = Some(error);
                                 break 'processing;
@@ -208,6 +256,11 @@ impl ParseRuntime {
                             let context = Arc::clone(&context);
                             match result {
                                 Ok(rendered) => {
+                                    // Observers see the owned raster before it moves into analysis.
+                                    // No PDFium handles escape, and unobserved parses make no copy.
+                                    if let Some(observer) = observer {
+                                        observer.on_page_image(page_number, rendered.image.as_ref());
+                                    }
                                     page_tasks.spawn(async move {
                                         analyze_rendered_page(
                                             config,
@@ -291,6 +344,13 @@ impl ParseRuntime {
             }
         }
         page_errors.sort_by_key(|error| error.page_number);
+
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Linking {
+                total: page_count,
+            });
+        }
+
         let relations = DocumentLinker::new().link(&context, &pages)?;
         let result = DocumentResult::builder()
             .schema_version(SchemaVersion::V2_0)
@@ -300,6 +360,13 @@ impl ParseRuntime {
             .errors(page_errors)
             .build();
         ResultValidator::validate(&result)?;
+
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Complete {
+                total: page_count,
+            });
+        }
+
         tracing::info!(
             "completed document parse with {} pages and {} page errors",
             result.pages.len(),
@@ -565,7 +632,7 @@ mod tests {
             ParseRuntime::new(config(), Arc::new(EmptyLayoutEngine), None);
 
         let result = runtime
-            .parse_document(PdfInput::Path(fixture_path()))
+            .parse_document(PdfInput::Path(fixture_path()), None)
             .await
             .expect("fixture parse must succeed");
 
@@ -615,7 +682,7 @@ mod tests {
             .join("tests/fixtures/pdf/multipage_layout.pdf");
 
         let _error = runtime
-            .parse_document(PdfInput::Path(path))
+            .parse_document(PdfInput::Path(path), None)
             .await
             .expect_err("the injected layout error must fail parsing");
 

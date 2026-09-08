@@ -255,6 +255,8 @@ fn vertical_partition(
         }
     });
     let mut best: Option<(f64, Vec<usize>, Vec<usize>)> = None;
+    let height = median_height(indices, fragments);
+    let broad_gap = (height * 2.0).max(region.width() * 0.03);
     for split in 1..by_center.len() {
         let (left_slice, right_slice) = by_center.split_at(split);
         if left_slice.len() < 2 || right_slice.len() < 2 {
@@ -273,8 +275,7 @@ fn vertical_partition(
             })
             .fold(f64::INFINITY, f64::min);
         let gap = right_edge - left_edge;
-        let minimum_gap = (median_height(indices, fragments) * 2.0)
-            .max(region.width() * 0.03);
+        let minimum_gap = (height * 0.75).max(region.width() * 0.01).max(2.0);
         let obstacle_crosses = obstacles.iter().any(|obstacle| {
             obstacle.left < right_edge
                 && obstacle.right > left_edge
@@ -283,6 +284,37 @@ fn vertical_partition(
         });
         if gap < minimum_gap || obstacle_crosses {
             continue;
+        }
+        if gap < broad_gap {
+            // Narrow gutters need repeated rows and substantial overlapping columns;
+            // an ordinary word/style gap or a short list prefix is not enough evidence.
+            let (Some(left), Some(right)) = (
+                union_indices(left_slice, fragments),
+                union_indices(right_slice, fragments),
+            ) else {
+                continue;
+            };
+            let overlap =
+                left.bottom.min(right.bottom) - left.top.max(right.top);
+            let repeated_rows =
+                [left_slice, right_slice].into_iter().all(|side| {
+                    side.iter()
+                        .filter_map(|index| fragments.get(*index))
+                        .map(|fragment| {
+                            ((fragment.baseline.start.y - region.top) / height)
+                                .round() as i64
+                        })
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        >= 3
+                });
+            if !repeated_rows
+                || overlap < height * 4.0
+                || left.width() < region.width() * 0.2
+                || right.width() < region.width() * 0.2
+            {
+                continue;
+            }
         }
         if best.as_ref().is_none_or(|(best_gap, _, _)| gap > *best_gap) {
             best = Some((gap, left_slice.to_vec(), right_slice.to_vec()));

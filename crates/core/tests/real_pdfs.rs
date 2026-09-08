@@ -452,6 +452,7 @@ fn accumulate_counts(
             LabelSource::Model => "model_blocks",
             LabelSource::Fallback => "fallback_blocks",
             LabelSource::Heuristic => "heuristic_blocks",
+            LabelSource::Pdf => "pdf_blocks",
         };
         *totals.entry(key.to_owned()).or_default() += 1;
     }

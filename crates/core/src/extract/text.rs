@@ -23,6 +23,8 @@ pub(crate) struct TextCharFact {
     pub(crate) bbox: Bbox,
     pub(crate) loose_bbox: Bbox,
     #[builder(default)]
+    pub(crate) watermark: bool,
+    #[builder(default)]
     pub(crate) origin: Option<Point>,
     #[builder(default)]
     pub(crate) font_name: Option<String>,
@@ -70,6 +72,8 @@ pub(crate) struct TextItemDraft {
     pub(crate) id: TextItemId,
     pub(crate) raw_text: String,
     pub(crate) bbox: Bbox,
+    #[builder(default)]
+    pub(crate) watermark: bool,
     #[builder(default)]
     pub(crate) baseline: Option<crate::Baseline>,
     pub(crate) rotation: f64,
@@ -150,6 +154,11 @@ impl TryFrom<TextItemDraft> for TextItem {
             .raw_text(draft.raw_text)
             .raw_bbox(Some(draft.bbox))
             .bbox(draft.bbox)
+            .watermark(
+                draft
+                    .watermark
+                    .then_some(crate::WatermarkSource::PdfMarkedContent),
+            )
             .baseline(draft.baseline)
             .rotation(draft.rotation)
             .source(TextSource::Native)
@@ -167,6 +176,8 @@ pub(crate) struct CurrentSegment {
     raw_text: String,
     bbox: Bbox,
     last_bbox: Bbox,
+    #[builder(default)]
+    watermark: bool,
     #[builder(default)]
     baseline: Option<crate::Baseline>,
     width_sum: f64,
@@ -219,6 +230,7 @@ impl CurrentSegment {
             .raw_text(character)
             .bbox(fact.loose_bbox)
             .last_bbox(fact.bbox)
+            .watermark(fact.watermark)
             .baseline(baseline)
             .width_sum(fact.bbox.width())
             .character_count(1)
@@ -245,6 +257,13 @@ impl CurrentSegment {
     /// Returns whether an incoming visible character must start a new segment.
     fn must_split(&self, fact: &TextCharFact) -> bool {
         let axes = TextAxes::from(self.rotation);
+        // Preserve exact object geometry and explicit PDF semantics at segment boundaries.
+        if self.watermark != fact.watermark
+            || ((axes.is_oblique() || self.watermark)
+                && self.text_object_index != fact.text_object_index)
+        {
+            return true;
+        }
         let (previous, incoming) = if axes.is_oblique() {
             let (Ok(previous), Ok(incoming)) = (
                 axes.project_bbox(self.last_bbox),
@@ -392,6 +411,7 @@ impl CurrentSegment {
             .id(TextItemId::native(page_number, extraction_order))
             .raw_text(self.raw_text)
             .bbox(self.bbox)
+            .watermark(self.watermark)
             .baseline(self.baseline)
             .rotation(self.rotation)
             .font_name(self.font_name)
@@ -544,12 +564,14 @@ pub(crate) fn extract_page_text_items(
 ) -> Result<Vec<TextItem>, ExtractError> {
     let mut builder = SegmentBuilder::new(page_number);
     let viewport = page.viewport_transform(view_box);
-    let object_indices: std::collections::HashMap<_, _> = page
-        .text_object_identities()
-        .into_iter()
+    let objects = page.text_object_facts();
+    let object_indices: std::collections::HashMap<_, _> = objects
+        .iter()
         .enumerate()
-        .filter_map(|(index, identity)| {
-            u32::try_from(index).ok().map(|index| (identity, index))
+        .filter_map(|(index, facts)| {
+            u32::try_from(index)
+                .ok()
+                .map(|index| (facts.identity, index))
         })
         .collect();
     let links = page.links(view_box);
@@ -700,6 +722,11 @@ pub(crate) fn extract_page_text_items(
                 .unicode_map_error(character.has_unicode_map_error())
                 .mcid(character.marked_content_id())
                 .text_object_index(text_object_index)
+                .watermark(
+                    text_object_index
+                        .and_then(|index| objects.get(index as usize))
+                        .is_some_and(|object| object.watermark),
+                )
                 .link(link)
                 .build(),
         )?;
@@ -716,7 +743,39 @@ pub(crate) fn extract_page_text_items(
             page_number
         );
     }
-    drafts.into_iter().map(TextItem::try_from).collect()
+    drafts
+        .into_iter()
+        .map(|draft| {
+            let object = draft
+                .text_object_index
+                .and_then(|index| objects.get(index as usize));
+            let polygon = if TextAxes::from(draft.rotation).is_oblique()
+                || draft.watermark
+            {
+                object
+                    .and_then(|object| object.quad)
+                    .and_then(|points| {
+                        let points = points.map(|point| {
+                            let (x, y) = page.page_to_viewport(
+                                view_box,
+                                point.x as f32,
+                                point.y as f32,
+                            );
+                            Point::new(f64::from(x), f64::from(y))
+                        });
+                        docparse_layout::Quad::try_from(points)
+                            .ok()
+                            .map(docparse_layout::Polygon::from)
+                    })
+                    .and_then(|polygon| polygon.clipped(draft.bbox))
+            } else {
+                None
+            };
+            let mut item = TextItem::try_from(draft)?;
+            item.polygon = polygon;
+            Ok(item)
+        })
+        .collect()
 }
 
 /// Converts a PDFium viewport rectangle into a validated canonical box.
@@ -1012,6 +1071,12 @@ mod tests {
                 );
                 let item = items.first().expect("one complete oblique run");
                 assert_eq!(item.raw_text, "ACME");
+                let polygon=item.polygon.as_ref().expect("PDFium object contour must survive page rotation and UserUnit");
+                assert!(
+                    polygon.area() > 0.0
+                        && polygon.area() < item.bbox.area() * 0.9,
+                    "tilted text must retain a narrow contour"
+                );
                 let expected =
                     (f64::from(page_rotation) - text_angle).rem_euclid(360.0);
                 assert!(

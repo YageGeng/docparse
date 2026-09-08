@@ -1,5 +1,18 @@
 use docparse_layout::LayoutLabel;
 
+/// Parser-derived watermarks must serialize canonically without extending the model's class IDs.
+#[test]
+fn watermark_is_a_semantic_label_without_a_model_index() {
+    let label = LayoutLabel::from("watermark");
+    assert_eq!(
+        serde_json::to_value(&label).expect("label JSON"),
+        "watermark"
+    );
+    assert_eq!(label.idx(), None);
+    assert_eq!(LayoutLabel::ALL.len(), 25);
+    LayoutLabel::try_from(25).expect_err("watermark must not extend model IDs");
+}
+
 /// Keeps numeric model classes, raw names, and the existing JSON schema aligned.
 #[test]
 fn known_labels_preserve_the_fixed_model_order() {

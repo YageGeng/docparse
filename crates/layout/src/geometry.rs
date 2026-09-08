@@ -1,8 +1,8 @@
 use geo::algorithm::Validation;
 use geo::line_intersection::{LineIntersection, line_intersection};
 use geo::{
-    Area, BooleanOps, BoundingRect, Coord, Intersects, Line,
-    Polygon as GeoPolygon,
+    Area, BooleanOps, BoundingRect, ConvexHull, Coord, Intersects, Line,
+    MultiPoint, Polygon as GeoPolygon,
 };
 use serde::de::Error as DeserializeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -11,6 +11,63 @@ use typed_builder::TypedBuilder;
 use crate::GeometryError;
 
 const GEOMETRY_EPSILON: f64 = 1.0e-9;
+
+/// Four ordered convex corners, retaining rotation and affine shear.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "[Point; 4]", into = "[Point; 4]")]
+pub struct Quad([Point; 4]);
+
+impl Quad {
+    /// Returns the corners in perimeter order without closing the ring.
+    pub fn points(&self) -> &[Point; 4] {
+        &self.0
+    }
+}
+
+impl TryFrom<[Point; 4]> for Quad {
+    type Error = GeometryError;
+
+    /// Rejects non-finite, self-crossing, concave, or degenerate quadrilaterals.
+    fn try_from(points: [Point; 4]) -> Result<Self, Self::Error> {
+        Polygon::try_from(points.to_vec())?;
+        let [p0, p1, p2, p3] = points;
+        let mut sign = None;
+        for (a, b, c) in
+            [(p0, p1, p2), (p1, p2, p3), (p2, p3, p0), (p3, p0, p1)]
+        {
+            let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+            if cross.abs() <= GEOMETRY_EPSILON
+                || sign.is_some_and(|positive| {
+                    positive != cross.is_sign_positive()
+                })
+            {
+                return Err(GeometryError::InvalidPolygon {
+                    reason:
+                        "quad corners must form a strictly convex perimeter"
+                            .to_owned(),
+                });
+            }
+            sign = Some(cross.is_sign_positive());
+        }
+        Ok(Self(points))
+    }
+}
+
+impl From<Quad> for [Point; 4] {
+    /// Returns the validated public corner representation.
+    fn from(quad: Quad) -> Self {
+        quad.0
+    }
+}
+
+impl From<Quad> for Polygon {
+    /// Converts already validated corners without replacing them with an AABB.
+    fn from(quad: Quad) -> Self {
+        Self {
+            points: quad.0.to_vec(),
+        }
+    }
+}
 
 /// A point in one explicitly documented two-dimensional coordinate space.
 #[derive(
@@ -344,6 +401,49 @@ pub struct Polygon {
 }
 
 impl Polygon {
+    /// Encloses source corners while preserving a tilted footprint across split text runs.
+    pub fn enclosing(
+        points: impl IntoIterator<Item = Point>,
+    ) -> Result<Self, GeometryError> {
+        let points: Vec<_> = points.into_iter().collect();
+        if points.iter().any(|point| !point.is_finite()) {
+            return Err(GeometryError::InvalidPolygon {
+                reason: "all coordinates must be finite".to_owned(),
+            });
+        }
+        let hull = MultiPoint::from(
+            points
+                .into_iter()
+                .map(|point| geo::Point::new(point.x, point.y))
+                .collect::<Vec<_>>(),
+        )
+        .convex_hull();
+        let mut corners: Vec<_> = hull
+            .exterior()
+            .0
+            .iter()
+            .map(|point| Point::new(point.x, point.y))
+            .collect();
+        if corners.first() == corners.last() {
+            corners.pop();
+        }
+        Self::try_from(corners)
+    }
+
+    /// Clips a convex source footprint to a run or page without expanding its empty corners.
+    pub fn clipped(&self, bbox: Bbox) -> Option<Self> {
+        let intersection =
+            self.as_geo_polygon().intersection(&bbox.as_geo_polygon());
+        Self::enclosing(intersection.0.iter().flat_map(|polygon| {
+            polygon
+                .exterior()
+                .0
+                .iter()
+                .map(|point| Point::new(point.x, point.y))
+        }))
+        .ok()
+    }
+
     /// Returns the polygon vertices without the private closing coordinate.
     pub fn points(&self) -> &[Point] {
         &self.points

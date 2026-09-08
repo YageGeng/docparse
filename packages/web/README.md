@@ -21,6 +21,8 @@ rtk npm run build
 
 `dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
 
+The SDK build excludes the example. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
+
 Copy the complete `dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The default single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
 
 ## Usage
@@ -53,6 +55,93 @@ Here, `file` is a caller-selected File. To manage authentication or caching, obt
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
+## Interactive example
+
+The example selects WebGPU by default and explicitly allows CPU fallback on unsupported devices. Its layout engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
+
+After preparing the model and building the package, run this command in `packages/web`:
+
+```sh
+rtk npm run example
+```
+
+This compiles `example/src/main.ts` through its own TypeScript configuration and starts the static server. Use `rtk npm run build:example` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM.
+
+Open <http://127.0.0.1:8768/example/>. Choose a local PDF, then select **Parse document**. The example displays actual model-download, text-extraction, and page-analysis progress. Browse the PDFium page thumbnails, zoom the page, and toggle overlays without changing the parsed geometry. Click an overlay, or use the region menu, to inspect and copy its text. On narrow screens the selected text opens in a dismissible floating inspector.
+
+The workspace fills the remaining viewport height and fits the entire PDF page by
+default. The introduction collapses after file selection. Zoom percentages are relative
+to this fitted size; click **Fit entire page** to reset both scale and scroll position.
+Window resizing refits the image and overlays together. Thumbnails, enlarged pages, and
+long extracted text scroll within their own panels. Exported PNG resolution is unchanged.
+
+**Export PNG** opens the generated image for inspection; **Save PNG** then downloads it. Some embedded browsers cancel file downloads, but the image remains available in the preview. Cancel stops the Worker; the next parse creates a fresh parser. A ready model is reused when choosing another PDF. Returning through browser history does not revoke a cached document's preview URLs.
+
+The static server exposes only the example, built SDK, and model directory. It does not receive PDF uploads or perform parsing. Set `PORT` to use another local port. The example uses PDFium's inference raster and SVG hit targets; it has no pdf.js dependency. Native PDF text is extracted; image-only and outlined text still require OCR.
+
+### UI end-to-end acceptance
+
+The unified entry builds the SDK and example, regenerates native references, starts owned servers on free ports, and runs SDK acceptance, UI flows, and export-race checks against the real model:
+
+```sh
+rtk npx playwright install chromium
+rtk npm run test:e2e
+```
+
+Use `-- --headed` to watch the command-line browser, `-- --channel chrome` to use an installed Chrome, or `-- --cycles 20` for the longer SDK repeat matrix. Reports and the final screenshot are written to `test-results/e2e/`. Playwright is a development-only E2E dependency; there are no frontend unit tests.
+
+`tests/run.e2e.mjs` owns command-line preparation and browser startup. Its exported `prepareE2E()` can also prepare servers from a Node host. The browser-controller-independent `tests/suite.e2e.mjs` exports `runE2E(driver, environment)` for both the CLI and Browser Use. A Browser Use driver supplies `page: tab.playwright`, `navigate: url => tab.goto(url)`, and the tab's CDP capability. Exhaust the generator and close the prepared environment when finished.
+
+`tests/example.e2e.mjs` exports an async generator that drives the real example through a Playwright-compatible page. It uses file choosers, clicks actual SVG overlays, inspects the visible text, checks zoom/navigation, decodes the export preview, cancels an active parse, and verifies bad-PDF recovery. It never intercepts requests or replaces the production Worker or model.
+
+Start the example server, navigate a fresh browser page to `/example/`, and supply absolute paths to the three-page `multipage_layout.pdf`, an invalid PDF, and a multipage PDF for cancellation:
+
+```javascript
+import { runExampleE2E } from "./tests/example.e2e.mjs";
+
+for await (const event of runExampleE2E(page, {
+  pdf: multipageFixturePath,
+  invalidPdf: invalidFixturePath,
+  cancellationPdf: longPdfPath,
+})) {
+  console.log(event);
+}
+```
+
+With Codex Browser Use, pass `tab.playwright` as `page`. The generator yields progress between assertions so a long model initialization does not conceal test status. Run the UI checks in a visible tab, verify both wide and narrow layouts, and retain the resulting check records in `test-results/`. A tab reclaimed by the host is an interrupted run, not a pass. The SDK-level real-model matrix below separately verifies numerical parity and Worker resource cleanup.
+
+`tests/export-race.e2e.mjs` adds controlled PNG callback timing to a real parsed three-page example. Pass the page and a CDP session to `runExportRaceE2E(page, cdp)`. It checks both completion orders, stale failures, Escape cancellation, and blob URL cleanup. Encoding itself remains real, and the test restores its instrumentation in `finally`.
+
+## Progress and page images
+
+```typescript
+const parser = await createParser({
+  artifacts,
+  onProgress: event => console.log(event.stage),
+});
+const document = await parser.parse(pdfBytes, {
+  signal: abortController.signal,
+  onProgress: event => console.log(event),
+  onPageImage: ({ pageNumber, width, height, blob }) => {
+    // The PNG is the same PDFium raster used by layout inference.
+    // Create an object URL for display, and revoke it when the document is released.
+    displayPageImage(pageNumber, width, height, blob);
+  },
+});
+```
+
+Initialization reports `loading_runtime`, `downloading`, and `initializing_model`. Parsing reports `opening`, `scanning`, `analyzing`, `linking`, and `complete`. Scan/analysis events contain actual `completed` and `total` page counts. Download `loaded` counts decoded bytes; `total` is provided only when an unencoded content length can be established. Compressed responses, unknown lengths, and CORS responses with hidden encoding metadata report bytes without a percentage. Cross-origin hosts can explicitly expose `Content-Encoding: identity` when they serve uncompressed artifacts. Observers are optional and their exceptions are logged without settling the parse request. Progress does not release the parser's busy state.
+
+`onPageImage` receives a PNG `Blob` and its pixel dimensions. Use `PageResult.width`, `PageResult.height`, and block `bbox` values for overlay coordinates, scaling the raster to that same viewport. Images can arrive before the final `DocumentResult`, and the parse promise resolves only after every requested image has been delivered. Cancel/close rejects pending work and ignores late events. Pages whose rendering fails may have no image; inspect the result's page warnings and errors. Without `onPageImage`, no preview pixels are copied out of WASM or PNG-encoded.
+
+## Watermarks and geometry
+
+Draw `Block.polygon` when present, falling back to `Block.bbox`. Polygon vertices are
+in the same viewport point space as the bbox. The example uses this contour for SVG
+hit testing and PNG export, including slanted watermarks. `label: "watermark"` denotes
+an independent block excluded from body fusion and reading-order constraints; its
+text remains inspectable and retained in text/Markdown output.
+
 ## Lifecycle
 
 - `createParser` resolves only after fixed artifact validation and actual model initialization.
@@ -62,7 +151,11 @@ Here, `file` is a caller-selected File. To manage authentication or caching, obt
 - Fatal Worker/WASM failures settle pending requests instead of leaving Promises suspended.
 - Errors contain a stable `code` and readable message; Worker error stacks are retained for diagnostics.
 
-Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. Fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. See the [validation report](../../docs/superpowers/reports/2026-09-07-native-web-wasm-validation.md) for the tested matrix; CPU acceptance does not establish GPU support.
+Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM dependency graph enables `ort/webgpu`; the host loads the pinned WebGPU distribution and registers its execution provider. The SDK retains its CPU default for compatibility. PDFium rendering, text extraction, and fusion still run on CPU.
+
+Fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
+
+Run `rtk npm run test:e2e -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
 
 ## Native/Web result parity
 
@@ -71,6 +164,22 @@ Native font selection is preserved. Embedded-font PDFs provide strict parity fix
 The model is approximately 124.46 MiB. The browser also holds Rust/PDFium, ORT, image, and tensor buffers. A single WASM memory capacity is not total process memory, and arbitrary document sizes are not guaranteed. Inference requests only boxes and count; the unused mask is not returned.
 
 ## Real-browser acceptance
+
+The unified E2E suite grows the actual Rust WASM heap after input tensor creation.
+ORT must still run the real model without `LayoutUnavailable` degradation. Run the
+standalone browser harness with `growMemory=1` to exercise the same regression.
+When `WebAssembly.Memory.toResizableBuffer()` is available, input tensors borrow Rust
+memory through views that survive growth. The linked module declares the wasm32 4 GiB
+ceiling; this does not preallocate 4 GiB. Older engines use JavaScript-owned input
+snapshots. This removes an intermediate tensor copy on supporting engines, not ORT's
+copy into its separate WASM heap or GPU uploads. The build adapts wasm-bindgen's UTF-8
+codec boundaries because browser text codecs require fixed buffers; string conversion
+can still copy bytes.
+
+Acceptance records borrowed and copied input bytes and requires zero intermediate
+input copies when the engine supports growable buffers. Add `expectViews=1` to require
+that capability explicitly, or `legacyMemory=1&growMemory=1` to disable it only in the
+test Worker and validate the compatibility path with actual inference.
 
 From the repository root, generate native references and start the static/report server:
 
@@ -81,6 +190,6 @@ rtk proxy python3 packages/web/tests/serve.py --port 8767
 
 Open `/packages/web/tests/browser.html?cycles=20&relocated=1&run=cpu-stress`. The page uses the production build, real model, and PDF fixtures. `relocated=1` checks deployment under a renamed directory. Reports are saved to `packages/web/test-results/cpu-stress-<run-id>.json`, including parity, actual fetches, live tensors, WASM capacities, and cancellation/close results.
 
-Use `provider=webgpu` for a separate GPU run. `provider=webgpu&fallback=1&noGpu=1` disables GPU capability only in the test Worker and validates explicit fallback with the real CPU model. Diagnostic edge weights use the same numeric tolerance, while edge IDs, source, and reason remain exact; raw diagnostic differences are recorded. Instrumentation observes the real runtime and does not replace PDFium or inference. The report server performs no parsing.
+Use `provider=webgpu` for a separate GPU run. `provider=webgpu&fallback=1&noGpu=1` disables GPU capability only in the test Worker and validates explicit fallback with the real CPU model. Replace `noGpu=1` with `failGpuInit=1` to reject GPU session creation at the ORT boundary; omit `fallback=1` to require an explicit failure. Diagnostic edge weights use the same numeric tolerance, while edge IDs, source, and reason remain exact; raw diagnostic differences are recorded. Successful parsing always uses real PDFium and inference. The report server performs no parsing.
 
 Fixture generators require reportlab, and the Chinese generator also requires pypdf and the pinned Noto font. Embedded-font licenses accompany the PDFs. Generators and acceptance reports are not production runtime dependencies.

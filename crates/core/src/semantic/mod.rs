@@ -4,7 +4,7 @@ mod paragraph;
 use std::collections::BTreeMap;
 
 use docparse_config::FusionConfig;
-use docparse_layout::{Bbox, GeometrySource, LayoutLabel};
+use docparse_layout::{Bbox, GeometrySource, LayoutLabel, Polygon};
 use typed_builder::TypedBuilder;
 
 use crate::fusion::assign::BlockSeed;
@@ -36,6 +36,121 @@ pub(crate) struct SemanticAssembler {
 }
 
 impl SemanticAssembler {
+    /// Builds detached watermarks without assigning, splitting, or ordering them with body content.
+    pub(crate) fn watermark_blocks(
+        &self,
+        items: Vec<crate::TextItem>,
+        annotations: Vec<Bbox>,
+        decisions: &BTreeMap<crate::TextItemId, Evidence>,
+    ) -> Result<Vec<Block>, SemanticError> {
+        let mut fragments =
+            ConservativeLineAssembler.fragments(items, &self.config)?;
+        fragments.sort_by_key(|fragment| {
+            fragment
+                .items
+                .iter()
+                .map(|item| item.extraction_order)
+                .min()
+        });
+        let mut blocks = Vec::new();
+        for fragment in fragments {
+            let ordinal = fragment
+                .items
+                .iter()
+                .map(|item| item.extraction_order)
+                .min()
+                .unwrap_or(0);
+            let explicit = fragment.items.iter().all(|item| {
+                item.watermark == Some(crate::WatermarkSource::PdfMarkedContent)
+            });
+            let mut evidence: Vec<_> = fragment
+                .items
+                .iter()
+                .filter_map(|item| decisions.get(&item.id).cloned())
+                .collect();
+            evidence.dedup();
+            if evidence.is_empty() {
+                evidence.push(
+                    Evidence::builder()
+                        .kind(
+                            if explicit {
+                                "pdf_watermark_mark"
+                            } else {
+                                "watermark_text_pattern"
+                            }
+                            .to_owned(),
+                        )
+                        .build(),
+                );
+            }
+            let id = BlockId::watermark(self.page_number, ordinal, false);
+            let lines = self.lines(&id, vec![fragment]);
+            let polygon = Self::content_polygon(&lines)
+                .and_then(|polygon| polygon.clipped(self.page_bbox));
+            // Keep the original loose text bounds as the conservative index box. The
+            // copied PDFium contour is the precise paint/hit-test footprint inside it.
+            let bbox = Self::content_bbox(&lines)?.unwrap_or(self.page_bbox);
+            blocks.push(
+                Block::builder()
+                    .id(id)
+                    .label(LayoutLabel::Watermark)
+                    .label_source(if explicit {
+                        LabelSource::Pdf
+                    } else {
+                        LabelSource::Heuristic
+                    })
+                    .text(Block::derive_text(&LayoutLabel::Watermark, &lines))
+                    .bbox(bbox)
+                    .polygon(polygon)
+                    .final_order(0)
+                    .evidence(evidence)
+                    .lines(lines)
+                    .build(),
+            );
+        }
+        for (ordinal, bbox) in annotations.into_iter().enumerate() {
+            // Annotation /Contents is a comment, not its appearance text. Preserve the region
+            // without inventing native text or claiming overlapping body text belongs to it.
+            blocks.push(
+                Block::builder()
+                    .id(BlockId::watermark(
+                        self.page_number,
+                        ordinal as u32,
+                        true,
+                    ))
+                    .label(LayoutLabel::Watermark)
+                    .label_source(LabelSource::Pdf)
+                    .text(String::new())
+                    .bbox(bbox)
+                    .final_order(0)
+                    .evidence(vec![
+                        Evidence::builder()
+                            .kind("pdf_watermark_annotation".to_owned())
+                            .build(),
+                    ])
+                    .lines(Vec::new())
+                    .build(),
+            );
+        }
+        Ok(blocks)
+    }
+
+    /// Encloses complete copied text footprints; missing geometry keeps the conservative bbox.
+    fn content_polygon(lines: &[Line]) -> Option<Polygon> {
+        let items: Vec<_> =
+            lines.iter().flat_map(|line| &line.text_items).collect();
+        if items.is_empty() || items.iter().any(|item| item.polygon.is_none()) {
+            return None;
+        }
+        Polygon::enclosing(
+            items
+                .into_iter()
+                .filter_map(|item| item.polygon.as_ref())
+                .flat_map(|polygon| polygon.points().iter().copied()),
+        )
+        .ok()
+    }
+
     /// Creates a page-local semantic assembler from validated fusion settings.
     pub(crate) const fn new(
         page_number: u32,
@@ -103,7 +218,9 @@ impl SemanticAssembler {
                 leaf_fragments.push(fragment);
             }
             for (split_ordinal, group) in self
-                .fallback_paragraph_groups(leaf_fragments)
+                .fallback_paragraph_groups(
+                    self.reassemble_fragments(leaf_fragments)?,
+                )
                 .into_iter()
                 .enumerate()
             {
@@ -181,6 +298,7 @@ impl SemanticAssembler {
         let block_id =
             BlockId::model(self.page_number, seed.source_detection_index, 0);
         let lines = self.lines(&block_id, fragments);
+        let polygon = Self::content_polygon(&lines);
         let text = Block::derive_text(&seed.label, &lines);
         let bbox = Self::content_bbox(&lines)?.unwrap_or(seed.bbox);
         let evidence = seed
@@ -219,7 +337,7 @@ impl SemanticAssembler {
             .label_source(LabelSource::Model)
             .confidence(Some(seed.confidence))
             .bbox(bbox)
-            .polygon(None)
+            .polygon(polygon)
             .source_region(Some(source_region))
             .model_region_id(Some(seed.region_id.clone()))
             .model_order(Some(seed.model_order))
@@ -239,6 +357,7 @@ impl SemanticAssembler {
     ) -> Result<Block, SemanticError> {
         let block_id = BlockId::fallback(self.page_number, path, split_ordinal);
         let lines = self.lines(&block_id, fragments);
+        let polygon = Self::content_polygon(&lines);
         let text = Block::derive_text(&LayoutLabel::Text, &lines);
         let bbox = Self::content_bbox(&lines)?.unwrap_or(self.page_bbox);
         let fallback_id = FallbackRegionId::from_path(self.page_number, path);
@@ -255,7 +374,7 @@ impl SemanticAssembler {
             .label_source(LabelSource::Fallback)
             .confidence(None)
             .bbox(bbox)
-            .polygon(None)
+            .polygon(polygon)
             .source_region(Some(source_region))
             .model_region_id(None)
             .model_order(None)

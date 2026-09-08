@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DocParse · PDF workspace</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="icon-document" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></symbol>
+    <symbol id="icon-layers" viewBox="0 0 24 24"><path d="m12 3 10 6-10 6L2 9Zm-10 12 10 6 10-6M2 12l10 6 10-6"/></symbol>
+    <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 17v3h16v-3"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  </defs></svg>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="DocParse home"><span class="brand-mark" aria-hidden="true"><svg><use href="#icon-document"/></svg></span>DocParse</a>
+    <span class="header-divider"></span><span class="header-section">Workspace</span>
+    <span class="privacy"><span class="status-dot"></span>Local & private</span>
+  </header>
+  <main>
+    <section class="intro">
+      <div><p class="eyebrow">DOCUMENT INTELLIGENCE</p><h1>Your PDF, made readable.</h1></div>
+      <p class="intro-copy">Explore the layout.<br>Inspect the text behind every region.</p>
+    </section>
+    <section class="document-bar" aria-label="Document selection">
+      <div class="file-summary"><span class="file-icon" aria-hidden="true"><svg><use href="#icon-document"/></svg><span>PDF</span></span><div><strong id="file-name">No document selected</strong><span id="file-detail">Choose a PDF to get started</span></div></div>
+      <input id="file" type="file" accept="application/pdf,.pdf" aria-label="Choose PDF" tabindex="-1">
+      <div class="file-actions"><button class="button secondary" type="button" id="choose"><svg><use href="#icon-upload"/></svg>Choose PDF</button><button class="button primary" id="parse" disabled>Parse document<svg><use href="#icon-arrow"/></svg></button><button class="button cancel" id="cancel" hidden>Cancel parsing</button></div>
+    </section>
+    <div class="engine-bar"><label for="execution-provider">Layout engine</label><select id="execution-provider" aria-describedby="engine-status"><option value="webgpu">WebGPU · recommended</option><option value="wasm">CPU · WebAssembly</option></select><span id="engine-status" role="status">GPU preferred · CPU fallback if unavailable</span></div>
+    <section class="status-card" aria-label="Parsing progress">
+      <div class="status-copy" role="status" aria-live="polite"><span class="status-symbol" id="status-symbol">○</span><div><strong id="stage">Ready when you are</strong><p id="status-detail">Your document is processed entirely in this browser.</p></div></div>
+      <div class="progress-group"><span id="progress-detail"></span><progress id="progress" max="100" hidden aria-label="Current stage progress"></progress></div>
+    </section>
+    <section class="workspace" aria-label="PDF results">
+      <aside class="pages-panel"><div class="panel-heading"><h2>Pages</h2><span id="page-count" class="count">0</span></div><nav id="pages" aria-label="Document pages"><div class="empty-pages"><svg><use href="#icon-document"/></svg><p>No pages yet</p><span>Choose a document<br>to start exploring.</span></div></nav></aside>
+      <section class="viewer-panel">
+        <div class="viewer-toolbar">
+          <div class="pager"><button id="previous" class="icon-button" aria-label="Previous page" disabled>←</button><span id="page-position">Page —</span><button id="next" class="icon-button" aria-label="Next page" disabled>→</button></div>
+          <div class="view-tools"><div class="zoom-control"><button class="icon-button" id="zoom-out" aria-label="Zoom out" disabled>−</button><button id="zoom-fit" class="zoom-fit" aria-label="Fit entire page" title="Fit entire page" disabled>100%</button><button class="icon-button" id="zoom-in" aria-label="Zoom in" disabled>+</button></div><button id="toggle-overlays" class="icon-button layers-button" aria-label="Toggle overlays" aria-pressed="true" title="Show or hide overlays" disabled><svg><use href="#icon-layers"/></svg></button><span class="toolbar-divider"></span><button id="download" class="button small secondary" disabled><svg><use href="#icon-download"/></svg><span>Export PNG</span></button></div>
+        </div>
+        <div id="viewer" class="viewer"><div class="empty-view"><div class="empty-art" aria-hidden="true"><div class="paper-back"></div><div class="paper-front"><span class="paper-title"></span><div class="paper-lines"><i></i><i></i><i></i></div><div class="paper-grid"><span></span><span></span></div><div class="paper-lines short"><i></i><i></i></div><span class="annotation">TEXT REGION</span></div><div class="art-badge"><svg><use href="#icon-layers"/></svg></div></div><h3>A little structure.<br>A lot more clarity.</h3><p>Choose a PDF and we'll reveal its layout.<br>Every detected region becomes explorable.</p><span class="technology"><span class="status-dot"></span>Powered by PDFium</span></div></div>
+        <div class="viewer-footer"><span><i class="legend-swatch"></i>Select a region to read its text</span><span id="region-count">0 regions</span></div>
+      </section>
+      <aside class="inspector-panel"><div class="panel-heading"><h2><svg><use href="#icon-document"/></svg>Text inspector</h2><div class="inspector-heading-actions"><span id="selected-number" class="count">—</span><button id="close-inspector" class="icon-button" aria-label="Close text inspector"><svg><use href="#icon-close"/></svg></button></div></div><div class="inspector-content"><div class="field-heading"><label for="block-select" class="field-label">SELECTED REGION</label><span class="field-hint">Click a box on the page</span></div><select id="block-select" disabled><option value="">Select a region…</option></select><div id="selection-meta" class="selection-meta">A closer look, one region at a time.</div><div class="text-card"><div class="text-card-heading"><span>EXTRACTED TEXT</span><span id="character-count">—</span></div><div id="extracted-text" class="extracted-text" tabindex="0">Select an overlay to reveal the original text from your PDF.</div></div><button class="button secondary copy" id="copy" disabled><svg><use href="#icon-copy"/></svg>Copy text</button><p id="copy-status" class="muted" role="status"></p><p id="page-warnings" class="page-warnings" hidden></p><p class="inspector-note">Text is preserved from the document.<br>Scanned and outlined text requires OCR.</p></div></aside>
+    </section>
+    <footer class="app-footer"><span><span class="status-dot"></span>Your files stay on your device</span><span>PDFium · PP-DocLayoutV3 · WebAssembly</span></footer>
+  </main>
+  <dialog id="export-dialog" aria-labelledby="export-title"><div class="export-header"><div><p class="eyebrow">IMAGE EXPORT</p><h2 id="export-title">Your page, with context.</h2></div><button class="icon-button" id="close-export" aria-label="Close image export"><svg><use href="#icon-close"/></svg></button></div><div class="export-body"><p id="export-status" role="status">Preparing your image…</p><img id="export-preview" alt="Exported PDF page with layout overlays" hidden></div><div class="export-footer"><span id="export-detail">PDFium page image + detected regions</span><a id="save-export" class="button primary" hidden><svg><use href="#icon-download"/></svg>Save PNG</a></div></dialog>
+  <script type="module" src="./dist/main.js"></script>
+</body>
+</html>

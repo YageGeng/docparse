@@ -16,4 +16,11 @@ pub struct ExtractedPage {
     #[builder(default)]
     pub content_bounds: Option<Bbox>,
     pub text_items: Vec<TextItem>,
+    /// Explicit watermark annotation bounds, independent of the native text layer.
+    #[builder(default)]
+    pub watermark_annotations: Vec<Bbox>,
+    /// Transient rule decisions become final Block evidence after ownership is resolved.
+    #[builder(default)]
+    pub watermark_evidence:
+        std::collections::BTreeMap<crate::TextItemId, crate::Evidence>,
 }

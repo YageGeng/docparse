@@ -8,151 +8,289 @@ use web_sys::{HtmlImageElement, ImageBitmap, ImageData};
 
 pub use crate::binding::{ImageFormat, ImageNorm, ImageTensorLayout};
 use crate::{
-	Error,
-	binding::{self, DataType, ImageDataType},
-	memory::MemoryInfo,
-	util::num_elements
+    Error,
+    binding::{self, DataType, ImageDataType},
+    memory::MemoryInfo,
+    util::num_elements,
 };
 
 pub const TENSOR_SENTINEL: [u8; 4] = [0xFC, 0x86, 0xA5, 0x39];
 
 pub enum TensorData {
-	/// Data is stored in WASM linear memory and can be immediately accessed.
-	RustView { ptr: *mut c_void, byte_len: usize },
-	/// Data is stored outside of WASM linear memory (i.e. session output, or a tensor created from anything other than
-	/// a Rust slice) and would need to be retrieved if we try to extract this tensor.
-	External { buffer: Option<Box<[u8]>> }
+    /// Data is stored in WASM linear memory and can be immediately accessed.
+    RustView { ptr: *mut c_void, byte_len: usize },
+    /// Data is stored outside of WASM linear memory (i.e. session output, or a tensor created from anything other than
+    /// a Rust slice) and would need to be retrieved if we try to extract this tensor.
+    External { buffer: Option<Box<[u8]>> },
 }
 
 #[repr(C)]
 pub struct Tensor {
-	sentinel: [u8; 4],
-	pub js: binding::Tensor,
-	pub data: TensorData,
-	pub memory_info: MemoryInfo
+    sentinel: [u8; 4],
+    pub js: binding::Tensor,
+    pub data: TensorData,
+    pub memory_info: MemoryInfo,
 }
 
 impl Tensor {
-	pub unsafe fn from_ptr(dtype: binding::DataType, ptr: *mut c_void, byte_len: usize, dims: &[i32]) -> Result<Self, JsValue> {
-		let tensor = binding::Tensor::new_from_buffer(dtype, unsafe { buffer_from_ptr(dtype, ptr, byte_len) }, dims)?;
-		Ok(Self {
-			sentinel: TENSOR_SENTINEL,
-			memory_info: MemoryInfo { location: tensor.location() },
-			js: tensor,
-			data: TensorData::RustView { ptr, byte_len }
-		})
-	}
+    pub unsafe fn from_ptr(
+        dtype: binding::DataType,
+        ptr: *mut c_void,
+        byte_len: usize,
+        dims: &[i32],
+    ) -> Result<Self, JsValue> {
+        let tensor = binding::Tensor::new_from_buffer(
+            dtype,
+            unsafe { buffer_from_ptr(dtype, ptr, byte_len) },
+            dims,
+        )?;
+        Ok(Self {
+            sentinel: TENSOR_SENTINEL,
+            memory_info: MemoryInfo {
+                location: tensor.location(),
+            },
+            js: tensor,
+            data: TensorData::RustView { ptr, byte_len },
+        })
+    }
 
-	pub fn from_tensor(tensor: binding::Tensor) -> Self {
-		Self {
-			sentinel: TENSOR_SENTINEL,
-			memory_info: MemoryInfo { location: tensor.location() },
-			js: tensor,
-			data: TensorData::External { buffer: None }
-		}
-	}
+    pub fn from_tensor(tensor: binding::Tensor) -> Self {
+        Self {
+            sentinel: TENSOR_SENTINEL,
+            memory_info: MemoryInfo {
+                location: tensor.location(),
+            },
+            js: tensor,
+            data: TensorData::External { buffer: None },
+        }
+    }
 
-	pub async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()> {
-		match direction {
-			SyncDirection::Rust => {
-				let data = self.js.get_data().await?;
+    pub async fn sync(
+        &mut self,
+        direction: SyncDirection,
+    ) -> crate::Result<()> {
+        match direction {
+            SyncDirection::Rust => {
+                let data = self.js.get_data().await?;
 
-				// cast to some kind of typed array first, then convert to uint8array so we can properly copy
-				let generic_typed_array = Uint8Array::unchecked_from_js(data);
-				let bytes = Uint8Array::new_with_byte_offset_and_length(
-					&generic_typed_array.buffer(),
-					generic_typed_array.byte_offset(),
-					generic_typed_array.byte_length()
-				);
-				match &mut self.data {
-					TensorData::RustView { ptr, byte_len } => {
-						bytes.copy_to(unsafe { core::slice::from_raw_parts_mut(ptr.cast(), *byte_len) });
-					}
-					TensorData::External { buffer } => {
-						let buffer = match buffer {
-							Some(buffer) => buffer,
-							None => {
-								*buffer = Some(vec![0; generic_typed_array.byte_length() as usize].into_boxed_slice());
-								unsafe { buffer.as_mut().unwrap_unchecked() }
-							}
-						};
-						bytes.copy_to(buffer);
-					}
-				}
-			}
-			SyncDirection::Runtime => {
-				let Ok(generic_typed_array) = self.js.data().map(Uint8Array::unchecked_from_js) else {
-					// we have a download function, but no upload...
-					return Err(Error::new(
-						"Cannot synchronize Rust data to a runtime tensor that is not on the CPU; modify the WebGPU/WebGL buffer directly."
-					));
-				};
-				let bytes = Uint8Array::new_with_byte_offset_and_length(
-					&generic_typed_array.buffer(),
-					generic_typed_array.byte_offset(),
-					generic_typed_array.byte_length()
-				);
-				bytes.copy_from(match &self.data {
-					TensorData::RustView { ptr, byte_len } => unsafe { core::slice::from_raw_parts(ptr.cast(), *byte_len) },
-					TensorData::External { buffer } => {
-						let Some(buffer) = buffer else {
-							return Ok(());
-						};
-						&*buffer
-					}
-				});
-			}
-		}
-		Ok(())
-	}
+                // cast to some kind of typed array first, then convert to uint8array so we can properly copy
+                let generic_typed_array = Uint8Array::unchecked_from_js(data);
+                let bytes = Uint8Array::new_with_byte_offset_and_length(
+                    &generic_typed_array.buffer(),
+                    generic_typed_array.byte_offset(),
+                    generic_typed_array.byte_length(),
+                );
+                match &mut self.data {
+                    TensorData::RustView { ptr, byte_len } => {
+                        bytes.copy_to(unsafe {
+                            core::slice::from_raw_parts_mut(
+                                ptr.cast(),
+                                *byte_len,
+                            )
+                        });
+                    }
+                    TensorData::External { buffer } => {
+                        let buffer = match buffer {
+                            Some(buffer) => buffer,
+                            None => {
+                                *buffer = Some(
+                                    vec![
+                                        0;
+                                        generic_typed_array.byte_length()
+                                            as usize
+                                    ]
+                                    .into_boxed_slice(),
+                                );
+                                unsafe { buffer.as_mut().unwrap_unchecked() }
+                            }
+                        };
+                        bytes.copy_to(buffer);
+                    }
+                }
+            }
+            SyncDirection::Runtime => {
+                let Ok(generic_typed_array) =
+                    self.js.data().map(Uint8Array::unchecked_from_js)
+                else {
+                    // we have a download function, but no upload...
+                    return Err(Error::new(
+                        "Cannot synchronize Rust data to a runtime tensor that is not on the CPU; modify the WebGPU/WebGL buffer directly.",
+                    ));
+                };
+                let bytes = Uint8Array::new_with_byte_offset_and_length(
+                    &generic_typed_array.buffer(),
+                    generic_typed_array.byte_offset(),
+                    generic_typed_array.byte_length(),
+                );
+                bytes.copy_from(match &self.data {
+                    TensorData::RustView { ptr, byte_len } => unsafe {
+                        core::slice::from_raw_parts(ptr.cast(), *byte_len)
+                    },
+                    TensorData::External { buffer } => {
+                        let Some(buffer) = buffer else {
+                            return Ok(());
+                        };
+                        &*buffer
+                    }
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Tensor {
     /// Disposes externally owned runtime buffers when the final Rust value is released.
     fn drop(&mut self) {
         if let Err(error) = self.js.dispose() {
-            web_sys::console::error_1(&error);
+            #[allow(unused_unsafe)]
+            unsafe {
+                web_sys::console::error_1(&error);
+            }
         }
     }
 }
 
 pub fn create_buffer(dtype: binding::DataType, shape: &[i32]) -> JsValue {
-	let numel = num_elements(shape) as u32;
-	match dtype {
-		binding::DataType::Bool | binding::DataType::Uint8 => js_sys::Uint8Array::new_with_length(numel).into(),
-		binding::DataType::Int8 => js_sys::Int8Array::new_with_length(numel).into(),
-		binding::DataType::Uint16 => js_sys::Uint16Array::new_with_length(numel).into(),
-		binding::DataType::Int16 => js_sys::Int16Array::new_with_length(numel).into(),
-		binding::DataType::Uint32 => js_sys::Uint32Array::new_with_length(numel).into(),
-		binding::DataType::Int32 => js_sys::Int32Array::new_with_length(numel).into(),
-		binding::DataType::Uint64 => js_sys::BigUint64Array::new_with_length(numel).into(),
-		binding::DataType::Int64 => js_sys::BigInt64Array::new_with_length(numel).into(),
-		binding::DataType::Float32 => js_sys::Float32Array::new_with_length(numel).into(),
-		binding::DataType::Float64 => js_sys::Float64Array::new_with_length(numel).into(),
-		binding::DataType::Int4 | binding::DataType::Uint4 | binding::DataType::Float16 | binding::DataType::String => unimplemented!(),
-		binding::DataType::__Invalid => unreachable!()
-	}
+    let numel = num_elements(shape) as u32;
+    match dtype {
+        binding::DataType::Bool | binding::DataType::Uint8 => {
+            js_sys::Uint8Array::new_with_length(numel).into()
+        }
+        binding::DataType::Int8 => {
+            js_sys::Int8Array::new_with_length(numel).into()
+        }
+        binding::DataType::Uint16 => {
+            js_sys::Uint16Array::new_with_length(numel).into()
+        }
+        binding::DataType::Int16 => {
+            js_sys::Int16Array::new_with_length(numel).into()
+        }
+        binding::DataType::Uint32 => {
+            js_sys::Uint32Array::new_with_length(numel).into()
+        }
+        binding::DataType::Int32 => {
+            js_sys::Int32Array::new_with_length(numel).into()
+        }
+        binding::DataType::Uint64 => {
+            js_sys::BigUint64Array::new_with_length(numel).into()
+        }
+        binding::DataType::Int64 => {
+            js_sys::BigInt64Array::new_with_length(numel).into()
+        }
+        binding::DataType::Float32 => {
+            js_sys::Float32Array::new_with_length(numel).into()
+        }
+        binding::DataType::Float64 => {
+            js_sys::Float64Array::new_with_length(numel).into()
+        }
+        binding::DataType::Int4
+        | binding::DataType::Uint4
+        | binding::DataType::Float16
+        | binding::DataType::String => unimplemented!(),
+        binding::DataType::__Invalid => unreachable!(),
+    }
 }
 
-pub unsafe fn buffer_from_ptr(dtype: binding::DataType, ptr: *mut c_void, byte_len: usize) -> JsValue {
-	match dtype {
-		binding::DataType::Bool | binding::DataType::Uint8 => unsafe { js_sys::Uint8Array::view(slice::from_raw_parts(ptr.cast(), byte_len)) }.into(),
-		binding::DataType::Int8 => unsafe { js_sys::Int8Array::view(slice::from_raw_parts(ptr.cast(), byte_len)) }.into(),
-		binding::DataType::Uint16 => unsafe { js_sys::Uint16Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 2)) }.into(),
-		binding::DataType::Int16 => unsafe { js_sys::Int16Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 2)) }.into(),
-		binding::DataType::Uint32 => unsafe { js_sys::Uint32Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 4)) }.into(),
-		binding::DataType::Int32 => unsafe { js_sys::Int32Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 4)) }.into(),
-		binding::DataType::Uint64 => unsafe { js_sys::BigUint64Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 8)) }.into(),
-		binding::DataType::Int64 => unsafe { js_sys::BigInt64Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 8)) }.into(),
-		binding::DataType::Float32 => unsafe { js_sys::Float32Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 4)) }.into(),
-		binding::DataType::Float64 => unsafe { js_sys::Float64Array::view(slice::from_raw_parts(ptr.cast(), byte_len / 8)) }.into(),
-		binding::DataType::Int4 | binding::DataType::Uint4 | binding::DataType::Float16 | binding::DataType::String => unimplemented!(),
-		binding::DataType::__Invalid => unreachable!()
-	}
+/// Borrows growable Rust memory, with safe input snapshots on older browser engines.
+///
+/// Resizable WASM buffers retain their identity across heap growth, so asynchronous ORT
+/// can safely keep these views. Detachable buffers require an intermediate snapshot.
+/// The Rust tensor owner must retain the backing allocation until inference completes.
+///
+/// # Safety
+/// `ptr` must be aligned for `dtype` and readable for `byte_len` bytes while JavaScript
+/// retains the returned view. Its backing allocation must outlive asynchronous inference.
+pub unsafe fn buffer_from_ptr(
+    dtype: binding::DataType,
+    ptr: *mut c_void,
+    byte_len: usize,
+) -> JsValue {
+    let view = match dtype {
+        binding::DataType::Bool | binding::DataType::Uint8 => unsafe {
+            js_sys::Uint8Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len,
+            ))
+        }
+        .into(),
+        binding::DataType::Int8 => unsafe {
+            js_sys::Int8Array::view(slice::from_raw_parts(ptr.cast(), byte_len))
+        }
+        .into(),
+        binding::DataType::Uint16 => unsafe {
+            js_sys::Uint16Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 2,
+            ))
+        }
+        .into(),
+        binding::DataType::Int16 => unsafe {
+            js_sys::Int16Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 2,
+            ))
+        }
+        .into(),
+        binding::DataType::Uint32 => unsafe {
+            js_sys::Uint32Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 4,
+            ))
+        }
+        .into(),
+        binding::DataType::Int32 => unsafe {
+            js_sys::Int32Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 4,
+            ))
+        }
+        .into(),
+        binding::DataType::Uint64 => unsafe {
+            js_sys::BigUint64Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 8,
+            ))
+        }
+        .into(),
+        binding::DataType::Int64 => unsafe {
+            js_sys::BigInt64Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 8,
+            ))
+        }
+        .into(),
+        binding::DataType::Float32 => unsafe {
+            js_sys::Float32Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 4,
+            ))
+        }
+        .into(),
+        binding::DataType::Float64 => unsafe {
+            js_sys::Float64Array::view(slice::from_raw_parts(
+                ptr.cast(),
+                byte_len / 8,
+            ))
+        }
+        .into(),
+        binding::DataType::Int4
+        | binding::DataType::Uint4
+        | binding::DataType::Float16
+        | binding::DataType::String => unimplemented!(),
+        binding::DataType::__Invalid => unreachable!(),
+    };
+
+    #[allow(unused_unsafe)]
+    unsafe {
+        binding::stable_tensor_data(view)
+    }
 }
 
-pub fn dtype_to_onnx(dtype: binding::DataType) -> ort_sys::ONNXTensorElementDataType {
-	match dtype {
+pub fn dtype_to_onnx(
+    dtype: binding::DataType,
+) -> ort_sys::ONNXTensorElementDataType {
+    match dtype {
 		binding::DataType::String => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING,
 		binding::DataType::Bool => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL,
 		binding::DataType::Uint8 => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8,
@@ -172,8 +310,10 @@ pub fn dtype_to_onnx(dtype: binding::DataType) -> ort_sys::ONNXTensorElementData
 	}
 }
 
-pub fn onnx_to_dtype(dtype: ort_sys::ONNXTensorElementDataType) -> Option<binding::DataType> {
-	match dtype {
+pub fn onnx_to_dtype(
+    dtype: ort_sys::ONNXTensorElementDataType,
+) -> Option<binding::DataType> {
+    match dtype {
 		ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING => Some(binding::DataType::String),
 		ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL => Some(binding::DataType::Bool),
 		ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => Some(binding::DataType::Uint8),
@@ -194,259 +334,349 @@ pub fn onnx_to_dtype(dtype: ort_sys::ONNXTensorElementDataType) -> Option<bindin
 }
 
 pub struct TypeInfo {
-	pub dtype: ort_sys::ONNXTensorElementDataType,
-	pub shape: Vec<i32>
+    pub dtype: ort_sys::ONNXTensorElementDataType,
+    pub shape: Vec<i32>,
 }
 
 impl TypeInfo {
-	pub fn new_sys_from_tensor(tensor: &Tensor) -> *mut ort_sys::OrtTypeInfo {
-		Self::new_sys(tensor.js.dtype(), tensor.js.dims())
-	}
+    pub fn new_sys_from_tensor(tensor: &Tensor) -> *mut ort_sys::OrtTypeInfo {
+        Self::new_sys(tensor.js.dtype(), tensor.js.dims())
+    }
 
-	pub fn new_sys_from_value_metadata(metadata: &binding::ValueMetadata) -> *mut ort_sys::OrtTypeInfo {
-		Self::new_sys(
-			metadata.r#type.unwrap(),
-			metadata
-				.shape
-				.as_ref()
-				.unwrap()
-				.iter()
-				.map(|el| match el {
-					binding::ShapeElement::Value(v) => *v as i32,
-					binding::ShapeElement::Named(_) => -1
-				})
-				.collect()
-		)
-	}
+    pub fn new_sys_from_value_metadata(
+        metadata: &binding::ValueMetadata,
+    ) -> *mut ort_sys::OrtTypeInfo {
+        Self::new_sys(
+            metadata.r#type.unwrap(),
+            metadata
+                .shape
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|el| match el {
+                    binding::ShapeElement::Value(v) => *v as i32,
+                    binding::ShapeElement::Named(_) => -1,
+                })
+                .collect(),
+        )
+    }
 
-	pub fn new_sys(dtype: DataType, shape: Vec<i32>) -> *mut ort_sys::OrtTypeInfo {
-		(Box::leak(Box::new(Self { dtype: dtype_to_onnx(dtype), shape })) as *mut TypeInfo).cast()
-	}
+    pub fn new_sys(
+        dtype: DataType,
+        shape: Vec<i32>,
+    ) -> *mut ort_sys::OrtTypeInfo {
+        (Box::leak(Box::new(Self {
+            dtype: dtype_to_onnx(dtype),
+            shape,
+        })) as *mut TypeInfo)
+            .cast()
+    }
 
-	pub unsafe fn consume_sys(ptr: *mut ort_sys::OrtTypeInfo) -> Box<TypeInfo> {
-		unsafe { Box::from_raw(ptr.cast::<TypeInfo>()) }
-	}
+    pub unsafe fn consume_sys(ptr: *mut ort_sys::OrtTypeInfo) -> Box<TypeInfo> {
+        unsafe { Box::from_raw(ptr.cast::<TypeInfo>()) }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncDirection {
-	/// Synchronize tensor data from the device/runtime so that it is accessible to Rust code.
-	Rust,
-	/// Synchronize tensor data from Rust code so that it is accessible to the runtime.
-	Runtime
+    /// Synchronize tensor data from the device/runtime so that it is accessible to Rust code.
+    Rust,
+    /// Synchronize tensor data from Rust code so that it is accessible to the runtime.
+    Runtime,
 }
 
 pub trait ValueExt {
-	private_trait!();
+    private_trait!();
 
-	/// Synchronize data between Rust & the runtime.
-	///
-	/// See the [top-level documentation][crate] for more information on synchronization.
-	#[allow(async_fn_in_trait)]
-	async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()>;
+    /// Synchronize data between Rust & the runtime.
+    ///
+    /// See the [top-level documentation][crate] for more information on synchronization.
+    #[allow(async_fn_in_trait)]
+    async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()>;
 }
 
 impl<T: ValueTypeMarker> ValueExt for ort::value::Value<T> {
-	private_impl!();
+    private_impl!();
 
-	async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()> {
-		let ptr = self.ptr_mut();
-		// definitely safe regardless of what backend is used since it's highly improbable that a backend's tensor would be
-		// smaller than 4 bytes (which is pointer size on wasm32)
-		let sentinel: [u8; 4] = unsafe { core::ptr::read(ptr.cast()) };
-		if sentinel != TENSOR_SENTINEL {
-			return Err(Error::new("Cannot synchronize Value that was not created by ort-web"));
-		}
+    async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()> {
+        let ptr = self.ptr_mut();
+        // definitely safe regardless of what backend is used since it's highly improbable that a backend's tensor would be
+        // smaller than 4 bytes (which is pointer size on wasm32)
+        let sentinel: [u8; 4] = unsafe { core::ptr::read(ptr.cast()) };
+        if sentinel != TENSOR_SENTINEL {
+            return Err(Error::new(
+                "Cannot synchronize Value that was not created by ort-web",
+            ));
+        }
 
-		let tensor: &mut Tensor = unsafe { &mut *ptr.cast() };
-		tensor.sync(direction).await
-	}
+        let tensor: &mut Tensor = unsafe { &mut *ptr.cast() };
+        tensor.sync(direction).await
+    }
 }
 
 #[derive(Default)]
 pub struct TensorFromImageOptions {
-	pub norm: Option<ImageNorm>,
-	pub resized_height: Option<u32>,
-	pub resized_width: Option<u32>,
-	pub tensor_format: Option<ImageFormat>,
-	pub tensor_layout: Option<ImageTensorLayout>
+    pub norm: Option<ImageNorm>,
+    pub resized_height: Option<u32>,
+    pub resized_width: Option<u32>,
+    pub tensor_format: Option<ImageFormat>,
+    pub tensor_layout: Option<ImageTensorLayout>,
 }
 
 #[derive(Default)]
 pub struct TensorFromUrlOptions {
-	pub norm: Option<ImageNorm>,
-	pub resized_height: Option<u32>,
-	pub resized_width: Option<u32>,
-	pub tensor_format: Option<ImageFormat>,
-	pub tensor_layout: Option<ImageTensorLayout>
+    pub norm: Option<ImageNorm>,
+    pub resized_height: Option<u32>,
+    pub resized_width: Option<u32>,
+    pub tensor_format: Option<ImageFormat>,
+    pub tensor_layout: Option<ImageTensorLayout>,
 }
 
 #[allow(async_fn_in_trait)]
 pub trait TensorFromImage: Sized {
-	private_trait!();
+    private_trait!();
 
-	async fn from_image_data(image_data: &ImageData, options: TensorFromImageOptions) -> crate::Result<Self>;
-	async fn from_image_element(image_element: &HtmlImageElement, options: TensorFromImageOptions) -> crate::Result<Self>;
-	async fn from_image_bitmap(image_bitmap: &ImageBitmap, options: TensorFromImageOptions) -> crate::Result<Self>;
-	async fn from_image_url(url: &str, options: TensorFromImageOptions, original_dimensions: Option<(u32, u32)>) -> crate::Result<Self>;
+    async fn from_image_data(
+        image_data: &ImageData,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self>;
+    async fn from_image_element(
+        image_element: &HtmlImageElement,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self>;
+    async fn from_image_bitmap(
+        image_bitmap: &ImageBitmap,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self>;
+    async fn from_image_url(
+        url: &str,
+        options: TensorFromImageOptions,
+        original_dimensions: Option<(u32, u32)>,
+    ) -> crate::Result<Self>;
 }
 
 impl TensorFromImage for ort::value::Tensor<f32> {
-	private_impl!();
+    private_impl!();
 
-	async fn from_image_data(image: &ImageData, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_data(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Float32),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_data(
+        image: &ImageData,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_data(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Float32),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_element(image: &HtmlImageElement, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_element(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Float32),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_element(
+        image: &HtmlImageElement,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_element(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Float32),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_bitmap(image: &ImageBitmap, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_bitmap(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Float32),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_bitmap(
+        image: &ImageBitmap,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_bitmap(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Float32),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_url(url: &str, options: TensorFromImageOptions, original_dimensions: Option<(u32, u32)>) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_url(
-				url,
-				&binding::TensorFromUrlOptions {
-					base: binding::TensorFromImageOptions {
-						data_type: Some(ImageDataType::Float32),
-						norm: options.norm,
-						resized_height: options.resized_height,
-						resized_width: options.resized_width,
-						tensor_format: options.tensor_format,
-						tensor_layout: options.tensor_layout
-					},
-					width: original_dimensions.map(|(w, _)| w),
-					height: original_dimensions.map(|(_, h)| h)
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_url(
+        url: &str,
+        options: TensorFromImageOptions,
+        original_dimensions: Option<(u32, u32)>,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_url(
+                url,
+                &binding::TensorFromUrlOptions {
+                    base: binding::TensorFromImageOptions {
+                        data_type: Some(ImageDataType::Float32),
+                        norm: options.norm,
+                        resized_height: options.resized_height,
+                        resized_width: options.resized_width,
+                        tensor_format: options.tensor_format,
+                        tensor_layout: options.tensor_layout,
+                    },
+                    width: original_dimensions.map(|(w, _)| w),
+                    height: original_dimensions.map(|(_, h)| h),
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 }
 
 impl TensorFromImage for ort::value::Tensor<u8> {
-	private_impl!();
+    private_impl!();
 
-	async fn from_image_data(image: &ImageData, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_data(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Uint8),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_data(
+        image: &ImageData,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_data(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Uint8),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_element(image: &HtmlImageElement, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_element(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Uint8),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_element(
+        image: &HtmlImageElement,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_element(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Uint8),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_bitmap(image: &ImageBitmap, options: TensorFromImageOptions) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_bitmap(
-				image,
-				&binding::TensorFromImageOptions {
-					data_type: Some(ImageDataType::Uint8),
-					norm: options.norm,
-					resized_height: options.resized_height,
-					resized_width: options.resized_width,
-					tensor_format: options.tensor_format,
-					tensor_layout: options.tensor_layout
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_bitmap(
+        image: &ImageBitmap,
+        options: TensorFromImageOptions,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_bitmap(
+                image,
+                &binding::TensorFromImageOptions {
+                    data_type: Some(ImageDataType::Uint8),
+                    norm: options.norm,
+                    resized_height: options.resized_height,
+                    resized_width: options.resized_width,
+                    tensor_format: options.tensor_format,
+                    tensor_layout: options.tensor_layout,
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 
-	async fn from_image_url(url: &str, options: TensorFromImageOptions, original_dimensions: Option<(u32, u32)>) -> crate::Result<Self> {
-		let tensor = Tensor::from_tensor(
-			binding::Tensor::from_image_url(
-				url,
-				&binding::TensorFromUrlOptions {
-					base: binding::TensorFromImageOptions {
-						data_type: Some(ImageDataType::Uint8),
-						norm: options.norm,
-						resized_height: options.resized_height,
-						resized_width: options.resized_width,
-						tensor_format: options.tensor_format,
-						tensor_layout: options.tensor_layout
-					},
-					width: original_dimensions.map(|(w, _)| w),
-					height: original_dimensions.map(|(_, h)| h)
-				}
-			)
-			.await?
-		);
-		Ok(unsafe { ort::value::Tensor::from_ptr(NonNull::from_mut(Box::leak(Box::new(tensor))).cast(), None) })
-	}
+    async fn from_image_url(
+        url: &str,
+        options: TensorFromImageOptions,
+        original_dimensions: Option<(u32, u32)>,
+    ) -> crate::Result<Self> {
+        let tensor = Tensor::from_tensor(
+            binding::Tensor::from_image_url(
+                url,
+                &binding::TensorFromUrlOptions {
+                    base: binding::TensorFromImageOptions {
+                        data_type: Some(ImageDataType::Uint8),
+                        norm: options.norm,
+                        resized_height: options.resized_height,
+                        resized_width: options.resized_width,
+                        tensor_format: options.tensor_format,
+                        tensor_layout: options.tensor_layout,
+                    },
+                    width: original_dimensions.map(|(w, _)| w),
+                    height: original_dimensions.map(|(_, h)| h),
+                },
+            )
+            .await?,
+        );
+        Ok(unsafe {
+            ort::value::Tensor::from_ptr(
+                NonNull::from_mut(Box::leak(Box::new(tensor))).cast(),
+                None,
+            )
+        })
+    }
 }

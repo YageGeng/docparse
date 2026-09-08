@@ -345,6 +345,22 @@ fn pre_scan_document_page(
             .width(f64::from(width))
             .height(f64::from(height))
             .rotation(normalized_rotation(page.rotation()))
+            .watermark_annotations(
+                page.annotations(&view_box)
+                    .into_iter()
+                    .filter(|annotation| annotation.subtype == "watermark")
+                    .filter_map(|annotation| annotation.rect)
+                    .filter_map(|rect| {
+                        Bbox::try_from([
+                            f64::from(rect.left),
+                            f64::from(rect.top),
+                            f64::from(rect.right),
+                            f64::from(rect.bottom),
+                        ])
+                        .ok()
+                    })
+                    .collect(),
+            )
             .content_bounds(content_bounds)
             .text_items(text_items)
             .build(),

@@ -5,6 +5,7 @@ mod document;
 mod error;
 mod font;
 mod library;
+mod object;
 mod page;
 mod struct_tree;
 mod text_page;
@@ -18,6 +19,7 @@ pub use document::{
 pub use error::PdfiumError;
 pub use font::{Font, FontType};
 pub use library::Library;
+pub use object::TextObjectFacts;
 pub use page::{
     ImageBounds, ImageObjectInfo, ImageObjects, Page, PathObject, PathSegment,
     PdfAnnotation, PdfFormField, PdfLink, SegmentKind, ViewportTransform,

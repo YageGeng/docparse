@@ -32,6 +32,9 @@ impl DocumentLinker {
         let mut occurrences = BTreeMap::<String, Vec<NodeRef>>::new();
         for page in &ordered_pages {
             for block in &page.blocks {
+                if block.label == LayoutLabel::Watermark {
+                    continue;
+                }
                 let fingerprint = block
                     .lines
                     .iter()

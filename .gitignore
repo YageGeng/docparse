@@ -34,4 +34,5 @@ output.json
 # Browser build artifacts
 /packages/web/node_modules/
 /packages/web/dist/
+/packages/web/example/dist/
 /packages/web/test-results/

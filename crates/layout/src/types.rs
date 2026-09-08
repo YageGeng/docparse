@@ -101,7 +101,7 @@ impl TryFrom<PageImageInput> for PageImage {
     }
 }
 
-/// Normalized PP-DocLayoutV3 labels plus forward-compatible unknown labels.
+/// Fixed model labels, parser-derived semantics, and forward-compatible unknown labels.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutLabel {
@@ -130,6 +130,8 @@ pub enum LayoutLabel {
     Text,
     VerticalText,
     VisionFootnote,
+    /// A parser-derived overlay, outside the fixed model class vocabulary.
+    Watermark,
     Unknown(String),
 }
 
@@ -191,11 +193,12 @@ impl LayoutLabel {
             Self::Text => "text",
             Self::VerticalText => "vertical_text",
             Self::VisionFootnote => "vision_footnote",
+            Self::Watermark => "watermark",
             Self::Unknown(value) => value,
         }
     }
 
-    /// Returns the fixed-model class index; unknown labels have no model index.
+    /// Returns the fixed-model class index; derived and unknown labels have no model index.
     pub fn idx(&self) -> Option<usize> {
         Self::ALL.iter().position(|label| label == self)
     }
@@ -241,6 +244,9 @@ impl TryFrom<i32> for LayoutLabel {
 impl From<&str> for LayoutLabel {
     /// Maps known raw labels while preserving any future model label verbatim.
     fn from(value: &str) -> Self {
+        if value == "watermark" {
+            return Self::Watermark;
+        }
         Self::ALL
             .into_iter()
             .find(|label| label.to_str() == value)
@@ -251,6 +257,9 @@ impl From<&str> for LayoutLabel {
 impl From<String> for LayoutLabel {
     /// Maps an owned raw label without losing unknown text.
     fn from(value: String) -> Self {
+        if value == "watermark" {
+            return Self::Watermark;
+        }
         Self::ALL
             .into_iter()
             .find(|label| label.to_str() == value)

@@ -201,7 +201,7 @@ impl OrderGraph {
             let source_priority = match block.label_source {
                 LabelSource::Model => 0,
                 LabelSource::Fallback => 1,
-                LabelSource::Heuristic => 2,
+                LabelSource::Heuristic | LabelSource::Pdf => 2,
             };
             graph.insert_node(
                 OrderNode::builder()

@@ -1,0 +1,22 @@
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "linkedProjects": ["Cargo.toml"],
+        "cargo": {
+          "buildScripts": {
+            // Respect native default-members instead of building the browser crate for the host.
+            "overrideCommand": [
+              "cargo", "check", "--locked", "--message-format=json"
+            ]
+          }
+        },
+        "check": {
+          "allTargets": false,
+          // --all-targets controls tests/examples, not which workspace packages are checked.
+          "extraArgs": ["--exclude", "docparse-web"]
+        }
+      }
+    }
+  }
+}

@@ -65,4 +65,6 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8767)
-    ThreadingHTTPServer(("127.0.0.1", parser.parse_args().port), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", parser.parse_args().port), Handler)
+    print(f"DocParse SDK acceptance: http://127.0.0.1:{server.server_address[1]}/", flush=True)
+    server.serve_forever()

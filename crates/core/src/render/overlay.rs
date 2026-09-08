@@ -53,17 +53,37 @@ impl OverlayRenderer {
                     source.bbox.height()
                 )?;
             }
-            let raw_label = block.raw_label.as_deref().unwrap_or("fallback");
+            let raw_label = block
+                .raw_label
+                .as_deref()
+                .unwrap_or_else(|| block.label.to_str());
+            write!(
+                svg,
+                "<g><title>{} {} #{}</title>",
+                xml_escape(block.id.as_str()),
+                xml_escape(block.label.to_str()),
+                block.final_order
+            )?;
+            if let Some(polygon) = &block.polygon {
+                // Exact text contours replace the large empty corners of a rotated AABB.
+                write!(svg, "<polygon points=\"")?;
+                for point in polygon.points() {
+                    write!(svg, "{},{} ", point.x, point.y)?;
+                }
+                write!(svg, "\" fill=\"none\" stroke=\"#00b4d8\"/>")?;
+            } else {
+                write!(
+                    svg,
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"none\" stroke=\"#00b4d8\"/>",
+                    block.bbox.left,
+                    block.bbox.top,
+                    block.bbox.width(),
+                    block.bbox.height()
+                )?;
+            }
             writeln!(
                 svg,
-                "<g><title>{} {} #{}</title><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"none\" stroke=\"#00b4d8\"/><text x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"4\" fill=\"#d00000\">#{} {}</text></g>",
-                xml_escape(block.id.as_str()),
-                xml_escape(raw_label),
-                block.final_order,
-                block.bbox.left,
-                block.bbox.top,
-                block.bbox.width(),
-                block.bbox.height(),
+                "<text x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"4\" fill=\"#d00000\">#{} {}</text></g>",
                 block.bbox.left,
                 (block.bbox.top + 4.0).max(4.0),
                 block.final_order,

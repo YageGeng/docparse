@@ -17,7 +17,7 @@ pub use error::{
 };
 pub use geometry::{
     AffineTransform, Bbox, PageRotation, PageTransform, PageTransformInput,
-    Point, Polygon,
+    Point, Polygon, Quad,
 };
 pub use model_manifest::{
     ModelArtifacts, ModelManifest, ModelManifestError, PP_DOCLAYOUT_V3_REVISION,
