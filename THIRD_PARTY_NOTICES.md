@@ -70,6 +70,12 @@ Geometry intersection and validation use Rust crate `geo` version `0.33.1`.
 - Source: [georust/geo](https://github.com/georust/geo)
 - License: MIT OR Apache-2.0
 
+## Timing and build optimization
+
+Stage timing uses `web-time` 1.1.0 (MIT OR Apache-2.0), sourced from [daxpedda/web-time](https://github.com/daxpedda/web-time). It uses native monotonic time or the browser Worker's performance clock.
+
+Browser builds use Binaryen 132.0.0 (Apache-2.0), sourced from [WebAssembly/binaryen](https://github.com/WebAssembly/binaryen), as a development-only optimizer installed through the npm lockfile. The optimizer itself is not included in `dist/`.
+
 ## Python oracle and E2E dependencies
 
 PaddleOCR 3.6.0, PaddleX, OpenCV, NumPy, Python ONNX Runtime, psutil, and pypdf are used only by locked development/test scripts. They are not linked into or distributed with the Rust runtime crates. Their own package licenses apply to anyone redistributing those development environments.

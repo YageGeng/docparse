@@ -1,5 +1,6 @@
 //! Layout detection interfaces and PP-DocLayoutV3 inference for docparse.
 
+pub mod timing;
 pub mod wasm_compat;
 pub use wasm_compat::*;
 

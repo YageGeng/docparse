@@ -191,3 +191,11 @@ dialog::backdrop { background: #122d2690; backdrop-filter: blur(3px); }
 }
 @media (max-width: 390px) { .privacy { display: none; } .header-section { margin-left: auto; } .header-divider { display: none; } .view-tools .small span { display: none; } .zoom-control { border: 0; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Timing details stay in a modal so the document workspace retains its viewport budget. */
+#timing-details { margin-left: auto; }
+.timing-body { padding: 0 24px 24px; overflow: auto; }
+.timing-body p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.timing-body table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.timing-body th, .timing-body td { padding: 9px; text-align: right; border-bottom: 1px solid #dce5d5; white-space: nowrap; }
+.timing-body th:first-child, .timing-body td:first-child { text-align: left; }

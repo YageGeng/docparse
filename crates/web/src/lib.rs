@@ -143,7 +143,7 @@ impl WebParser {
 
     /// Runs the actual PDFium, model and fusion pipeline without exposing runtime handles.
     pub async fn parse(&self, bytes: Vec<u8>) -> Result<JsValue, JsValue> {
-        self.parse_with_observer(bytes, None, None).await
+        self.parse_with_observer(bytes, None, None, None).await
     }
 
     /// Relays progress and borrowed PDFium rasters through Worker-local callbacks.
@@ -152,19 +152,30 @@ impl WebParser {
         bytes: Vec<u8>,
         progress: Option<js_sys::Function>,
         page_image: Option<js_sys::Function>,
+        timing: Option<js_sys::Function>,
     ) -> Result<JsValue, JsValue> {
         let observer = BrowserObserver {
             progress,
             page_image,
+            timing,
         };
         let document = self
             .parser
             .parse_bytes_with_observer(Arc::from(bytes), &observer)
             .await
             .map_err(|error| WebError::value("DocumentFailed", error))?;
-        document
+        let (timings, mut receiver) =
+            docparse_layout::timing::Timings::channel();
+        let timer = timings
+            .start(docparse_layout::timing::TimingStage::ResultSerialize);
+        let result = document
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-            .map_err(|error| WebError::value("SerializationFailed", error))
+            .map_err(|error| WebError::value("SerializationFailed", error));
+        drop(timer);
+        if let Ok(timing) = receiver.try_recv() {
+            observer.on_timing(timing);
+        }
+        result
     }
 
     /// Applies the same native renderers to a validated canonical document.
@@ -202,9 +213,23 @@ impl WebParser {
 struct BrowserObserver {
     progress: Option<js_sys::Function>,
     page_image: Option<js_sys::Function>,
+    timing: Option<js_sys::Function>,
 }
 
 impl ParseObserver for BrowserObserver {
+    /// Reports small timing records without adding volatile fields to canonical results.
+    fn on_timing(&self, timing: docparse_core::Timing) {
+        if let Some(callback) = &self.timing {
+            let result = timing
+                .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+                .map_err(JsValue::from)
+                .and_then(|value| callback.call1(&JsValue::NULL, &value));
+            if let Err(error) = result {
+                web_sys::console::error_1(&error);
+            }
+        }
+    }
+
     /// Serializes only a small progress record at each real pipeline boundary.
     fn on_progress(&self, progress: ParseProgress) {
         if let Some(callback) = &self.progress {

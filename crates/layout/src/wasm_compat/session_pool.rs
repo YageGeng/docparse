@@ -1,5 +1,6 @@
 //! Native session leases and the browser inference actor behind one pool interface.
 use crate::pp_doclayout_v3::{preprocess::ModelInputs, session::ModelOutputs};
+use crate::timing::{TimingStage, Timings};
 use crate::{LayoutError, ModelArtifacts, ModelSchema};
 use docparse_config::{ExecutionProviderConfig, ValidatedConfig};
 use ort::session::{OutputSelector, RunOptions, Session};
@@ -121,12 +122,16 @@ mod platform {
         fn run(
             &mut self,
             inputs: &ModelInputs,
+            timings: &Timings,
         ) -> Result<ModelOutputs, LayoutError> {
+            let inference = timings.start(TimingStage::LayoutInference);
             let outputs = self.session.run_with_options(ort::inputs! {
                 "im_shape" => TensorRef::from_array_view(&inputs.image_size)?,
                 "image" => TensorRef::from_array_view(&inputs.image)?,
                 "scale_factor" => TensorRef::from_array_view(&inputs.scale_factor)?,
             }, &self.options)?;
+            drop(inference);
+            let _readback = timings.start(TimingStage::LayoutReadback);
             ModelOutputs::try_from(&outputs)
         }
     }
@@ -196,11 +201,17 @@ mod platform {
         pub(crate) async fn run(
             self: Arc<Self>,
             inputs: ModelInputs,
+            timings: Timings,
         ) -> Result<ModelOutputs, LayoutError> {
+            let queued = timings.start(TimingStage::LayoutQueue);
             let lease = self.acquire().await?;
-            run_cpu(move || lease.run(&inputs))
-                .await
-                .map_err(|source| LayoutError::TaskJoin { source })?
+            run_cpu(move || {
+                // Include semaphore and blocking-executor wait, but not model execution.
+                drop(queued);
+                lease.run(&inputs, &timings)
+            })
+            .await
+            .map_err(|source| LayoutError::TaskJoin { source })?
         }
     }
 
@@ -216,6 +227,7 @@ mod platform {
         fn run(
             &self,
             inputs: &ModelInputs,
+            timings: &Timings,
         ) -> Result<ModelOutputs, LayoutError> {
             let slot = self.pool.sessions.get(self.index).ok_or(
                 LayoutError::SessionPool {
@@ -226,7 +238,7 @@ mod platform {
                 slot.lock().map_err(|error| LayoutError::SessionPool {
                     message: error.to_string(),
                 })?;
-            session.run(inputs)
+            session.run(inputs, timings)
         }
     }
 
@@ -322,9 +334,12 @@ mod platform {
     use tokio::sync::{mpsc, oneshot};
 
     /// Owned inference request whose buffers survive cancellation of the waiting caller.
+    #[derive(typed_builder::TypedBuilder)]
     struct InferenceRequest {
         inputs: ModelInputs,
         response: oneshot::Sender<Result<ModelOutputs, LayoutError>>,
+        timings: Timings,
+        queued: crate::timing::StageTimer,
     }
 
     /// The sender for one browser-local actor that owns its ORT session across awaits.
@@ -368,12 +383,17 @@ mod platform {
             wasm_bindgen_futures::spawn_local(async move {
                 while let Some(request) = receiver.recv().await {
                     // The actor keeps inputs and the session alive until the JS Promise completes.
+                    drop(request.queued);
                     let result = async {
+                        let inference = request.timings.start(TimingStage::LayoutInference);
                         let mut outputs = session.run_async(ort::inputs! {
                             "im_shape" => TensorRef::from_array_view(&request.inputs.image_size)?,
                             "image" => TensorRef::from_array_view(&request.inputs.image)?,
                             "scale_factor" => TensorRef::from_array_view(&request.inputs.scale_factor)?,
                         }, &options).await?;
+                        drop(inference);
+                        // The Promise may finish before GPU outputs are CPU-readable.
+                        let _readback = request.timings.start(TimingStage::LayoutReadback);
                         ort_web::sync_outputs(&mut outputs).await.map_err(|error| LayoutError::Engine { message: format!("Web tensor synchronization failed: {error}") })?;
                         ModelOutputs::try_from(&outputs)
                     }.await;
@@ -394,10 +414,19 @@ mod platform {
         pub(crate) async fn run(
             self: Arc<Self>,
             inputs: ModelInputs,
+            timings: Timings,
         ) -> Result<ModelOutputs, LayoutError> {
+            let queued = timings.start(TimingStage::LayoutQueue);
             let (response, receiver) = oneshot::channel();
             self.sender
-                .send(InferenceRequest { inputs, response })
+                .send(
+                    InferenceRequest::builder()
+                        .inputs(inputs)
+                        .response(response)
+                        .timings(timings)
+                        .queued(queued)
+                        .build(),
+                )
                 .await
                 .map_err(|_error| LayoutError::SessionPool {
                     message: "browser session stopped".into(),

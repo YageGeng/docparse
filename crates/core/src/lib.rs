@@ -31,7 +31,7 @@ pub use ocr::{
     OcrContentStatus, OcrEngine, OcrError, OcrRequest, OcrResult, OcrTextItem,
 };
 pub use parser::{DocParseError, DocParser, DocParserBuilder, PageInput};
-pub use progress::{ParseObserver, ParseProgress};
+pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
     RenderError, RenderView, TextRenderer,

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, copyFile, readdir, stat, cp, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, copyFile, readdir, stat, cp, rm, rename } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,23 @@ if (version.status !== 0 || version.stdout.trim() !== "wasm-bindgen 0.2.125") {
 }
 run("cargo", ["build", "-p", "docparse-web", "--target", "wasm32-unknown-unknown", "--release", "--locked", "--target-dir", join(root, "target")]);
 run("wasm-bindgen", [join(root, "target/wasm32-unknown-unknown/release/docparse_web.wasm"), "--out-dir", join(dist, "pkg"), "--target", "web"]);
+
+// Optimize the post-bindgen artifact, then validate and hash exactly what browsers load.
+// PDFium uses exception tags for longjmp; keep EH enabled alongside Rust's SIMD/bulk-memory ABI.
+const wasmPath = join(dist, "pkg/docparse_web_bg.wasm");
+const optimizedPath = `${wasmPath}.optimized`;
+const optimizerFlags = ["-O4", "--enable-simd", "--enable-reference-types", "--enable-bulk-memory", "--enable-mutable-globals", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-exception-handling"];
+const beforeBytes = (await stat(wasmPath)).size;
+const optimizerStarted = performance.now();
+console.log("Optimizing DocParse WASM with Binaryen 132.0.0 (-O4)…");
+try {
+  run(process.execPath, [join(packageRoot, "node_modules/binaryen/bin/wasm-opt"), wasmPath, ...optimizerFlags, "-o", optimizedPath]);
+  // Never replace a usable artifact with invalid optimizer output.
+  new WebAssembly.Module(await readFile(optimizedPath));
+  await rename(optimizedPath, wasmPath);
+} finally { await rm(optimizedPath, { force: true }); }
+const optimization = { binaryen: "132.0.0", flags: optimizerFlags, beforeBytes, afterBytes: (await stat(wasmPath)).size, durationMs: performance.now() - optimizerStarted };
+console.log(`WASM optimization: ${optimization.beforeBytes} → ${optimization.afterBytes} bytes in ${(optimization.durationMs / 1000).toFixed(1)}s`);
 
 const gluePath = join(dist, "pkg/docparse_web.js");
 let glue = await readFile(gluePath, "utf8");
@@ -102,5 +119,5 @@ await copyFile(join(sdkRoot, "LICENSE"), join(dist, "pdfium/LICENSE"));
 await copyFile(join(sdkRoot, "VERSION"), join(dist, "pdfium/VERSION"));
 await cp(join(sdkRoot, "licenses"), join(dist, "pdfium/licenses"), { recursive: true });
 const pdfiumLibraries = Object.fromEntries((await readFile(join(root, "crates/pdfium-sys/wasm-libraries.sha256"), "utf8")).trim().split("\n").map(line => { const [hash, name] = line.split(/\s+/); return [name, hash]; }));
-await writeFile(join(dist, "build-manifest.json"), JSON.stringify({ rustTarget: "wasm32-unknown-unknown", ort: "2.0.0-rc.13", ortWeb: "0.3.0+1.27", onnxruntimeWeb: "1.27.0", wasmBindgen: "0.2.125", pdfium: "chromium/8028", pdfiumLibraries, imports, hashes }, null, 2) + "\n");
+await writeFile(join(dist, "build-manifest.json"), JSON.stringify({ rustTarget: "wasm32-unknown-unknown", ort: "2.0.0-rc.13", ortWeb: "0.3.0+1.27", onnxruntimeWeb: "1.27.0", wasmBindgen: "0.2.125", pdfium: "chromium/8028", pdfiumLibraries, optimization, imports, hashes }, null, 2) + "\n");
 console.log(`Built browser package at ${dist}; verified ${imports.length} WASM imports`);

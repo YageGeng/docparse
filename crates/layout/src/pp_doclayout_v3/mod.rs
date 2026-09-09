@@ -14,6 +14,7 @@ pub(crate) mod preprocess;
 pub(crate) mod schema;
 pub(crate) mod session;
 
+use crate::timing::TimingStage;
 use preprocess::preprocess;
 
 #[derive(Debug, Deserialize)]
@@ -104,13 +105,16 @@ impl LayoutEngine for PpDocLayoutV3Engine {
     > {
         Box::pin(async move {
             let page_number = request.page_number;
+            let timings = request.timings.for_page(page_number);
             let image = Arc::clone(&request.image);
             let transform = request.transform;
             let threshold = self.score_threshold;
             // CPU preprocessing happens before leasing the scarce session so later pages can prepare
             // tensors while the current page is using the GPU.
             let preprocess_transform = transform.clone();
+            let preprocessing = timings.clone();
             let inputs = crate::wasm_compat::run_cpu(move || {
+                let _timer = preprocessing.start(TimingStage::LayoutPreprocess);
                 preprocess(image.as_ref(), &preprocess_transform)
             })
             .await
@@ -119,13 +123,17 @@ impl LayoutEngine for PpDocLayoutV3Engine {
                 "starting PP-DocLayoutV3 inference for page {}",
                 page_number
             );
-            let outputs = Arc::clone(&self.pool).run(inputs).await?;
+            let outputs =
+                Arc::clone(&self.pool).run(inputs, timings.clone()).await?;
+            let postprocess_timer =
+                timings.start(TimingStage::LayoutPostprocess);
             let detections = postprocess::postprocess_page(
                 outputs.boxes.view(),
                 outputs.count,
                 threshold,
                 &transform,
             )?;
+            drop(postprocess_timer);
             tracing::info!(
                 "completed PP-DocLayoutV3 inference for page {} with {} detections",
                 page_number,

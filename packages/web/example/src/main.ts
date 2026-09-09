@@ -1,5 +1,5 @@
 import { createParser, DocParseError } from "../../dist/index.js";
-import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress } from "../../dist/index.js";
+import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress, ParserTiming } from "../../dist/index.js";
 
 /** The example owns these fixed elements; PDF text is always inserted with textContent. */
 const ui = {
@@ -9,6 +9,9 @@ const ui = {
   parse: document.querySelector<HTMLButtonElement>("#parse")!,
   cancel: document.querySelector<HTMLButtonElement>("#cancel")!,
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
+  timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
+  timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
+  timingRows: document.querySelector<HTMLElement>("#timing-rows")!,
   engine: document.querySelector<HTMLElement>("#engine-status")!,
   stage: document.querySelector<HTMLElement>("#stage")!,
   status: document.querySelector<HTMLElement>(".status-card")!,
@@ -46,6 +49,7 @@ const initialView = ui.viewer.cloneNode(true) as HTMLElement;
 const initialPages = ui.pages.cloneNode(true) as HTMLElement;
 const previews = new Map<number, PageImageResult & { url: string }>();
 const pageButtons = new Map<number, HTMLButtonElement>();
+const timingTotals = new Map<string, { count: number; total: number; first: number }>();
 let parser: DocParser | undefined;
 let selectedFile: File | undefined;
 let result: DocumentResult | undefined;
@@ -107,6 +111,7 @@ function setPageCount(count: number): void {
 
 /** Clears document-owned blobs while keeping a ready model available for another PDF. */
 function clearDocument(): void {
+  timingTotals.clear(); ui.timingDetails.disabled = true; ui.timingDialog.close();
   for (const preview of previews.values()) URL.revokeObjectURL(preview.url);
   previews.clear(); result = undefined; pageNumber = 1; selectedBlock = undefined;
   setPageCount(0); ui.pages.replaceChildren(...Array.from(initialPages.cloneNode(true).childNodes));
@@ -254,6 +259,27 @@ function showPage(number: number): void {
   selectBlock(""); controls();
 }
 
+/** Aggregates lightweight observations; detailed page numbers remain available in the SDK callback. */
+function recordTiming(scope: string, event: ParserTiming): void {
+  const key = `${scope} · ${event.stage.replaceAll("_", " ")}`;
+  const entry = timingTotals.get(key) ?? { count: 0, total: 0, first: event.duration_ms };
+  entry.count++; entry.total += event.duration_ms; timingTotals.set(key, entry);
+  ui.timingDetails.disabled = false;
+}
+
+/** Opens a snapshot without adding height or automatic scrolling to the PDF workspace. */
+function showTimings(): void {
+  ui.timingRows.replaceChildren();
+  for (const [stage, entry] of timingTotals) {
+    const row = document.createElement("tr");
+    for (const value of [stage, String(entry.count), `${entry.total.toFixed(1)} ms`, `${(entry.total / entry.count).toFixed(1)} ms`, `${entry.first.toFixed(1)} ms`]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    ui.timingRows.append(row);
+  }
+  ui.timingDialog.showModal();
+}
+
 /** Runs one cancellable operation while keeping stale callbacks from replacing a newer document. */
 async function parse(): Promise<void> {
   if (!selectedFile || busy) return;
@@ -274,6 +300,7 @@ async function parse(): Promise<void> {
         allowCpuFallback: true,
         config: { render: { dpi: 144, max_long_edge_pixels: 2000 } },
         signal, onProgress: event => { if (run === generation) progress(event); },
+        onTiming: event => { if (run === generation) recordTiming("Initialization", event); },
       });
       if (run !== generation) { await current.close(); return; }
       parser = current;
@@ -285,6 +312,7 @@ async function parse(): Promise<void> {
     const parsed = await current.parse(bytes, {
       signal,
       onProgress: event => { if (run === generation) progress(event); },
+      onTiming: event => { if (run === generation) recordTiming("Document", event); },
       onPageImage: image => {
         if (run !== generation) return;
         const previous = previews.get(image.pageNumber);
@@ -438,3 +466,6 @@ window.addEventListener("pagehide", () => {
   ui.engine.textContent = "Engine stopped"; delete ui.engine.dataset.provider;
   if (busy) { busy = false; status("Parsing canceled", "Select Parse document to start again."); controls(); }
 });
+
+ui.timingDetails.addEventListener("click", showTimings);
+document.querySelector("#close-timing")!.addEventListener("click", () => ui.timingDialog.close());

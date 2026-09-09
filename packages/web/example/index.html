@@ -32,7 +32,7 @@
       <input id="file" type="file" accept="application/pdf,.pdf" aria-label="Choose PDF" tabindex="-1">
       <div class="file-actions"><button class="button secondary" type="button" id="choose"><svg><use href="#icon-upload"/></svg>Choose PDF</button><button class="button primary" id="parse" disabled>Parse document<svg><use href="#icon-arrow"/></svg></button><button class="button cancel" id="cancel" hidden>Cancel parsing</button></div>
     </section>
-    <div class="engine-bar"><label for="execution-provider">Layout engine</label><select id="execution-provider" aria-describedby="engine-status"><option value="webgpu">WebGPU · recommended</option><option value="wasm">CPU · WebAssembly</option></select><span id="engine-status" role="status">GPU preferred · CPU fallback if unavailable</span></div>
+    <div class="engine-bar"><label for="execution-provider">Layout engine</label><select id="execution-provider" aria-describedby="engine-status"><option value="webgpu">WebGPU · recommended</option><option value="wasm">CPU · WebAssembly</option></select><span id="engine-status" role="status">GPU preferred · CPU fallback if unavailable</span><button id="timing-details" class="button secondary" disabled>Stage timings</button></div>
     <section class="status-card" aria-label="Parsing progress">
       <div class="status-copy" role="status" aria-live="polite"><span class="status-symbol" id="status-symbol">○</span><div><strong id="stage">Ready when you are</strong><p id="status-detail">Your document is processed entirely in this browser.</p></div></div>
       <div class="progress-group"><span id="progress-detail"></span><progress id="progress" max="100" hidden aria-label="Current stage progress"></progress></div>
@@ -51,6 +51,10 @@
     </section>
     <footer class="app-footer"><span><span class="status-dot"></span>Your files stay on your device</span><span>PDFium · PP-DocLayoutV3 · WebAssembly</span></footer>
   </main>
+  <dialog id="timing-dialog" aria-labelledby="timing-title">
+    <div class="export-header"><div><p class="eyebrow">PERFORMANCE</p><h2 id="timing-title">Stage timings</h2></div><button id="close-timing" class="icon-button" aria-label="Close stage timings"><svg><use href="#icon-close"/></svg></button></div>
+    <div class="timing-body"><p>Snapshot of the current run, in milliseconds. Concurrent stages overlap; totals include nested work and must not be added together. First inference may include lazy initialization. Recorded durations also include attempted stages that failed.</p><table><thead><tr><th>Stage</th><th>Runs</th><th>Total</th><th>Mean</th><th>First</th></tr></thead><tbody id="timing-rows"></tbody></table></div>
+  </dialog>
   <dialog id="export-dialog" aria-labelledby="export-title"><div class="export-header"><div><p class="eyebrow">IMAGE EXPORT</p><h2 id="export-title">Your page, with context.</h2></div><button class="icon-button" id="close-export" aria-label="Close image export"><svg><use href="#icon-close"/></svg></button></div><div class="export-body"><p id="export-status" role="status">Preparing your image…</p><img id="export-preview" alt="Exported PDF page with layout overlays" hidden></div><div class="export-footer"><span id="export-detail">PDFium page image + detected regions</span><a id="save-export" class="button primary" hidden><svg><use href="#icon-download"/></svg>Save PNG</a></div></dialog>
   <script type="module" src="./dist/main.js"></script>
 </body>

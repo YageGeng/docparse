@@ -101,6 +101,7 @@ sha2 = "0.11"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
+web-time = "1.1"
 
 # build
 bindgen = "0.72"

@@ -2,6 +2,7 @@ use docparse_layout::PageImage;
 use serde::Serialize;
 
 use crate::wasm_compat::{WasmCompatSend, WasmCompatSync};
+pub use docparse_layout::timing::Timing;
 
 /// Actual document pipeline boundaries, independent of execution speed or platform.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -18,6 +19,9 @@ pub enum ParseProgress {
 pub trait ParseObserver: WasmCompatSend + WasmCompatSync {
     /// Reports completed work rather than an estimated timer-based percentage.
     fn on_progress(&self, progress: ParseProgress);
+
+    /// Receives elapsed stage intervals separately from canonical document data.
+    fn on_timing(&self, _timing: Timing) {}
 
     /// Borrows the same PDFium RGB raster used by inference, without rendering a second time.
     fn on_page_image(&self, _page_number: u32, _image: &PageImage) {}

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::wasm_compat::{TaskError, TaskSet};
 use docparse_config::{OcrPolicy, ValidatedConfig};
+use docparse_layout::timing::{TimingStage, Timings};
 use docparse_layout::{LayoutEngine, LayoutRequest};
 use tokio::sync::mpsc;
 
@@ -70,6 +71,13 @@ impl ParseRuntime {
         input: PdfInput,
         observer: Option<&dyn crate::ParseObserver>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
+        let (collector, mut timing_receiver) = Timings::channel();
+        let timings = if observer.is_some() {
+            collector
+        } else {
+            Timings::default()
+        };
+        let total_timer = timings.start(TimingStage::ParseTotal);
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Opening);
         }
@@ -77,8 +85,10 @@ impl ParseRuntime {
             "starting document parse with layout engine {}",
             self.layout_engine.name()
         );
+        let opening = timings.start(TimingStage::PdfOpen);
         let executor =
             PdfiumExecutor::open(input, self.config.runtime()).await?;
+        drop(opening);
         let page_count = executor.page_count();
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Scanning {
@@ -101,7 +111,17 @@ impl ParseRuntime {
             .build();
         for page_number in 1..=page_count {
             tracing::debug!("pre-scanning page {}", page_number);
-            match executor.pre_scan_page(page_number).await {
+            let extraction = timings
+                .for_page(page_number)
+                .start(TimingStage::TextExtract);
+            let outcome = executor.pre_scan_page(page_number).await;
+            drop(extraction);
+            while let Ok(timing) = timing_receiver.try_recv() {
+                if let Some(observer) = observer {
+                    observer.on_timing(timing);
+                }
+            }
+            match outcome {
                 Ok(outcome) => {
                     let (extracted, warning, page_error) =
                         match Self::recover_pre_scan(
@@ -144,6 +164,7 @@ impl ParseRuntime {
                 }
             }
         }
+        let context_timer = timings.start(TimingStage::DocumentContext);
         // Freeze watermark decisions before body-font/chrome statistics or any page fusion.
         if let Err(error) = crate::watermark::classify(
             extracted_pages.values_mut(),
@@ -183,13 +204,19 @@ impl ParseRuntime {
                 total: page_count,
             });
         }
+        drop(context_timer);
         let (render_sender, mut render_receiver) =
             mpsc::channel(self.config.runtime().render_queue_capacity);
         let render_config = self.config.render().clone();
+        let render_timings = timings.clone();
         let producer = crate::wasm_compat::spawn(async move {
             for page_number in 1..=page_count {
+                let timer = render_timings
+                    .for_page(page_number)
+                    .start(TimingStage::PdfRender);
                 let rendered =
                     executor.render_page(page_number, &render_config).await;
+                drop(timer);
                 if render_sender.send((page_number, rendered)).await.is_err() {
                     break;
                 }
@@ -202,6 +229,12 @@ impl ParseRuntime {
         let mut fatal_error = None;
         let mut receiver_open = true;
         'processing: while receiver_open || !page_tasks.is_empty() {
+            // Deliver observations on this future, never from native tasks or the ORT actor.
+            while let Ok(timing) = timing_receiver.try_recv() {
+                if let Some(observer) = observer {
+                    observer.on_timing(timing);
+                }
+            }
             if page_tasks.len() >= self.config.runtime().page_concurrency {
                 if let Some(result) = page_tasks.join_next().await {
                     match Self::collect_page_task(result) {
@@ -225,6 +258,9 @@ impl ParseRuntime {
                 continue;
             }
             tokio::select! {
+                Some(timing) = timing_receiver.recv(), if observer.is_some() => {
+                    if let Some(observer) = observer { observer.on_timing(timing); }
+                }
                 result = page_tasks.join_next(), if !page_tasks.is_empty() => {
                     if let Some(result) = result {
                         match Self::collect_page_task(result) {
@@ -250,6 +286,7 @@ impl ParseRuntime {
                                 );
                                 break 'processing;
                             };
+                            let page_timings = timings.for_page(page_number);
                             let config = Arc::clone(&self.config);
                             let layout_engine = Arc::clone(&self.layout_engine);
                             let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
@@ -269,6 +306,7 @@ impl ParseRuntime {
                                             context,
                                             extracted,
                                             rendered,
+                                            page_timings,
                                         )
                                         .await
                                     });
@@ -280,7 +318,7 @@ impl ParseRuntime {
                                         error
                                     );
                                     page_tasks.spawn(async move {
-                                        analyze_without_render(config, context, extracted, error)
+                                        analyze_without_render(config, context, extracted, error, page_timings)
                                     });
                                 }
                                 Err(error) => {
@@ -351,6 +389,7 @@ impl ParseRuntime {
             });
         }
 
+        let linking = timings.start(TimingStage::LinkValidate);
         let relations = DocumentLinker::new().link(&context, &pages)?;
         let result = DocumentResult::builder()
             .schema_version(SchemaVersion::V2_0)
@@ -360,6 +399,13 @@ impl ParseRuntime {
             .errors(page_errors)
             .build();
         ResultValidator::validate(&result)?;
+        drop(linking);
+        drop(total_timer);
+        while let Ok(timing) = timing_receiver.try_recv() {
+            if let Some(observer) = observer {
+                observer.on_timing(timing);
+            }
+        }
 
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Complete {
@@ -434,6 +480,7 @@ pub(crate) async fn analyze_rendered_page(
     context: Arc<DocumentContext>,
     extracted: ExtractedPage,
     rendered: RenderedPage,
+    timings: Timings,
 ) -> Result<PageResult, ParseRuntimeError> {
     let page_number = extracted.page_number;
     if rendered.page_number != page_number {
@@ -449,6 +496,7 @@ pub(crate) async fn analyze_rendered_page(
                 .page_number(page_number)
                 .image(Arc::clone(&rendered.image))
                 .transform(rendered.transform.clone())
+                .timings(timings.clone())
                 .build(),
         )
         .await
@@ -471,7 +519,9 @@ pub(crate) async fn analyze_rendered_page(
         }
     };
     let analyzer = PageAnalyzer::new(Arc::clone(&config));
+    let preparation = timings.start(TimingStage::TextPrepare);
     let draft = analyzer.prepare(extracted, detections, context)?;
+    drop(preparation);
     let completion = if config.ocr().policy == OcrPolicy::Disabled
         || draft.missing_regions.is_empty()
     {
@@ -490,6 +540,7 @@ pub(crate) async fn analyze_rendered_page(
             .missing_regions(draft.missing_regions.clone())
             .native_text_coverage(draft.native_text_coverage)
             .build();
+        let _ocr = timings.start(TimingStage::Ocr);
         match engine.recognize(request).await {
             Ok(result) => OcrCompletion::Succeeded(result),
             Err(error) => OcrCompletion::Failed(error.to_string()),
@@ -497,7 +548,9 @@ pub(crate) async fn analyze_rendered_page(
     } else {
         OcrCompletion::Unavailable
     };
+    let finishing = timings.start(TimingStage::TextFinish);
     let mut page = analyzer.finish(draft, completion)?;
+    drop(finishing);
     if let Some(warning) = layout_warning {
         page.warnings.push(warning);
         page.warnings.sort_by(|left, right| {
@@ -516,9 +569,13 @@ fn analyze_without_render(
     context: Arc<DocumentContext>,
     extracted: ExtractedPage,
     error: PdfiumRuntimeError,
+    timings: Timings,
 ) -> Result<PageResult, ParseRuntimeError> {
     let analyzer = PageAnalyzer::new(config);
+    let preparation = timings.start(TimingStage::TextPrepare);
     let draft = analyzer.prepare(extracted, Vec::new(), context)?;
+    drop(preparation);
+    let _finishing = timings.start(TimingStage::TextFinish);
     let mut page = analyzer.finish(draft, OcrCompletion::Unavailable)?;
     page.warnings.push(PageWarning {
         code: "RenderUnavailable".to_owned(),

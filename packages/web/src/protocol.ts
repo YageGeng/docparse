@@ -1,17 +1,17 @@
-import type { DocumentResult, ExecutionProvider, ModelSource, PageImageResult, ParserProgress, RenderFormat, WebParseConfig } from "./types.js";
+import type { DocumentResult, ExecutionProvider, ModelSource, PageImageResult, ParserProgress, ParserTiming, RenderFormat, WebParseConfig } from "./types.js";
 
 /** Correlates each private Worker operation with its payload and successful result. */
 export interface WorkerOperations {
   init: {
-    payload: { artifacts: ModelSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean };
+    payload: { artifacts: ModelSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean; observeTiming: boolean };
     result: ExecutionProvider;
   };
   parse: {
-    payload: { bytes: Uint8Array; observeProgress: boolean; pageImages: boolean };
+    payload: { bytes: Uint8Array; observeProgress: boolean; observeTiming: boolean; pageImages: boolean };
     result: DocumentResult;
   };
   render: {
-    payload: { document: DocumentResult; format: RenderFormat; observeProgress?: false };
+    payload: { document: DocumentResult; format: RenderFormat; observeProgress?: false; observeTiming?: false };
     result: string;
   };
 }
@@ -26,6 +26,7 @@ export type WorkerSuccess = { [M in WorkerMethod]: { id: number; ok: true; metho
 /** Intermediate events never settle a request; terminal responses retain the originating operation. */
 export type WorkerResponse =
   | { id: number; event: "progress"; value: ParserProgress }
+  | { id: number; event: "timing"; value: ParserTiming }
   | { id: number; event: "page_image"; value: PageImageResult }
   | WorkerSuccess
   | { id: number; ok: false; code: string; message: string; stack?: string }

@@ -34,6 +34,7 @@ class WorkerParser implements DocParser {
       if ("event" in message) {
         try {
           if (message.event === "progress") pending.callbacks.onProgress?.(message.value);
+          else if (message.event === "timing") pending.callbacks.onTiming?.(message.value);
           else pending.callbacks.onPageImage?.(message.value);
         } catch (error) { console.error("DocParse observer callback failed", error); }
         return;
@@ -70,8 +71,8 @@ class WorkerParser implements DocParser {
     }
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
-    const payload: WorkerOperations["init"]["payload"] = { artifacts, config: options.config, executionProvider: options.executionProvider ?? "wasm", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress) };
-    this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress });
+    const payload: WorkerOperations["init"]["payload"] = { artifacts, config: options.config, executionProvider: options.executionProvider ?? "wasm", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
+    this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress, onTiming: options.onTiming });
   }
 
   /** Reports the backend selected by the Worker after successful model initialization. */
@@ -81,7 +82,7 @@ class WorkerParser implements DocParser {
   async parse(pdf: Uint8Array, options: ParseOptions = {}): Promise<DocumentResult> {
     this.assertReady(options.signal);
     const bytes = new Uint8Array(pdf);
-    return await this.request({ method: "parse", payload: { bytes, observeProgress: Boolean(options.onProgress), pageImages: Boolean(options.onPageImage) } }, [bytes.buffer], options.signal, options);
+    return await this.request({ method: "parse", payload: { bytes, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming), pageImages: Boolean(options.onPageImage) } }, [bytes.buffer], options.signal, options);
   }
 
   /** Reuses Rust renderers without running PDF extraction or model inference again. */

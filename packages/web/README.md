@@ -19,6 +19,8 @@ rtk npm ci --ignore-scripts
 rtk npm run build
 ```
 
+`npm run build` uses Cargo's release profile, runs wasm-bindgen, then runs the pinned npm Binaryen 132.0.0 `wasm-opt -O4`. No system `wasm-opt` installation is required. Optimization preserves SIMD, bulk memory, reference types, and PDFium exception handling; invalid output fails the build. The manifest records optimization flags, before/after byte sizes, elapsed optimization time, and the hash of the optimized artifact. ORT's own prebuilt WASM files are copied unchanged.
+
 `dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
 
 The SDK build excludes the example. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
@@ -55,6 +57,37 @@ Here, `file` is a caller-selected File. To manage authentication or caching, obt
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
+## Stage timings
+
+Both `createParser({ onTiming })` and `parser.parse(bytes, { onTiming })` accept a callback with `{stage, page_number, duration_ms}`. Page numbers are one-based; `null` denotes document-wide work. Timings never enter `DocumentResult`, so native/Web comparison and stored JSON stay deterministic. Rust callers use `ParseObserver::on_timing`; `RUST_LOG=debug` also reports elapsed stages.
+
+```javascript
+const timings = [];
+const document = await parser.parse(bytes, {
+  onTiming: event => timings.push(event),
+});
+console.table(timings);
+```
+
+| Stage | Measured interval |
+| --- | --- |
+| `runtime_load`, `model_download`, `model_init` | Worker WASM initialization, parallel artifact downloads, then ORT/model initialization (including an allowed fallback attempt). Downloads are omitted for caller-supplied bytes. |
+| `pdf_open`, `text_extract`, `pdf_render` | PDFium actor turnaround, including dispatch and native executor waits; extraction/rendering are attributed to each page. |
+| `document_context` | Watermark classification and document statistics. |
+| `layout_preprocess` | CPU resize/normalization/tensor preparation; excludes native blocking-executor wait. |
+| `layout_queue` | Session availability and native inference-executor wait, or browser actor queue wait. |
+| `layout_inference` | Input binding and the synchronous ORT run or asynchronous ORT Promise. Includes runtime transfers/lazy compilation performed inside that call; this is not GPU kernel time. |
+| `layout_readback` | Web output synchronization plus conversion of the two consumed outputs; native output conversion. Native provider-internal transfers remain in `layout_inference`. |
+| `layout_postprocess` | Detection filtering and coordinate conversion. |
+| `text_prepare`, `ocr`, `text_finish` | Native text/layout preparation, an actual OCR call when needed, then final text/layout composition. |
+| `link_validate` | Cross-page linking, result assembly, and validation. |
+| `result_serialize`, `preview_encode` | Rust result conversion to JavaScript; each Worker PNG encoding operation, including asynchronous waiting. |
+| `parse_total`, `worker_total` | Inclusive Rust parse time; inclusive Worker initialization or parse time, respectively. Worker parse time includes serialization and preview completion, but excludes request/result transfer and UI rendering. |
+
+All values use monotonic wall clocks, including `performance.now()` in the dedicated Worker. Concurrent stages overlap, and totals include nested work: **do not add all stage durations to compute elapsed parse time**. The example's status timer additionally includes main-thread setup, file reading, and message delivery. Initializing a model and parsing a document are separate callback scopes. The first real inference can include lazy runtime/GPU compilation; no explicit dummy warmup run is added.
+
+Observations describe elapsed attempts, not success. Error/cancellation can leave a partial set of events; stages that never run have no record. SDK callbacks are isolated from parser failures and scoped to the active request. Rust callbacks are delivered serially by the parse future, potentially after a stage has ended.
+
 ## Interactive example
 
 The example selects WebGPU by default and explicitly allows CPU fallback on unsupported devices. Its layout engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
@@ -74,6 +107,8 @@ default. The introduction collapses after file selection. Zoom percentages are r
 to this fitted size; click **Fit entire page** to reset both scale and scroll position.
 Window resizing refits the image and overlays together. Thumbnails, enlarged pages, and
 long extracted text scroll within their own panels. Exported PNG resolution is unchanged.
+
+**Stage timings** opens a snapshot with counts, cumulative time, mean, and first measurement for each stage. Initialization is listed only when this run created a Worker; reusing a model does not count as new initialization. The dialog preserves the fitted workspace height.
 
 **Export PNG** opens the generated image for inspection; **Save PNG** then downloads it. Some embedded browsers cancel file downloads, but the image remains available in the preview. Cancel stops the Worker; the next parse creates a fresh parser. A ready model is reused when choosing another PDF. Returning through browser history does not revoke a cached document's preview URLs.
 

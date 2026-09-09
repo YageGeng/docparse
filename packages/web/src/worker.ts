@@ -1,5 +1,5 @@
 import init, { default_config, WebParser } from "./pkg/docparse_web.js";
-import type { DocumentResult, ParserProgress, WebParseConfig } from "./types.js";
+import type { DocumentResult, ParserProgress, ParserTiming, WebParseConfig } from "./types.js";
 import type { WorkerRequest, WorkerResponse, WorkerSuccess } from "./protocol.js";
 import { artifact } from "./artifacts.js";
 
@@ -46,15 +46,21 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
   const { id, method, payload } = event.data;
   if (executing) { scope.postMessage({ id, ok: false, code: "ParserBusy", message: "Worker is busy" } satisfies WorkerResponse); return; }
   executing = true;
+  const requestStarted = performance.now();
   const progress = payload.observeProgress
     ? (value: ParserProgress) => scope.postMessage({ id, event: "progress", value } satisfies WorkerResponse)
+    : undefined;
+  const timing = payload.observeTiming
+    ? (value: ParserTiming) => scope.postMessage({ id, event: "timing", value } satisfies WorkerResponse)
     : undefined;
   try {
     let reply: WorkerSuccess;
     if (method === "init") {
       if (parser) throw new Error("Parser already initialized");
       progress?.({ stage: "loading_runtime" });
-      await init();
+      const runtimeStarted = performance.now();
+      try { await init(); }
+      finally { timing?.({ stage: "runtime_load", page_number: null, duration_ms: performance.now() - runtimeStarted }); }
       const config = configuration(payload.config);
       if (!["wasm", "webgpu"].includes(payload.executionProvider)) throw Object.assign(new Error("Unknown execution provider"), { code: "InvalidConfig" });
       let webgpu = payload.executionProvider === "webgpu";
@@ -70,11 +76,14 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
         }
       }
       const source = payload.artifacts;
+      const downloadStarted = performance.now();
       const [model, modelConfig, manifest] = source.kind === "urls"
         ? await Promise.all([artifact("model", source.model, progress), artifact("config", source.config, progress), artifact("manifest", source.manifest, progress)])
         : [source.model, source.config, source.manifest];
+      if (source.kind === "urls") timing?.({ stage: "model_download", page_number: null, duration_ms: performance.now() - downloadStarted });
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
+      const modelStarted = performance.now();
       try { parser = await WebParser.create(model, modelConfig, manifest, config, base, webgpu); }
       catch (error) {
         const code = (error as { code?: string }).code;
@@ -83,6 +92,7 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
         parser = await WebParser.create(model, modelConfig, manifest, config, base, false);
         webgpu = false;
       }
+      finally { timing?.({ stage: "model_init", page_number: null, duration_ms: performance.now() - modelStarted }); }
       // Report the initialized backend, not the caller's preference, so fallback stays visible.
       reply = { id, ok: true, method, value: webgpu ? "webgpu" : "wasm" };
     } else if (!parser) throw new Error("Parser is not initialized");
@@ -97,13 +107,15 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
       const onImage = payload.pageImages ? (page: number, width: number, height: number, pixels: Uint8Array) => {
         // Catch immediately: a PNG failure must not become an unhandled rejection while
         // Rust is awaiting inference. The parse promise settles only after all images do.
+        const encodingStarted = performance.now();
         images.push(pageImage(page, width, height, pixels)
           .then(value => scope.postMessage({ id, event: "page_image", value } satisfies WorkerResponse))
-          .catch(error => { imageFailure ??= error; }));
+          .catch(error => { imageFailure ??= error; })
+          .finally(() => timing?.({ stage: "preview_encode", page_number: page, duration_ms: performance.now() - encodingStarted })));
       } : undefined;
       // Rust validates the canonical result before its WASM ABI serializes it.
       let document: DocumentResult;
-      try { document = await parser.parse_with_observer(payload.bytes, onProgress, onImage); }
+      try { document = await parser.parse_with_observer(payload.bytes, onProgress, onImage, timing); }
       finally { await Promise.all(images); }
       if (imageFailure) throw Object.assign(new Error(`Page preview failed: ${String(imageFailure)}`), { code: "ImageEncodingFailed" });
       if (completion) progress?.(completion);
@@ -111,8 +123,11 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
     }
     else if (method === "render") reply = { id, ok: true, method, value: parser.render(payload.document, payload.format) };
     else throw new Error("Unknown Worker method");
+    // Includes preview encoding and result serialization, but excludes result message delivery.
+    timing?.({ stage: "worker_total", page_number: null, duration_ms: performance.now() - requestStarted });
     scope.postMessage(reply);
   } catch (error) {
+    timing?.({ stage: "worker_total", page_number: null, duration_ms: performance.now() - requestStarted });
     const failure = error as { code?: string; message?: string };
     scope.postMessage({ id, ok: false, code: failure?.code ?? "OperationFailed", message: failure?.message ?? String(error), stack: error instanceof Error ? error.stack : undefined } satisfies WorkerResponse);
   } finally { executing = false; }

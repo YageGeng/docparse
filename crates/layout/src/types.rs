@@ -299,4 +299,7 @@ pub struct LayoutRequest {
     pub page_number: u32,
     pub image: Arc<PageImage>,
     pub transform: PageTransform,
+    /// Optional observations do not become part of detection metadata.
+    #[builder(default)]
+    pub timings: crate::timing::Timings,
 }

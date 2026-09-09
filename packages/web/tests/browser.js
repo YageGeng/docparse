@@ -104,16 +104,24 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   report.elapsedMs = Math.round(performance.now() - start); render();
 } else try {
   const initialization = new AbortController();
-  parser = await createParser({ ...options, signal: initialization.signal });
+  const initializationTimings = [];
+  parser = await createParser({ ...options, signal: initialization.signal, onTiming: event => initializationTimings.push(event) });
+  for (const stage of ["runtime_load", "model_download", "model_init", "worker_total"]) {
+    assert(initializationTimings.filter(event => event.stage === stage).length === 1, `Missing initialization timing: ${stage}`);
+  }
+  assert(initializationTimings.every(event => Number.isFinite(event.duration_ms) && event.duration_ms >= 0 && event.page_number === null), "Invalid initialization clock or scope");
+  report.initializationTimings = initializationTimings;
   report.executionProvider = parser.executionProvider;
   assert(parser.executionProvider === (gpuUnavailable ? "wasm" : options.executionProvider), "Reported backend differs from the initialized backend");
   initialization.abort();
   report.tests.push("PASS: actual module Worker initialization and detached initialization signal"); render();
   const bytes = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/extraction_metadata.pdf", base))).arrayBuffer());
   const storage = new Uint8Array(bytes.length + 16); storage.set(bytes, 8);
-  const parsing = parser.parse(storage.subarray(8, 8 + bytes.length));
+  const firstPageTimings = [];
+  const parsing = parser.parse(storage.subarray(8, 8 + bytes.length), { onTiming: event => firstPageTimings.push(event) });
   await rejects(parser.parse(bytes), "ParserBusy");
   const document = await parsing;
+  report.firstPageTimings = firstPageTimings;
   assertContentLayouts(document);
   assert(!document.pages.some(page => page.warnings.some(warning => warning.code === "LayoutUnavailable")), "Real-model acceptance must not silently use layout fallback");
   if (parameters.has("growMemory")) assert(report.metrics.at(-1).forcedMemoryGrowth > 0, "Parser heap growth was not exercised");
@@ -171,13 +179,27 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   report.tests.push(`PASS: ${cycles} repeat parses, bad-PDF recovery, zero retained tensors, exactly two runtime fetches`); render();
 
   const multiple = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/multipage_layout.pdf", base))).arrayBuffer());
-  const progressEvents = [], pageImages = [];
+  const progressEvents = [], pageImages = [], timingEvents = [];
   let settled = false, lateEvent = false;
   const multiResult = await parser.parse(multiple, {
     onProgress: event => { lateEvent ||= settled; progressEvents.push(event); },
     onPageImage: image => { lateEvent ||= settled; pageImages.push(image); },
+    onTiming: event => { lateEvent ||= settled; timingEvents.push(event); },
   });
   settled = true;
+  const pageStages = ["text_extract", "pdf_render", "layout_preprocess", "layout_queue", "layout_inference", "layout_readback", "layout_postprocess", "text_prepare", "text_finish", "preview_encode"];
+  for (const page of [1, 2, 3]) for (const stage of pageStages) {
+    assert(timingEvents.filter(event => event.stage === stage && event.page_number === page).length === 1, `Missing or duplicate page ${page} timing: ${stage}`);
+  }
+  for (const stage of ["pdf_open", "document_context", "link_validate", "parse_total", "result_serialize", "worker_total"]) {
+    assert(timingEvents.filter(event => event.stage === stage && event.page_number === null).length === 1, `Missing or duplicate document timing: ${stage}`);
+  }
+  assert(timingEvents.every(event => Number.isFinite(event.duration_ms) && event.duration_ms >= 0), "Non-finite or negative stage timing");
+  assert(timingEvents.filter(event => event.stage === "layout_inference").every(event => event.duration_ms > 0), "Worker clock reports zero inference time");
+  assert(timingEvents.find(event => event.stage === "worker_total").duration_ms >= timingEvents.find(event => event.stage === "parse_total").duration_ms, "Worker total excludes its Rust parse interval");
+  assert(!JSON.stringify(multiResult).includes('"duration_ms"'), "Timings leaked into canonical result");
+  report.pageTimings = timingEvents;
+  report.tests.push("PASS: Worker-safe stage timing, page attribution, initialization separation, and unchanged canonical schema");
   assertContentLayouts(multiResult);
   assert(multiResult.pages.length === 3 && multiResult.errors.length === 0, "Three-page parsing degraded or failed");
   assert(progressEvents[0].stage === "opening" && progressEvents.at(-1).stage === "complete", "Progress boundaries are missing");

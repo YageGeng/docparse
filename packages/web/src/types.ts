@@ -52,6 +52,7 @@ export interface WebParserOptions {
   config?: WebParseConfig;
   signal?: AbortSignal;
   onProgress?: (progress: ParserProgress) => void;
+  onTiming?: (timing: ParserTiming) => void;
 }
 /** Reported stages follow actual downloads, scanned pages, and completed analyses. */
 export type ParserProgress =
@@ -59,12 +60,22 @@ export type ParserProgress =
   | { stage: "downloading"; artifact: string; loaded: number; total?: number }
   | { stage: "scanning" | "analyzing"; completed: number; total: number }
   | { stage: "linking" | "complete"; total: number };
+/** Elapsed wall time for an attempted stage, including errors; intervals may overlap or nest.
+ * Page numbers are one-based; null denotes a document or initialization stage.
+ * These observations never enter DocumentResult. A duration is not proof of stage success.
+ */
+export interface ParserTiming {
+  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  page_number: number | null;
+  duration_ms: number;
+}
 /** A PNG of the exact PDFium raster used for inference, without any overlay baked in. */
 export interface PageImageResult { pageNumber: number; width: number; height: number; blob: Blob }
 /** Per-call cancellation and observations retained on the calling thread. */
 export interface ParseOptions {
   signal?: AbortSignal;
   onProgress?: (progress: ParserProgress) => void;
+  onTiming?: (timing: ParserTiming) => void;
   onPageImage?: (image: PageImageResult) => void;
 }
 /** Supported projections of a canonical document. */

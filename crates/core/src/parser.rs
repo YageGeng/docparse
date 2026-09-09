@@ -244,6 +244,7 @@ impl DocParser {
             context,
             input.extracted,
             rendered,
+            docparse_layout::timing::Timings::default(),
         )
         .await
         .map_err(|source| DocParseError::ParsePage {
