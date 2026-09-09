@@ -21,6 +21,7 @@ pub enum TimingStage {
     TextPrepare,
     Ocr,
     TextFinish,
+    TableStructure,
     LinkValidate,
     ParseTotal,
     ResultSerialize,

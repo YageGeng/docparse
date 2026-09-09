@@ -205,6 +205,24 @@ function selectBlock(id: string): void {
   ui.text.textContent = selectedBlock?.label === "reference"
     ? "Visual reference area. Select a reference content region to read its text."
     : selectedBlock ? selectedBlock.text || "No native text was extracted for this region. Image and outline text require OCR." : "Select an overlay to reveal the original text from your PDF.";
+  if (selectedBlock?.table) {
+    const source = selectedBlock.table;
+    const table = document.createElement("table"); table.className = "table-view";
+    table.setAttribute("aria-label", `Table with ${source.row_count} rows and ${source.column_count} columns`);
+    const body = document.createElement("tbody");
+    for (let row = 0; row < source.row_count; row++) {
+      const tr = document.createElement("tr");
+      for (const cell of source.cells.filter(cell => cell.row === row).sort((a, b) => a.column - b.column)) {
+        // Source PDF text is never parsed as markup; spans come from the validated Rust grid.
+        const td = document.createElement(cell.is_header ? "th" : "td");
+        td.rowSpan = cell.row_span; td.colSpan = cell.column_span; td.textContent = cell.text;
+        tr.append(td);
+      }
+      body.append(tr);
+    }
+    table.append(body); ui.text.replaceChildren(table);
+    ui.meta.textContent += ` · ${source.row_count} rows × ${source.column_count} columns`;
+  }
   ui.characters.textContent = selectedBlock ? `${Array.from(selectedBlock.text).length} characters` : "—";
   ui.copy.disabled = !selectedBlock?.text; ui.copyStatus.textContent = "";
 }
@@ -255,7 +273,9 @@ function showPage(number: number): void {
   // A model failure is a different result from missing native text; make degraded layout visible.
   ui.warnings.textContent = page?.warnings.some(warning => warning.code === "LayoutUnavailable")
     ? "Layout inference failed on this page. A geometry-only fallback is shown."
-    : page?.warnings.length ? `${page.warnings.length} parser warnings on this page. Some regions may have no native text.` : "";
+    : page?.warnings.some(warning => warning.code === "TableStructureUnavailable")
+      ? "Some table structures could not be recovered. Their original text is preserved."
+      : page?.warnings.length ? `${page.warnings.length} parser warnings on this page. Some regions may have no native text.` : "";
   selectBlock(""); controls();
 }
 

@@ -18,7 +18,7 @@ pub(crate) enum LabelPolicy {
 impl LabelPolicy {
     /// Returns whether canonical Block text should retain physical line breaks.
     pub(crate) const fn preserves_line_breaks(self) -> bool {
-        matches!(self, Self::Algorithm)
+        matches!(self, Self::Algorithm | Self::Structured)
     }
 
     /// Returns whether canonical Block text may join an encoded line-end hyphen.

@@ -518,7 +518,8 @@ pub(crate) async fn analyze_rendered_page(
             )
         }
     };
-    let analyzer = PageAnalyzer::new(Arc::clone(&config));
+    let analyzer =
+        PageAnalyzer::new(Arc::clone(&config)).with_timings(timings.clone());
     let preparation = timings.start(TimingStage::TextPrepare);
     let draft = analyzer.prepare(extracted, detections, context)?;
     drop(preparation);
@@ -571,7 +572,7 @@ fn analyze_without_render(
     error: PdfiumRuntimeError,
     timings: Timings,
 ) -> Result<PageResult, ParseRuntimeError> {
-    let analyzer = PageAnalyzer::new(config);
+    let analyzer = PageAnalyzer::new(config).with_timings(timings.clone());
     let preparation = timings.start(TimingStage::TextPrepare);
     let draft = analyzer.prepare(extracted, Vec::new(), context)?;
     drop(preparation);

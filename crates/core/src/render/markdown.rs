@@ -38,6 +38,10 @@ impl MarkdownRenderer {
                 if hidden.contains(block.id.as_str()) {
                     continue;
                 }
+                if let Some(table) = &block.table {
+                    output.push(table.to_markdown());
+                    continue;
+                }
                 let text = block
                     .lines
                     .iter()

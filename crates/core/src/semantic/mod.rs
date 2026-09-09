@@ -299,7 +299,18 @@ impl SemanticAssembler {
         let lines = self.lines(&block_id, fragments);
         let polygon = Self::content_polygon(&lines);
         let text = Block::derive_text(&seed.label, &lines);
-        let bbox = Self::content_bbox(&lines)?.unwrap_or(seed.bbox);
+        let content_bbox = Self::content_bbox(&lines)?.unwrap_or(seed.bbox);
+        // Table whitespace carries empty cells and separators; retain it before containment normalization.
+        let bbox = if seed.label == LayoutLabel::Table {
+            Bbox::try_from([
+                seed.bbox.left.min(content_bbox.left),
+                seed.bbox.top.min(content_bbox.top),
+                seed.bbox.right.max(content_bbox.right),
+                seed.bbox.bottom.max(content_bbox.bottom),
+            ])?
+        } else {
+            content_bbox
+        };
         let evidence = seed
             .assignment_evidence
             .iter()

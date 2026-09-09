@@ -37,12 +37,25 @@ pub(crate) struct PageAnalysisDraft {
 #[derive(Debug, Clone)]
 pub(crate) struct PageAnalyzer {
     config: Arc<ValidatedConfig>,
+    timings: docparse_layout::timing::Timings,
 }
 
 impl PageAnalyzer {
     /// Creates an analyzer from immutable validated configuration.
-    pub(crate) const fn new(config: Arc<ValidatedConfig>) -> Self {
-        Self { config }
+    pub(crate) fn new(config: Arc<ValidatedConfig>) -> Self {
+        Self {
+            config,
+            timings: docparse_layout::timing::Timings::default(),
+        }
+    }
+
+    /// Shares the per-parse timing sink without making observations part of page data.
+    pub(crate) fn with_timings(
+        mut self,
+        timings: docparse_layout::timing::Timings,
+    ) -> Self {
+        self.timings = timings;
+        self
     }
 
     /// Prepares stable native/layout facts and suggested OCR missing regions.
@@ -245,6 +258,42 @@ impl PageAnalyzer {
         blocks.extend(fallback.blocks);
         warnings.extend(fallback.warnings);
         let mut blocks = assembler.normalize_blocks(blocks)?;
+        // Reconstruct tables only after every source item has its final parent owner.
+        // Cell text is assembled independently; the original lines remain source evidence.
+        let table_timer = blocks
+            .iter()
+            .any(|block| block.label == LayoutLabel::Table)
+            .then(|| {
+                self.timings
+                    .for_page(extracted.page_number)
+                    .start(docparse_layout::timing::TimingStage::TableStructure)
+            });
+        let table_assembler = crate::table::TableAssembler::new(
+            self.config.fusion(),
+            &extracted.table_evidence,
+        );
+        for block in blocks
+            .iter_mut()
+            .filter(|block| block.label == LayoutLabel::Table)
+        {
+            if let Err(reason) = table_assembler.reconstruct(block) {
+                tracing::warn!(
+                    "table structure unavailable for {}: {}",
+                    block.id.as_str(),
+                    reason
+                );
+                warnings.push(PageWarning {
+                    code: "TableStructureUnavailable".to_owned(),
+                    stage: "table".to_owned(),
+                    message: format!(
+                        "table {} retains source lines: {}",
+                        block.id.as_str(),
+                        reason
+                    ),
+                });
+            }
+        }
+        drop(table_timer);
         warnings.extend(
             blocks
                 .iter()

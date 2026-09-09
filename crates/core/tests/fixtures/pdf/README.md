@@ -10,3 +10,9 @@ The generation scripts live beside the PDFs. Vera comes from reportlab's fonts d
 All fixtures use deterministic generation metadata. Ordinary tests use the committed PDFs and do not download fonts or regenerate files. Chinese strings are intentional test data.
 
 Native references include the input PDF SHA-256. Regenerate references after changing an input; browser comparisons reject mismatched input hashes.
+
+## Table structure fixture
+
+`table_layout.pdf` contains three embedded-font pages: a ruled grid, a borderless table, and a tagged table. It exercises grouped/multiline headers, row/column spans, an empty interior cell, decimal punctuation, and unrelated surrounding text. `generate_table_layout.py` regenerates it with ReportLab and pypdf. The Vera fonts use the same redistribution notice as `embedded_layout.LICENSE.txt`.
+
+The real-model native reference test and browser acceptance compare all three pages, including structured cells and their source ranges. Expected dimensions are 8x4 (ruled), 7x4 (text alignment), and 8x4 (tagged PDF). The tagged page deliberately includes an empty TD, which PDFium may omit from its page-filtered tree; the remaining cells must keep their physical columns.

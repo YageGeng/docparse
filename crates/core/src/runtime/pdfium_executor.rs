@@ -313,6 +313,8 @@ fn pre_scan_document_page(
             ])
             .ok()
         });
+    let mut table_evidence = crate::TableEvidence::default();
+    table_evidence.read_geometry(&page, &view_box);
     // Preserve page geometry even when only the native-text layer is unavailable.
     let (text_items, extraction_error) = match page.text() {
         Ok(text_page) => match extract_page_text_items(
@@ -320,6 +322,7 @@ fn pre_scan_document_page(
             &text_page,
             &view_box,
             page_number,
+            &mut table_evidence,
         ) {
             Ok(text_items) => (text_items, None),
             Err(source) => (
@@ -363,6 +366,7 @@ fn pre_scan_document_page(
             )
             .content_bounds(content_bounds)
             .text_items(text_items)
+            .table_evidence(table_evidence)
             .build(),
         extraction_error,
     })

@@ -16,6 +16,9 @@ pub struct ExtractedPage {
     #[builder(default)]
     pub content_bounds: Option<Bbox>,
     pub text_items: Vec<TextItem>,
+    /// Measured words, vector separators, and tagged cells used only during table reconstruction.
+    #[builder(default)]
+    pub table_evidence: crate::TableEvidence,
     /// Explicit watermark annotation bounds, independent of the native text layer.
     #[builder(default)]
     pub watermark_annotations: Vec<Bbox>,

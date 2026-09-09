@@ -34,6 +34,7 @@ async fn native_artifacts_parse_real_pdf_bytes() {
         ("multipage_layout", 3),
         ("embedded_layout", 2),
         ("embedded_cjk_90", 1),
+        ("table_layout", 3),
     ] {
         let bytes: Arc<[u8]> = Arc::from(
             std::fs::read(
@@ -64,6 +65,57 @@ async fn native_artifacts_parse_real_pdf_bytes() {
                     .collect::<String>()
                     .contains("中文文档解析测试")
             );
+        }
+        if name == "table_layout" {
+            for (page, (rows, columns, source)) in result.pages.iter().zip([
+                (8, 4, docparse_core::TableStructureSource::Ruled),
+                (7, 4, docparse_core::TableStructureSource::TextAlignment),
+                (8, 4, docparse_core::TableStructureSource::TaggedPdf),
+            ]) {
+                let table = page
+                    .blocks
+                    .iter()
+                    .find_map(|block| block.table.as_ref())
+                    .expect("real model table detection and structure");
+                assert_eq!(
+                    (table.row_count, table.column_count, table.source),
+                    (rows, columns, source)
+                );
+                assert!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.row == 0)
+                        .all(|cell| cell.is_header)
+                );
+                assert!(table.cells.iter().any(|cell| cell.text == "32.5"));
+                assert!(table.cells.iter().any(|cell| cell.text == "28.1"));
+                if rows == 8 {
+                    assert!(table.cells.iter().any(|cell| cell.row == 4
+                        && cell.column == 1
+                        && cell.text.is_empty()));
+                    assert!(table.cells.iter().any(|cell| cell.row == 4
+                        && cell.column == 2
+                        && cell.text == "25.4"));
+                    assert!(table.cells.iter().any(|cell| cell.text
+                        == "System"
+                        && cell.row_span == 2));
+                    assert!(
+                        table.cells.iter().any(|cell| cell.text
+                            == "Performance measurements"
+                            && cell.column_span == 3)
+                    );
+                }
+                assert!(
+                    page.blocks
+                        .iter()
+                        .filter(|block| block.label
+                            != docparse_layout::LayoutLabel::Table)
+                        .any(|block| block
+                            .text
+                            .contains("This sentence is outside"))
+                );
+            }
         }
         assert!(
             result

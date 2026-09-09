@@ -34,6 +34,10 @@ impl TextRenderer {
                 if hidden.contains(block.id.as_str()) {
                     continue;
                 }
+                if let Some(table) = &block.table {
+                    lines.push(table.to_text());
+                    continue;
+                }
                 if block.label == docparse_layout::LayoutLabel::Watermark
                     && !lines.is_empty()
                 {

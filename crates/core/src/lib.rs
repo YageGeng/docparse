@@ -16,6 +16,7 @@ mod progress;
 mod render;
 mod runtime;
 mod semantic;
+mod table;
 mod types;
 mod validate;
 mod watermark;
@@ -35,6 +36,11 @@ pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
     RenderError, RenderView, TextRenderer,
+};
+pub use table::{
+    Table, TableCell, TableCellLine, TableEvidence, TableRule,
+    TableStructureSource, TableTextSpan, TableWord, TaggedTable,
+    TaggedTableCell,
 };
 pub use types::*;
 pub use validate::ResultValidator;

@@ -113,6 +113,8 @@ pub(crate) struct TextItemDraft {
     #[builder(default)]
     pub(crate) repair_actions: Vec<RepairAction>,
     pub(crate) extraction_order: u32,
+    #[builder(default)]
+    pub(crate) words: Vec<crate::TableWord>,
 }
 
 impl TryFrom<TextItemDraft> for TextItem {
@@ -219,6 +221,8 @@ pub(crate) struct CurrentSegment {
     strike: bool,
     #[builder(default)]
     repair_actions: Vec<RepairAction>,
+    #[builder(default)]
+    words: Vec<crate::TableWord>,
 }
 
 impl CurrentSegment {
@@ -226,7 +230,14 @@ impl CurrentSegment {
     fn from_fact(fact: TextCharFact) -> Self {
         let character = fact.character.to_string();
         let baseline = fact.measured_baseline();
+        let word = crate::TableWord::builder()
+            .byte_range(0..character.len())
+            .bbox(fact.bbox)
+            .baseline(baseline)
+            .mcid(fact.mcid)
+            .build();
         Self::builder()
+            .words(vec![word])
             .raw_text(character)
             .bbox(fact.loose_bbox)
             .last_bbox(fact.bbox)
@@ -318,6 +329,9 @@ impl CurrentSegment {
         if !self.raw_text.ends_with(' ') {
             self.raw_text.push(' ');
         }
+        if let Some(word) = self.words.last_mut() {
+            word.byte_range.end = self.raw_text.len();
+        }
         self.generated_space |= fact.generated;
         self.char_codes.push(fact.char_code);
     }
@@ -328,7 +342,35 @@ impl CurrentSegment {
             (Some(baseline), Some(next)) => baseline.end = next.end,
             _ => self.baseline = None,
         }
+        let start = self.raw_text.len();
+        // Keep source segmentation unchanged. Measured words allow a table to reference
+        // different cells inside one long source run without inventing equal-width slices.
+        let new_word = self.raw_text.ends_with(char::is_whitespace)
+            || self.words.last().is_some_and(|word| word.mcid != fact.mcid)
+            || (!TextAxes::from(self.rotation).is_oblique()
+                && fact.bbox.left - self.last_bbox.right
+                    > fact.font_size.max(1.0) * 0.5);
         self.raw_text.push(fact.character);
+        if new_word {
+            self.words.push(
+                crate::TableWord::builder()
+                    .byte_range(start..self.raw_text.len())
+                    .bbox(fact.bbox)
+                    .baseline(fact.measured_baseline())
+                    .mcid(fact.mcid)
+                    .build(),
+            );
+        } else if let Some(word) = self.words.last_mut() {
+            word.byte_range.end = self.raw_text.len();
+            word.bbox = Self::union(word.bbox, fact.bbox);
+            word.baseline = match (word.baseline, fact.measured_baseline()) {
+                (Some(previous), Some(next)) => Some(crate::Baseline {
+                    start: previous.start,
+                    end: next.end,
+                }),
+                _ => None,
+            };
+        }
         self.bbox = Self::union(self.bbox, fact.loose_bbox);
         self.last_bbox = fact.bbox;
         self.width_sum += fact.bbox.width();
@@ -410,6 +452,7 @@ impl CurrentSegment {
         TextItemDraft::builder()
             .id(TextItemId::native(page_number, extraction_order))
             .raw_text(self.raw_text)
+            .words(self.words)
             .bbox(self.bbox)
             .watermark(self.watermark)
             .baseline(self.baseline)
@@ -558,6 +601,7 @@ pub(crate) fn extract_page_text_items(
     text_page: &TextPage<'_, '_>,
     view_box: &RectF,
     page_number: u32,
+    table_evidence: &mut crate::TableEvidence,
 ) -> Result<Vec<TextItem>, ExtractError> {
     let mut builder = SegmentBuilder::new(page_number);
     let viewport = page.viewport_transform(view_box);
@@ -766,6 +810,10 @@ pub(crate) fn extract_page_text_items(
             } else {
                 None
             };
+            let mut draft = draft;
+            table_evidence
+                .words
+                .insert(draft.id.clone(), std::mem::take(&mut draft.words));
             let mut item = TextItem::try_from(draft)?;
             item.polygon = polygon;
             Ok(item)
@@ -1074,9 +1122,14 @@ mod tests {
                 let page = document.page(0).expect("page must open");
                 let view_box = page.view_box().expect("crop box must exist");
                 let text_page = page.text().expect("text must load");
-                let items =
-                    extract_page_text_items(&page, &text_page, &view_box, 1)
-                        .expect("rotated extraction must succeed");
+                let items = extract_page_text_items(
+                    &page,
+                    &text_page,
+                    &view_box,
+                    1,
+                    &mut crate::TableEvidence::default(),
+                )
+                .expect("rotated extraction must succeed");
                 assert_eq!(
                     items.len(),
                     1,
@@ -1126,9 +1179,14 @@ mod tests {
             let view_box =
                 page.view_box().expect("the fixture must have a view box");
             let text_page = page.text().expect("fixture text must load");
-            let items =
-                extract_page_text_items(&page, &text_page, &view_box, 1)
-                    .expect("fixture extraction must succeed");
+            let items = extract_page_text_items(
+                &page,
+                &text_page,
+                &view_box,
+                1,
+                &mut crate::TableEvidence::default(),
+            )
+            .expect("fixture extraction must succeed");
             runs.push(
                 items
                     .into_iter()
@@ -1140,5 +1198,58 @@ mod tests {
         let first = runs.first().expect("the first extraction must exist");
         assert!(!first.is_empty());
         assert!(runs.iter().all(|run| run == first));
+    }
+    /// Word geometry splits source ranges without changing the established native segmentation.
+    #[test]
+    fn measured_word_ranges_preserve_source_segmentation_and_unicode() {
+        let mut builder = SegmentBuilder::new(1);
+        for (character, x) in [
+            ('A', 10.0),
+            (' ', 16.0),
+            ('甲', 20.0),
+            (' ', 26.0),
+            ('B', 30.0),
+        ] {
+            let bbox =
+                Bbox::try_from([x, 10.0, x + 5.0, 20.0]).expect("glyph bounds");
+            builder
+                .push(
+                    TextCharFact::builder()
+                        .character(character)
+                        .bbox(bbox)
+                        .loose_bbox(bbox)
+                        .font_size(10.0)
+                        .build(),
+                )
+                .expect("source character");
+        }
+        let items = builder.finish().expect("native segmentation");
+        let item = items.first().expect("source run");
+        assert_eq!(items.len(), 1);
+        assert_eq!(item.raw_text, "A 甲 B");
+        assert_eq!(
+            item.words
+                .iter()
+                .map(|word| word.byte_range.clone())
+                .collect::<Vec<_>>(),
+            vec![0..2, 2..6, 6..7]
+        );
+        assert_eq!(
+            item.words
+                .iter()
+                .map(|word| item
+                    .raw_text
+                    .get(word.byte_range.clone())
+                    .expect("UTF-8 range"))
+                .collect::<String>(),
+            item.raw_text
+        );
+        assert_eq!(
+            item.words
+                .iter()
+                .map(|word| word.bbox.left)
+                .collect::<Vec<_>>(),
+            vec![10.0, 20.0, 30.0]
+        );
     }
 }

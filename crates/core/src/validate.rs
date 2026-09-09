@@ -363,6 +363,11 @@ impl ResultValidator {
                     )?;
                 }
             }
+            if let Some(table) = &block.table {
+                table.validate(block).map_err(|reason| {
+                    Self::invalid(format!("{block_path}.table"), reason)
+                })?;
+            }
             // Reuse Block's streaming comparison after validating every source Line so
             // label-aware separators cannot drift between construction and validation.
             if !block.text_matches_lines() {

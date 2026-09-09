@@ -509,6 +509,10 @@ pub struct Block {
     #[builder(default)]
     pub semantic_hints: BTreeMap<String, String>,
     pub lines: Vec<Line>,
+    /// Non-owning table cells; absent when the layout is not a confidently recovered table.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<crate::Table>,
 }
 
 /// Canonical text projection applied between two non-empty physical Lines.
@@ -598,6 +602,26 @@ impl Block {
 
     /// Checks stored summary text against the canonical label-aware Line projection.
     pub(crate) fn text_matches_lines(&self) -> bool {
+        if let Some(table) = &self.table {
+            return self.label == LayoutLabel::Table
+                && self.text == table.to_text();
+        }
+        // Schema-2 results produced before cell reconstruction joined table fragments
+        // with spaces. Keep those stored documents valid while new unresolved tables
+        // retain line breaks and structured tables use their explicit cell projection.
+        if self.label == LayoutLabel::Table
+            && self.text
+                == self
+                    .lines
+                    .iter()
+                    .map(|line| line.text.trim())
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+        {
+            return true;
+        }
+
         let policy = LabelPolicy::from(&self.label);
         let mut offset = 0_usize;
         let mut non_empty = self

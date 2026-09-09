@@ -1,5 +1,5 @@
 /** An immutable canonical text fact; additional evidence follows the Rust schema. */
-export interface TextItem { raw_text: string; [key: string]: unknown }
+export interface TextItem { id: string; raw_text: string; [key: string]: unknown }
 /** A canonical line in the parser's reading order. */
 export interface Line { id: string; text: string; text_items: TextItem[]; [key: string]: unknown }
 /** Canonical viewport bounds in PDF points. */
@@ -9,7 +9,15 @@ export interface Point { x: number; y: number }
 /** Original region geometry retained when several candidates become one content layout. */
 export interface SourceRegionEvidence { label?: string; model_region_id: string | null; fallback_region_id: string | null; bbox: Bbox; polygon: Point[] | null; geometry_source: string; confidence: number | null; model_order: number | null }
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; [key: string]: unknown }
+/** A non-owning source slice. Byte offsets address UTF-8, not JavaScript UTF-16 strings. */
+export interface TableTextSpan { text_item_id: string; byte_range: { start: number; end: number }; bbox: Bbox }
+/** Cell-local physical line with the original source references. */
+export interface TableCellLine { text: string; bbox: Bbox; spans: TableTextSpan[] }
+/** A zero-based logical cell; covered positions do not appear as duplicate cells. */
+export interface TableCell { row: number; column: number; row_span: number; column_span: number; bbox: Bbox | null; is_header: boolean; text: string; lines: TableCellLine[] }
+/** A recovered table view; original TextItems remain owned by the parent block's lines. */
+export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
 export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */
@@ -65,7 +73,7 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }

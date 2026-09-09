@@ -26,9 +26,14 @@ globalThis.Worker = class extends NativeWorker {
 /** Publishes progress so the test is inspectable without developer-console execution. */
 function render() {
   report.sequence++;
-  output.textContent = JSON.stringify(report, null, 2);
-  // Persist evidence even when an embedding app reclaims a background browser tab.
-  fetch("/__docparse_test_report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(report), keepalive: report.status !== "running" }).then(response => response.arrayBuffer()).catch(() => {});
+  const terminal = report.status !== "running";
+  const snapshot = JSON.stringify(report, null, 2);
+  if (!terminal) output.textContent = snapshot;
+  // Detailed table reports can exceed fetch's 64 KiB keepalive quota. Publish the
+  // terminal UI state only after the ordinary report request has settled.
+  return fetch("/__docparse_test_report", { method: "POST", headers: { "Content-Type": "application/json" }, body: snapshot })
+    .then(response => response.arrayBuffer()).catch(() => {})
+    .finally(() => { if (terminal) output.textContent = snapshot; });
 }
 /** Fails immediately when an independently specified runtime contract is violated. */
 function assert(value, message) { if (!value) throw new Error(message); }
@@ -259,6 +264,43 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   else report.tests.push("PASS: embedded Chinese, rotation, CropBox and UserUnit strict parity");
   render();
 
+  const tablePdf = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/table_layout.pdf", base))).arrayBuffer());
+  const tableTimings = [];
+  const tables = await parser.parse(tablePdf, { onTiming: event => tableTimings.push(event) });
+  assert(tables.pages.length === 3 && tables.errors.length === 0, "Table fixture parsing degraded");
+  assertContentLayouts(tables);
+  report.tables = [];
+  for (const [index, page] of tables.pages.entries()) {
+    assert(!page.warnings.some(warning => ["TableStructureUnavailable", "LayoutUnavailable"].includes(warning.code)), `Page ${index + 1} lost table structure`);
+    const table = page.blocks.find(block => block.table)?.table;
+    const expected = [{rows:8,source:"ruled"}, {rows:7,source:"text_alignment"}, {rows:8,source:"tagged_pdf"}][index];
+    assert(table && table.row_count === expected.rows && table.column_count === 4 && table.source === expected.source, `Unexpected table grid on page ${index + 1}`);
+    assert(table.cells.some(cell => cell.text === "32.5") && table.cells.some(cell => cell.text === "28.1"), "Table punctuation changed");
+    const blankRow = index === 1 ? 3 : 4;
+    assert(table.cells.some(cell => cell.row === blankRow && cell.column === 1 && cell.text === ""), "Empty table cell shifted later columns");
+    assert(table.cells.some(cell => cell.row === blankRow && cell.column === 2 && cell.text === "25.4"), "Sparse row lost its column alignment");
+    if (index !== 1) {
+      assert(table.cells.some(cell => cell.text === "System" && cell.row_span === 2), "Missing rowspan");
+      assert(table.cells.some(cell => cell.text === "Performance measurements" && cell.column_span === 3), "Missing colspan");
+    }
+    report.tables.push({page:index+1,rows:table.row_count,columns:table.column_count,source:table.source,cells:table.cells.length});
+  }
+  assert(tableTimings.filter(event => event.stage === "table_structure").length === 3, "Table timing is missing");
+  const tableJson = JSON.parse(await parser.render(tables, "json"));
+  assert(JSON.stringify(tableJson.pages.map(page => page.blocks.map(block => block.table))) === JSON.stringify(tables.pages.map(page => page.blocks.map(block => block.table))), "Configured JSON discarded table cells");
+  const tableMarkdown = await parser.render(tables, "markdown");
+  report.tableMarkdown = tableMarkdown;
+  render();
+  assert(tableMarkdown.includes('rowspan="2"') && tableMarkdown.includes('colspan="3"') && tableMarkdown.includes("| System | Requests | Latency | Accuracy |"), "Table markup does not preserve structure");
+  await verifyReferenceInput(tablePdf, "table_layout");
+  const tableReference = await (await fetch(new URL("../test-results/native/table_layout.json", import.meta.url))).json();
+  const tableDelta = differences(tables, tableReference);
+  report.tableDifferenceCount = tableDelta.length;
+  report.tableDifferences = tableDelta.slice(0,12);
+  if (tableDelta.length) { parityFailures++; report.tests.push(`FAIL: structured-table native/Web parity (${tableDelta.length} fields)`); }
+  else report.tests.push("PASS: real ruled, borderless, tagged tables; spans, blank cells, markup, timings and strict native/Web parity");
+  render();
+
   const cancellation = new AbortController();
   const cancelled = rejects(parser.parse(multiple, { signal: cancellation.signal }), "Aborted");
   await new Promise(resolve => setTimeout(resolve, 100)); cancellation.abort();
@@ -276,4 +318,4 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   if (parameters.has("legacyMemory")) assert(report.metrics.every(metrics => metrics.borrowedInputBytes === 0), "Legacy inference retained a detachable input view");
   report.status = parityFailures ? "failed" : "passed";
 } catch (error) { report.status = "failed"; report.error = error.stack ?? String(error); }
-finally { if (parser) await parser.close(); report.elapsedMs = Math.round(performance.now() - start); render(); }
+finally { if (parser) await parser.close(); report.elapsedMs = Math.round(performance.now() - start); await render(); }
