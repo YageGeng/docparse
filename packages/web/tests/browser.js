@@ -32,6 +32,29 @@ function render() {
 }
 /** Fails immediately when an independently specified runtime contract is violated. */
 function assert(value, message) { if (!value) throw new Error(message); }
+/** Checks the public geometry contract on actual Worker results, including annotation exceptions. */
+function assertContentLayouts(document) {
+  for (const page of document.pages) {
+    for (const block of page.blocks.filter(block => block.label === "reference")) {
+      assert(block.text === "" && block.lines.length === 0, `Page ${page.page_number}: reference owns text`);
+    }
+    const content = page.blocks.filter(block => !["reference", "watermark"].includes(block.label));
+    let overlaps = 0;
+    for (let index = 0; index < content.length; index++) {
+      for (const other of content.slice(index + 1)) {
+        const first = content[index];
+        const width = Math.min(first.bbox.right, other.bbox.right) - Math.max(first.bbox.left, other.bbox.left);
+        const height = Math.min(first.bbox.bottom, other.bbox.bottom) - Math.max(first.bbox.top, other.bbox.top);
+        const a = first.bbox, b = other.bbox;
+        const contained = (a.left <= b.left && a.top <= b.top && a.right >= b.right && a.bottom >= b.bottom)
+          || (b.left <= a.left && b.top <= a.top && b.right >= a.right && b.bottom >= a.bottom);
+        assert(!contained, `Page ${page.page_number}: contained layouts remain (${first.id}, ${other.id})`);
+        if (width > 1e-6 && height > 1e-6) overlaps++;
+      }
+    }
+    assert(overlaps === 0 || page.warnings.some(warning => warning.code === "ContentLayoutOverlap"), `Page ${page.page_number}: partial overlaps have no warning`);
+  }
+}
 /** Requires the exact public error category and catches unexpected success. */
 async function rejects(operation, code) {
   try { await operation; } catch (error) { assert(error.code === code, `Expected ${code}, got ${error.code}: ${error.message}`); return; }
@@ -91,6 +114,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   const parsing = parser.parse(storage.subarray(8, 8 + bytes.length));
   await rejects(parser.parse(bytes), "ParserBusy");
   const document = await parsing;
+  assertContentLayouts(document);
   assert(!document.pages.some(page => page.warnings.some(warning => warning.code === "LayoutUnavailable")), "Real-model acceptance must not silently use layout fallback");
   if (parameters.has("growMemory")) assert(report.metrics.at(-1).forcedMemoryGrowth > 0, "Parser heap growth was not exercised");
   const inferenceMetrics = report.metrics.at(-1);
@@ -135,6 +159,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   const cycles = Number(new URL(location.href).searchParams.get("cycles") ?? 3);
   for (let index = 0; index < cycles; index++) {
     const repeated = await parser.parse(bytes);
+    assertContentLayouts(repeated);
     assert(differences(repeated, document).length === 0, "Repeated parsing changed canonical output");
     const metrics = report.metrics.at(-1);
     assert(metrics.liveTensors === 0, `Runtime tensors retained: ${metrics.liveTensors}`);
@@ -153,6 +178,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
     onPageImage: image => { lateEvent ||= settled; pageImages.push(image); },
   });
   settled = true;
+  assertContentLayouts(multiResult);
   assert(multiResult.pages.length === 3 && multiResult.errors.length === 0, "Three-page parsing degraded or failed");
   assert(progressEvents[0].stage === "opening" && progressEvents.at(-1).stage === "complete", "Progress boundaries are missing");
   for (const stage of ["scanning", "analyzing"]) {
@@ -179,6 +205,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
 
   const embedded = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/embedded_layout.pdf", base))).arrayBuffer());
   const embeddedResult = await parser.parse(embedded);
+  assertContentLayouts(embeddedResult);
   assert(embeddedResult.pages.length === 2 && embeddedResult.errors.length === 0, "Embedded-font parsing degraded");
   await verifyReferenceInput(embedded, "embedded_layout");
   const embeddedReference = await (await fetch(new URL("../test-results/native/embedded_layout.json", import.meta.url))).json();
@@ -191,6 +218,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
 
   const cjk = new Uint8Array(await (await fetch(new URL("crates/core/tests/fixtures/pdf/embedded_cjk_90.pdf", base))).arrayBuffer());
   const cjkResult = await parser.parse(cjk);
+  assertContentLayouts(cjkResult);
   assert(cjkResult.pages.length === 1 && cjkResult.errors.length === 0, "Chinese geometry fixture degraded");
   await verifyReferenceInput(cjk, "embedded_cjk_90");
   const cjkReference = await (await fetch(new URL("../test-results/native/embedded_cjk_90.json", import.meta.url))).json();

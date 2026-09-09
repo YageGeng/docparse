@@ -106,6 +106,63 @@ fn document_fixture() -> DocumentResult {
         .build()
 }
 
+/// A visual reference may overlap content but must never own that content's text.
+#[test]
+fn validator_rejects_text_owned_by_reference_annotations() {
+    let mut document = document_fixture();
+    let block = document
+        .pages
+        .first_mut()
+        .and_then(|page| page.blocks.first_mut())
+        .expect("block");
+    block.label = LayoutLabel::Reference;
+    assert!(
+        ResultValidator::validate(&document).is_err(),
+        "References must remain empty annotations"
+    );
+}
+
+/// All partial crossings are valid, but identical or contained content must have one owner.
+#[test]
+fn validator_checks_content_overlap_with_detached_exceptions() {
+    let mut document = document_fixture();
+    let page = document.pages.first_mut().expect("page");
+    page.blocks.push(
+        Block::builder()
+            .id(BlockId::model(1, 20, 0))
+            .label(LayoutLabel::Text)
+            .text(String::new())
+            .label_source(LabelSource::Model)
+            .bbox(Bbox::try_from([20.0, 20.0, 60.0, 50.0]).expect("overlap"))
+            .final_order(1)
+            .lines(Vec::new())
+            .build(),
+    );
+    ResultValidator::validate_page(page).expect("partial overlap is allowed");
+    page.blocks.last_mut().expect("second block").bbox =
+        Bbox::try_from([11.0, 10.0, 53.0, 40.0])
+            .expect("high-IoU partial overlap");
+    ResultValidator::validate_page(page)
+        .expect("high IoU alone must not invalidate separate content");
+    for bounds in [
+        [10.0, 10.0, 52.0, 40.0],
+        [9.0, 9.0, 53.0, 41.0],
+        [20.0, 12.0, 22.0, 14.0],
+    ] {
+        page.blocks.last_mut().expect("second block").bbox =
+            Bbox::try_from(bounds).expect("mergeable geometry");
+        assert!(
+            ResultValidator::validate_page(page).is_err(),
+            "Mergeable content must not survive normalization"
+        );
+    }
+    for label in [LayoutLabel::Reference, LayoutLabel::Watermark] {
+        page.blocks.last_mut().expect("second block").label = label;
+        ResultValidator::validate_page(page)
+            .expect("detached overlap is allowed");
+    }
+}
+
 /// Verifies schema 2 exposes one canonical text field without a normalized alias.
 #[test]
 fn schema_v2_exposes_only_raw_text() {

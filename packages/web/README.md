@@ -157,6 +157,30 @@ Fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallb
 
 Run `rtk npm run test:e2e -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
 
+## Content layouts and reference annotations
+
+`reference` blocks retain model geometry with empty `text` and `lines`. They are
+annotation-only outlines and do not participate in text ownership, XY-cut, content
+merging, or body reading order. The example draws them dashed and makes their interior
+transparent to content selection. Bibliography content is labeled `reference_content`.
+
+Ordinary content bboxes merge only when one completely contains the other, including
+identical boxes. Partial intersections remain separate regardless of IoU and
+produce a `ContentLayoutOverlap` page warning with `content.overlap.*` diagnostics.
+Enable `output.include_diagnostics` to include per-pair details in serialized results.
+Short superscripts/subscripts join an unambiguous parent using font size, baseline
+shift and position before model assignment. Upright PDFium baselines keep body rows
+in order; nested indices follow the original typography graph, and adjacent fragments
+on the same body baseline reconnect after scripts fill their inline gap. Nearby rows
+remain separate. This does
+not provide LaTeX or structured formula recognition. Unmatched inline
+formula detections produce diagnostics instead of independent empty content blocks.
+
+A merged block retains a stable primary identity and `source_region`. Its optional
+`source_regions` array records every contributing model/fallback region, including
+original labels and geometry. Raw source regions may overlap. `reference` and
+`watermark` annotations are exempt from content merge validation and overlap warnings.
+
 ## Native/Web result parity
 
 Native font selection is preserved. Embedded-font PDFs provide strict parity fixtures. For unembedded fonts, host substitution can change glyph metrics, rendered images, confidence scores, coordinates, and derived IDs. Record these differences separately while checking text preservation and deterministic results within each environment.

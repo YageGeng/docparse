@@ -193,6 +193,7 @@ impl FormulaMatcher {
             formula.source_detection_index,
         );
         let source_region = SourceRegionEvidence::builder()
+            .label(formula.label.clone())
             .model_region_id(Some(region_id.clone()))
             .bbox(formula.bbox)
             .polygon(formula.polygon.clone())

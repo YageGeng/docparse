@@ -43,7 +43,7 @@ impl OverlayRenderer {
             page.height
         )?;
         for block in &page.blocks {
-            if let Some(source) = &block.source_region {
+            for source in block.source_regions() {
                 writeln!(
                     svg,
                     "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"none\" stroke=\"#ff9f1c\" stroke-dasharray=\"4 3\"/>",

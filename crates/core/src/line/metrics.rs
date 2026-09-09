@@ -107,9 +107,32 @@ impl LineMetrics {
                 }
             }
         } else {
+            // Use the dominant font's measured baseline. A superscript can sort first
+            // in x order or extend the line bbox without moving the body baseline.
+            let measured = items
+                .iter()
+                .filter_map(|item| {
+                    item.baseline.map(|baseline| {
+                        (
+                            item.style
+                                .as_ref()
+                                .and_then(|style| style.font_size)
+                                .unwrap_or(0.0),
+                            baseline,
+                        )
+                    })
+                })
+                .max_by(|(left, _), (right, _)| left.total_cmp(right));
+            let y = if super::bidi::detect_direction(items, first.rotation)
+                == crate::WritingDirection::Vertical
+            {
+                bbox.bottom
+            } else {
+                measured.map_or(bbox.bottom, |(_, baseline)| baseline.start.y)
+            };
             Baseline {
-                start: docparse_layout::Point::new(bbox.left, bbox.bottom),
-                end: docparse_layout::Point::new(bbox.right, bbox.bottom),
+                start: docparse_layout::Point::new(bbox.left, y),
+                end: docparse_layout::Point::new(bbox.right, y),
             }
         };
         Ok(Self::builder()

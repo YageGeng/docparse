@@ -305,6 +305,7 @@ impl BlockSeed {
 #[derive(Debug, Clone, PartialEq, TypedBuilder)]
 pub(crate) struct AssignmentResult {
     pub(crate) model_seeds: Vec<BlockSeed>,
+    pub(crate) reference_seeds: Vec<BlockSeed>,
     pub(crate) residual: Vec<LineFragment>,
     pub(crate) inline_formulas: Vec<LayoutDetection>,
     #[builder(default)]
@@ -340,6 +341,7 @@ impl AssignmentEngine {
         detections: Vec<LayoutDetection>,
     ) -> Result<AssignmentResult, LineError> {
         let mut model_seeds = Vec::new();
+        let mut reference_seeds = Vec::new();
         let mut inline_formulas = Vec::new();
         let mut diagnostics = BTreeSet::new();
         for detection in detections {
@@ -364,7 +366,15 @@ impl AssignmentEngine {
                 detection,
                 self.page_bbox,
             )) {
-                Ok(seed) => model_seeds.push(seed),
+                Ok(seed) => {
+                    // Reference envelopes describe visual scope only. Let their entries
+                    // compete for text without a fully covering parent stealing URL tails.
+                    if seed.label == LayoutLabel::Reference {
+                        reference_seeds.push(seed);
+                    } else {
+                        model_seeds.push(seed);
+                    }
+                }
                 Err(error) => {
                     diagnostics.insert(format!(
                         "ignored layout detection {source_index}: {error}"
@@ -373,6 +383,7 @@ impl AssignmentEngine {
             }
         }
         model_seeds.sort_by_key(|seed| seed.source_detection_index);
+        reference_seeds.sort_by_key(|seed| seed.source_detection_index);
         inline_formulas
             .sort_by_key(|detection| detection.source_detection_index);
 
@@ -386,13 +397,27 @@ impl AssignmentEngine {
                 item.source == TextSource::Native
                     && TextAxes::from(item.rotation).is_oblique()
             });
-        let ordinary = ordinary.into_iter().map(|item| {
-            LineFragment::from_items(vec![item], self.page_bbox.width())
-        });
+        let ordinary = ordinary
+            .into_iter()
+            .map(|item| {
+                LineFragment::from_items(vec![item], self.page_bbox.width())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Establish script ownership before model assignment, so a clipped detection
+        // cannot send a parent's subscript into an unrelated residual layout.
+        let ordinary_count = ordinary.len();
+        let ordinary =
+            LineFragment::attach_scripts(ordinary, self.page_bbox.width())?;
+        if ordinary.len() < ordinary_count {
+            tracing::debug!(
+                "attached {} script fragments to parent text on page {} before model assignment",
+                ordinary_count - ordinary.len(),
+                self.page_number
+            );
+        }
         let oblique =
             ConservativeLineAssembler.fragments(oblique, &self.config)?;
-        for fragment in ordinary.chain(oblique.into_iter().map(Ok)) {
-            let fragment = fragment?;
+        for fragment in ordinary.into_iter().chain(oblique) {
             let mut owner = None;
             let mut candidate_count = 0_usize;
             // Select the stable maximum in one pass so each fragment avoids allocating and
@@ -454,6 +479,7 @@ impl AssignmentEngine {
 
         Ok(AssignmentResult::builder()
             .model_seeds(model_seeds)
+            .reference_seeds(reference_seeds)
             .residual(residual)
             .inline_formulas(inline_formulas)
             .diagnostics(diagnostics.into_iter().collect())

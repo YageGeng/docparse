@@ -107,9 +107,10 @@ impl ResultValidator {
             ));
         }
 
-        // ModelRegionId is the authoritative model Block identity, so a second
-        // Block with the same region would violate the one-region/one-Block contract.
+        // A merged block keeps a primary identity while every original model region
+        // still contributes to exactly one final owner.
         let mut model_region_ids = BTreeSet::new();
+        let mut source_model_region_ids = BTreeSet::new();
         for (block_index, block) in page.blocks.iter().enumerate() {
             let block_path = format!("{path}.blocks[{block_index}]");
             if block.final_order as usize != block_index {
@@ -130,6 +131,16 @@ impl ResultValidator {
                 return Err(Self::invalid(&block_path, "duplicate BlockId"));
             }
             Self::validate_bbox(block.bbox, &format!("{block_path}.bbox"))?;
+            if block.label == docparse_layout::LayoutLabel::Reference
+                && (!block.text.is_empty()
+                    || !block.lines.is_empty()
+                    || !block.source_regions.is_empty())
+            {
+                return Err(Self::invalid(
+                    &block_path,
+                    "reference annotations must not own text or merged layouts",
+                ));
+            }
             if let Some(polygon) = &block.polygon
                 && !Self::bbox_contains(block.bbox, polygon.bbox())
             {
@@ -164,10 +175,27 @@ impl ResultValidator {
                     ));
                 }
             }
-            if let Some(source_region) = &block.source_region {
+            if !block.source_regions.is_empty()
+                && block.source_region.as_ref().is_none_or(|primary| {
+                    !block.source_regions.contains(primary)
+                })
+            {
+                return Err(Self::invalid(
+                    format!("{block_path}.source_regions"),
+                    "merged regions must retain the primary source",
+                ));
+            }
+            for (source_index, source_region) in
+                block.source_regions().enumerate()
+            {
+                let source_path = if block.source_regions.is_empty() {
+                    format!("{block_path}.source_region")
+                } else {
+                    format!("{block_path}.source_regions[{source_index}]")
+                };
                 Self::validate_bbox(
                     source_region.bbox,
-                    &format!("{block_path}.source_region.bbox"),
+                    &format!("{source_path}.bbox"),
                 )?;
                 let source_count =
                     usize::from(source_region.model_region_id.is_some())
@@ -176,9 +204,29 @@ impl ResultValidator {
                         );
                 if source_count != 1 {
                     return Err(Self::invalid(
-                        format!("{block_path}.source_region"),
+                        &source_path,
                         "must reference exactly one model or fallback region",
                     ));
+                }
+                if let Some(id) = &source_region.model_region_id {
+                    Self::validate_id_page(
+                        id.as_str(),
+                        page.page_number,
+                        &source_path,
+                    )?;
+                    if !source_model_region_ids.insert(id.as_str()) {
+                        return Err(Self::invalid(
+                            &source_path,
+                            "model source must contribute to exactly one final Block",
+                        ));
+                    }
+                }
+                if let Some(id) = &source_region.fallback_region_id {
+                    Self::validate_id_page(
+                        id.as_str(),
+                        page.page_number,
+                        &source_path,
+                    )?;
                 }
             }
 
@@ -322,6 +370,39 @@ impl ResultValidator {
                     format!("{block_path}.text"),
                     "must match the label-aware ordered Line projection",
                 ));
+            }
+        }
+        // Partial intersections are valid regardless of IoU and reported by the page analyzer.
+        // Only full containment should have merged; detached annotations are exempt.
+        for (index, block) in page
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| !block.is_detached())
+        {
+            for other in page
+                .blocks
+                .iter()
+                .skip(index + 1)
+                .filter(|block| !block.is_detached())
+            {
+                if block.bbox.contains_bbox(other.bbox)
+                    || other.bbox.contains_bbox(block.bbox)
+                {
+                    tracing::error!(
+                        "page {} content layouts {} and {} still satisfy the merge criteria",
+                        page.page_number,
+                        block.id.as_str(),
+                        other.id.as_str()
+                    );
+                    return Err(Self::invalid(
+                        format!("{path}.blocks[{index}].bbox"),
+                        format!(
+                            "content layout must be merged with {}",
+                            other.id.as_str()
+                        ),
+                    ));
+                }
             }
         }
         Ok(())

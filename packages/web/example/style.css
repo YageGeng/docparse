@@ -109,6 +109,8 @@ h2 svg { color: #7d9276; width: 14px; }
 .overlay.selected :is(rect, polygon) { fill: #e0a64c; stroke: #b8812d; fill-opacity: .2; stroke-width: 2.2; stroke-opacity: 1; }
 .overlay.selected text { fill: #94631c; }
 .overlay:focus-visible :is(rect, polygon) { stroke: #1767b7; stroke-width: 3; stroke-opacity: 1; }
+/* Reference envelopes are annotation outlines; their interiors never intercept content clicks. */
+.overlay.reference-overlay :is(rect, polygon) { fill: none; stroke-dasharray: 4 3; pointer-events: stroke; }
 .viewer.overlays-hidden .overlay { display: none; }
 .viewer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; color: #96a38a; background: #fafcf6; border-top: 1px solid var(--line); font-size: 9px; flex-shrink: 0; }
 .legend-swatch { display: inline-block; width: 7px; height: 7px; margin-right: 5px; background: #cee2ca; border: 1px solid #8bb28a; vertical-align: middle; }

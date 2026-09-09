@@ -225,7 +225,7 @@ impl CurrentSegment {
     /// Starts one segment from its first visible character fact.
     fn from_fact(fact: TextCharFact) -> Self {
         let character = fact.character.to_string();
-        let baseline = fact.oblique_baseline();
+        let baseline = fact.measured_baseline();
         Self::builder()
             .raw_text(character)
             .bbox(fact.loose_bbox)
@@ -324,7 +324,7 @@ impl CurrentSegment {
 
     /// Appends one visible source character without inferring missing text.
     fn push_visible(&mut self, fact: TextCharFact) {
-        match (&mut self.baseline, fact.oblique_baseline()) {
+        match (&mut self.baseline, fact.measured_baseline()) {
             (Some(baseline), Some(next)) => baseline.end = next.end,
             _ => self.baseline = None,
         }
@@ -438,12 +438,9 @@ impl CurrentSegment {
 }
 
 impl TextCharFact {
-    /// Extends the measured oblique origin to the glyph's projected visible extent.
-    fn oblique_baseline(&self) -> Option<crate::Baseline> {
+    /// Extends the copied origin along the text direction to the glyph's visible extent.
+    fn measured_baseline(&self) -> Option<crate::Baseline> {
         let axes = TextAxes::from(self.rotation);
-        if !axes.is_oblique() {
-            return None;
-        }
         let origin = self.origin?;
         let local = axes.project(origin);
         let bounds = axes.project_bbox(self.bbox).ok()?;
@@ -646,18 +643,16 @@ pub(crate) fn extract_page_text_items(
         } else {
             0.0
         };
-        let origin = if TextAxes::from(rotation).is_oblique() {
-            character.origin().map(|origin| {
-                let (x, y) = page.page_to_viewport(
-                    view_box,
-                    origin.x as f32,
-                    origin.y as f32,
-                );
-                Point::new(f64::from(x), f64::from(y))
-            })
-        } else {
-            None
-        };
+        // Upright math needs measured baselines too: glyph bottoms vary with the
+        // font's descenders and cannot reliably distinguish a subscript from body text.
+        let origin = character.origin().map(|origin| {
+            let (x, y) = page.page_to_viewport(
+                view_box,
+                origin.x as f32,
+                origin.y as f32,
+            );
+            Point::new(f64::from(x), f64::from(y))
+        });
         let font_size = character.font_size();
         let font = character.font();
         let font_height = character
@@ -876,6 +871,24 @@ mod tests {
 
         assert_eq!(item.raw_text, "AB");
         assert!(item.repair_actions.is_empty());
+    }
+
+    /// Keeps the copied baseline independent of upright glyph descenders.
+    #[test]
+    fn horizontal_glyphs_preserve_their_measured_baseline() {
+        let mut first = fact('A', 10.0, 10.0);
+        first.origin = Some(docparse_layout::Point::new(10.0, 17.0));
+        let mut second = fact('g', 15.0, 11.0);
+        second.origin = Some(docparse_layout::Point::new(15.0, 17.0));
+        let result = build([first, second]);
+        assert_eq!(result.len(), 1);
+        let baseline = result
+            .first()
+            .expect("source run")
+            .baseline
+            .expect("copied horizontal baseline");
+        assert_eq!(baseline.start, docparse_layout::Point::new(10.0, 17.0));
+        assert_eq!(baseline.end, docparse_layout::Point::new(20.0, 17.0));
     }
 
     /// Keeps slanted glyphs on their measured baseline despite changes in page-axis box tops.

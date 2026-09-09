@@ -10,6 +10,8 @@ pub(crate) enum LabelPolicy {
     Formula,
     Chrome,
     Structured,
+    /// Annotation geometry without text ownership or participation in body composition.
+    VisualOnly,
     Unknown,
 }
 
@@ -62,7 +64,8 @@ impl From<&LayoutLabel> for LabelPolicy {
             LayoutLabel::Footer | LayoutLabel::Header | LayoutLabel::Number => {
                 Self::Chrome
             }
-            LayoutLabel::Reference | LayoutLabel::Table => Self::Structured,
+            LayoutLabel::Reference => Self::VisualOnly,
+            LayoutLabel::Table => Self::Structured,
             LayoutLabel::Unknown(_) => Self::Unknown,
         }
     }
@@ -96,7 +99,7 @@ mod tests {
             (LayoutLabel::InlineFormula, LabelPolicy::Formula),
             (LayoutLabel::Number, LabelPolicy::Chrome),
             (LayoutLabel::ParagraphTitle, LabelPolicy::Title),
-            (LayoutLabel::Reference, LabelPolicy::Structured),
+            (LayoutLabel::Reference, LabelPolicy::VisualOnly),
             (LayoutLabel::ReferenceContent, LabelPolicy::FlowText),
             (LayoutLabel::Seal, LabelPolicy::Atomic),
             (LayoutLabel::Table, LabelPolicy::Structured),

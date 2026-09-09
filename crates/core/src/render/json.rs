@@ -173,7 +173,10 @@ impl Serialize for ConfiguredBlock<'_> {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Block", 15)?;
+        let mut state = serializer.serialize_struct(
+            "Block",
+            15 + usize::from(!self.block.source_regions.is_empty()),
+        )?;
         state.serialize_field("id", &self.block.id)?;
         state.serialize_field("label", &self.block.label)?;
         state.serialize_field("text", &self.block.text)?;
@@ -183,6 +186,12 @@ impl Serialize for ConfiguredBlock<'_> {
         state.serialize_field("bbox", &self.block.bbox)?;
         state.serialize_field("polygon", &self.block.polygon)?;
         state.serialize_field("source_region", &self.block.source_region)?;
+        if !self.block.source_regions.is_empty() {
+            state.serialize_field(
+                "source_regions",
+                &self.block.source_regions,
+            )?;
+        }
         state
             .serialize_field("model_region_id", &self.block.model_region_id)?;
         state.serialize_field("model_order", &self.block.model_order)?;

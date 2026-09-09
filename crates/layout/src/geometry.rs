@@ -117,6 +117,29 @@ impl Bbox {
         self.width() * self.height()
     }
 
+    /// Returns whether the entire other box lies inside this box, including shared edges.
+    pub fn contains_bbox(self, other: Self) -> bool {
+        self.left <= other.left
+            && self.top <= other.top
+            && self.right >= other.right
+            && self.bottom >= other.bottom
+    }
+
+    /// Returns intersection over union; touching boxes and non-finite areas have no usable overlap.
+    pub fn iou(self, other: Self) -> f64 {
+        let width =
+            (self.right.min(other.right) - self.left.max(other.left)).max(0.0);
+        let height =
+            (self.bottom.min(other.bottom) - self.top.max(other.top)).max(0.0);
+        let intersection = width * height;
+        let union = self.area() + other.area() - intersection;
+        if union.is_finite() && union > 0.0 {
+            (intersection / union).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
     /// Returns the geometric center of the box.
     pub fn center(self) -> Point {
         Point::new(

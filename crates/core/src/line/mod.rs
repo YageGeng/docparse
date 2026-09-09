@@ -2,6 +2,7 @@ pub(crate) mod assemble;
 mod axes;
 pub(crate) mod bidi;
 pub(crate) mod metrics;
+mod scripts;
 
 pub(crate) use assemble::{
     ConservativeLineAssembler, LineAssembler, LineFragment,

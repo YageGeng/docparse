@@ -197,7 +197,9 @@ function selectBlock(id: string): void {
   }
   ui.selected.textContent = selectedBlock ? String(selectedBlock.final_order + 1) : "—";
   ui.meta.textContent = selectedBlock ? `${selectedBlock.label.replaceAll("_", " ")} · Page ${pageNumber}` : "A closer look, one region at a time.";
-  ui.text.textContent = selectedBlock ? selectedBlock.text || "No native text was extracted for this region. Image and outline text require OCR." : "Select an overlay to reveal the original text from your PDF.";
+  ui.text.textContent = selectedBlock?.label === "reference"
+    ? "Visual reference area. Select a reference content region to read its text."
+    : selectedBlock ? selectedBlock.text || "No native text was extracted for this region. Image and outline text require OCR." : "Select an overlay to reveal the original text from your PDF.";
   ui.characters.textContent = selectedBlock ? `${Array.from(selectedBlock.text).length} characters` : "—";
   ui.copy.disabled = !selectedBlock?.text; ui.copyStatus.textContent = "";
 }
@@ -226,6 +228,7 @@ function showPage(number: number): void {
     const bounds = block.bbox;
     const group = svg("g", { class: "overlay", tabindex: "0", role: "button", "aria-label": `Region ${block.final_order + 1}: ${block.label.replaceAll("_", " ")}`, "aria-pressed": "false" });
     group.dataset.blockId = block.id;
+    if (block.label === "reference") group.classList.add("reference-overlay");
     // The actual footprint owns hit testing; empty AABB corners must not catch pointer clicks.
     group.append(block.polygon?.length ? svg("polygon", { points: block.polygon.map(point => `${point.x},${point.y}`).join(" "), stroke: color(block.label), fill: color(block.label) }) : svg("rect", { x: String(bounds.left), y: String(bounds.top), width: String(bounds.right - bounds.left), height: String(bounds.bottom - bounds.top), stroke: color(block.label), fill: color(block.label) }));
     const label = svg("text", { x: String(Math.max(1, bounds.left + 2)), y: String(Math.max(7, bounds.top + 7)), fill: color(block.label) });
@@ -343,6 +346,7 @@ async function download(): Promise<void> {
     for (const block of page.blocks) {
       const b = block.bbox;
       context.strokeStyle = color(block.label); context.lineWidth = .8;
+      context.setLineDash(block.label === "reference" ? [4, 3] : []);
       if (block.polygon?.length) {
         // Export the same contour used by the interactive SVG, without rotating an AABB.
         context.beginPath();

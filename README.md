@@ -2,7 +2,9 @@
 
 DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
-Each validated model region produces one final block. Ownership is assigned at the `TextItem` boundary so partially overlapping visual lines cannot pull unrelated text into a model block. Unassigned text is partitioned by residual XY-cut before line assembly, so narrow column gutters are not swallowed as inline gaps. Lines are then rebuilt within each leaf and emitted with `label_source = "Fallback"`.
+Model regions are candidates rather than a one-to-one final block contract. Ownership is assigned at the `TextItem` boundary, with short, unambiguous superscripts/subscripts attached to their parent before model assignment; residual XY-cut preserves column gutters before line assembly. Page-wide normalization merges content only when one bbox fully contains the other, including identical boxes, then computes reading order. Every native text fact remains owned exactly once.
+
+`reference` is an empty visual annotation: it never owns text, obstructs XY-cut, merges with content, or enters body reading order. Bibliography text uses `reference_content`, including recovered fragments. Partial content intersections remain separate regardless of IoU and produce a `ContentLayoutOverlap` page warning with per-pair `content.overlap.*` diagnostics. Reference outlines and detached watermarks are exempt. Merged layouts retain their primary `source_region` plus all contributing `source_regions`, whose optional `label` preserves original model semantics.
 
 ## Prepare the model
 

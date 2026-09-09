@@ -6,8 +6,10 @@ export interface Line { id: string; text: string; text_items: TextItem[]; [key: 
 export interface Bbox { left: number; top: number; right: number; bottom: number }
 /** A vertex in canonical viewport points, matching the page image's coordinate space. */
 export interface Point { x: number; y: number }
+/** Original region geometry retained when several candidates become one content layout. */
+export interface SourceRegionEvidence { label?: string; model_region_id: string | null; fallback_region_id: string | null; bbox: Bbox; polygon: Point[] | null; geometry_source: string; confidence: number | null; model_order: number | null }
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; bbox: Bbox; polygon: Point[] | null; final_order: number; lines: Line[]; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; [key: string]: unknown }
 /** A canonical page with viewport coordinates and recoverable warnings. */
 export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */

@@ -1,4 +1,5 @@
 mod formula;
+mod normalize;
 mod paragraph;
 
 use std::collections::BTreeMap;
@@ -164,7 +165,7 @@ impl SemanticAssembler {
         }
     }
 
-    /// Preserves one validated model region as exactly one final semantic block.
+    /// Assembles one model candidate before page-wide content normalization.
     pub(crate) fn model_blocks(
         &self,
         mut seed: BlockSeed,
@@ -172,9 +173,8 @@ impl SemanticAssembler {
         let policy = LabelPolicy::from(&seed.label);
         let fragments =
             self.reassemble_fragments(std::mem::take(&mut seed.fragments))?;
-        // A trusted model detection is the authoritative Block boundary. Paragraph
-        // heuristics remain available only for residual fallback regions, where no
-        // model boundary exists to preserve.
+        // Keep model-owned text together here. Page-wide normalization resolves candidate
+        // overlaps after residual text has also been assembled.
         let blocks = vec![self.model_block(&seed, fragments)?];
         let warnings = if blocks.iter().all(|block| block.lines.is_empty())
             && matches!(policy, LabelPolicy::FlowText | LabelPolicy::Title)
@@ -240,9 +240,8 @@ impl SemanticAssembler {
         mut fragments: Vec<LineFragment>,
     ) -> Vec<Vec<LineFragment>> {
         fragments.sort_by(|left, right| {
-            left.bbox
-                .top
-                .total_cmp(&right.bbox.top)
+            left.reading_order_y()
+                .total_cmp(&right.reading_order_y())
                 .then_with(|| left.bbox.left.total_cmp(&right.bbox.left))
                 .then_with(|| {
                     left.items
@@ -289,7 +288,7 @@ impl SemanticAssembler {
             .map_err(SemanticError::from)
     }
 
-    /// Builds one model-derived child block while retaining complete source evidence.
+    /// Builds one model candidate while retaining complete source evidence.
     fn model_block(
         &self,
         seed: &BlockSeed,
@@ -322,6 +321,7 @@ impl SemanticAssembler {
             })
             .collect();
         let source_region = SourceRegionEvidence::builder()
+            .label(seed.label.clone())
             .model_region_id(Some(seed.region_id.clone()))
             .bbox(seed.bbox)
             .polygon(seed.polygon.clone())
@@ -362,6 +362,7 @@ impl SemanticAssembler {
         let bbox = Self::content_bbox(&lines)?.unwrap_or(self.page_bbox);
         let fallback_id = FallbackRegionId::from_path(self.page_number, path);
         let source_region = SourceRegionEvidence::builder()
+            .label(LayoutLabel::Text)
             .fallback_region_id(Some(fallback_id))
             .bbox(bbox)
             .geometry_source(GeometrySource::DerivedFromBbox)

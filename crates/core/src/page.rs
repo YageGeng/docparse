@@ -95,8 +95,10 @@ impl PageAnalyzer {
             missing_regions.push(extracted.content_bounds.unwrap_or(page_bbox));
         } else {
             for detection in &detections {
-                if detection.label == LayoutLabel::InlineFormula
-                    || !Self::valid_page_bbox(detection.bbox, page_bbox)
+                if matches!(
+                    detection.label,
+                    LayoutLabel::InlineFormula | LayoutLabel::Reference
+                ) || !Self::valid_page_bbox(detection.bbox, page_bbox)
                 {
                     continue;
                 }
@@ -206,6 +208,7 @@ impl PageAnalyzer {
 
         let AssignmentResult {
             model_seeds,
+            reference_seeds,
             residual,
             inline_formulas,
             diagnostics: assignment_diagnostics,
@@ -215,6 +218,10 @@ impl PageAnalyzer {
             self.config.fusion().clone(),
         )
         .assign(text_items, detections)?;
+        let references: Vec<_> = reference_seeds
+            .into_iter()
+            .map(|seed| assembler.reference_block(seed))
+            .collect();
         // Cut spatial regions before grouping residual spans into lines. Otherwise a
         // narrow column gutter can be mistaken for an inline gap and disappear in a
         // page-wide merged line. Each leaf reassembles only its own original facts.
@@ -225,15 +232,80 @@ impl PageAnalyzer {
         for seed in model_seeds {
             let output = assembler.model_blocks(seed)?;
             blocks.extend(output.blocks);
-            warnings.extend(output.warnings);
+            // Empty duplicate candidates may disappear during normalization. Report
+            // missing content from the final owners, while retaining other diagnostics.
+            warnings.extend(
+                output
+                    .warnings
+                    .into_iter()
+                    .filter(|warning| warning.code != "EmptyModelRegion"),
+            );
         }
         let fallback = assembler.fallback_blocks(residual, &fallback_tree)?;
         blocks.extend(fallback.blocks);
         warnings.extend(fallback.warnings);
+        let mut blocks = assembler.normalize_blocks(blocks)?;
+        warnings.extend(
+            blocks
+                .iter()
+                .filter(|block| {
+                    block.lines.is_empty()
+                        && matches!(
+                            crate::label_policy::LabelPolicy::from(
+                                &block.label
+                            ),
+                            crate::label_policy::LabelPolicy::FlowText
+                                | crate::label_policy::LabelPolicy::Title
+                        )
+                })
+                .map(|block| PageWarning {
+                    code: "EmptyModelRegion".to_owned(),
+                    stage: "semantic".to_owned(),
+                    message: format!(
+                        "content layout {} contains no extracted text",
+                        block.id.as_str()
+                    ),
+                }),
+        );
         let formula_blocks = FormulaMatcher::new(extracted.page_number)
             .attach(&mut blocks, inline_formulas);
-        blocks.extend(formula_blocks);
+        // Unmatched inline detections have no text ownership. Keep a diagnostic rather
+        // than introducing another empty content layout that can overlap nearby prose.
+        warnings.extend(formula_blocks.into_iter().map(|block| PageWarning {
+            code: "UnmatchedInlineFormula".to_owned(),
+            stage: "formula".to_owned(),
+            message: format!(
+                "inline formula region {} has no corresponding content line",
+                block.id.as_str()
+            ),
+        }));
         let mut ordered = order_blocks(blocks)?;
+        // Label already ordered content without letting reference envelopes influence
+        // ownership, grouping, or reading order. Raw model labels remain in provenance.
+        for block in &mut ordered.blocks {
+            if block.label == LayoutLabel::Text
+                && references.iter().any(|reference| {
+                    Self::intersection_area(block.bbox, reference.bbox)
+                        >= block.bbox.area() * 0.5
+                })
+            {
+                block.label = LayoutLabel::ReferenceContent;
+                block.label_source = crate::LabelSource::Heuristic;
+                block.text =
+                    crate::Block::derive_text(&block.label, &block.lines);
+            }
+        }
+        if !references.is_empty() {
+            tracing::debug!(
+                "kept {} empty reference annotations outside body layout on page {}",
+                references.len(),
+                extracted.page_number
+            );
+        }
+        for mut reference in references {
+            reference.final_order = ordered.blocks.len() as u32;
+            ordered.blocks.push(reference);
+        }
         if !watermarks.is_empty() {
             tracing::debug!(
                 "detached {} watermark blocks from body layout on page {}",
@@ -271,6 +343,51 @@ impl PageAnalyzer {
         if let Some(model_revision) = &context.model_revision {
             diagnostics
                 .insert("model_revision".to_owned(), model_revision.clone());
+        }
+        // Preserve partial intersections instead of expanding their union across unrelated
+        // content. One page warning summarizes the pairs; diagnostics retain their identities.
+        let mut overlap_count = 0;
+        for (index, block) in ordered
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| !block.is_detached())
+        {
+            for other in ordered
+                .blocks
+                .iter()
+                .skip(index + 1)
+                .filter(|block| !block.is_detached())
+            {
+                let width = block.bbox.right.min(other.bbox.right)
+                    - block.bbox.left.max(other.bbox.left);
+                let height = block.bbox.bottom.min(other.bbox.bottom)
+                    - block.bbox.top.max(other.bbox.top);
+                if width > 1e-6 && height > 1e-6 {
+                    diagnostics.insert(
+                        format!("content.overlap.{overlap_count}"),
+                        format!(
+                            "{} overlaps {} with IoU {:.6}",
+                            block.id.as_str(),
+                            other.id.as_str(),
+                            block.bbox.iou(other.bbox)
+                        ),
+                    );
+                    overlap_count += 1;
+                }
+            }
+        }
+        if overlap_count > 0 {
+            tracing::warn!(
+                "page {} retained {} partially overlapping content layout pairs; see content.overlap diagnostics",
+                extracted.page_number,
+                overlap_count
+            );
+            warnings.push(PageWarning {
+                code: "ContentLayoutOverlap".to_owned(),
+                stage: "semantic".to_owned(),
+                message: format!("retained {overlap_count} partially overlapping content layout pairs; see content.overlap diagnostics"),
+            });
         }
         warnings.sort_by(|left, right| {
             left.stage
@@ -615,6 +732,353 @@ mod tests {
             .push_page(PageProbe::from(page))
             .expect("test probe must be valid");
         builder.build().expect("test context must build")
+    }
+
+    /// Reference envelopes must not steal partially covered text from bibliography entries.
+    #[test]
+    fn reference_is_visual_only_and_children_own_all_text() {
+        let page = extracted();
+        let mut parent = detection(0, [0.0, 0.0, 100.0, 100.0]);
+        parent.label = LayoutLabel::Reference;
+        parent.raw_label = "reference".to_owned();
+        parent.class_id = 18;
+        parent.confidence = 0.99;
+        let bounds = parent.bbox;
+        let mut children = vec![
+            detection(1, [5.0, 5.0, 85.0, 25.0]),
+            detection(2, [5.0, 55.0, 55.0, 75.0]),
+        ];
+        for child in &mut children {
+            child.label = LayoutLabel::ReferenceContent;
+            child.raw_label = "reference_content".to_owned();
+            child.class_id = 19;
+        }
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                [vec![parent], children].concat(),
+                context(&page),
+            )
+            .expect("prepare bibliography");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("bibliography");
+        let reference = result
+            .blocks
+            .iter()
+            .find(|block| block.label == LayoutLabel::Reference)
+            .expect("visual reference");
+        assert!(reference.text.is_empty() && reference.lines.is_empty());
+        assert_eq!(reference.bbox, bounds);
+        let entries: Vec<_> = result
+            .blocks
+            .iter()
+            .filter(|block| block.label == LayoutLabel::ReferenceContent)
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries
+                .iter()
+                .flat_map(|block| &block.lines)
+                .flat_map(|line| &line.text_items)
+                .count(),
+            3
+        );
+        assert!(
+            entries.iter().any(|block| block.text.contains("right")),
+            "The partially covered trailing text must remain in its entry"
+        );
+        assert!(
+            entries
+                .iter()
+                .all(|block| block.final_order < reference.final_order)
+        );
+    }
+
+    /// Missing child detections must preserve bibliography text without filling the visual envelope.
+    #[test]
+    fn reference_without_children_keeps_fallback_content_separate() {
+        let page = extracted();
+        let mut parent = detection(0, [0.0, 0.0, 100.0, 100.0]);
+        parent.label = LayoutLabel::Reference;
+        parent.raw_label = "reference".to_owned();
+        parent.class_id = 18;
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(page.clone(), vec![parent], context(&page))
+            .expect("prepare");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("fallback bibliography");
+        assert_eq!(result.iter_text_items().count(), 3);
+        assert!(
+            result
+                .blocks
+                .iter()
+                .filter(|block| !block.lines.is_empty())
+                .all(|block| block.label == LayoutLabel::ReferenceContent)
+        );
+        let reference = result
+            .blocks
+            .iter()
+            .find(|block| block.label == LayoutLabel::Reference)
+            .expect("reference");
+        assert!(reference.text.is_empty() && reference.lines.is_empty());
+    }
+
+    /// A visual reference may change semantic labels but never content merge geometry.
+    #[test]
+    fn reference_cannot_change_content_layout_geometry() {
+        let mut page = extracted();
+        page.text_items.truncate(2);
+        for (item, bounds) in page
+            .text_items
+            .iter_mut()
+            .zip([[10.0, 10.0, 60.0, 20.0], [10.0, 24.0, 60.0, 34.0]])
+        {
+            item.bbox = Bbox::try_from(bounds).expect("adjacent text");
+        }
+        let body = vec![
+            detection(0, [5.0, 5.0, 65.0, 22.0]),
+            detection(1, [5.0, 23.0, 65.0, 40.0]),
+        ];
+        let analyzer = PageAnalyzer::new(config());
+        let analyze = |detections| {
+            let draft = analyzer
+                .prepare(page.clone(), detections, context(&page))
+                .expect("prepare");
+            analyzer
+                .finish(draft, OcrCompletion::NotRequested)
+                .expect("layout")
+        };
+        let before = analyze(body.clone());
+        let mut reference = detection(10, [0.0, 0.0, 100.0, 100.0]);
+        reference.label = LayoutLabel::Reference;
+        reference.raw_label = "reference".to_owned();
+        reference.class_id = 18;
+        let after = analyze([body, vec![reference]].concat());
+        let bounds = |page: &crate::PageResult| {
+            page.blocks
+                .iter()
+                .filter(|block| !block.is_detached())
+                .map(|block| block.bbox)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bounds(&before), bounds(&after));
+        assert_eq!(after.iter_text_items().count(), 2);
+    }
+
+    /// Equivalent model hypotheses must not leave a second empty overlapping content box.
+    #[test]
+    fn content_layout_collapses_duplicate_model_regions() {
+        let page = extracted();
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                vec![
+                    detection(0, [5.0, 5.0, 45.0, 25.0]),
+                    detection(1, [6.0, 6.0, 44.0, 24.0]),
+                ],
+                context(&page),
+            )
+            .expect("prepare duplicate regions");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("normalize duplicates");
+        assert_eq!(
+            result
+                .blocks
+                .iter()
+                .filter(|block| block.bbox.top < 25.0 && block.bbox.left < 45.0)
+                .count(),
+            1
+        );
+        assert_eq!(result.iter_text_items().count(), 3);
+        let merged = result
+            .blocks
+            .iter()
+            .find(|block| block.bbox.top < 25.0 && block.bbox.left < 45.0)
+            .expect("merged candidate");
+        assert_eq!(
+            merged.source_regions.len(),
+            2,
+            "Both model hypotheses must remain inspectable"
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "EmptyModelRegion"),
+            "Absorbed duplicate candidates must not leave stale empty-content warnings"
+        );
+    }
+
+    /// Partial crossings stay separate and report diagnostics without swallowing a third block.
+    #[test]
+    fn content_layout_preserves_partial_crossings_with_warning() {
+        let mut page = extracted();
+        page.text_items = [
+            (0, "horizontal", [5.0, 5.0, 35.0, 10.0]),
+            (1, "vertical", [5.0, 5.0, 10.0, 35.0]),
+            (2, "inside union", [25.0, 25.0, 30.0, 30.0]),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds)| {
+            TextItem::builder()
+                .id(TextItemId::native(1, index))
+                .raw_text(text.to_owned())
+                .bbox(Bbox::try_from(bounds).expect("content geometry"))
+                .source(TextSource::Native)
+                .extraction_order(index)
+                .build()
+        })
+        .collect();
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                vec![
+                    detection(0, [4.0, 4.0, 36.0, 11.0]),
+                    detection(1, [4.0, 4.0, 11.0, 36.0]),
+                    detection(2, [24.0, 24.0, 31.0, 31.0]),
+                ],
+                context(&page),
+            )
+            .expect("prepare crossing layouts");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("partial overlaps are non-fatal");
+        assert_eq!(result.blocks.len(), 3);
+        assert_eq!(result.iter_text_items().count(), 3);
+        assert!(
+            result
+                .blocks
+                .iter()
+                .all(|block| block.source_regions.is_empty())
+        );
+        assert_eq!(
+            result
+                .warnings
+                .iter()
+                .filter(|warning| warning.code == "ContentLayoutOverlap")
+                .count(),
+            1
+        );
+        assert_eq!(
+            result
+                .diagnostics
+                .keys()
+                .filter(|key| key.starts_with("content.overlap."))
+                .count(),
+            1
+        );
+    }
+
+    /// Close but independently detected paragraphs must not lose their established boundaries.
+    #[test]
+    fn content_layout_preserves_separate_model_paragraphs() {
+        let mut page = extracted();
+        page.text_items.truncate(2);
+        for (item, (text, bounds)) in page.text_items.iter_mut().zip([
+            ("Previous paragraph.", [10.0, 10.0, 60.0, 20.0]),
+            ("• New paragraph.", [10.0, 24.0, 60.0, 34.0]),
+        ]) {
+            item.raw_text = text.to_owned();
+            item.bbox = Bbox::try_from(bounds).expect("paragraph bounds");
+        }
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                vec![
+                    detection(0, [5.0, 5.0, 65.0, 22.0]),
+                    detection(1, [5.0, 23.0, 65.0, 40.0]),
+                ],
+                context(&page),
+            )
+            .expect("prepare paragraphs");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("paragraph layouts");
+        assert_eq!(
+            result.blocks.len(),
+            2,
+            "A gap alone must not erase two non-overlapping model paragraphs"
+        );
+    }
+
+    /// A script joins its parent line while the next paragraph keeps its independent layout.
+    #[test]
+    fn content_layout_attaches_script_without_merging_next_line() {
+        let mut page = extracted();
+        page.text_items = [
+            (0, "body", [10.0, 10.0, 60.0, 20.0], 10.0),
+            (1, "2", [32.0, 16.0, 36.0, 23.0], 7.0),
+            (2, "continuation", [10.0, 24.0, 60.0, 34.0], 10.0),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds, size)| {
+            TextItem::builder()
+                .id(TextItemId::native(1, index))
+                .raw_text(text.to_owned())
+                .bbox(Bbox::try_from(bounds).expect("math bounds"))
+                .source(TextSource::Native)
+                .style(Some(
+                    crate::TextStyle::builder().font_size(Some(size)).build(),
+                ))
+                .extraction_order(index)
+                .build()
+        })
+        .collect();
+        let analyzer = PageAnalyzer::new(config());
+        let analyze = |page: ExtractedPage| {
+            let draft = analyzer
+                .prepare(
+                    page.clone(),
+                    vec![detection(0, [10.0, 10.0, 60.0, 16.0])],
+                    context(&page),
+                )
+                .expect("prepare math");
+            analyzer
+                .finish(draft, OcrCompletion::NotRequested)
+                .expect("math layout")
+        };
+        let forward = analyze(page.clone());
+        page.text_items.reverse();
+        let reverse = analyze(page);
+        assert_eq!(
+            forward.blocks.len(),
+            2,
+            "Only the script should join its parent"
+        );
+        assert_eq!(forward.iter_text_items().count(), 3);
+        assert_eq!(forward.blocks, reverse.blocks);
+        assert_eq!(
+            forward.blocks.first().expect("merged block").bbox,
+            Bbox::try_from([10.0, 10.0, 60.0, 23.0])
+                .expect("parent and script bounds")
+        );
+        let parent = forward.blocks.first().expect("parent");
+        assert_eq!(parent.lines.len(), 1);
+        assert_eq!(
+            parent
+                .lines
+                .first()
+                .expect("parent line")
+                .text_items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![TextItemId::native(1, 0), TextItemId::native(1, 1)]
+        );
+        assert!(
+            !forward
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "ContentLayoutOverlap")
+        );
     }
 
     /// Confirmed watermarks cannot affect the ordinary model, fallback, or order results.

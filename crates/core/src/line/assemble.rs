@@ -21,6 +21,19 @@ pub(crate) struct LineFragment {
 }
 
 impl LineFragment {
+    /// Orders upright fragments by the body baseline so raised scripts cannot jump ahead.
+    pub(crate) fn reading_order_y(&self) -> f64 {
+        if self.direction != WritingDirection::Vertical
+            && !super::TextAxes::from(self.rotation).is_oblique()
+            && self.items.iter().any(|item| item.baseline.is_some())
+        {
+            self.baseline.start.y
+        } else {
+            // An estimated bbox bottom can put a small overlapping glyph before prose.
+            self.bbox.top
+        }
+    }
+
     /// Builds one canonical fragment from non-empty ordered or unordered text facts.
     pub(crate) fn from_items(
         mut items: Vec<TextItem>,
@@ -182,6 +195,57 @@ impl LineAssembler for ConservativeLineAssembler {
             const CROSS_AXIS_SIZE_CAP: f64 = 24.0;
             let mut bands = Vec::<Vec<AlignedItem>>::new();
             for item in items {
+                if !item.vertical && !axes.is_oblique() {
+                    // Group body text on its baseline before inserting scripts. Using
+                    // bbox tops mixes raised glyphs with prose and splits the row each
+                    // time the font changes; its fragments then sort ahead of the prose.
+                    let size = item
+                        .item
+                        .style
+                        .as_ref()
+                        .and_then(|style| style.font_size)
+                        .filter(|size| size.is_finite() && *size > 0.0)
+                        .unwrap_or_else(|| item.bbox.height());
+                    let baseline = item
+                        .item
+                        .baseline
+                        .map_or(item.bbox.bottom, |baseline| baseline.start.y);
+                    let band_index = bands.iter().position(|band| {
+                        let Some(first) = band.first() else {
+                            return false;
+                        };
+                        let first_size = first
+                            .item
+                            .style
+                            .as_ref()
+                            .and_then(|style| style.font_size)
+                            .filter(|size| size.is_finite() && *size > 0.0)
+                            .unwrap_or_else(|| first.bbox.height());
+                        let first_baseline = first
+                            .item
+                            .baseline
+                            .map_or(first.bbox.bottom, |baseline| {
+                                baseline.start.y
+                            });
+                        (size - first_size).abs()
+                            <= config
+                                .estimated_font_size_tolerance_points
+                                .max(0.5)
+                            && (baseline - first_baseline).abs()
+                                <= size
+                                    .min(first_size)
+                                    .clamp(1.0, CROSS_AXIS_SIZE_CAP)
+                                    * 0.2
+                    });
+                    if let Some(band) =
+                        band_index.and_then(|index| bands.get_mut(index))
+                    {
+                        band.push(item);
+                    } else {
+                        bands.push(vec![item]);
+                    }
+                    continue;
+                }
                 let merge = bands.last().is_some_and(|band| {
                     let Some(first) = band.first() else {
                         return false;
@@ -268,11 +332,15 @@ impl LineAssembler for ConservativeLineAssembler {
                 )
             })
             .collect::<Result<_, LineError>>()?;
+        fragments = LineFragment::attach_scripts(fragments, page_width)?;
+        fragments = Self::join_script_gaps(fragments, page_width, config)?;
         // Restore canonical page order after orientation-specific band construction.
         fragments.sort_by(|left, right| {
             left.rotation
                 .total_cmp(&right.rotation)
-                .then_with(|| left.bbox.top.total_cmp(&right.bbox.top))
+                .then_with(|| {
+                    left.reading_order_y().total_cmp(&right.reading_order_y())
+                })
                 .then_with(|| left.bbox.left.total_cmp(&right.bbox.left))
                 .then_with(|| {
                     left.items
@@ -286,6 +354,73 @@ impl LineAssembler for ConservativeLineAssembler {
 }
 
 impl ConservativeLineAssembler {
+    /// Rejoins one body baseline when attached scripts fill an apparent inline gap.
+    fn join_script_gaps(
+        mut fragments: Vec<LineFragment>,
+        page_width: f64,
+        config: &FusionConfig,
+    ) -> Result<Vec<LineFragment>, LineError> {
+        loop {
+            let pair =
+                fragments.iter().enumerate().find_map(|(index, left)| {
+                    let angle = left.rotation.rem_euclid(360.0);
+                    if angle.min(360.0 - angle) > 2.0
+                        || left.direction == WritingDirection::Vertical
+                    {
+                        return None;
+                    }
+                    fragments
+                        .iter()
+                        .enumerate()
+                        .skip(index + 1)
+                        .find(|(_, right)| {
+                            let size = left
+                                .metrics
+                                .font_size
+                                .min(right.metrics.font_size);
+                            let gap = (left.bbox.left - right.bbox.right)
+                                .max(right.bbox.left - left.bbox.right);
+                            // Retained body baselines/font sizes establish one physical row.
+                            // Script-inflated bbox tops and bottoms are not used to merge rows.
+                            left.direction == right.direction
+                                && (left.rotation - right.rotation).abs() <= 2.0
+                                && (left.metrics.font_size
+                                    - right.metrics.font_size)
+                                    .abs()
+                                    <= config
+                                        .estimated_font_size_tolerance_points
+                                        .max(0.5)
+                                && (left.baseline.start.y
+                                    - right.baseline.start.y)
+                                    .abs()
+                                    <= size.clamp(1.0, 24.0) * 0.2
+                                && gap >= -size
+                                && gap <= MAX_HORIZONTAL_GAP
+                        })
+                        .map(|(right, _)| (index, right))
+                });
+            let Some((left, right)) = pair else {
+                break;
+            };
+            let other = fragments.remove(right);
+            if let Some(fragment) = fragments.get_mut(left) {
+                let baseline = fragment.baseline;
+                let font_size = fragment.metrics.font_size;
+                let estimated = fragment.metrics.font_size_estimated;
+                let mut items = std::mem::take(&mut fragment.items);
+                items.extend(other.items);
+                *fragment = LineFragment::from_items(items, page_width)?;
+                // Extend the segment across the joined row while retaining its body height.
+                fragment.baseline.start.y = baseline.start.y;
+                fragment.baseline.end.y = baseline.end.y;
+                fragment.metrics.baseline = fragment.baseline;
+                fragment.metrics.font_size = font_size;
+                fragment.metrics.font_size_estimated = estimated;
+            }
+        }
+        Ok(fragments)
+    }
+
     /// Applies overlap, font, and gap policies to boxes in the same reference frame.
     fn compatible(
         left: &AlignedItem,
@@ -399,6 +534,132 @@ mod tests {
         );
     }
 
+    /// Raised and lowered small glyphs join a parent without moving its baseline or the next row.
+    #[test]
+    fn scripts_join_parent_line_and_preserve_body_baseline() {
+        for bounds in [[32.0, 7.0, 36.0, 14.0], [32.0, 16.0, 36.0, 23.0]] {
+            let inputs = vec![
+                item(0, "body", [10.0, 10.0, 60.0, 20.0], 10.0),
+                item(1, "2", bounds, 7.0),
+                item(2, "next", [10.0, 24.0, 60.0, 34.0], 10.0),
+            ];
+            let forward = ConservativeLineAssembler
+                .fragments(inputs.clone(), &FusionConfig::default())
+                .expect("lines");
+            let reverse = ConservativeLineAssembler
+                .fragments(
+                    inputs.into_iter().rev().collect(),
+                    &FusionConfig::default(),
+                )
+                .expect("reverse lines");
+            assert_eq!(forward, reverse);
+            assert_eq!(forward.len(), 2);
+            let parent = forward.first().expect("parent line");
+            assert_eq!(
+                parent
+                    .items
+                    .iter()
+                    .map(|item| item.id.clone())
+                    .collect::<Vec<_>>(),
+                vec![TextItemId::native(1, 0), TextItemId::native(1, 1)]
+            );
+            assert!((parent.baseline.start.y - 20.0).abs() < 1e-6);
+            assert!((parent.metrics.font_size - 10.0).abs() < 1e-6);
+        }
+    }
+
+    /// Small type alone does not establish script ownership across baselines, columns or notes.
+    #[test]
+    fn small_non_script_text_remains_separate() {
+        for (text, bounds, font_size) in [
+            ("2", [32.0, 13.0, 36.0, 20.0], 7.0),
+            ("2", [73.0, 16.0, 77.0, 23.0], 7.0),
+            ("footnote", [32.0, 16.0, 58.0, 23.0], 7.0),
+            ("2", [32.0, 16.0, 36.0, 23.0], 10.0),
+        ] {
+            let lines = ConservativeLineAssembler
+                .fragments(
+                    vec![
+                        item(0, "body", [10.0, 10.0, 60.0, 20.0], 10.0),
+                        item(1, text, bounds, font_size),
+                    ],
+                    &FusionConfig::default(),
+                )
+                .expect("lines");
+            assert_eq!(
+                lines.len(),
+                2,
+                "independent small text: {text} {bounds:?}"
+            );
+        }
+    }
+
+    /// Reconstructs two real mixed-math rows without moving their scripts ahead of prose.
+    #[test]
+    fn mixed_math_rows_preserve_inline_script_order() {
+        // The excerpt uses an unrotated 792-point page. Baselines were mapped from
+        // its PDF text matrices; bboxes and source text are unchanged copied facts.
+        let rows: Vec<(u32, String, [f64; 4], f64, f64)> =
+            serde_json::from_str(include_str!(
+                "../../tests/fixtures/line/math-scripts.json"
+            ))
+            .expect("math source facts");
+        for (scale, dx, dy) in [(1.0, 0.0, 0.0), (1.0, 200.0, 50.0)] {
+            let items: Vec<_> = rows
+                .iter()
+                .map(|(index, text, bounds, size, baseline)| {
+                    let [left, top, right, bottom] = *bounds;
+                    let mut item = item(
+                        *index,
+                        text,
+                        [
+                            left * scale + dx,
+                            top * scale + dy,
+                            right * scale + dx,
+                            bottom * scale + dy,
+                        ],
+                        size * scale,
+                    );
+                    item.baseline = Some(crate::Baseline {
+                        start: docparse_layout::Point::new(
+                            item.bbox.left,
+                            baseline * scale + dy,
+                        ),
+                        end: docparse_layout::Point::new(
+                            item.bbox.right,
+                            baseline * scale + dy,
+                        ),
+                    });
+                    item
+                })
+                .collect();
+            let forward = ConservativeLineAssembler
+                .fragments(items.clone(), &FusionConfig::default())
+                .expect("math lines");
+            let reverse = ConservativeLineAssembler
+                .fragments(
+                    items.into_iter().rev().collect(),
+                    &FusionConfig::default(),
+                )
+                .expect("reverse math lines");
+            assert_eq!(
+                forward, reverse,
+                "source iteration order must not change physical rows"
+            );
+            assert_eq!(
+                forward
+                    .iter()
+                    .map(|line| crate::Line::derive_text(&line.items))
+                    .collect::<Vec<_>>(),
+                vec![
+                    "Lemma 2. If q = δτ∗(r, q0τ) and no prefix of r is in L(τ ) i.e. ∄w1 ∈ Σ∗, w2 ∈ Σ∗such that w1.w2 =",
+                    "r and δτ∗(w1, q0τ) ∈ Fτ then dmatch(t, q,Λ) ⇐⇒ dmatch(r.t, q0τ,Λ).",
+                ]
+            );
+            assert_eq!(forward.iter().flat_map(|line| &line.items).count(), 81);
+        }
+    }
+
     /// Groups oblique spans by their baseline instead of page top, preserving parallel lines.
     #[test]
     fn scaled_oblique_glyphs_use_physical_font_height() {
@@ -435,6 +696,310 @@ mod tests {
                 .map(|item| item.raw_text.as_str())
                 .collect::<String>(),
             "AB"
+        );
+    }
+
+    /// Measured equal baselines override misleading glyph bottoms when font sizes differ.
+    #[test]
+    fn measured_baselines_prevent_false_script_attachment() {
+        let mut items = vec![
+            item(0, "body", [10.0, 10.0, 60.0, 20.0], 10.0),
+            item(1, "2", [32.0, 16.0, 36.0, 23.0], 7.0),
+        ];
+        for item in &mut items {
+            item.baseline = Some(crate::Baseline {
+                start: docparse_layout::Point::new(item.bbox.left, 20.0),
+                end: docparse_layout::Point::new(item.bbox.right, 20.0),
+            });
+        }
+        let lines = ConservativeLineAssembler
+            .fragments(items, &FusionConfig::default())
+            .expect("lines");
+        assert_eq!(
+            lines.len(),
+            2,
+            "a measured baseline has priority over the bbox bottom"
+        );
+    }
+
+    /// Nested indices follow original parent relations without absorbing the following row.
+    #[test]
+    fn nested_scripts_follow_original_typographic_parent_chain() {
+        let specs = [
+            (0, "q", [10.0, 10.0, 15.0, 20.0], 10.0, 18.0),
+            (1, "τ", [15.0, 6.0, 19.0, 12.0], 7.0, 10.5),
+            (2, "f", [18.5, 9.0, 22.0, 13.0], 5.0, 11.8),
+            (3, "0", [14.9, 18.0, 19.0, 24.0], 7.0, 22.0),
+            (4, "next", [10.0, 30.0, 50.0, 40.0], 10.0, 38.0),
+        ];
+        let fragments = specs
+            .into_iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(index, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(source.bbox.left, y),
+                    end: docparse_layout::Point::new(source.bbox.right, y),
+                });
+                super::LineFragment::from_items(vec![source], 100.0)
+                    .expect("source fragment")
+            })
+            .collect();
+        let output = super::LineFragment::attach_scripts(fragments, 100.0)
+            .expect("nested attachment");
+        assert_eq!(
+            output.len(),
+            2,
+            "a nested index must not become an independent line"
+        );
+        let parent = output.first().expect("parent");
+        assert_eq!(crate::Line::derive_text(&parent.items), "q0τf");
+        assert!((parent.baseline.start.y - 18.0).abs() < 1e-6);
+        assert_eq!(output.last().expect("following row").items.len(), 1);
+    }
+
+    /// Nested scripts fill an apparent inline gap without joining the following body row.
+    #[test]
+    fn script_extents_bridge_fragments_on_the_same_body_baseline() {
+        let specs = [
+            (0, "q", [10.0, 10.0, 15.0, 20.0], 10.0, 18.0),
+            (1, "τ", [15.0, 6.0, 19.0, 12.0], 7.0, 10.5),
+            (2, "f+1", [18.5, 9.0, 28.5, 13.0], 5.0, 11.8),
+            (3, "0", [14.9, 18.0, 19.0, 24.0], 7.0, 22.0),
+            (4, ",Λ)", [32.0, 10.0, 48.0, 20.0], 10.0, 18.0),
+            (5, "next", [10.0, 30.0, 50.0, 40.0], 10.0, 38.0),
+        ];
+        let sources = specs
+            .into_iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(index, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(source.bbox.left, y),
+                    end: docparse_layout::Point::new(source.bbox.right, y),
+                });
+                source
+            })
+            .collect();
+        let lines = ConservativeLineAssembler
+            .fragments(sources, &FusionConfig::default())
+            .expect("physical lines");
+        assert!(
+            (lines.first().expect("first row").baseline.end.x - 48.0).abs()
+                < 1e-6
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            vec!["q0τf+1,Λ)", "next"]
+        );
+    }
+
+    /// A nearby font-size difference cannot split an unrelated run into separate words.
+    #[test]
+    fn unrelated_small_font_run_is_not_split_into_words() {
+        let parent = super::LineFragment::from_items(
+            vec![item(0, "body", [0.0, 10.0, 20.0, 20.0], 10.0)],
+            200.0,
+        )
+        .expect("parent");
+        let note = super::LineFragment::from_items(
+            vec![
+                item(1, "small ", [100.0, 10.0, 115.0, 17.0], 7.0),
+                item(2, "note", [116.0, 10.0, 130.0, 17.0], 7.0),
+            ],
+            200.0,
+        )
+        .expect("independent note");
+        let output =
+            super::LineFragment::attach_scripts(vec![parent, note], 200.0)
+                .expect("attachment");
+        assert_eq!(output.len(), 2);
+        assert_eq!(output.last().expect("note").items.len(), 2);
+    }
+
+    /// Unknown typography and equally plausible parents must leave script ownership unresolved.
+    #[test]
+    fn scripts_require_known_typography_and_an_unambiguous_parent() {
+        let base = item(0, "body", [10.0, 10.0, 60.0, 20.0], 10.0);
+        let script = item(1, "2", [32.0, 16.0, 36.0, 23.0], 7.0);
+        let mut unknown = script.clone();
+        unknown.style = None;
+        let lines = ConservativeLineAssembler
+            .fragments(vec![base, unknown], &FusionConfig::default())
+            .expect("unknown font");
+        assert_eq!(lines.len(), 2);
+        let items = vec![
+            item(0, "left", [10.0, 10.0, 60.0, 20.0], 10.0),
+            script,
+            item(2, "right", [11.0, 10.0, 61.0, 20.0], 10.0),
+        ];
+        let fragments = items
+            .into_iter()
+            .map(|item| {
+                super::LineFragment::from_items(vec![item], 100.0)
+                    .expect("fragment")
+            })
+            .collect();
+        let result = super::LineFragment::attach_scripts(fragments, 100.0)
+            .expect("attachment");
+        assert_eq!(
+            result.len(),
+            3,
+            "equal candidates must not pick an arbitrary owner"
+        );
+    }
+
+    /// A split nested index is reconstructed before per-region text ownership is decided.
+    #[test]
+    fn split_nested_script_run_stays_with_its_base_before_assignment() {
+        let rows: Vec<(u32, String, [f64; 4], f64, f64)> =
+            serde_json::from_str(include_str!(
+                "../../tests/fixtures/line/nested-math-scripts.json"
+            ))
+            .expect("source formula");
+        let fragments = rows
+            .into_iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(index, &text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(source.bbox.left, y),
+                    end: docparse_layout::Point::new(source.bbox.right, y),
+                });
+                super::LineFragment::from_items(vec![source], 612.0)
+                    .expect("source fragment")
+            })
+            .collect();
+        let output = super::LineFragment::attach_scripts(fragments, 612.0)
+            .expect("script attachment");
+        let q = output
+            .iter()
+            .find(|fragment| {
+                fragment
+                    .items
+                    .iter()
+                    .any(|source| source.id == TextItemId::native(1, 8))
+            })
+            .expect("q owner");
+        assert_eq!(crate::Line::derive_text(&q.items), "q0τf+1");
+        assert!(
+            !q.items
+                .iter()
+                .any(|source| source.id == TextItemId::native(1, 13)),
+            "following punctuation keeps independent ownership"
+        );
+        assert_eq!(
+            output.iter().flat_map(|fragment| &fragment.items).count(),
+            17
+        );
+    }
+
+    /// Device-grid rounding cannot turn an otherwise valid baseline shift into an orphan.
+    #[test]
+    fn rounded_pdfium_origins_do_not_orphan_subscripts() {
+        let specs = [
+            (
+                0,
+                "w",
+                [336.16, 125.375, 343.283, 134.222],
+                9.962599754333496,
+                132.28900146484375,
+            ),
+            (
+                1,
+                "2",
+                [343.292, 128.978, 347.26, 135.136],
+                6.973800182342529,
+                133.7830047607422,
+            ),
+            (
+                2,
+                "or",
+                [351.083, 125.425, 359.96, 134.222],
+                9.962599754333496,
+                132.28900146484375,
+            ),
+        ];
+        let fragments = specs
+            .into_iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(index, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(source.bbox.left, y),
+                    end: docparse_layout::Point::new(source.bbox.right, y),
+                });
+                super::LineFragment::from_items(vec![source], 612.0)
+                    .expect("source")
+            })
+            .collect();
+        let output = super::LineFragment::attach_scripts(fragments, 612.0)
+            .expect("rounded baseline attachment");
+        assert_eq!(output.len(), 2);
+        assert_eq!(
+            crate::Line::derive_text(&output.first().expect("base").items),
+            "w2"
+        );
+    }
+
+    /// A script cannot move a right-hand fragment ahead of its left-hand baseline peer.
+    #[test]
+    fn scripts_do_not_reorder_fragments_sharing_a_body_baseline() {
+        let specs = [
+            (0, "Proof.", [0.0, 10.0, 12.0, 20.0], 10.0, 18.0),
+            (1, "(a) q", [40.0, 10.0, 65.0, 20.0], 10.0, 18.0),
+            (2, "2", [65.0, 7.0, 69.0, 14.0], 7.0, 12.0),
+            (3, "Next", [0.0, 30.0, 40.0, 40.0], 10.0, 38.0),
+        ];
+        let sources = specs
+            .into_iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(index, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(source.bbox.left, y),
+                    end: docparse_layout::Point::new(source.bbox.right, y),
+                });
+                source
+            })
+            .collect();
+        let lines = ConservativeLineAssembler
+            .fragments(sources, &FusionConfig::default())
+            .expect("row order");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            vec!["Proof.", "(a) q2", "Next"]
+        );
+    }
+
+    /// An ordinary postfix index belongs to the preceding base, not following punctuation.
+    #[test]
+    fn postfix_script_does_not_choose_following_text() {
+        let items = vec![
+            item(0, "q", [10.0, 10.0, 16.0, 20.0], 10.0),
+            item(1, "2", [16.3, 7.0, 20.3, 14.0], 7.0),
+            item(2, ")", [21.0, 10.0, 25.0, 20.0], 10.0),
+        ];
+        let fragments = items
+            .into_iter()
+            .map(|source| {
+                super::LineFragment::from_items(vec![source], 100.0)
+                    .expect("source")
+            })
+            .collect();
+        let output = super::LineFragment::attach_scripts(fragments, 100.0)
+            .expect("postfix attachment");
+        assert_eq!(output.len(), 2);
+        assert_eq!(
+            crate::Line::derive_text(&output.first().expect("base").items),
+            "q2"
+        );
+        assert_eq!(
+            crate::Line::derive_text(
+                &output.last().expect("following text").items
+            ),
+            ")"
         );
     }
 

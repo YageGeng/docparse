@@ -308,6 +308,10 @@ pub struct Evidence {
 /// Original model or fallback region geometry retained beside final content bounds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 pub struct SourceRegionEvidence {
+    /// Original semantic label, including alternate labels retained during a merge.
+    #[builder(default, setter(strip_option))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<LayoutLabel>,
     #[builder(default)]
     pub model_region_id: Option<ModelRegionId>,
     #[builder(default)]
@@ -491,6 +495,10 @@ pub struct Block {
     pub polygon: Option<Polygon>,
     #[builder(default)]
     pub source_region: Option<SourceRegionEvidence>,
+    /// All contributing regions for a merged layout; empty for legacy or unmerged blocks.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_regions: Vec<SourceRegionEvidence>,
     #[builder(default)]
     pub model_region_id: Option<ModelRegionId>,
     #[builder(default)]
@@ -512,6 +520,21 @@ enum BlockTextBoundary {
 }
 
 impl Block {
+    /// Identifies annotations kept outside body composition and content overlap diagnostics.
+    pub fn is_detached(&self) -> bool {
+        matches!(self.label, LayoutLabel::Reference | LayoutLabel::Watermark)
+    }
+
+    /// Visits every contributing region without counting the primary source twice.
+    pub fn source_regions(
+        &self,
+    ) -> impl Iterator<Item = &SourceRegionEvidence> {
+        self.source_region
+            .iter()
+            .filter(|_| self.source_regions.is_empty())
+            .chain(self.source_regions.iter())
+    }
+
     /// Selects the canonical projection for one non-empty physical-line boundary.
     fn boundary_between(
         policy: LabelPolicy,

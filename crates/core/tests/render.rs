@@ -108,6 +108,43 @@ fn renderers_preserve_canonical_document() {
     );
 }
 
+/// Configured JSON must retain merged source regions just like the direct serializer.
+#[test]
+fn configured_json_preserves_merged_layout_sources() {
+    let mut document = document();
+    let block = document
+        .pages
+        .first_mut()
+        .and_then(|page| page.blocks.first_mut())
+        .expect("block");
+    block.source_regions = [1, 2]
+        .into_iter()
+        .map(|index| {
+            docparse_core::SourceRegionEvidence::builder()
+                .label(LayoutLabel::Text)
+                .model_region_id(Some(docparse_core::ModelRegionId::detected(
+                    1, index,
+                )))
+                .bbox(block.bbox)
+                .geometry_source(
+                    docparse_layout::GeometrySource::DerivedFromBbox,
+                )
+                .build()
+        })
+        .collect();
+    block.source_region = block.source_regions.first().cloned();
+    let direct = serde_json::to_value(&document).expect("direct JSON");
+    let rendered =
+        JsonRenderer::render_with_config(&document, &OutputConfig::default())
+            .expect("configured JSON");
+    let configured: serde_json::Value =
+        serde_json::from_str(&rendered).expect("parse JSON");
+    assert_eq!(
+        configured.pointer("/pages/0/blocks/0/source_regions"),
+        direct.pointer("/pages/0/blocks/0/source_regions")
+    );
+}
+
 /// Verifies the overlay emits PNG bytes and XML-escapes model-controlled labels.
 #[test]
 fn overlay_encodes_background_and_escaped_svg() {
