@@ -117,11 +117,16 @@ impl<'a> TableGrid<'a> {
             .collect()
     }
 
+    /// Shares bounded paint-coordinate tolerance between snapping, stroke merging, and coverage.
+    fn rule_tolerance(&self) -> f64 {
+        (self.font_size * 0.15).clamp(0.5, 2.0)
+    }
+
     /// Coalesces paint-width jitter against a fixed cluster anchor instead of chaining distant rules.
     fn snapped(&self, mut positions: Vec<f64>) -> Vec<f64> {
         positions.retain(|value| value.is_finite());
         positions.sort_by(f64::total_cmp);
-        let tolerance = (self.font_size * 0.15).clamp(0.5, 2.0);
+        let tolerance = self.rule_tolerance();
         positions.dedup_by(|a, b| (*a - *b).abs() <= tolerance);
         positions
     }
@@ -135,16 +140,24 @@ impl<'a> TableGrid<'a> {
         from: f64,
         to: f64,
     ) -> f64 {
+        // Typeset rules often stop short of a crossing to leave visual padding.
+        // Ignore bounded endpoint padding, but still measure missing interior ink;
+        // a short header separator must not collapse all header columns into one.
+        let padding = (self.font_size * 0.4).min((to - from) * 0.2);
+        let from = from + padding;
+        let to = to - padding;
+        // Coverage must recognize the same near-collinear strokes as grid snapping.
+        let tolerance = self.rule_tolerance();
         let mut intervals: Vec<_> = rules
             .iter()
             .filter_map(|rule| match *rule {
                 TableRule::Horizontal { y, left, right }
-                    if horizontal && (y - at).abs() <= 1.5 =>
+                    if horizontal && (y - at).abs() <= tolerance =>
                 {
                     Some((left.max(from), right.min(to)))
                 }
                 TableRule::Vertical { x, top, bottom }
-                    if !horizontal && (x - at).abs() <= 1.5 =>
+                    if !horizontal && (x - at).abs() <= tolerance =>
                 {
                     Some((top.max(from), bottom.min(to)))
                 }

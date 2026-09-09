@@ -21,8 +21,8 @@ fn canonical_rotation(rotation: f64) -> i32 {
 }
 
 /// Detects writing direction from rotation and strong Unicode characters.
-pub(crate) fn detect_direction(
-    items: &[TextItem],
+pub(crate) fn detect_direction<'a>(
+    items: impl IntoIterator<Item = &'a TextItem>,
     rotation: f64,
 ) -> WritingDirection {
     let rotation = canonical_rotation(rotation);
@@ -31,7 +31,7 @@ pub(crate) fn detect_direction(
     }
     let mut left_to_right = 0_usize;
     let mut right_to_left = 0_usize;
-    for character in items.iter().flat_map(|item| item.raw_text.chars()) {
+    for character in items.into_iter().flat_map(|item| item.raw_text.chars()) {
         if is_rtl_character(character) {
             right_to_left += 1;
         } else if character.is_alphabetic() {

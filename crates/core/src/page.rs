@@ -183,11 +183,26 @@ impl PageAnalyzer {
             .text_items
             .into_iter()
             .partition(|item| item.watermark.is_some());
+        // Supply formula scopes before text grouping; InlineSpan annotation still
+        // happens afterward, using the resulting canonical item order and ranges.
+        let formula_regions: Vec<_> = detections
+            .iter()
+            .filter(|detection| {
+                Self::valid_page_bbox(detection.bbox, page_bbox)
+                    && detection.polygon.as_ref().is_none_or(|polygon| {
+                        Self::valid_page_bbox(polygon.bbox(), page_bbox)
+                    })
+            })
+            .filter_map(|detection| {
+                crate::line::FormulaRegion::try_from(detection).ok()
+            })
+            .collect();
         let assembler = SemanticAssembler::new(
             extracted.page_number,
             page_bbox,
             self.config.fusion().clone(),
-        );
+        )
+        .with_evidence(&extracted.table_evidence.rules, &formula_regions);
         let watermarks = assembler.watermark_blocks(
             watermark_items,
             extracted.watermark_annotations,
@@ -271,6 +286,7 @@ impl PageAnalyzer {
         let table_assembler = crate::table::TableAssembler::new(
             self.config.fusion(),
             &extracted.table_evidence,
+            &formula_regions,
         );
         for block in blocks
             .iter_mut()
@@ -781,6 +797,207 @@ mod tests {
             .push_page(PageProbe::from(page))
             .expect("test probe must be valid");
         builder.build().expect("test context must build")
+    }
+
+    /// Inline formula detections must constrain script ownership before ordinary prose grouping.
+    #[test]
+    fn inline_formula_region_keeps_its_script_out_of_neighboring_prose() {
+        let mut page = extracted();
+        page.text_items = [
+            (0, "before ", [0.0, 10.0, 20.0, 20.0], 13.0, 18.0),
+            (1, "x", [20.0, 10.0, 30.0, 20.0], 10.0, 18.0),
+            (2, "2", [20.0, 16.0, 24.0, 23.0], 7.0, 22.0),
+            (3, " after", [40.0, 10.0, 70.0, 20.0], 13.0, 18.0),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds, size, y)| {
+            TextItem::builder()
+                .id(TextItemId::native(1, index))
+                .raw_text(text.to_owned())
+                .bbox(Bbox::try_from(bounds).expect("source"))
+                .baseline(Some(crate::Baseline {
+                    start: docparse_layout::Point::new(bounds[0], y),
+                    end: docparse_layout::Point::new(bounds[2], y),
+                }))
+                .style(Some(
+                    crate::TextStyle::builder().font_size(Some(size)).build(),
+                ))
+                .source(TextSource::Native)
+                .build()
+        })
+        .collect();
+        let mut formula = detection(1, [20.0, 9.0, 30.0, 24.0]);
+        formula.label = LayoutLabel::InlineFormula;
+        let analyzer = PageAnalyzer::new(config());
+        for reverse in [false, true] {
+            let mut source = page.clone();
+            if reverse {
+                source.text_items.reverse();
+            }
+            let draft = analyzer
+                .prepare(
+                    source,
+                    vec![detection(0, [0.0, 5.0, 90.0, 30.0]), formula.clone()],
+                    context(&page),
+                )
+                .expect("prepare");
+            let result = analyzer
+                .finish(draft, OcrCompletion::NotRequested)
+                .expect("formula page");
+            assert!(
+                result
+                    .blocks
+                    .iter()
+                    .any(|block| block.text == "before x2 after"),
+                "{:?}",
+                result
+                    .blocks
+                    .iter()
+                    .map(|block| &block.text)
+                    .collect::<Vec<_>>()
+            );
+            let span = result
+                .iter_lines()
+                .flat_map(|line| &line.inline_spans)
+                .next()
+                .expect("formula span");
+            assert_eq!(span.extracted_text.as_deref(), Some("x2"));
+            assert_eq!(result.iter_text_items().count(), 4);
+        }
+    }
+
+    /// Clipping a nested index must not move it past the formula's following operands.
+    #[test]
+    fn clipped_formula_scope_preserves_nested_script_ownership() {
+        let mut page = extracted();
+        page.text_items = [
+            (0, "q", [20.0, 50.0, 26.0, 60.0], 10.0, 58.0),
+            (1, "τ", [26.0, 56.0, 31.0, 63.0], 7.0, 62.0),
+            (2, "1", [31.0, 61.0, 34.0, 66.0], 5.0, 65.0),
+            (3, "=", [40.0, 50.0, 46.0, 60.0], 10.0, 58.0),
+            (4, "x", [52.0, 50.0, 58.0, 60.0], 10.0, 58.0),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds, size, y)| {
+            TextItem::builder()
+                .id(TextItemId::native(1, index))
+                .raw_text(text.to_owned())
+                .bbox(Bbox::try_from(bounds).expect("source"))
+                .baseline(Some(crate::Baseline {
+                    start: docparse_layout::Point::new(bounds[0], y),
+                    end: docparse_layout::Point::new(bounds[2], y),
+                }))
+                .style(Some(
+                    crate::TextStyle::builder().font_size(Some(size)).build(),
+                ))
+                .source(TextSource::Native)
+                .build()
+        })
+        .collect();
+        let analyzer = PageAnalyzer::new(config());
+        for label in [LayoutLabel::InlineFormula, LayoutLabel::DisplayFormula] {
+            for bottom in [67.0, 63.0, 58.0] {
+                for reverse in [false, true] {
+                    let mut source = page.clone();
+                    if reverse {
+                        source.text_items.reverse();
+                    }
+                    let mut formula = detection(1, [19.0, 49.0, 60.0, bottom]);
+                    formula.class_id = if label == LayoutLabel::InlineFormula {
+                        15
+                    } else {
+                        5
+                    };
+                    formula.label = label.clone();
+                    // Inline math belongs to prose; standalone display math owns its row.
+                    let mut detections = vec![formula];
+                    if label == LayoutLabel::InlineFormula {
+                        detections.push(detection(0, [10.0, 30.0, 90.0, 90.0]));
+                    }
+                    let draft = analyzer
+                        .prepare(source, detections, context(&page))
+                        .expect("prepare");
+                    let result = analyzer
+                        .finish(draft, OcrCompletion::NotRequested)
+                        .expect("formula page");
+                    assert_eq!(
+                        result
+                            .iter_lines()
+                            .map(|line| line.text.as_str())
+                            .collect::<Vec<_>>(),
+                        ["qτ1=x"],
+                        "{label:?}, bottom {bottom}, reverse {reverse}",
+                    );
+                    assert_eq!(
+                        result.iter_text_items().count(),
+                        page.text_items.len()
+                    );
+                    for original in &page.text_items {
+                        let mut actual = result
+                            .iter_text_items()
+                            .find(|item| item.id == original.id)
+                            .expect("original glyph")
+                            .clone();
+                        // The parser may assign order, but it must not change the source facts.
+                        actual.final_order = original.final_order;
+                        assert_eq!(&actual, original);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Confirmed display formulas can order a standalone fraction without an external prose anchor.
+    #[test]
+    fn display_formula_region_orders_an_unanchored_fraction() {
+        let mut page = extracted();
+        page.text_items = [(0, "a", 10.0), (1, "b", 24.0)]
+            .into_iter()
+            .map(|(index, text, top)| {
+                TextItem::builder()
+                    .id(TextItemId::native(1, index))
+                    .raw_text(text.to_owned())
+                    .bbox(
+                        Bbox::try_from([20.0, top, 26.0, top + 7.0])
+                            .expect("fraction"),
+                    )
+                    .baseline(Some(crate::Baseline {
+                        start: docparse_layout::Point::new(20.0, top + 6.0),
+                        end: docparse_layout::Point::new(26.0, top + 6.0),
+                    }))
+                    .style(Some(
+                        crate::TextStyle::builder()
+                            .font_size(Some(8.0))
+                            .build(),
+                    ))
+                    .source(TextSource::Native)
+                    .build()
+            })
+            .collect();
+        page.table_evidence
+            .rules
+            .push(crate::TableRule::Horizontal {
+                y: 20.0,
+                left: 19.0,
+                right: 27.0,
+            });
+        let mut formula = detection(0, [18.0, 8.0, 28.0, 33.0]);
+        formula.label = LayoutLabel::DisplayFormula;
+        let analyzer = PageAnalyzer::new(config());
+        let draft = analyzer
+            .prepare(page.clone(), vec![formula], context(&page))
+            .expect("prepare");
+        let result = analyzer
+            .finish(draft, OcrCompletion::NotRequested)
+            .expect("fraction page");
+        let block = result
+            .blocks
+            .iter()
+            .find(|block| block.label == LayoutLabel::DisplayFormula)
+            .expect("display formula");
+        assert_eq!(block.text, "ab");
+        assert_eq!(block.lines.len(), 1);
+        assert_eq!(result.iter_text_items().count(), 2);
     }
 
     /// Reference envelopes must not steal partially covered text from bibliography entries.

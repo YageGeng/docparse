@@ -344,6 +344,18 @@ impl AssignmentEngine {
         let mut reference_seeds = Vec::new();
         let mut inline_formulas = Vec::new();
         let mut diagnostics = BTreeSet::new();
+        let formula_regions: Vec<_> = detections
+            .iter()
+            .filter(|detection| {
+                page_contains(self.page_bbox, detection.bbox)
+                    && detection.polygon.as_ref().is_none_or(|polygon| {
+                        page_contains(self.page_bbox, polygon.bbox())
+                    })
+            })
+            .filter_map(|detection| {
+                crate::line::FormulaRegion::try_from(detection).ok()
+            })
+            .collect();
         for detection in detections {
             let source_index = detection.source_detection_index;
             if detection.label == LayoutLabel::InlineFormula {
@@ -406,8 +418,19 @@ impl AssignmentEngine {
         // Establish script ownership before model assignment, so a clipped detection
         // cannot send a parent's subscript into an unrelated residual layout.
         let ordinary_count = ordinary.len();
-        let ordinary =
-            LineFragment::attach_scripts(ordinary, self.page_bbox.width())?;
+        // Formula membership constrains ownership before a clipped detection or
+        // nearby large-font prose can pull a script away from its formula base.
+        // Use the same clipped-script inheritance as semantic and table assembly
+        // so a display formula cannot lose its index to a separate block first.
+        let script_groups =
+            LineFragment::formula_groups(ordinary, &formula_regions);
+        let mut ordinary = Vec::new();
+        for group in script_groups.into_values() {
+            ordinary.extend(LineFragment::attach_scripts(
+                group,
+                self.page_bbox.width(),
+            )?);
+        }
         if ordinary.len() < ordinary_count {
             tracing::debug!(
                 "attached {} script fragments to parent text on page {} before model assignment",

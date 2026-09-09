@@ -319,6 +319,139 @@ fn check_document_invariants(
                 "invalid page dimensions or rotation",
             ));
         }
+        // Geometry and serialization can agree while display limits are in the
+        // wrong reading order. Keep the real equations that exposed that gap.
+        if logical_id == "arxiv-2604.18583v1" && page.page_number == 6 {
+            for (summand, ordered_limits) in [
+                ("Tgsf", "Xr=1Rα"),
+                ("TLL +X", "Xr=1Rα"),
+                ("Tsl,f", "Xr=1Rlα"),
+            ] {
+                let matches = page.blocks.iter().any(|block| {
+                    block.label == docparse_layout::LayoutLabel::DisplayFormula
+                        && block.text.contains(summand)
+                        && block
+                            .lines
+                            .iter()
+                            .any(|line| line.text.contains(ordered_limits))
+                });
+                if !matches {
+                    return Err(invariant_error(
+                        logical_id,
+                        page.page_number,
+                        "display_limit_order",
+                        format!(
+                            "missing grouped limits {ordered_limits} for {summand}"
+                        ),
+                    ));
+                }
+            }
+        }
+        // Pin the real clipped-inline and nested-index rows found during the
+        // requested page-by-page audit, beyond geometry/serialization invariants.
+        if logical_id == "arxiv-2403.01632v4" {
+            let valid = match page.page_number {
+                3 => page
+                    .iter_lines()
+                    .any(|line| line.text.contains("and S∗ =Si∈N Si. Thus")),
+                12 => {
+                    page.iter_lines()
+                        .filter(|line| line.text.contains("q0τ1"))
+                        .count()
+                        >= 3
+                }
+                30 => page
+                    .iter_lines()
+                    .any(|line| line.text.contains("(w, q0τf+1) ∈ live")),
+                31 => page
+                    .iter_lines()
+                    .any(|line| line.text.contains("(w2, q0τf+1)")),
+                _ => true,
+            };
+            if !valid {
+                return Err(invariant_error(
+                    logical_id,
+                    page.page_number,
+                    "scoped_formula_order",
+                    "a checked inline expression or nested index left its body row",
+                ));
+            }
+        }
+        // Real formula powers and table cells must survive the complete model pipeline,
+        // not merely the fixed-geometry unit fixtures used to diagnose these pages.
+        if logical_id == "arxiv-2303.18223v16" {
+            let valid = match page.page_number {
+                4 => [
+                    "L(N)=NcNαN,αN∼0.076,Nc∼8.8×1013",
+                    "L(D)=DcDαD,αD∼0.095,Dc∼5.4×1013",
+                    "L(C)=CcCαC,αC∼0.050,Cc∼3.1×108",
+                    "L(N,D)=E+ANα+BDβ,",
+                    "Nopt(C)=GC6a,Dopt(C)=G−1C6b,",
+                ]
+                .iter()
+                .all(|expected| {
+                    page.blocks
+                        .iter()
+                        .filter(|block| {
+                            block.label
+                                == docparse_layout::LayoutLabel::DisplayFormula
+                        })
+                        // Keep the original gap-based line policy while checking
+                        // every character across the complete equation region.
+                        .any(|block| {
+                            block
+                                .text
+                                .chars()
+                                .filter(|c| !c.is_whitespace())
+                                .collect::<String>()
+                                == *expected
+                        })
+                }),
+                29 => page
+                    .blocks
+                    .iter()
+                    .filter_map(|block| block.table.as_ref())
+                    .any(|table| {
+                        (table.row_count, table.column_count) == (19, 10)
+                            && table.cells.iter().any(|cell| {
+                                cell.row == 1
+                                    && cell.column == 2
+                                    && cell
+                                        .text
+                                        .chars()
+                                        .filter(|c| !c.is_whitespace())
+                                        .collect::<String>()
+                                        == "6×10−5"
+                            })
+                    }),
+                33 => page
+                    .blocks
+                    .iter()
+                    .filter_map(|block| block.table.as_ref())
+                    .any(|table| {
+                        (table.row_count, table.column_count) == (6, 13)
+                            && table.cells.iter().any(|cell| {
+                                cell.row == 5
+                                    && cell.column == 3
+                                    && cell.text == "11.2h"
+                            })
+                            && table.cells.iter().any(|cell| {
+                                cell.row == 0
+                                    && cell.column == 1
+                                    && cell.column_span == 3
+                            })
+                    }),
+                _ => true,
+            };
+            if !valid {
+                return Err(invariant_error(
+                    logical_id,
+                    page.page_number,
+                    "survey_formula_and_tables",
+                    "fraction powers or header/data cells do not match the original PDF",
+                ));
+            }
+        }
         for (block_index, block) in page.blocks.iter().enumerate() {
             if usize::try_from(block.final_order).unwrap_or(usize::MAX)
                 != block_index

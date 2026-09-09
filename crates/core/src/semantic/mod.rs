@@ -29,14 +29,29 @@ pub(crate) struct SemanticOutput {
 }
 
 /// Converts uniquely owned local fragments into canonical nested result blocks.
-#[derive(Debug, Clone)]
-pub(crate) struct SemanticAssembler {
+#[derive(Debug, Clone, TypedBuilder)]
+pub(crate) struct SemanticAssembler<'a> {
     page_number: u32,
     page_bbox: Bbox,
     config: FusionConfig,
+    #[builder(default)]
+    rules: &'a [crate::TableRule],
+    #[builder(default)]
+    formulas: &'a [crate::line::FormulaRegion],
 }
 
-impl SemanticAssembler {
+impl<'a> SemanticAssembler<'a> {
+    /// Keeps vector and model formula evidence available to every semantic reassembly pass.
+    pub(crate) fn with_evidence(
+        mut self,
+        rules: &'a [crate::TableRule],
+        formulas: &'a [crate::line::FormulaRegion],
+    ) -> Self {
+        self.rules = rules;
+        self.formulas = formulas;
+        self
+    }
+
     /// Builds detached watermarks without assigning, splitting, or ordering them with body content.
     pub(crate) fn watermark_blocks(
         &self,
@@ -153,16 +168,16 @@ impl SemanticAssembler {
     }
 
     /// Creates a page-local semantic assembler from validated fusion settings.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         page_number: u32,
         page_bbox: Bbox,
         config: FusionConfig,
     ) -> Self {
-        Self {
-            page_number,
-            page_bbox,
-            config,
-        }
+        Self::builder()
+            .page_number(page_number)
+            .page_bbox(page_bbox)
+            .config(config)
+            .build()
     }
 
     /// Assembles one model candidate before page-wide content normalization.
@@ -284,7 +299,12 @@ impl SemanticAssembler {
             .flat_map(|fragment| fragment.items)
             .collect();
         ConservativeLineAssembler
-            .fragments(items, &self.config)
+            .fragments_with_formulas(
+                items,
+                &self.config,
+                self.rules,
+                self.formulas,
+            )
             .map_err(SemanticError::from)
     }
 

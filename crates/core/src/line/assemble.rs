@@ -42,6 +42,16 @@ impl LineFragment {
         let rotation = items.first().map_or(0.0, |item| item.rotation);
         let direction = detect_direction(&items, rotation);
         order_items(&mut items, direction);
+        Self::from_ordered_items(items, page_width)
+    }
+
+    /// Builds metrics around an established inline order without flattening compound atoms again.
+    pub(crate) fn from_ordered_items(
+        items: Vec<TextItem>,
+        page_width: f64,
+    ) -> Result<Self, LineError> {
+        let rotation = items.first().map_or(0.0, |item| item.rotation);
+        let direction = detect_direction(&items, rotation);
         let metrics = LineMetrics::from_items(&items, page_width)?;
         Ok(Self::builder()
             .items(items)
@@ -354,6 +364,21 @@ impl LineAssembler for ConservativeLineAssembler {
 }
 
 impl ConservativeLineAssembler {
+    /// Shares optional vector evidence with line assembly after text ownership is known.
+    pub(crate) fn fragments_with_rules(
+        &self,
+        items: Vec<TextItem>,
+        config: &FusionConfig,
+        rules: &[crate::TableRule],
+    ) -> Result<Vec<LineFragment>, LineError> {
+        let mut input =
+            super::inline::InlineInput::prepare(items, rules, false)?;
+        let mut fragments =
+            self.fragments(std::mem::take(&mut input.items), config)?;
+        input.restore(&mut fragments);
+        Ok(fragments)
+    }
+
     /// Rejoins one body baseline when attached scripts fill an apparent inline gap.
     fn join_script_gaps(
         mut fragments: Vec<LineFragment>,
@@ -407,9 +432,23 @@ impl ConservativeLineAssembler {
                 let baseline = fragment.baseline;
                 let font_size = fragment.metrics.font_size;
                 let estimated = fragment.metrics.font_size_estimated;
-                let mut items = std::mem::take(&mut fragment.items);
-                items.extend(other.items);
-                *fragment = LineFragment::from_items(items, page_width)?;
+                let first = std::mem::take(&mut fragment.items);
+                let first_precedes = if fragment.direction
+                    == crate::WritingDirection::RightToLeft
+                {
+                    fragment.bbox.right >= other.bbox.right
+                } else {
+                    fragment.bbox.left <= other.bbox.left
+                };
+                let items = if first_precedes {
+                    first.into_iter().chain(other.items).collect()
+                } else {
+                    other.items.into_iter().chain(first).collect()
+                };
+                // Both fragments already own ordered script groups. Re-sorting the
+                // expanded members would interleave a sum's upper and lower limits.
+                *fragment =
+                    LineFragment::from_ordered_items(items, page_width)?;
                 // Extend the segment across the joined row while retaining its body height.
                 fragment.baseline.start.y = baseline.start.y;
                 fragment.baseline.end.y = baseline.end.y;
@@ -941,6 +980,88 @@ mod tests {
         );
     }
 
+    /// A broad body fragment must not compete with the actual intermediate parent of a nested index.
+    #[test]
+    fn nested_index_uses_its_glyph_parent_instead_of_the_whole_body_box() {
+        let items = [
+            (
+                0,
+                "dmatch(",
+                [220.043, 120.218, 255.223, 130.171],
+                9.9626,
+                127.690,
+            ),
+            (
+                1,
+                "r.t,",
+                [255.233, 120.776, 268.563, 129.623],
+                9.9626,
+                127.690,
+            ),
+            (
+                2,
+                "q",
+                [270.227, 120.776, 274.730, 129.623],
+                9.9626,
+                127.690,
+            ),
+            (
+                3,
+                "τ",
+                [275.049, 118.422, 279.108, 124.615],
+                6.9738,
+                123.262,
+            ),
+            (
+                4,
+                "1",
+                [278.723, 120.826, 282.110, 125.224],
+                4.9813,
+                124.258,
+            ),
+            (
+                5,
+                "0",
+                [274.691, 125.541, 278.659, 131.699],
+                6.9738,
+                130.346,
+            ),
+            (
+                6,
+                ",Λ)",
+                [283.109, 120.218, 302.926, 130.171],
+                9.9626,
+                127.690,
+            ),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds, size, y)| {
+            let mut source = item(index, text, bounds, size);
+            source.baseline = Some(crate::Baseline {
+                start: docparse_layout::Point::new(bounds[0], y),
+                end: docparse_layout::Point::new(bounds[2], y),
+            });
+            source
+        })
+        .collect::<Vec<_>>();
+        for reverse in [false, true] {
+            let mut input = items.clone();
+            if reverse {
+                input.reverse();
+            }
+            let lines = ConservativeLineAssembler
+                .fragments(input, &FusionConfig::default())
+                .expect("nested index");
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|line| crate::Line::derive_text(&line.items))
+                    .collect::<Vec<_>>(),
+                ["dmatch(r.t,q0τ1,Λ)"]
+            );
+        }
+    }
+
     /// A script cannot move a right-hand fragment ahead of its left-hand baseline peer.
     #[test]
     fn scripts_do_not_reorder_fragments_sharing_a_body_baseline() {
@@ -1260,6 +1381,337 @@ mod tests {
                 )
                 .map(|fragment| fragment.items.len()),
             Some(1)
+        );
+    }
+    /// Stacked fractions and hanging operators stay in their own equation without changing source glyphs.
+    #[test]
+    fn stacked_math_preserves_source_characters_and_equation_order() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/line/stacked-math.json"
+        ))
+        .expect("copied math facts");
+        let facts: Vec<(u32, String, [f64; 4], f64, f64)> =
+            serde_json::from_value(
+                fixture.get("items").expect("fixture items").clone(),
+            )
+            .expect("source words");
+        let items: Vec<_> = facts
+            .iter()
+            .map(|(index, text, bounds, size, y)| {
+                let mut source = item(*index, text, *bounds, *size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(bounds[0], *y),
+                    end: docparse_layout::Point::new(bounds[2], *y),
+                });
+                source
+            })
+            .collect();
+        let bars: Vec<[f64; 3]> = serde_json::from_value(
+            fixture.get("rules").expect("fixture rules").clone(),
+        )
+        .expect("fraction bars");
+        let rules: Vec<_> = bars
+            .into_iter()
+            .map(|[y, left, right]| crate::TableRule::Horizontal {
+                y,
+                left,
+                right,
+            })
+            .collect();
+        let expected = [
+            "x−µσ· γ + β, µ = 1dPi=1 dxi, σ =q1dPi=1d(xi − µ))2",
+            "xRMS(x)· γ, RMS(x) = q1dPi=1 dxi2",
+            "LayerNorm(α · x + Sublayer(x))",
+        ];
+        for reverse in [false, true] {
+            let mut input = items.clone();
+            if reverse {
+                input.reverse();
+            }
+            let result = ConservativeLineAssembler
+                .fragments_with_rules(input, &FusionConfig::default(), &rules)
+                .expect("equations");
+            assert_eq!(
+                result
+                    .iter()
+                    .map(|line| crate::Line::derive_text(&line.items))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            let mut actual: Vec<_> =
+                result.into_iter().flat_map(|line| line.items).collect();
+            actual.sort_by(|a, b| a.id.cmp(&b.id));
+            let mut source = items.clone();
+            source.sort_by(|a, b| a.id.cmp(&b.id));
+            assert_eq!(actual, source, "ordering must not mutate source facts");
+        }
+    }
+    /// Tight word boxes retain shallow, measured subscripts instead of moving all indices to the line end.
+    #[test]
+    fn tight_math_ink_preserves_shallow_subscript_ownership() {
+        let specs = [
+            ("x", [10.0, 6.45, 14.7, 10.0], 8.0, 10.0),
+            ("1", [15.3, 7.15, 17.6, 11.12], 6.0, 11.12),
+            ("+", [21.0, 5.18, 26.6, 10.82], 8.0, 10.0),
+            ("x", [30.0, 6.45, 34.7, 10.0], 8.0, 10.0),
+            ("2", [35.3, 7.15, 38.1, 11.12], 6.0, 11.12),
+        ];
+        let inputs = specs
+            .into_iter()
+            .enumerate()
+            .map(|(index, (text, bounds, size, y))| {
+                let mut source = item(index as u32, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(bounds[0], y),
+                    end: docparse_layout::Point::new(bounds[2], y),
+                });
+                source
+            })
+            .collect();
+        let lines = ConservativeLineAssembler
+            .fragments(inputs, &FusionConfig::default())
+            .expect("tight math line");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            ["x1+x2"]
+        );
+    }
+
+    /// Detached limits copied from real display equations stay beside their operator in either source order.
+    #[test]
+    fn display_operator_limits_stay_before_the_summand() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/line/display-operator-limits.json"
+        ))
+        .expect("real display equations");
+        for case in cases {
+            let facts: Vec<(u32, String, [f64; 4], f64, f64)> =
+                serde_json::from_value(
+                    case.get("items").expect("items").clone(),
+                )
+                .expect("source glyphs");
+            let sources: Vec<_> = facts
+                .into_iter()
+                .map(|(index, text, bounds, size, y)| {
+                    let mut source = item(index, &text, bounds, size);
+                    source.baseline = Some(crate::Baseline {
+                        start: docparse_layout::Point::new(bounds[0], y),
+                        end: docparse_layout::Point::new(bounds[2], y),
+                    });
+                    source
+                })
+                .collect();
+            for reverse in [false, true] {
+                let mut input = sources.clone();
+                if reverse {
+                    input.reverse();
+                }
+                let lines = ConservativeLineAssembler
+                    .fragments_with_rules(input, &FusionConfig::default(), &[])
+                    .expect("display equation");
+                let texts: Vec<_> = lines
+                    .iter()
+                    .map(|line| crate::Line::derive_text(&line.items))
+                    .collect();
+                assert!(
+                    texts.iter().any(|text| text.contains(
+                        case.get("expected_group")
+                            .and_then(serde_json::Value::as_str)
+                            .expect("limit order")
+                    )),
+                    "{}: {texts:?}",
+                    case.get("source").expect("source PDF")
+                );
+                let mut actual: Vec<_> =
+                    lines.into_iter().flat_map(|line| line.items).collect();
+                actual.sort_by(|a, b| a.id.cmp(&b.id));
+                let mut expected = sources.clone();
+                expected.sort_by(|a, b| a.id.cmp(&b.id));
+                assert_eq!(
+                    actual, expected,
+                    "source facts must survive grouping"
+                );
+            }
+        }
+    }
+
+    /// An isolated note or equally plausible operators must not fabricate a limit group.
+    #[test]
+    fn detached_limits_require_both_sides_and_unique_ownership() {
+        let sources: Vec<_> = [
+            (0, "+", [10.0, 10.0, 18.0, 20.0], 10.0, 18.0),
+            (1, "X", [20.0, 8.0, 34.0, 22.0], 9.5, 8.0),
+            (2, "N", [24.0, 1.0, 30.0, 7.0], 7.0, 6.0),
+            (3, "i=1", [20.2, 24.0, 34.0, 30.2], 7.0, 29.0),
+        ]
+        .into_iter()
+        .map(|(index, text, bounds, size, y)| {
+            let mut source = item(index, text, bounds, size);
+            source.baseline = Some(crate::Baseline {
+                start: docparse_layout::Point::new(bounds[0], y),
+                end: docparse_layout::Point::new(bounds[2], y),
+            });
+            source
+        })
+        .collect();
+        for ambiguous in [false, true] {
+            let mut input = sources.clone();
+            if ambiguous {
+                let mut duplicate = input.get(1).expect("operator").clone();
+                duplicate.id = TextItemId::native(1, 4);
+                input.push(duplicate);
+            } else {
+                input.pop();
+            }
+            let lines = ConservativeLineAssembler
+                .fragments_with_rules(input, &FusionConfig::default(), &[])
+                .expect("conservative limits");
+            let upper = lines
+                .iter()
+                .find(|line| line.items.iter().any(|item| item.raw_text == "N"))
+                .expect("unclaimed upper note");
+            assert_eq!(crate::Line::derive_text(&upper.items), "N");
+        }
+    }
+
+    /// An operator-bearing multi-piece index remains attached as a whole before following body text.
+    #[test]
+    fn compound_math_index_stays_before_following_body() {
+        let specs = [
+            ("R", [10.0, 10.0, 16.0, 18.0], 8.0, 18.0),
+            ("Θ", [16.5, 13.2, 21.0, 18.5], 6.0, 19.3),
+            (",", [22.0, 17.0, 23.0, 19.5], 6.0, 19.3),
+            ("i", [24.0, 13.2, 26.0, 19.5], 6.0, 19.3),
+            ("−", [27.0, 16.0, 31.0, 16.3], 6.0, 19.3),
+            ("j", [32.0, 13.2, 35.0, 19.5], 6.0, 19.3),
+            ("x", [36.0, 12.4, 41.0, 18.0], 8.0, 18.0),
+        ];
+        let inputs = specs
+            .into_iter()
+            .enumerate()
+            .map(|(index, (text, bounds, size, y))| {
+                let mut source = item(index as u32, text, bounds, size);
+                source.baseline = Some(crate::Baseline {
+                    start: docparse_layout::Point::new(bounds[0], y),
+                    end: docparse_layout::Point::new(bounds[2], y),
+                });
+                source
+            })
+            .collect();
+        let lines = ConservativeLineAssembler
+            .fragments(inputs, &FusionConfig::default())
+            .expect("compound script line");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            ["RΘ,i−jx"]
+        );
+    }
+    /// Equally plausible neighboring rows cannot move a hanging glyph into either equation.
+    #[test]
+    fn ambiguous_hanging_glyph_keeps_its_original_line() {
+        let specs = [
+            ("A", [0.0, 5.0, 8.0, 15.0], 13.0),
+            ("Q", [10.0, 8.0, 15.0, 24.0], 8.0),
+            ("B", [17.0, 17.0, 25.0, 27.0], 25.0),
+        ];
+        for reverse in [false, true] {
+            let mut inputs: Vec<_> = specs
+                .iter()
+                .enumerate()
+                .map(|(index, (text, bounds, y))| {
+                    let mut source = item(index as u32, text, *bounds, 10.0);
+                    source.baseline = Some(crate::Baseline {
+                        start: docparse_layout::Point::new(bounds[0], *y),
+                        end: docparse_layout::Point::new(bounds[2], *y),
+                    });
+                    source
+                })
+                .collect();
+            if reverse {
+                inputs.reverse();
+            }
+            let lines = ConservativeLineAssembler
+                .fragments_with_rules(inputs, &FusionConfig::default(), &[])
+                .expect("ambiguous glyph");
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|line| crate::Line::derive_text(&line.items))
+                    .collect::<Vec<_>>(),
+                ["Q", "A", "B"]
+            );
+        }
+    }
+
+    /// A horizontal rule alone cannot collapse ordinary stacked text into an inline fraction.
+    #[test]
+    fn separated_text_rows_do_not_become_fractions() {
+        let mut inputs = vec![
+            item(0, "first", [10.0, 5.0, 30.0, 12.0], 8.0),
+            item(1, "second", [10.0, 18.0, 30.0, 25.0], 8.0),
+        ];
+        for source in &mut inputs {
+            source.baseline = Some(crate::Baseline {
+                start: docparse_layout::Point::new(
+                    source.bbox.left,
+                    source.bbox.bottom,
+                ),
+                end: docparse_layout::Point::new(
+                    source.bbox.right,
+                    source.bbox.bottom,
+                ),
+            });
+        }
+        let lines = ConservativeLineAssembler
+            .fragments_with_rules(
+                inputs,
+                &FusionConfig::default(),
+                &[crate::TableRule::Horizontal {
+                    y: 15.0,
+                    left: 10.0,
+                    right: 30.0,
+                }],
+            )
+            .expect("separate rows");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
+    /// Joining already ordered fragments preserves right-to-left flow across a physical line.
+    #[test]
+    fn joining_fragments_preserves_right_to_left_order() {
+        let fragments = [
+            item(0, "עולם", [10.0, 10.0, 30.0, 20.0], 10.0),
+            item(1, "שלום", [40.0, 10.0, 60.0, 20.0], 10.0),
+        ]
+        .into_iter()
+        .map(|item| {
+            super::LineFragment::from_items(vec![item], 100.0)
+                .expect("RTL fragment")
+        })
+        .collect();
+        let lines = ConservativeLineAssembler::join_script_gaps(
+            fragments,
+            100.0,
+            &FusionConfig::default(),
+        )
+        .expect("joined RTL line");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| crate::Line::derive_text(&line.items))
+                .collect::<Vec<_>>(),
+            ["שלוםעולם"]
         );
     }
 }

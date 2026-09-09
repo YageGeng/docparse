@@ -1074,3 +1074,525 @@ async fn even_row_groups_preserve_their_single_label_as_a_span() {
         && cell.row == 1
         && cell.row_span == 4));
 }
+
+/// Fraction bars inside a cell are not table boundaries, and padded separators still divide headers.
+#[tokio::test]
+async fn formula_rules_do_not_merge_neighboring_table_columns() {
+    use docparse_core::TableRule;
+    let mut evidence = TableLayout::rules();
+    evidence
+        .rules
+        .retain(|rule| matches!(rule, TableRule::Horizontal { .. }));
+    for x in [100.0, 195.0] {
+        for (top, bottom) in [(13.0, 45.0), (54.0, 72.0), (81.0, 107.0)] {
+            evidence.rules.push(TableRule::Vertical { x, top, bottom });
+        }
+    }
+    evidence.rules.push(TableRule::Horizontal {
+        y: 62.0,
+        left: 210.0,
+        right: 235.0,
+    });
+    let mut items = Vec::new();
+    for (index, (text, x, y, bold)) in [
+        ("Group", 20.0, 25.0, true),
+        ("Method", 115.0, 25.0, true),
+        ("Equation", 210.0, 25.0, true),
+        ("Norm", 20.0, 57.0, false),
+        ("Layer", 115.0, 51.0, false),
+        ("x", 210.0, 51.0, false),
+        ("y", 210.0, 65.0, false),
+        ("Gate", 20.0, 85.0, false),
+        ("Sigmoid", 115.0, 85.0, false),
+        ("f(x)", 210.0, 85.0, false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        items.push(TableLayout::item(index as u32, text, x, y, bold));
+    }
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|block| block.table.as_ref())
+        .expect("formula table");
+    assert_eq!(
+        (table.row_count, table.column_count, table.cells.len()),
+        (3, 3, 9)
+    );
+    assert!(
+        table.cells.iter().any(|cell| cell.row == 1
+            && cell.column == 2
+            && cell.text == "x\ny")
+    );
+    assert!(
+        table
+            .cells
+            .iter()
+            .filter(|cell| cell.row == 0)
+            .all(|cell| cell.is_header)
+    );
+}
+
+/// Measured word baselines must survive cell assembly even when one source run spans two lines.
+#[tokio::test]
+async fn cell_lines_preserve_measured_word_baselines() {
+    let mut evidence = TableLayout::rules();
+    let mut items = vec![
+        TableLayout::item(0, "Name", 20.0, 25.0, true),
+        TableLayout::item(1, "Method", 115.0, 25.0, true),
+        TableLayout::item(2, "Equation", 210.0, 25.0, true),
+        TableLayout::item(3, "A", 20.0, 55.0, false),
+        TableLayout::item(4, "B", 115.0, 55.0, false),
+    ];
+    let mut source = TableLayout::item(5, "FirstSecond", 210.0, 52.0, false);
+    source.bbox =
+        Bbox::try_from([210.0, 50.0, 240.0, 74.0]).expect("source run bounds");
+    let words = [(0..5, 50.0), (5..11, 64.0)]
+        .into_iter()
+        .map(|(byte_range, top)| {
+            docparse_core::TableWord::builder()
+                .byte_range(byte_range)
+                .bbox(
+                    Bbox::try_from([210.0, top, 240.0, top + 10.0])
+                        .expect("word bounds"),
+                )
+                .baseline(Some(Baseline {
+                    start: Point::new(210.0, top + 8.0),
+                    end: Point::new(240.0, top + 8.0),
+                }))
+                .build()
+        })
+        .collect();
+    evidence.words.insert(source.id.clone(), words);
+    items.push(source);
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|block| block.table.as_ref())
+        .expect("word table");
+    let cell = table
+        .cells
+        .iter()
+        .find(|cell| cell.row == 1 && cell.column == 2)
+        .expect("multiline equation cell");
+    assert_eq!(
+        cell.lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        ["First", "Second"]
+    );
+}
+
+/// Endpoint padding on short vertical strokes must not turn a three-cell header into a colspan.
+#[tokio::test]
+async fn padded_vertical_rules_preserve_independent_header_cells() {
+    use docparse_core::TableRule;
+    let mut evidence = TableLayout::rules();
+    evidence
+        .rules
+        .retain(|rule| matches!(rule, TableRule::Horizontal { .. }));
+    for x in [100.0, 195.0] {
+        for (top, bottom) in [(19.0, 40.0), (51.0, 75.0), (81.0, 107.0)] {
+            evidence.rules.push(TableRule::Vertical { x, top, bottom });
+        }
+    }
+    let mut items = Vec::new();
+    for (row, values) in [
+        ["Group", "Method", "Value"],
+        ["A", "B", "10"],
+        ["C", "D", "20"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        for (column, text) in values.iter().enumerate() {
+            items.push(TableLayout::item(
+                (row * 3 + column) as u32,
+                text,
+                20.0 + column as f64 * 95.0,
+                25.0 + row as f64 * 30.0,
+                row == 0,
+            ));
+        }
+    }
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|block| block.table.as_ref())
+        .expect("padded table");
+    assert_eq!(
+        (table.row_count, table.column_count, table.cells.len()),
+        (3, 3, 9)
+    );
+    assert_eq!(
+        table
+            .cells
+            .iter()
+            .filter(|cell| cell.row == 0)
+            .map(|cell| cell.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Group", "Method", "Value"]
+    );
+}
+
+/// A long radical overbar must not establish its own column edges before rule validation.
+#[tokio::test]
+async fn wide_formula_bars_cannot_invent_table_columns() {
+    use docparse_core::TableRule;
+    let mut evidence = TableLayout::rules();
+    evidence.rules.retain(
+        |rule| !matches!(rule, TableRule::Vertical { x, .. } if (*x - 195.0).abs() < f64::EPSILON),
+    );
+    evidence.rules.push(TableRule::Horizontal {
+        y: 62.0,
+        left: 120.0,
+        right: 285.0,
+    });
+    let mut items = Vec::new();
+    for (index, (text, x, y)) in [
+        ("Name", 20.0, 25.0),
+        ("Equation", 115.0, 25.0),
+        ("Norm", 20.0, 57.0),
+        ("x", 125.0, 51.0),
+        ("y", 125.0, 65.0),
+        ("Gate", 20.0, 85.0),
+        ("f(x)", 115.0, 85.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        items.push(TableLayout::item(index as u32, text, x, y, index < 2));
+    }
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|block| block.table.as_ref())
+        .expect("wide formula table");
+    assert_eq!(
+        (table.row_count, table.column_count, table.cells.len()),
+        (3, 2, 6)
+    );
+}
+
+/// The public table path preserves the same fraction and script order as ordinary semantic lines.
+#[tokio::test]
+async fn table_cells_preserve_compound_equations_without_mutating_sources() {
+    use docparse_core::TableRule;
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/line/stacked-math.json"))
+            .expect("math facts");
+    let facts: Vec<(u32, String, [f64; 4], f64, f64)> = serde_json::from_value(
+        fixture.get("items").expect("fixture items").clone(),
+    )
+    .expect("source facts");
+    let mut items = Vec::new();
+    for (index, text, [left, top, right, bottom], size, y) in facts {
+        items.push(
+            TextItem::builder()
+                .id(TextItemId::native(1, index))
+                .raw_text(text)
+                .bbox(
+                    Bbox::try_from([
+                        left - 210.0,
+                        top - 100.0,
+                        right - 210.0,
+                        bottom - 100.0,
+                    ])
+                    .expect("translated word"),
+                )
+                .baseline(Some(Baseline {
+                    start: Point::new(left - 210.0, y - 100.0),
+                    end: Point::new(right - 210.0, y - 100.0),
+                }))
+                .style(Some(TextStyle::builder().font_size(Some(size)).build()))
+                .source(TextSource::Native)
+                .build(),
+        );
+    }
+    let source = items.clone();
+    items.extend([
+        TableLayout::item(0, "Name", 20.0, 25.0, true),
+        TableLayout::item(1, "Equation", 80.0, 25.0, true),
+        TableLayout::item(2, "Norm", 20.0, 62.0, false),
+        TableLayout::item(3, "Done", 20.0, 100.0, false),
+        TableLayout::item(4, "End", 80.0, 100.0, false),
+    ]);
+    let mut evidence = docparse_core::TableEvidence::default();
+    let bars: Vec<[f64; 3]> = serde_json::from_value(
+        fixture.get("rules").expect("fixture rules").clone(),
+    )
+    .expect("bars");
+    evidence
+        .rules
+        .extend(bars.into_iter().map(|[y, left, right]| {
+            TableRule::Horizontal {
+                y: y - 100.0,
+                left: left - 210.0,
+                right: right - 210.0,
+            }
+        }));
+    evidence.rules.extend([10.0, 40.0, 90.0, 120.0].map(|y| {
+        TableRule::Horizontal {
+            y,
+            left: 10.0,
+            right: 290.0,
+        }
+    }));
+    evidence
+        .rules
+        .extend([10.0, 70.0, 290.0].map(|x| TableRule::Vertical {
+            x,
+            top: 10.0,
+            bottom: 120.0,
+        }));
+    let page = TableLayout::parse(items, evidence).await;
+    let block = page
+        .blocks
+        .iter()
+        .find(|block| block.table.is_some())
+        .expect("table");
+    let table = block.table.as_ref().expect("cells");
+    assert_eq!((table.row_count, table.column_count), (3, 2));
+    let cell = table
+        .cells
+        .iter()
+        .find(|cell| cell.row == 1 && cell.column == 1)
+        .expect("formula cell");
+    assert_eq!(
+        cell.lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "x−µσ· γ + β, µ = 1dPi=1 dxi, σ =q1dPi=1d(xi − µ))2",
+            "xRMS(x)· γ, RMS(x) = q1dPi=1 dxi2",
+            "LayerNorm(α · x + Sublayer(x))",
+        ]
+    );
+    for original in source {
+        let actual = block
+            .lines
+            .iter()
+            .flat_map(|line| &line.text_items)
+            .find(|item| item.id == original.id)
+            .expect("original source");
+        assert_eq!(
+            (
+                &actual.raw_text,
+                actual.bbox,
+                actual.baseline,
+                &actual.style
+            ),
+            (
+                &original.raw_text,
+                original.bbox,
+                original.baseline,
+                &original.style
+            )
+        );
+    }
+}
+
+/// Fraction sides must keep each split lower limit together before its upper limit.
+#[tokio::test]
+async fn fraction_sides_preserve_compound_script_order() {
+    let sources: Vec<_> = [
+        ("=", [208.0, 52.0, 216.0, 60.0], 12.0, 59.0),
+        ("∑", [220.0, 48.0, 228.0, 54.0], 8.0, 54.0),
+        ("i", [228.0, 51.0, 229.5, 55.0], 6.0, 55.0),
+        ("=1", [230.0, 51.0, 236.0, 55.0], 6.0, 55.0),
+        ("n", [229.0, 47.0, 233.0, 51.0], 6.0, 51.0),
+        ("∑", [220.0, 58.0, 228.0, 64.0], 8.0, 64.0),
+        ("k", [228.0, 61.0, 229.5, 65.0], 6.0, 65.0),
+        ("=1", [230.0, 61.0, 236.0, 65.0], 6.0, 65.0),
+        ("m", [229.0, 57.0, 233.0, 61.0], 6.0, 61.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (text, bounds, size, baseline))| {
+        TextItem::builder()
+            .id(TextItemId::native(1, index as u32))
+            .raw_text(text.to_owned())
+            .bbox(Bbox::try_from(bounds).expect("fraction glyph"))
+            .baseline(Some(Baseline {
+                start: Point::new(bounds[0], baseline),
+                end: Point::new(bounds[2], baseline),
+            }))
+            .source(TextSource::Native)
+            .style(Some(TextStyle::builder().font_size(Some(size)).build()))
+            .build()
+    })
+    .collect();
+    for reverse in [false, true] {
+        let mut items = sources.clone();
+        if reverse {
+            items.reverse();
+        }
+        items.extend([
+            TableLayout::item(10, "Name", 20.0, 25.0, true),
+            TableLayout::item(11, "Method", 115.0, 25.0, true),
+            TableLayout::item(12, "Equation", 210.0, 25.0, true),
+            TableLayout::item(13, "A", 20.0, 55.0, false),
+            TableLayout::item(14, "B", 115.0, 55.0, false),
+            TableLayout::item(15, "C", 20.0, 85.0, false),
+            TableLayout::item(16, "D", 115.0, 85.0, false),
+            TableLayout::item(17, "E", 210.0, 85.0, false),
+        ]);
+        let mut evidence = TableLayout::rules();
+        evidence.rules.push(docparse_core::TableRule::Horizontal {
+            y: 56.0,
+            left: 219.0,
+            right: 237.0,
+        });
+        let page = TableLayout::parse(items, evidence).await;
+        let block = page
+            .blocks
+            .iter()
+            .find(|block| block.table.is_some())
+            .expect("formula table");
+        let cell = block
+            .table
+            .as_ref()
+            .expect("table")
+            .cells
+            .iter()
+            .find(|cell| cell.row == 1 && cell.column == 2)
+            .expect("fraction cell");
+        assert_eq!(cell.text, "=∑i=1n∑k=1m");
+        assert!(
+            block
+                .lines
+                .iter()
+                .any(|line| line.text.contains("=∑i=1n∑k=1m"))
+        );
+        for source in &sources {
+            let actual = block
+                .lines
+                .iter()
+                .flat_map(|line| &line.text_items)
+                .find(|item| item.id == source.id)
+                .expect("original glyph");
+            // Final order is assigned by the parser; copied glyph facts stay unchanged.
+            assert_eq!(
+                (
+                    &actual.raw_text,
+                    actual.bbox,
+                    actual.baseline,
+                    &actual.style
+                ),
+                (
+                    &source.raw_text,
+                    source.bbox,
+                    source.baseline,
+                    &source.style
+                ),
+            );
+        }
+    }
+}
+
+/// Padding, segmentation, and bounded paint jitter must preserve explicitly ruled empty rows.
+#[tokio::test]
+async fn padded_and_segmented_horizontal_rules_preserve_empty_rows() {
+    use docparse_core::TableRule;
+    for (padding, segmented, jitter, gap) in [
+        (0.0, false, 0.0, 0.0),
+        (3.0, false, 0.0, 0.0),
+        (0.0, true, 0.0, 0.0),
+        (3.0, true, 0.0, 0.0),
+        (0.0, true, 0.2, 0.0),
+        (0.0, true, 0.0, 0.2),
+        (3.0, true, -0.2, 0.2),
+    ] {
+        let mut evidence = TableLayout::rules();
+        evidence.rules = evidence
+            .rules
+            .into_iter()
+            .flat_map(|rule| {
+                if let TableRule::Horizontal { y, left, right } = rule {
+                    let left = left + padding;
+                    let right = right - padding;
+                    if segmented {
+                        // No individual segment reaches both column boundaries;
+                        // only their near-collinear union establishes the separator.
+                        return [left, 80.0, 150.0, 220.0, right]
+                            .windows(2)
+                            .enumerate()
+                            .map(|(index, ends)| TableRule::Horizontal {
+                                y: y + if y > 10.0 && y < 110.0 {
+                                    index as f64 * jitter
+                                } else {
+                                    0.0
+                                },
+                                left: *ends.first().expect("segment start")
+                                    + if index == 0 { 0.0 } else { gap },
+                                right: *ends.last().expect("segment end"),
+                            })
+                            .collect();
+                    }
+                    return vec![TableRule::Horizontal { y, left, right }];
+                }
+                vec![rule]
+            })
+            .collect();
+        let items = [
+            TableLayout::item(0, "Name", 20.0, 25.0, true),
+            TableLayout::item(1, "Method", 115.0, 25.0, true),
+            TableLayout::item(2, "Value", 210.0, 25.0, true),
+            TableLayout::item(3, "C", 20.0, 85.0, false),
+            TableLayout::item(4, "D", 115.0, 85.0, false),
+            TableLayout::item(5, "20", 210.0, 85.0, false),
+        ]
+        .to_vec();
+        let page = TableLayout::parse(items, evidence).await;
+        let table = page
+            .blocks
+            .iter()
+            .find_map(|block| block.table.as_ref())
+            .expect("ruled table");
+        assert_eq!(
+            (table.row_count, table.column_count, table.cells.len()),
+            (3, 3, 9),
+            "padding {padding}, segmented {segmented}, jitter {jitter}, gap {gap}"
+        );
+        assert_eq!(table.to_text(), "Name\tMethod\tValue\n\t\t\nC\tD\t20");
+    }
+}
+
+/// Bridging small seams must not fabricate enough ink to validate a sparse separator.
+#[tokio::test]
+async fn sparse_horizontal_dashes_cannot_fabricate_a_separator() {
+    use docparse_core::TableRule;
+    let mut evidence = TableLayout::rules();
+    evidence.rules.retain(
+        |rule| !matches!(rule, TableRule::Horizontal { y, .. } if (*y - 78.0).abs() <= f64::EPSILON),
+    );
+    evidence.rules.extend((10..290).step_by(2).map(|left| {
+        TableRule::Horizontal {
+            y: 78.0,
+            left: f64::from(left),
+            right: f64::from(left + 1),
+        }
+    }));
+    let items = vec![
+        TableLayout::item(0, "Name", 20.0, 25.0, true),
+        TableLayout::item(1, "Method", 115.0, 25.0, true),
+        TableLayout::item(2, "Value", 210.0, 25.0, true),
+        TableLayout::item(3, "C", 20.0, 85.0, false),
+        TableLayout::item(4, "D", 115.0, 85.0, false),
+        TableLayout::item(5, "20", 210.0, 85.0, false),
+    ];
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|block| block.table.as_ref())
+        .expect("ruled table");
+    assert_eq!((table.row_count, table.column_count), (2, 3));
+}

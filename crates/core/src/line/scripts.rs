@@ -6,6 +6,14 @@ impl LineFragment {
     fn script_parent_score(&self, parent: &Self) -> Option<f64> {
         let size = parent.metrics.font_size;
         let ratio = self.metrics.font_size / size;
+        // A compact index such as Theta,i-j may exceed four source characters.
+        // Require operator evidence for the larger bound so ordinary small-font
+        // words and notes do not gain the same attachment allowance.
+        let compound = self
+            .items
+            .iter()
+            .any(|item| item.raw_text.contains(['+', '-', '−', '=', ',']));
+        let maximum_characters = if compound { 12 } else { 4 };
         let upright = |fragment: &Self| {
             let rotation = fragment.rotation.rem_euclid(360.0);
             rotation.min(360.0 - rotation) <= 2.0
@@ -20,19 +28,43 @@ impl LineFragment {
             || !size.is_finite()
             || size <= 0.0
             || !(0.45..=0.85).contains(&ratio)
-            || !(1..=4).contains(
+            || !(1..=maximum_characters).contains(
                 &self
                     .items
                     .iter()
                     .flat_map(|item| item.raw_text.chars())
                     .filter(|character| !character.is_whitespace())
-                    .take(5)
+                    .take(maximum_characters + 1)
                     .count(),
             )
-            || self.bbox.width() > size * 2.0
-            || self.bbox.height() > parent.bbox.height()
+            || self.bbox.width() > size * if compound { 3.0 } else { 2.0 }
+            // Tight ink for a digit can be taller than a lowercase base such as x.
+            // The known parent font, rather than that glyph's ink height, bounds a script.
+            || self.bbox.height() > size
         {
             return None;
+        }
+        // A whole line can geometrically overlap every script and tie with its
+        // real intermediate parent (for example the 1 under tau above q). Score
+        // actual source runs instead of inventing a base from that union box.
+        if parent.items.len() > 1 {
+            return parent
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let mut glyph = Self::from_items(
+                        vec![item.clone()],
+                        parent.bbox.right.max(1.0),
+                    )
+                    .ok()?;
+                    // Tight lowercase ink may barely overlap a valid superscript.
+                    // Retain the established row band while limiting horizontal
+                    // reach to the actual base run; source geometry stays untouched.
+                    glyph.bbox.top = parent.bbox.top;
+                    glyph.bbox.bottom = parent.bbox.bottom;
+                    self.script_parent_score(&glyph)
+                })
+                .min_by(f64::total_cmp);
         }
         // Ordinary scripts follow their base in reading direction. A following word
         // or delimiter must not tie with the preceding base and orphan the index.
@@ -67,19 +99,49 @@ impl LineFragment {
         // page_to_viewport uses an integer device grid at 1000x scale. Allow two
         // coordinate rounding units at the boundary instead of orphaning a valid index.
         let baseline_tolerance = 0.002;
+        // Measured origins distinguish shallow TeX subscripts from same-baseline
+        // font changes even when tight word boxes barely move their ink centers.
+        let minimum_shift =
+            if self.items.iter().all(|item| item.baseline.is_some())
+                && parent.items.iter().all(|item| item.baseline.is_some())
+            {
+                0.1
+            } else {
+                0.15
+            };
         if overlap < self.bbox.height() * 0.2
             || gap > size * 0.25
-            || baseline_shift + baseline_tolerance < size * 0.15
+            || baseline_shift + baseline_tolerance < size * minimum_shift
             || baseline_shift > size * 0.9 + baseline_tolerance
-            || center_shift < size * 0.15
+            || center_shift < size * minimum_shift
         {
             return None;
         }
         Some((center_shift + gap) / size)
     }
 
-    /// Moves scripts, including nested indices, through original typographic parent relations.
-    pub(crate) fn attach_scripts(
+    /// Selects a typographic parent only when it clearly outranks every competing source run.
+    pub(super) fn script_parent(&self, fragments: &[Self]) -> Option<usize> {
+        let mut best: Option<(usize, f64)> = None;
+        let mut runner_up = f64::INFINITY;
+        for (index, parent) in fragments.iter().enumerate() {
+            // The strict font-size ratio also excludes the fragment itself.
+            let Some(score) = self.script_parent_score(parent) else {
+                continue;
+            };
+            if best.is_none_or(|(_, current)| score < current) {
+                runner_up = best.map_or(f64::INFINITY, |(_, current)| current);
+                best = Some((index, score));
+            } else {
+                runner_up = runner_up.min(score);
+            }
+        }
+        best.filter(|(_, score)| runner_up - score > 0.05)
+            .map(|(index, _)| index)
+    }
+
+    /// Joins adjacent pieces of one index only when their combined geometry fits a parent.
+    fn join_script_pieces(
         mut fragments: Vec<Self>,
         page_width: f64,
     ) -> Result<Vec<Self>, LineError> {
@@ -124,9 +186,9 @@ impl LineFragment {
                                                 item.raw_text.chars()
                                             })
                                             .filter(|c| !c.is_whitespace())
-                                            .take(5)
+                                            .take(13)
                                             .count()
-                                            > 4
+                                            > 12
                                     {
                                         return None;
                                     }
@@ -162,6 +224,19 @@ impl LineFragment {
                 *fragment = Self::from_items(items, page_width)?;
             }
         }
+        Ok(fragments)
+    }
+
+    /// Moves scripts, including nested indices, through original typographic parent relations.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "owner and child indices refer to the unchanged fragment vector; windows always contain two items"
+    )]
+    pub(crate) fn attach_scripts(
+        fragments: Vec<Self>,
+        page_width: f64,
+    ) -> Result<Vec<Self>, LineError> {
+        let fragments = Self::join_script_pieces(fragments, page_width)?;
         // A same-baseline script band can contain indices of different bases (for
         // example the two indices in w1.w2). Reconsider its original items separately
         // instead of attaching a wide synthetic run or leaving all its indices orphaned.
@@ -170,9 +245,12 @@ impl LineFragment {
             .map(|fragment| {
                 fragment.items.len() > 1
                     && !fragment.metrics.font_size_estimated
-                    && !fragments.iter().any(|parent| {
+                    && (!fragments.iter().any(|parent| {
                         fragment.script_parent_score(parent).is_some()
-                    })
+                    }) || fragment.items.windows(2).any(|pair| {
+                        pair[1].bbox.left - pair[0].bbox.right
+                            > fragment.metrics.font_size * 0.5
+                    }))
                     && fragments.iter().any(|parent| {
                         !parent.metrics.font_size_estimated
                             && (0.45..=0.85).contains(
@@ -204,79 +282,72 @@ impl LineFragment {
                 candidates.push(fragment);
             }
         }
-        let fragments = candidates;
+        // Splitting a mixed band must not leave a genuine multi-part limit such
+        // as i=1 exposed to interleaving with its neighboring upper limit.
+        let fragments = Self::join_script_pieces(candidates, page_width)?;
         // Select every owner from the original geometry. Do not let a newly attached
         // script enlarge the search band and drag an adjacent row into the same line.
         let owners: Vec<_> = fragments
             .iter()
-            .enumerate()
-            .map(|(index, script)| {
-                let mut best: Option<(usize, f64)> = None;
-                let mut runner_up = f64::INFINITY;
-                for (parent_index, parent) in fragments.iter().enumerate() {
-                    if index == parent_index {
-                        continue;
-                    }
-                    let Some(score) = script.script_parent_score(parent) else {
-                        continue;
-                    };
-                    if best.is_none_or(|(_, current)| score < current) {
-                        runner_up =
-                            best.map_or(f64::INFINITY, |(_, current)| current);
-                        best = Some((parent_index, score));
-                    } else {
-                        runner_up = runner_up.min(score);
-                    }
-                }
-                best.filter(|(_, score)| runner_up - score > 0.05)
-                    .map(|(index, _)| index)
-            })
+            // Formula membership and final attachment must use the same ambiguity guard.
+            .map(|script| script.script_parent(&fragments))
             .collect();
-        let mut changed = vec![false; fragments.len()];
+        let mut order: Vec<_> = (0..fragments.len()).collect();
+        order.sort_by(|&a, &b| {
+            fragments[a]
+                .metrics
+                .font_size
+                .total_cmp(&fragments[b].metrics.font_size)
+        });
+        let mut children: Vec<Vec<Self>> =
+            (0..fragments.len()).map(|_| Vec::new()).collect();
         let mut slots: Vec<_> = fragments.into_iter().map(Some).collect();
-        for (index, owner) in owners.iter().enumerate() {
-            let Some(mut owner) = *owner else {
-                continue;
-            };
-            // Every edge goes to a strictly larger font, so the original parent graph
-            // is acyclic. Follow it for nested indices without using any expanded bbox.
-            while let Some(next) = owners.get(owner).copied().flatten() {
-                owner = next;
-            }
-            let Some(script) = slots.get_mut(index).and_then(Option::take)
+        let mut result = Vec::new();
+        // Every parent has a strictly larger font. Build child atoms first, keeping
+        // a split index such as i=1 together when it meets a sibling upper index.
+        for index in order {
+            let Some(mut fragment) =
+                slots.get_mut(index).and_then(Option::take)
             else {
                 continue;
             };
-            if let Some(parent) = slots.get_mut(owner).and_then(Option::as_mut)
-            {
-                parent.items.extend(script.items);
-                if let Some(changed) = changed.get_mut(owner) {
-                    *changed = true;
-                }
+            let nested = std::mem::take(&mut children[index]);
+            if !nested.is_empty() {
+                let mut atoms: Vec<_> = std::mem::take(&mut fragment.items)
+                    .into_iter()
+                    .map(|item| (item.bbox, vec![item]))
+                    .collect();
+                atoms.extend(
+                    nested.into_iter().map(|child| (child.bbox, child.items)),
+                );
+                atoms.sort_by(|a, b| {
+                    if fragment.direction == WritingDirection::RightToLeft {
+                        b.0.right.total_cmp(&a.0.right)
+                    } else {
+                        a.0.left.total_cmp(&b.0.left)
+                    }
+                });
+                let items =
+                    atoms.into_iter().flat_map(|(_, items)| items).collect();
+                let mut rebuilt = Self::from_ordered_items(items, page_width)?;
+                rebuilt.baseline = fragment.baseline;
+                rebuilt.metrics.baseline = fragment.baseline;
+                rebuilt.metrics.font_size = fragment.metrics.font_size;
+                rebuilt.metrics.font_size_estimated =
+                    fragment.metrics.font_size_estimated;
+                fragment = rebuilt;
+            }
+            if let Some(parent) = owners[index] {
+                children[parent].push(fragment);
+            } else {
+                result.push(fragment);
             }
         }
-        slots
-            .into_iter()
-            .zip(changed)
-            .filter_map(|(slot, changed)| {
-                slot.map(|mut fragment| {
-                    if changed {
-                        let mut rebuilt = Self::from_items(
-                            std::mem::take(&mut fragment.items),
-                            page_width,
-                        )?;
-                        // Script extents change the bbox, not the body's baseline or font.
-                        rebuilt.baseline = fragment.baseline;
-                        rebuilt.metrics.baseline = fragment.baseline;
-                        rebuilt.metrics.font_size = fragment.metrics.font_size;
-                        rebuilt.metrics.font_size_estimated =
-                            fragment.metrics.font_size_estimated;
-                        Ok(rebuilt)
-                    } else {
-                        Ok(fragment)
-                    }
-                })
-            })
-            .collect()
+        result.sort_by(|a, b| {
+            a.reading_order_y()
+                .total_cmp(&b.reading_order_y())
+                .then_with(|| a.bbox.left.total_cmp(&b.bbox.left))
+        });
+        Ok(result)
     }
 }

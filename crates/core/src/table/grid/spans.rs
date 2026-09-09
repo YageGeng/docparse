@@ -391,6 +391,57 @@ impl TableGrid<'_> {
                 );
             }
         }
+        // Wrapped one-column headings can share a band with vertically centered
+        // neighbors. A global cut through that band clips the next heading line
+        // and makes otherwise valid words fail cell ownership. Grouped headings
+        // retain their distinct levels and explicit colspans.
+        let wrapped_header = header_rows > 1
+            && table
+                .cells
+                .iter()
+                .filter(|cell| cell.is_header)
+                .all(|cell| cell.column_span == 1)
+            && row_spans
+                .iter()
+                .take(header_rows)
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|pair| {
+                    let bottom = pair[0]
+                        .iter()
+                        .map(|&i| self.spans[i].span.bbox.bottom)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let top = pair[1]
+                        .iter()
+                        .map(|&i| self.spans[i].span.bbox.top)
+                        .fold(f64::INFINITY, f64::min);
+                    bottom > top
+                });
+        if wrapped_header {
+            table.cells.retain(|cell| !cell.is_header);
+            for cell in &mut table.cells {
+                cell.row -= header_rows - 1;
+            }
+            table.row_count -= header_rows - 1;
+            for column in 0..table.column_count {
+                table.cells.push(
+                    TableCell::builder()
+                        .row(0)
+                        .column(column)
+                        .is_header(true)
+                        .bbox(Some(
+                            Bbox::try_from([
+                                cuts[column],
+                                ys[0],
+                                cuts[column + 1],
+                                ys[header_rows],
+                            ])
+                            .ok()?,
+                        ))
+                        .build(),
+                );
+            }
+        }
         table.cells.sort_by_key(|cell| (cell.row, cell.column));
         Some(table)
     }

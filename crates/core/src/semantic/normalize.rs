@@ -3,7 +3,7 @@ use docparse_layout::{Bbox, LayoutLabel};
 use super::SemanticAssembler;
 use crate::fusion::assign::BlockSeed;
 use crate::label_policy::LabelPolicy;
-use crate::line::{ConservativeLineAssembler, LineAssembler};
+use crate::line::ConservativeLineAssembler;
 use crate::{
     Block, BlockId, Evidence, LabelSource, SemanticError, SourceRegionEvidence,
 };
@@ -34,7 +34,7 @@ impl LayoutGroup {
     }
 }
 
-impl SemanticAssembler {
+impl SemanticAssembler<'_> {
     /// Emits original reference geometry without invoking text or paragraph assembly.
     pub(crate) fn reference_block(&self, seed: BlockSeed) -> Block {
         let source = SourceRegionEvidence::builder()
@@ -161,8 +161,13 @@ impl SemanticAssembler {
                 );
                 block.evidence.extend(other.evidence);
             }
-            let fragments =
-                ConservativeLineAssembler.fragments(items, &self.config)?;
+            // Rebuilding a merged owner must retain the original formula scopes.
+            let fragments = ConservativeLineAssembler.fragments_with_formulas(
+                items,
+                &self.config,
+                self.rules,
+                self.formulas,
+            )?;
             block.lines = self.lines(&block.id, fragments);
             block.bbox = group.bbox;
             block.polygon = Self::content_polygon(&block.lines);

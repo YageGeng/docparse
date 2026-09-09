@@ -123,7 +123,36 @@ impl TableGrid<'_> {
             }
             let mut cuts = vec![self.bounds.left];
             for (left, right) in gaps {
-                let x = (left + right) * 0.5;
+                let midpoint = (left + right) * 0.5;
+                // Repeated vertical ink inside a supported gutter is a stronger
+                // boundary than its midpoint, especially under a wide group header.
+                // Keep requiring page-local coverage so a short formula mark cannot
+                // pull a column edge into neighboring text.
+                let x = local
+                    .iter()
+                    .filter_map(|rule| match *rule {
+                        TableRule::Vertical { x, .. }
+                            if x >= left
+                                && x <= right
+                                && self.coverage(
+                                    &local,
+                                    false,
+                                    x,
+                                    self.bounds.top,
+                                    self.bounds.bottom,
+                                ) >= 0.7 =>
+                        {
+                            Some(x)
+                        }
+                        _ => None,
+                    })
+                    .min_by(|a, b| {
+                        (a - midpoint)
+                            .abs()
+                            .total_cmp(&(b - midpoint).abs())
+                            .then_with(|| a.total_cmp(b))
+                    })
+                    .unwrap_or(midpoint);
                 let support = self
                     .rows
                     .iter()
