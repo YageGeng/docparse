@@ -22,6 +22,12 @@ mod tests {
         for source in [
             include_str!("../../tests/fixtures/table/survey-page-29.json"),
             include_str!("../../tests/fixtures/table/survey-page-33.json"),
+            include_str!("../../tests/fixtures/table/survey-page-35.json"),
+            include_str!("../../tests/fixtures/table/survey-page-47-0.json"),
+            include_str!("../../tests/fixtures/table/survey-page-57-0.json"),
+            include_str!("../../tests/fixtures/table/survey-page-68-0.json"),
+            include_str!("../../tests/fixtures/table/survey-page-84-0.json"),
+            include_str!("../../tests/fixtures/table/survey-page-84-1.json"),
         ] {
             let fixture: serde_json::Value =
                 serde_json::from_str(source).expect("native table");
@@ -211,7 +217,7 @@ mod tests {
                             "-"
                         ]
                     );
-                } else {
+                } else if page == 33 {
                     assert_eq!(
                         row_text(0),
                         [
@@ -278,6 +284,308 @@ mod tests {
                             "4",
                             "1.5"
                         ]
+                    );
+                } else if page == 35 {
+                    assert_eq!(
+                        row_text(0),
+                        [
+                            "Models",
+                            "DatasetMixtures",
+                            "InstructionNumbers",
+                            "LexicalDiversity",
+                            "Chat",
+                            "QA"
+                        ]
+                    );
+                    assert_eq!(row_text(1), ["AlpacaFarm", "MMLU", "BBH3k"]);
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.row == 0)
+                            .map(|cell| (
+                                cell.column,
+                                cell.row_span,
+                                cell.column_span
+                            ))
+                            .collect::<Vec<_>>(),
+                        [
+                            (0, 2, 1),
+                            (1, 2, 1),
+                            (2, 2, 1),
+                            (3, 2, 1),
+                            (4, 1, 1),
+                            (5, 1, 2)
+                        ]
+                    );
+                    // These values are transcribed from Table 10, independently of reconstruction.
+                    let expected = [
+                        ["80,000", "48.48", "23.77", "38.58", "32.79"],
+                        ["63,184", "77.31", "81.30", "38.11", "27.71"],
+                        ["82,439", "25.92", "/∗", "37.52", "29.81"],
+                        ["145,623", "48.22", "71.36", "41.26", "28.36"],
+                        ["225,623", "48.28", "70.00", "43.69", "29.69"],
+                        ["82,439", "25.92", "/∗", "37.52", "29.81"],
+                        ["70,000", "70.43", "76.96", "39.73", "33.25"],
+                        ["70,000", "75.59", "81.55", "38.01", "30.03"],
+                        ["70,000", "73.48", "79.15", "32.55", "31.25"],
+                        ["220,000", "57.78", "51.13", "33.81", "26.63"],
+                        ["80,000", "48.48", "22.12", "34.12", "34.05"],
+                        ["63,184", "77.31", "77.13", "47.49", "33.82"],
+                        ["82,439", "25.92", "/∗", "36.73", "25.43"],
+                        ["145,623", "48.22", "72.85", "41.16", "29.49"],
+                        ["225,623", "48.28", "69.49", "43.50", "31.16"],
+                        ["82,439", "25.92", "/∗", "36.73", "25.43"],
+                        ["70,000", "70.43", "77.94", "46.89", "35.75"],
+                        ["70,000", "75.59", "78.92", "44.97", "36.40"],
+                        ["70,000", "73.48", "80.45", "43.15", "34.59"],
+                        ["220,000", "57.78", "58.12", "38.07", "27.28"],
+                    ];
+                    for (index, expected) in expected.iter().enumerate() {
+                        assert_eq!(
+                            table
+                                .cells
+                                .iter()
+                                .filter(|cell| cell.row == index + 2
+                                    && cell.column >= 2)
+                                .map(|cell| cell
+                                    .text
+                                    .chars()
+                                    .filter(|c| !c.is_whitespace())
+                                    .collect::<String>())
+                                .collect::<Vec<_>>(),
+                            *expected,
+                            "data row {index}"
+                        );
+                    }
+                } else if page == 47 {
+                    assert_eq!(
+                        row_text(0),
+                        ["Ingredient", "CollectedPrompts", "Prin."]
+                    );
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 0 && cell.row > 0)
+                            .map(|cell| (
+                                cell.text.as_str(),
+                                cell.row,
+                                cell.row_span
+                            ))
+                            .collect::<Vec<_>>(),
+                        [
+                            ("Task Description", 1, 4),
+                            ("Input Data", 5, 2),
+                            ("Contextual Information", 7, 4),
+                            ("Demonstration", 11, 9),
+                            ("Other Designs", 20, 8)
+                        ]
+                    );
+                    let prefixes: Vec<_> =
+                        [('T', 4), ('I', 2), ('C', 4), ('D', 9), ('O', 8)]
+                            .into_iter()
+                            .flat_map(|(prefix, count)| {
+                                (1..=count)
+                                    .map(move |i| format!("{prefix}{i}."))
+                            })
+                            .collect();
+                    for (row, prefix) in prefixes.iter().enumerate() {
+                        let cell = table
+                            .cells
+                            .iter()
+                            .find(|cell| {
+                                cell.row == row + 1 && cell.column == 1
+                            })
+                            .expect("prompt cell");
+                        assert!(
+                            cell.text.starts_with(prefix),
+                            "row {row}: {}",
+                            cell.text
+                        );
+                        assert!(
+                            prefixes
+                                .iter()
+                                .filter(|p| *p != prefix)
+                                .all(|p| !cell.text.contains(p)),
+                            "prompts must stay in separate cells"
+                        );
+                    }
+                } else if page == 57 {
+                    assert_eq!(
+                        row_text(0),
+                        ["Level", "Ability", "Task", "Dataset"]
+                    );
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 0 && cell.row > 0)
+                            .map(|cell| (
+                                cell.text.as_str(),
+                                cell.row,
+                                cell.row_span
+                            ))
+                            .collect::<Vec<_>>(),
+                        [("Basic", 1, 9), ("Advanced", 10, 11)]
+                    );
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 1 && cell.row > 0)
+                            .map(|cell| (
+                                cell.text
+                                    .split_whitespace()
+                                    .collect::<String>(),
+                                cell.row,
+                                cell.row_span
+                            ))
+                            .collect::<Vec<_>>(),
+                        [
+                            ("LanguageGeneration", 1, 3),
+                            ("KnowledgeUtilization", 4, 3),
+                            ("ComplexReasoning", 7, 3),
+                            ("HumanAlignment", 10, 3),
+                            ("InteractionwithExternalEnvironment", 13, 3),
+                            ("ToolManipulation", 16, 5)
+                        ]
+                        .map(|(text, row, span)| (
+                            text.to_owned(),
+                            row,
+                            span
+                        ))
+                    );
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 2 && cell.row > 0)
+                            .map(|cell| cell
+                                .text
+                                .split_whitespace()
+                                .collect::<String>())
+                            .collect::<Vec<_>>(),
+                        [
+                            "LanguageModeling",
+                            "ConditionalTextGeneration",
+                            "CodeSynthesis",
+                            "Closed-BookQA",
+                            "Open-BookQA",
+                            "KnowledgeCompletion",
+                            "KnowledgeReasoning",
+                            "SymbolicReasoning",
+                            "MathematicalReasoning",
+                            "Honestness",
+                            "Helpfulness",
+                            "Harmlessness",
+                            "Household",
+                            "WebsiteEnvironment",
+                            "OpenWorld",
+                            "SearchEngine",
+                            "CodeExecutor",
+                            "Calculator",
+                            "ModelInterface",
+                            "DataInterface"
+                        ]
+                    );
+                } else if page == 68 {
+                    assert_eq!(
+                        row_text(0),
+                        [
+                            "Tasks",
+                            "Datasets",
+                            "Instructions",
+                            "ChatGPT",
+                            "Supervised"
+                        ]
+                    );
+                    assert!(table.cells.iter().any(|cell| cell.row == 0
+                        && cell.column == 0
+                        && cell.column_span == 2));
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 0 && cell.row > 0)
+                            .map(|cell| (
+                                cell.text.as_str(),
+                                cell.row,
+                                cell.row_span
+                            ))
+                            .collect::<Vec<_>>(),
+                        [
+                            ("LG", 1, 4),
+                            ("KU", 5, 6),
+                            ("CR", 11, 4),
+                            ("SDG", 15, 2),
+                            ("IR", 17, 2)
+                        ]
+                    );
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 4 && cell.row > 0)
+                            .map(|cell| cell.text.as_str())
+                            .collect::<Vec<_>>(),
+                        [
+                            "20.66", "21.12", "21.71", "23.01", "85.19",
+                            "85.86", "81.20", "82.20", "29.25", "31.21",
+                            "53.20", "66.75", "78.47", "79.30", "79.88",
+                            "70.10", "48.80", "17.20"
+                        ]
+                    );
+                    assert!(table.cells.iter().any(|cell| cell.column == 3
+                        && cell.row == 14
+                        && cell.text.contains("money_left")));
+                } else if page == 84 {
+                    assert_eq!(
+                        row_text(0),
+                        [
+                            "Equations",
+                            "Computation",
+                            "Datatransfer",
+                            "Arithmeticintensity"
+                        ]
+                    );
+                    let expected: &[&str] = if table.row_count == 10 {
+                        &[
+                            "6BTH2",
+                            "6BTH",
+                            "4BT2ND+4BT2N",
+                            "2BTH2",
+                            "5BTH",
+                            "4BTHH′",
+                            "2BTH′",
+                            "2BTHH′",
+                            "5BTH",
+                        ]
+                    } else {
+                        &[
+                            "6BH2",
+                            "6BH",
+                            "-",
+                            "4BTND+4BTN",
+                            "2BH2",
+                            "5BH",
+                            "4BHH′",
+                            "2BH′",
+                            "2BHH′",
+                            "5BH",
+                        ]
+                    };
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.column == 1 && cell.row > 0)
+                            .map(|cell| cell
+                                .text
+                                .split_whitespace()
+                                .collect::<String>())
+                            .collect::<Vec<_>>(),
+                        expected
                     );
                 }
             }
@@ -426,11 +734,12 @@ impl<'a> TableAssembler<'a> {
         }
         let grid = TableGrid::new(block.bbox, &spans);
         let mut failures = Vec::new();
-        for strategy in 0..3 {
+        for strategy in 0..4 {
             let candidate = match strategy {
                 0 => grid.tagged(&self.evidence.tagged_tables),
                 1 => grid.ruled(&self.evidence.rules),
-                _ => grid.aligned(&self.evidence.rules),
+                2 => grid.aligned(&self.evidence.rules),
+                _ => grid.sparse(&self.evidence.rules),
             };
             if let Some(candidate) = candidate {
                 match self.populate(candidate, &spans, block) {

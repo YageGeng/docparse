@@ -34,7 +34,7 @@ impl TableGrid<'_> {
                 })
                 .collect(),
         );
-        let row_spans: Vec<Vec<usize>> = groups
+        let mut row_spans: Vec<Vec<usize>> = groups
             .iter()
             .map(|group| {
                 group
@@ -80,6 +80,87 @@ impl TableGrid<'_> {
         }
         if header_rows >= table.row_count {
             header_rows = 0;
+        }
+        let mut groups = groups.to_vec();
+        let mut ys = ys.to_vec();
+        // Partial header rules establish logical levels even when centered stubs
+        // and wrapped titles contribute extra, overlapping physical baselines.
+        let header_rules = self.snapped(
+            rules
+                .iter()
+                .filter_map(|rule| match *rule {
+                    TableRule::Horizontal { y, left, right }
+                        if header_rows > 1
+                            && header_end.is_some_and(|end| {
+                                y < end - self.rule_tolerance()
+                            })
+                            && row_spans
+                                .iter()
+                                .take(header_rows)
+                                .flatten()
+                                .any(|&i| {
+                                    let center =
+                                        self.spans[i].span.bbox.center();
+                                    center.x >= left
+                                        && center.x <= right
+                                        && center.y < y
+                                })
+                            && row_spans
+                                .iter()
+                                .take(header_rows)
+                                .flatten()
+                                .any(|&i| {
+                                    let center =
+                                        self.spans[i].span.bbox.center();
+                                    center.x >= left
+                                        && center.x <= right
+                                        && center.y > y
+                                })
+                            && cuts.windows(2).any(|pair| {
+                                self.coverage(rules, true, y, pair[0], pair[1])
+                                    >= 0.7
+                            }) =>
+                    {
+                        Some(y)
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+        // Coalesce observed rows only; decorative ink must not invent extra levels
+        // or expand a candidate beyond the grid limits checked by the caller.
+        let ruled_header =
+            !header_rules.is_empty() && header_rules.len() < header_rows;
+        if ruled_header {
+            let physical_count = header_rows;
+            header_rows = header_rules.len() + 1;
+            let mut header_ys = vec![ys[0]];
+            header_ys.extend(header_rules);
+            header_ys.extend_from_slice(&ys[physical_count..]);
+            ys = header_ys;
+            let mut header_spans = vec![Vec::new(); header_rows];
+            for &index in row_spans.iter().take(physical_count).flatten() {
+                let y = self.spans[index].span.bbox.center().y;
+                let row = ys[..=header_rows]
+                    .windows(2)
+                    .position(|pair| y >= pair[0] && y <= pair[1])?;
+                header_spans[row].push(index);
+            }
+            row_spans.splice(..physical_count, header_spans);
+            // Header geometry now follows individual words; only body bands below
+            // use the original physical-row indices to recover centered row labels.
+            groups.splice(..physical_count, vec![Vec::new(); header_rows]);
+            table.cells.retain(|cell| cell.row >= physical_count);
+            for cell in &mut table.cells {
+                cell.row = cell.row - physical_count + header_rows;
+            }
+            table.row_count = table.row_count - physical_count + header_rows;
+            tracing::debug!(
+                "normalized table header at {:?} from {} physical rows to {} ruled levels",
+                self.bounds,
+                physical_count,
+                header_rows
+            );
         }
         let mut headings: Vec<TableCell> = Vec::new();
         for row in 0..header_rows {
@@ -301,6 +382,46 @@ impl TableGrid<'_> {
                             ))
                             .build(),
                     );
+                }
+            }
+        }
+        if ruled_header {
+            // A stub without a divider spans the surrounding logical levels, even
+            // when its title wraps or its only word is vertically centered.
+            for column in 0..table.column_count {
+                let mut row = 0;
+                while row < header_rows {
+                    let Some(index) = headings.iter().position(|cell| {
+                        cell.row == row
+                            && cell.column == column
+                            && cell.column_span == 1
+                    }) else {
+                        row += 1;
+                        continue;
+                    };
+                    let next_row = row + headings[index].row_span;
+                    let next = headings.iter().position(|cell| {
+                        cell.row == next_row
+                            && cell.column == column
+                            && cell.column_span == 1
+                    });
+                    if let Some(next) = next
+                        && self.coverage(
+                            rules,
+                            true,
+                            ys[next_row],
+                            cuts[column],
+                            cuts[column + 1],
+                        ) < 0.7
+                    {
+                        let bottom =
+                            headings[next].row + headings[next].row_span;
+                        headings[index].row_span = bottom - row;
+                        headings[index].bbox.as_mut()?.bottom = ys[bottom];
+                        headings.remove(next);
+                    } else {
+                        row = next_row;
+                    }
                 }
             }
         }

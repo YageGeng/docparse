@@ -2,6 +2,7 @@
 mod aligned;
 mod ruled;
 mod spans;
+mod sparse;
 mod tagged;
 
 use std::collections::{BTreeMap, BTreeSet};
