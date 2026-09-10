@@ -31,16 +31,19 @@ pub use extract::metadata::PageProbe;
 pub use ocr::{
     OcrContentStatus, OcrEngine, OcrError, OcrRequest, OcrResult, OcrTextItem,
 };
-pub use parser::{DocParseError, DocParser, DocParserBuilder, PageInput};
+pub use parser::{
+    DocParseError, DocParser, DocParserBuilder, PageInput, ParseOptions,
+};
 pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
     RenderError, RenderView, TextRenderer,
 };
 pub use table::{
-    Table, TableCell, TableCellLine, TableEvidence, TableRule,
-    TableStructureSource, TableTextSpan, TableWord, TaggedTable,
-    TaggedTableCell,
+    Table, TableCell, TableCellLine, TableEvidence, TableMode, TableOptions,
+    TableRule, TableStructureEngine, TableStructureError, TableStructureSource,
+    TableTextSpan, TableWord, TaggedTable, TaggedTableCell, TsrRequestReason,
+    TsrTableInput, TsrTableRequest,
 };
 pub use types::*;
 pub use validate::ResultValidator;

@@ -1,12 +1,12 @@
 use super::*;
 
-impl TableGrid<'_> {
+impl TableGeometry<'_> {
     /// Finds column gutters supported across rows, preserving empty positions and cautious text wraps.
     #[allow(
         clippy::indexing_slicing,
         reason = "row and word indices are generated locally; window and predecessor accesses are guarded"
     )]
-    pub fn aligned(&self, rules: &[TableRule]) -> Option<RecoveredGrid> {
+    pub fn aligned(&self, rules: &[TableRule]) -> Option<CellGrid> {
         if self.rows.len() < 2 || self.rows.len() > MAX_TABLE_ROWS {
             return None;
         }
@@ -244,21 +244,40 @@ impl TableGrid<'_> {
                 }
             }
             let source = if local.iter().filter(|rule| matches!(rule, TableRule::Horizontal { left, right, .. } if right-left >= self.bounds.width()*0.7)).count() >= 2 { TableStructureSource::Ruled } else { TableStructureSource::TextAlignment };
-            let Some(table) = self.recover_spans(
+            let rows = groups
+                .iter()
+                .enumerate()
+                .map(|(row, physical)| {
+                    GridRow::builder()
+                        .top(ys[row])
+                        .bottom(ys[row + 1])
+                        .physical(physical.clone())
+                        .words(
+                            physical
+                                .iter()
+                                .flat_map(|&i| {
+                                    self.rows[i].spans.iter().copied()
+                                })
+                                .collect(),
+                        )
+                        .build()
+                })
+                .collect();
+            let grid = CellGrid::try_from(
                 Table::builder()
                     .row_count(groups.len())
                     .column_count(columns)
                     .cells(cells)
                     .source(source)
                     .build(),
-                &cuts,
-                &ys,
-                &groups,
-                &local,
-            ) else {
+            )
+            .ok()?
+            .with_rows(rows)
+            .ok()?;
+            let Some(grid) = self.recover_spans(grid, &cuts, &local) else {
                 continue;
             };
-            if let Some(grid) = self.assign(table) {
+            if let Some(grid) = self.assign(grid) {
                 return Some(grid);
             }
         }

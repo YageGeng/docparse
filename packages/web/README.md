@@ -1,6 +1,6 @@
 # DocParse Web
 
-Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3 model inside a dedicated module Worker. PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
+Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3 model inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
 
 ## Build
 
@@ -259,6 +259,63 @@ Final `table` blocks may include a `table` object with zero-based rows/columns, 
 
 Original text remains owned once by `block.lines[].text_items`. Cell lines contain non-owning references (`text_item_id`, UTF-8 `byte_range`, measured `bbox`). Do not use JavaScript string offsets directly with these byte ranges. Tagged empty cells may have a null bbox; populated tagged cells expose measured content bounds, while geometry-based cells expose inferred grid bounds. Validation checks occupancy, source coverage, byte boundaries, geometry, and cached text. Existing schema-2 documents without the optional structure remain readable.
 
-The example displays a selected table in the text inspector with its rows and merged cells. Copy uses the table's plain-text projection. The page overlay stays one parent table region. Per-page `table_structure` timing is nested inside `text_finish`; `text_extract` includes the PDFium word, vector, and tag evidence scan.
+The example displays a selected table in the text inspector with its rows and merged cells. Copy uses the table's plain-text projection. The page overlay stays one parent table region. Per-page `table_structure` measures the default local reconstruction stage; `text_finish` covers composition and final validation around that stage. `text_extract` includes the PDFium word, vector, and tag evidence scan.
 
 Recovery is limited to already-detected table layouts. It uses existing native text or supplied OCR facts; it does not add a table/OCR model, infer missing scan text, or merge tables across pages. Ambiguous grids retain source lines with `TableStructureUnavailable`. Sparse-rule and borderless reconstruction use geometry-based heuristics, so complex/irregular structures still require inspection.
+
+## Caller-supplied table structure
+
+Existing parsing remains local by default. A per-call `table` option enables an
+external structure callback for regions the production layout model already
+identified as tables. This SDK does not ship a table recognition service.
+
+```javascript
+const document = await parser.parse(bytes, {
+  table: { mode: "fallback", max_in_flight: 2, timeout_ms: 60000 },
+  onTableStructure: async (request, signal) => {
+    // Invoke your own adapter, returning the original request ID and crop-pixel boxes.
+    const result = await yourTableProvider(request.image.blob, { signal });
+    return {
+      request_id: request.request_id,
+      structure_tokens: result.structure_tokens,
+      cell_bboxes: result.cell_bboxes,
+    };
+  },
+});
+```
+
+Use `external_only` to bypass local topology inference for all layout tables,
+or `rules_only` to disable the callback. Either external mode requires the
+callback. A failed provider retains the original text and emits table warnings;
+external-only mode does not silently substitute a local structure.
+
+The callback receives a PNG Blob, its actual width/height, one-based page number,
+block/request IDs, canonical `crop_bbox`, `crop_to_viewport`, and the reason for
+requesting external structure. The PNG has no UI overlays. Each returned box is
+`[left, top, right, bottom]` or four perimeter vertices, in the original crop's
+pixel coordinates. Undo any provider resize/padding before returning. Structural
+tokens and spans are validated in Rust; the returned data cannot add page regions
+or replace native text. Raster rounding can sample beyond the original block;
+Rust trims that margin from decoded cells and keeps the block bounds unchanged.
+Cells that become empty or cannot account for the original text reject only that
+table's structure. Successful structures use `Table.source = "external_tsr"`.
+
+The callback's AbortSignal is canceled on deadline, parse cancellation, or close.
+Honor it in your adapter. Duplicate/late replies cannot settle another parse.
+Callbacks remain on the calling thread; the private Worker control channel stays
+responsive while Rust awaits a result. `table_rules`, `table_external`, and
+`table_fill` timing events distinguish local attempts, external waits, and final
+source population. Model/service accuracy must be evaluated separately from the
+SDK's input and transport contracts.
+
+After building the package and serving the example, run the supplied-input SDK
+integration check from the repository root (installed Chrome is required):
+
+```sh
+rtk proxy node crates/web/tests/table_input.mjs /absolute/path/to/tables.pdf
+```
+
+Use a PDF containing multiple tables on one page and at least one locally
+unresolved table. The check uses the production SDK and layout model to verify
+fallback, external-only input, partial failures, timeout, and cancellation. Its
+declared test topology evaluates the input contract, not a TSR model's accuracy.

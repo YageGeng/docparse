@@ -1,12 +1,12 @@
 use super::*;
 
-impl TableGrid<'_> {
+impl TableGeometry<'_> {
     /// Recovers topology from visible separators; only rectangular missing-edge components become spans.
     #[allow(
         clippy::indexing_slicing,
         reason = "positive bounded grid dimensions and neighbor guards constrain every index"
     )]
-    pub fn ruled(&self, rules: &[TableRule]) -> Option<RecoveredGrid> {
+    pub fn ruled(&self, rules: &[TableRule]) -> Option<CellGrid> {
         let source_rules = self.local_rules(rules);
         // A separator may be painted as several touching paths. Validate their
         // union so an endpoint in the middle of a column does not erase the row.
@@ -247,12 +247,15 @@ impl TableGrid<'_> {
             return self.aligned(&painted_rules);
         }
         self.assign(
-            Table::builder()
-                .row_count(rows)
-                .column_count(columns)
-                .cells(cells)
-                .source(TableStructureSource::Ruled)
-                .build(),
+            CellGrid::try_from(
+                Table::builder()
+                    .row_count(rows)
+                    .column_count(columns)
+                    .cells(cells)
+                    .source(TableStructureSource::Ruled)
+                    .build(),
+            )
+            .ok()?,
         )
     }
 

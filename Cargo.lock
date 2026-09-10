@@ -477,6 +477,7 @@ dependencies = [
  "figment",
  "futures-util",
  "image",
+ "js-sys",
  "proptest",
  "serde",
  "serde_json",
@@ -486,6 +487,7 @@ dependencies = [
  "tokio",
  "tracing",
  "typed-builder",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
 
@@ -548,6 +550,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "tracing",
+ "typed-builder",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

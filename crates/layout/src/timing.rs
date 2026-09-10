@@ -22,6 +22,12 @@ pub enum TimingStage {
     Ocr,
     TextFinish,
     TableStructure,
+    /// Local table topology and source validation.
+    TableRules,
+    /// Queue and external structure-provider time.
+    TableExternal,
+    /// External topology binding and final source validation.
+    TableFill,
     LinkValidate,
     ParseTotal,
     ResultSerialize,

@@ -17,7 +17,7 @@ export interface TableCellLine { text: string; bbox: Bbox; spans: TableTextSpan[
 /** A zero-based logical cell; covered positions do not appear as duplicate cells. */
 export interface TableCell { row: number; column: number; row_span: number; column_span: number; bbox: Bbox | null; is_header: boolean; text: string; lines: TableCellLine[] }
 /** A recovered table view; original TextItems remain owned by the parent block's lines. */
-export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" }
+export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" | "external_tsr" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
 export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */
@@ -73,14 +73,35 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }
 /** A PNG of the exact PDFium raster used for inference, without any overlay baked in. */
 export interface PageImageResult { pageNumber: number; width: number; height: number; blob: Blob }
+/** Structural recovery is scoped to regions already labeled table by layout. */
+export type TableMode = "rules_only" | "fallback" | "external_only";
+/** Per-parse external table limits; the default never calls a provider. */
+export interface TableOptions { mode?: TableMode; max_in_flight?: number; timeout_ms?: number }
+/** An affine map from crop pixels to canonical viewport points. */
+export interface AffineTransform { a: number; b: number; c: number; d: number; e: number; f: number }
+/** Owned crop sent to the caller's structure provider; one-based page numbers match DocumentResult. */
+export interface TsrTableRequest {
+  request_id: string;
+  page_number: number;
+  block_id: string;
+  crop_bbox: Bbox;
+  crop_to_viewport: AffineTransform;
+  reason: { kind: "external_only" } | { kind: "rules_failed"; message: string };
+  image: { width: number; height: number; blob: Blob };
+}
+/** Structure tokens paired one-to-one with cell boxes in the original request image's pixel space. */
+export interface TsrTableInput { request_id: string; structure_tokens: string[]; cell_bboxes: number[][] }
+
 /** Per-call cancellation and observations retained on the calling thread. */
 export interface ParseOptions {
+  table?: TableOptions;
+  onTableStructure?: (request: TsrTableRequest, signal: AbortSignal) => Promise<TsrTableInput>;
   signal?: AbortSignal;
   onProgress?: (progress: ParserProgress) => void;
   onTiming?: (timing: ParserTiming) => void;

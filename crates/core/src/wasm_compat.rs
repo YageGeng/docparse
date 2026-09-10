@@ -2,6 +2,8 @@
 mod pdf_input;
 mod pdfium_worker;
 mod task_set;
+mod timeout;
+pub(crate) use timeout::timeout;
 
 pub(crate) use pdf_input::PdfInput;
 pub(crate) use pdfium_worker::PdfiumWorker;

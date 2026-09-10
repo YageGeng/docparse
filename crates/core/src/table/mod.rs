@@ -3,7 +3,12 @@ mod assemble;
 mod evidence;
 mod grid;
 mod render;
+mod tsr;
 mod validate;
+pub use tsr::{
+    TableMode, TableOptions, TableStructureEngine, TableStructureError,
+    TsrRequestReason, TsrTableInput, TsrTableRequest,
+};
 
 use std::ops::Range;
 
@@ -28,6 +33,7 @@ pub enum TableStructureSource {
     TaggedPdf,
     Ruled,
     TextAlignment,
+    ExternalTsr,
 }
 
 /// A non-owning slice of one source item; offsets are UTF-8 bytes, not character ordinals.

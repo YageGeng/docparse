@@ -1,6 +1,7 @@
 //! Browser-only parser ABI and ORT initialization.
 mod libc;
 mod logging;
+mod table;
 
 use docparse_config::{
     ExecutionProviderConfig, OutputConfig, RawConfig, ValidatedConfig,
@@ -159,23 +160,50 @@ impl WebParser {
             page_image,
             timing,
         };
-        let document = self
-            .parser
-            .parse_bytes_with_observer(Arc::from(bytes), &observer)
-            .await
-            .map_err(|error| WebError::value("DocumentFailed", error))?;
-        let (timings, mut receiver) =
-            docparse_layout::timing::Timings::channel();
-        let timer = timings
-            .start(docparse_layout::timing::TimingStage::ResultSerialize);
-        let result = document
-            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-            .map_err(|error| WebError::value("SerializationFailed", error));
-        drop(timer);
-        if let Ok(timing) = receiver.try_recv() {
-            observer.on_timing(timing);
-        }
-        result
+        self.parse_observed(
+            bytes,
+            docparse_core::TableOptions::default(),
+            None,
+            observer,
+        )
+        .await
+    }
+
+    /// Runs table policy and an optional promise broker while preserving the legacy observer ABI.
+    pub async fn parse_with_options(
+        &self,
+        bytes: Vec<u8>,
+        options: JsValue,
+        callbacks: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let options = if options.is_null() || options.is_undefined() {
+            docparse_core::TableOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)
+                .map_err(|e| WebError::value("InvalidTableOptions", e))?
+        };
+        let callbacks = table::Callbacks::from(callbacks);
+        let observer = BrowserObserver {
+            progress: callbacks.function("progress")?,
+            page_image: callbacks.function("page_image")?,
+            timing: callbacks.function("timing")?,
+        };
+        let engine = match (
+            callbacks.function("table_request")?,
+            callbacks.function("table_cancel")?,
+        ) {
+            (None, None) => None,
+            (Some(request), Some(cancel)) => {
+                Some(table::BrowserTableEngine::shared(request, cancel))
+            }
+            _ => {
+                return Err(WebError::value(
+                    "InvalidTableOptions",
+                    "table request and cancellation callbacks must be provided together",
+                ));
+            }
+        };
+        self.parse_observed(bytes, options, engine, observer).await
     }
 
     /// Applies the same native renderers to a validated canonical document.
@@ -206,6 +234,48 @@ impl WebParser {
                 "expected json, text or markdown",
             )),
         }
+    }
+}
+
+impl WebParser {
+    /// Shares serialization and observations across the old and option-bearing parser entry points.
+    async fn parse_observed(
+        &self,
+        bytes: Vec<u8>,
+        options: docparse_core::TableOptions,
+        engine: Option<Arc<dyn docparse_core::TableStructureEngine>>,
+        observer: BrowserObserver,
+    ) -> Result<JsValue, JsValue> {
+        let document = self
+            .parser
+            .parse_bytes_with_options(
+                Arc::from(bytes),
+                docparse_core::ParseOptions::builder()
+                    .table(options)
+                    .table_engine(engine)
+                    .observer(Some(&observer))
+                    .build(),
+            )
+            .await
+            .map_err(|error| {
+                let code = match &error {
+                    docparse_core::DocParseError::TableStructure(e) => e.code(),
+                    _ => "DocumentFailed",
+                };
+                WebError::value(code, error)
+            })?;
+        let (timings, mut receiver) =
+            docparse_layout::timing::Timings::channel();
+        let timer = timings
+            .start(docparse_layout::timing::TimingStage::ResultSerialize);
+        let result = document
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|error| WebError::value("SerializationFailed", error));
+        drop(timer);
+        if let Ok(timing) = receiver.try_recv() {
+            observer.on_timing(timing);
+        }
+        result
     }
 }
 

@@ -4,7 +4,7 @@ use docparse_config::FusionConfig;
 use docparse_layout::Bbox;
 use typed_builder::TypedBuilder;
 
-use super::grid::{RecoveredGrid, TableGrid};
+use super::grid::{CellGrid, TableGeometry};
 use super::{Table, TableCellLine, TableEvidence, TableTextSpan};
 use crate::line::{ConservativeLineAssembler, LineFragment};
 use crate::{Baseline, Block, TextItem, TextItemId};
@@ -888,6 +888,42 @@ impl<'a> TableAssembler<'a> {
 
     /// Tries explicit topology before geometry, publishing only a complete validated table.
     pub(crate) fn reconstruct(&self, block: &mut Block) -> Result<(), String> {
+        let spans = self.locate(block)?;
+        let grid = TableGeometry::new(block.bbox, &spans);
+        let mut failures = Vec::new();
+        for strategy in 0..4 {
+            let candidate = match strategy {
+                0 => grid.tagged(&self.evidence.tagged_tables),
+                1 => grid.ruled(&self.evidence.rules),
+                2 => grid.aligned(&self.evidence.rules),
+                _ => grid.sparse(&self.evidence.rules),
+            };
+            if let Some(candidate) = candidate {
+                match self.populate(candidate, &spans, block) {
+                    Ok(table) => {
+                        tracing::debug!(
+                            "reconstructed table {} with {} rows and {} columns from {:?}",
+                            block.id.as_str(),
+                            table.row_count,
+                            table.column_count,
+                            table.source
+                        );
+                        block.text = table.to_text();
+                        block.table = Some(table);
+                        return Ok(());
+                    }
+                    Err(reason) => failures.push(reason),
+                }
+            }
+        }
+        Err(failures.pop().unwrap_or_else(|| "no consistent row/column structure accounts for the source text".to_owned()))
+    }
+
+    /// Collects measured word references once for either local or externally supplied topology.
+    fn locate<'b>(
+        &self,
+        block: &'b Block,
+    ) -> Result<Vec<LocatedSpan<'b>>, String> {
         let mut spans = Vec::new();
         for line in &block.lines {
             for item in &line.text_items {
@@ -979,40 +1015,53 @@ impl<'a> TableAssembler<'a> {
             return Err("no native or OCR text is available inside the table"
                 .to_owned());
         }
-        let grid = TableGrid::new(block.bbox, &spans);
-        let mut failures = Vec::new();
-        for strategy in 0..4 {
-            let candidate = match strategy {
-                0 => grid.tagged(&self.evidence.tagged_tables),
-                1 => grid.ruled(&self.evidence.rules),
-                2 => grid.aligned(&self.evidence.rules),
-                _ => grid.sparse(&self.evidence.rules),
-            };
-            if let Some(candidate) = candidate {
-                match self.populate(candidate, &spans, block) {
-                    Ok(table) => {
-                        tracing::debug!(
-                            "reconstructed table {} with {} rows and {} columns from {:?}",
-                            block.id.as_str(),
-                            table.row_count,
-                            table.column_count,
-                            table.source
-                        );
-                        block.text = table.to_text();
-                        block.table = Some(table);
-                        return Ok(());
-                    }
-                    Err(reason) => failures.push(reason),
-                }
-            }
+        Ok(spans)
+    }
+
+    /// Applies external topology transactionally, preserving the model's explicit header decisions.
+    pub(crate) fn reconstruct_external(
+        &self,
+        block: &mut Block,
+        request: &super::TsrTableRequest,
+        input: super::TsrTableInput,
+    ) -> Result<(), super::TableStructureError> {
+        use super::TableStructureError;
+        if request.block_id != block.id {
+            return Err(TableStructureError::InvalidInput {
+                reason: "external request targets a different block".to_owned(),
+            });
         }
-        Err(failures.pop().unwrap_or_else(|| "no consistent row/column structure accounts for the source text".to_owned()))
+        // Sampling can round past the layout boundary; external topology must not change page ownership.
+        let grid = CellGrid::try_from((request, block.bbox, input))?;
+        let mut candidate = block.clone();
+        let spans = self
+            .locate(&candidate)
+            .map_err(|message| TableStructureError::SourceText { message })?;
+        let geometry = TableGeometry::new(candidate.bbox, &spans);
+        let assignment =
+            geometry.assign_words(grid.table()).ok_or_else(|| {
+                TableStructureError::SourceText {
+                    message:
+                        "external cells do not uniquely own every source word"
+                            .to_owned(),
+                }
+            })?;
+        let grid = grid
+            .bind_words(assignment, spans.len())
+            .map_err(|reason| TableStructureError::InvalidInput { reason })?;
+        let table = self
+            .populate(grid, &spans, &candidate)
+            .map_err(|message| TableStructureError::SourceText { message })?;
+        candidate.text = table.to_text();
+        candidate.table = Some(table);
+        *block = candidate;
+        Ok(())
     }
 
     /// Reuses script-aware line assembly inside each cell, then retains only source references.
     fn populate(
         &self,
-        mut grid: RecoveredGrid,
+        grid: CellGrid,
         spans: &[LocatedSpan<'_>],
         block: &Block,
     ) -> Result<Table, String> {
@@ -1022,14 +1071,15 @@ impl<'a> TableAssembler<'a> {
             .flat_map(|line| &line.text_items)
             .map(|item| (item.id.clone(), item))
             .collect();
-        let mut members = vec![Vec::new(); grid.table.cells.len()];
-        for (index, &cell) in grid.assignment.iter().enumerate() {
+        let (mut table, assignment) = grid.into_parts()?;
+        let mut members = vec![Vec::new(); table.cells.len()];
+        for (index, &cell) in assignment.iter().enumerate() {
             members
                 .get_mut(cell)
                 .ok_or("invalid cell assignment")?
                 .push(index);
         }
-        for (cell, indices) in grid.table.cells.iter_mut().zip(members) {
+        for (cell, indices) in table.cells.iter_mut().zip(members) {
             let mut items = Vec::new();
             let mut references = BTreeMap::new();
             for index in indices {
@@ -1148,9 +1198,9 @@ impl<'a> TableAssembler<'a> {
                 .collect::<Vec<_>>()
                 .join("\n");
         }
-        grid.table.cells.sort_by_key(|cell| (cell.row, cell.column));
-        grid.table.validate(block)?;
-        Ok(grid.table)
+        table.cells.sort_by_key(|cell| (cell.row, cell.column));
+        table.validate(block)?;
+        Ok(table)
     }
 }
 

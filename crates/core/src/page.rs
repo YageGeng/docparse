@@ -33,6 +33,68 @@ pub(crate) struct PageAnalysisDraft {
     pub(crate) native_text_coverage: f64,
 }
 
+/// Stable block ownership and retained native evidence while table structures are resolved.
+#[derive(TypedBuilder)]
+pub(crate) struct PageTableDraft {
+    pub(crate) blocks: Vec<crate::Block>,
+    pub(crate) warnings: Vec<PageWarning>,
+    pub(crate) extracted: ExtractedPage,
+    pub(crate) formula_regions: Vec<crate::line::FormulaRegion>,
+    context: Arc<DocumentContext>,
+    expected_native_ids: BTreeMap<String, usize>,
+    references: Vec<crate::Block>,
+    watermarks: Vec<crate::Block>,
+    inline_formulas: Vec<LayoutDetection>,
+    assignment_diagnostics: Vec<String>,
+    native_text_coverage: f64,
+}
+
+impl PageTableDraft {
+    /// Preserves the existing synchronous local-only behavior for ordinary and non-rendered pages.
+    pub(crate) fn reconstruct_local(
+        &mut self,
+        config: &docparse_config::FusionConfig,
+        timings: &docparse_layout::timing::Timings,
+    ) {
+        let _timer = self
+            .blocks
+            .iter()
+            .any(|b| b.label == LayoutLabel::Table)
+            .then(|| {
+                timings
+                    .for_page(self.extracted.page_number)
+                    .start(docparse_layout::timing::TimingStage::TableStructure)
+            });
+        let assembler = crate::table::TableAssembler::new(
+            config,
+            &self.extracted.table_evidence,
+            &self.formula_regions,
+        );
+        for block in self
+            .blocks
+            .iter_mut()
+            .filter(|block| block.label == LayoutLabel::Table)
+        {
+            if let Err(reason) = assembler.reconstruct(block) {
+                tracing::warn!(
+                    "table structure unavailable for {}: {}",
+                    block.id.as_str(),
+                    reason
+                );
+                self.warnings.push(PageWarning {
+                    code: "TableStructureUnavailable".to_owned(),
+                    stage: "table".to_owned(),
+                    message: format!(
+                        "table {} retains source lines: {}",
+                        block.id.as_str(),
+                        reason
+                    ),
+                });
+            }
+        }
+    }
+}
+
 /// Pure page-local analyzer that shares only frozen configuration and context.
 #[derive(Debug, Clone)]
 pub(crate) struct PageAnalyzer {
@@ -154,10 +216,21 @@ impl PageAnalyzer {
     pub(crate) fn finish(
         &self,
         draft: PageAnalysisDraft,
-        mut ocr: OcrCompletion,
+        ocr: OcrCompletion,
     ) -> Result<PageResult, PageAnalysisError> {
+        let mut table_draft = self.compose(draft, ocr)?;
+        table_draft.reconstruct_local(self.config.fusion(), &self.timings);
+        self.complete(table_draft)
+    }
+
+    /// Completes canonical text ownership while retaining all evidence needed by an async table stage.
+    pub(crate) fn compose(
+        &self,
+        draft: PageAnalysisDraft,
+        mut ocr: OcrCompletion,
+    ) -> Result<PageTableDraft, PageAnalysisError> {
         let PageAnalysisDraft {
-            extracted,
+            mut extracted,
             detections,
             context,
             missing_regions,
@@ -179,10 +252,10 @@ impl PageAnalyzer {
         let mut warnings = Vec::new();
         // Remove watermarks before OCR ownership, model assignment, fallback XY-cut, and
         // formula attachment. Their original facts remain owned exactly once by detached blocks.
-        let (watermark_items, mut text_items): (Vec<_>, Vec<_>) = extracted
-            .text_items
-            .into_iter()
-            .partition(|item| item.watermark.is_some());
+        let (watermark_items, mut text_items): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut extracted.text_items)
+                .into_iter()
+                .partition(|item| item.watermark.is_some());
         // Supply formula scopes before text grouping; InlineSpan annotation still
         // happens afterward, using the resulting canonical item order and ranges.
         let formula_regions: Vec<_> = detections
@@ -205,7 +278,7 @@ impl PageAnalyzer {
         .with_evidence(&extracted.table_evidence.rules, &formula_regions);
         let watermarks = assembler.watermark_blocks(
             watermark_items,
-            extracted.watermark_annotations,
+            std::mem::take(&mut extracted.watermark_annotations),
             &extracted.watermark_evidence,
         )?;
         // OCR sees the original raster and may rediscover the same overlay. Deduplicate
@@ -272,44 +345,40 @@ impl PageAnalyzer {
         let fallback = assembler.fallback_blocks(residual, &fallback_tree)?;
         blocks.extend(fallback.blocks);
         warnings.extend(fallback.warnings);
-        let mut blocks = assembler.normalize_blocks(blocks)?;
-        // Reconstruct tables only after every source item has its final parent owner.
-        // Cell text is assembled independently; the original lines remain source evidence.
-        let table_timer = blocks
-            .iter()
-            .any(|block| block.label == LayoutLabel::Table)
-            .then(|| {
-                self.timings
-                    .for_page(extracted.page_number)
-                    .start(docparse_layout::timing::TimingStage::TableStructure)
-            });
-        let table_assembler = crate::table::TableAssembler::new(
-            self.config.fusion(),
-            &extracted.table_evidence,
-            &formula_regions,
-        );
-        for block in blocks
-            .iter_mut()
-            .filter(|block| block.label == LayoutLabel::Table)
-        {
-            if let Err(reason) = table_assembler.reconstruct(block) {
-                tracing::warn!(
-                    "table structure unavailable for {}: {}",
-                    block.id.as_str(),
-                    reason
-                );
-                warnings.push(PageWarning {
-                    code: "TableStructureUnavailable".to_owned(),
-                    stage: "table".to_owned(),
-                    message: format!(
-                        "table {} retains source lines: {}",
-                        block.id.as_str(),
-                        reason
-                    ),
-                });
-            }
-        }
-        drop(table_timer);
+        let blocks = assembler.normalize_blocks(blocks)?;
+        Ok(PageTableDraft::builder()
+            .blocks(blocks)
+            .warnings(warnings)
+            .extracted(extracted)
+            .formula_regions(formula_regions)
+            .context(context)
+            .expected_native_ids(expected_native_ids)
+            .references(references)
+            .watermarks(watermarks)
+            .inline_formulas(inline_formulas)
+            .assignment_diagnostics(assignment_diagnostics)
+            .native_text_coverage(native_text_coverage)
+            .build())
+    }
+
+    /// Finalizes ordering, formulas, and conservation only after every table attempt has completed.
+    pub(crate) fn complete(
+        &self,
+        draft: PageTableDraft,
+    ) -> Result<PageResult, PageAnalysisError> {
+        let PageTableDraft {
+            mut blocks,
+            mut warnings,
+            extracted,
+            context,
+            expected_native_ids,
+            references,
+            watermarks,
+            inline_formulas,
+            assignment_diagnostics,
+            native_text_coverage,
+            ..
+        } = draft;
         warnings.extend(
             blocks
                 .iter()

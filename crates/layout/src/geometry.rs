@@ -242,7 +242,7 @@ impl AffineTransform {
     }
 
     /// Validates all coefficients and returns the inverse transform.
-    fn inverse(self) -> Result<Self, GeometryError> {
+    pub fn inverse(self) -> Result<Self, GeometryError> {
         for (field, coefficient) in [
             ("page_to_viewport.a", self.a),
             ("page_to_viewport.b", self.b),

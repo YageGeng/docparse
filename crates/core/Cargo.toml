@@ -62,4 +62,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 futures-util.workspace = true
 
 # browser
+js-sys.workspace = true
+wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

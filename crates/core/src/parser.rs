@@ -24,6 +24,9 @@ pub enum DocParseError {
     /// A builder cannot construct a parser without validated configuration.
     #[error("DocParserBuilder requires validated configuration")]
     MissingConfiguration,
+    /// Per-call table policy or provider configuration is invalid.
+    #[error(transparent)]
+    TableStructure(#[from] crate::TableStructureError),
     /// The default or injected layout engine failed during initialization.
     #[error(transparent)]
     Layout(#[from] docparse_layout::LayoutError),
@@ -69,6 +72,17 @@ pub struct PageInput {
     pub extracted: ExtractedPage,
     pub image: Arc<PageImage>,
     pub transform: PageTransform,
+}
+
+/// Per-call table policy, optional structure provider, and serial progress observations.
+#[derive(Default, Clone, TypedBuilder)]
+pub struct ParseOptions<'a> {
+    #[builder(default)]
+    pub table: crate::TableOptions,
+    #[builder(default)]
+    pub table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+    #[builder(default)]
+    pub observer: Option<&'a dyn crate::ParseObserver>,
 }
 
 /// Public reusable parser with immutable shared configuration and engines.
@@ -171,8 +185,19 @@ impl DocParser {
         &self,
         bytes: Arc<[u8]>,
     ) -> Result<DocumentResult, DocParseError> {
+        self.parse_bytes_with_options(bytes, ParseOptions::default())
+            .await
+    }
+
+    /// Parses shared bytes with per-call table recovery and an optional external engine.
+    pub async fn parse_bytes_with_options(
+        &self,
+        bytes: Arc<[u8]>,
+        options: ParseOptions<'_>,
+    ) -> Result<DocumentResult, DocParseError> {
+        options.table.validate(options.table_engine.is_some())?;
         self.runtime()
-            .parse_document(PdfInput::Bytes(bytes), None)
+            .parse_document_with_options(PdfInput::Bytes(bytes), options)
             .await
             .map_err(DocParseError::from)
     }
@@ -183,17 +208,40 @@ impl DocParser {
         bytes: Arc<[u8]>,
         observer: &dyn crate::ParseObserver,
     ) -> Result<DocumentResult, DocParseError> {
-        self.runtime()
-            .parse_document(PdfInput::Bytes(bytes), Some(observer))
-            .await
-            .map_err(DocParseError::from)
+        self.parse_bytes_with_options(
+            bytes,
+            ParseOptions::builder().observer(Some(observer)).build(),
+        )
+        .await
     }
 
     /// Parses one already extracted and rendered page with a one-page context.
     pub async fn parse_page(
         &self,
-        mut input: PageInput,
+        input: PageInput,
     ) -> Result<PageResult, DocParseError> {
+        self.parse_page_with_options(input, ParseOptions::default())
+            .await
+    }
+
+    /// Parses one owned page using the same per-call table policy as a full document.
+    pub async fn parse_page_with_options(
+        &self,
+        mut input: PageInput,
+        options: ParseOptions<'_>,
+    ) -> Result<PageResult, DocParseError> {
+        let observer = options.observer;
+        let (collector, mut timing_receiver) =
+            docparse_layout::timing::Timings::channel();
+        let timings = if observer.is_some() {
+            collector
+        } else {
+            docparse_layout::timing::Timings::default()
+        };
+        let tables = crate::runtime::TableRuntime::shared(
+            options.table,
+            options.table_engine,
+        )?;
         let source_page_number = input.extracted.page_number;
         crate::watermark::classify(
             std::iter::once(&mut input.extracted),
@@ -232,24 +280,48 @@ impl DocParser {
                 source: Box::new(source),
             }
         })?;
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Analyzing {
+                completed: 0,
+                total: 1,
+            });
+            observer.on_page_image(input.extracted.page_number, &input.image);
+        }
         let rendered = RenderedPage::builder()
             .page_number(input.extracted.page_number)
             .image(input.image)
             .transform(input.transform)
             .build();
-        analyze_rendered_page(
-            Arc::clone(&self.config),
-            Arc::clone(&self.layout_engine),
-            self.ocr_engine.as_ref().map(Arc::clone),
-            context,
-            input.extracted,
-            rendered,
-            docparse_layout::timing::Timings::default(),
+        let result = analyze_rendered_page(
+            crate::runtime::PageAnalysisInput::builder()
+                .config(Arc::clone(&self.config))
+                .layout_engine(Arc::clone(&self.layout_engine))
+                .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
+                .context(context)
+                .extracted(input.extracted)
+                .rendered(rendered)
+                .timings(timings)
+                .tables(tables)
+                .build(),
         )
         .await
         .map_err(|source| DocParseError::ParsePage {
             source: Box::new(source),
-        })
+        });
+        if let Some(observer) = observer {
+            while let Ok(timing) = timing_receiver.try_recv() {
+                observer.on_timing(timing);
+            }
+            if result.is_ok() {
+                observer.on_progress(crate::ParseProgress::Analyzing {
+                    completed: 1,
+                    total: 1,
+                });
+                observer
+                    .on_progress(crate::ParseProgress::Complete { total: 1 });
+            }
+        }
+        result
     }
 
     /// Creates one short-lived runtime facade that clones only shared ownership handles.

@@ -12,6 +12,7 @@ ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout"
 ALLOWED.update({
     "crates/core/src/wasm_compat/pdf_input.rs",
     "crates/core/src/wasm_compat/task_set.rs",
+    "crates/core/src/wasm_compat/timeout.rs",
     "crates/core/src/wasm_compat/pdfium_worker.rs",
     "crates/layout/src/wasm_compat/session_pool.rs",
 })

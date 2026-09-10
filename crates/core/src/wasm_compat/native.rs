@@ -11,7 +11,10 @@ impl DocParser {
     ) -> Result<DocumentResult, DocParseError> {
         let path = path.as_ref().to_path_buf();
         self.runtime()
-            .parse_document(PdfInput::Path(path.clone()), None)
+            .parse_document_with_options(
+                PdfInput::Path(path.clone()),
+                crate::ParseOptions::default(),
+            )
             .await
             .map_err(DocParseError::from)
             .map_err(|source| DocParseError::ParsePath {
@@ -20,6 +23,25 @@ impl DocParser {
             })
     }
     /// Runs the async path parser from an ordinary synchronous thread.
+    /// Parses a native path with per-call table policy and an optional external structure engine.
+    pub async fn parse_path_with_options(
+        &self,
+        path: impl AsRef<Path>,
+        options: crate::ParseOptions<'_>,
+    ) -> Result<DocumentResult, DocParseError> {
+        options.table.validate(options.table_engine.is_some())?;
+        let path = path.as_ref().to_path_buf();
+        self.runtime()
+            .parse_document_with_options(PdfInput::Path(path.clone()), options)
+            .await
+            .map_err(DocParseError::from)
+            .map_err(|source| DocParseError::ParsePath {
+                path,
+                source: Box::new(source),
+            })
+    }
+
+    /// Runs path parsing without nesting a Tokio runtime.
     pub fn parse_path_blocking(
         &self,
         path: impl AsRef<Path>,

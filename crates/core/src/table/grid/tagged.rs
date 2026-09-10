@@ -1,8 +1,8 @@
 use super::*;
 
-impl TableGrid<'_> {
+impl TableGeometry<'_> {
     /// Uses tagged cell ownership only when every word resolves to one unambiguous MCID owner.
-    pub fn tagged(&self, tables: &[TaggedTable]) -> Option<RecoveredGrid> {
+    pub fn tagged(&self, tables: &[TaggedTable]) -> Option<CellGrid> {
         for table in tables {
             if table.row_count == 0
                 || table.column_count == 0
@@ -99,15 +99,17 @@ impl TableGrid<'_> {
                     }
                 }
             }
-            return Some(RecoveredGrid {
-                table: Table::builder()
+            return CellGrid::try_from(
+                Table::builder()
                     .row_count(table.row_count)
                     .column_count(table.column_count)
                     .cells(cells)
                     .source(TableStructureSource::TaggedPdf)
                     .build(),
-                assignment,
-            });
+            )
+            .ok()?
+            .bind_words(assignment, self.spans.len())
+            .ok();
         }
         None
     }

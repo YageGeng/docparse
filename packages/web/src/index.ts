@@ -1,6 +1,6 @@
 export type * from "./types.js";
-import type { DocParser, DocumentResult, ExecutionProvider, ModelSource, ParseOptions, RenderFormat, WebParserOptions } from "./types.js";
-import type { WorkerCommand, WorkerMethod, WorkerOperations, WorkerRequest, WorkerResponse, WorkerResult, WorkerSuccess } from "./protocol.js";
+import type { DocParser, DocumentResult, ExecutionProvider, ModelSource, ParseOptions, RenderFormat, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
+import type { WorkerCommand, WorkerMethod, WorkerOperations, WorkerRequest, WorkerResponse, WorkerResult, WorkerSuccess, WorkerTableReply } from "./protocol.js";
 
 /** A request failure that preserves its stable machine-readable category. */
 export class DocParseError extends Error {
@@ -15,6 +15,7 @@ class WorkerParser implements DocParser {
   private readonly worker: Worker;
   private pending?: Pending;
   private nextId = 0;
+  private readonly tableControllers = new Map<string, AbortController>();
   private provider: ExecutionProvider = "wasm";
   private state: "initializing" | "ready" | "busy" | "failed" | "closed" = "initializing";
 
@@ -32,6 +33,8 @@ class WorkerParser implements DocParser {
       // Progress and images belong to this request but do not settle it or release Busy.
       // Ignore late messages after cancellation through the same request-ID check.
       if ("event" in message) {
+        if (message.event === "table_structure_request") { this.resolveTable(pending, message.value); return; }
+        if (message.event === "table_structure_cancel") { this.tableControllers.get(message.requestId)?.abort(); this.tableControllers.delete(message.requestId); return; }
         try {
           if (message.event === "progress") pending.callbacks.onProgress?.(message.value);
           else if (message.event === "timing") pending.callbacks.onTiming?.(message.value);
@@ -43,6 +46,7 @@ class WorkerParser implements DocParser {
         this.fail(new DocParseError("WorkerStopped", "Worker replied to a different operation"), "failed");
         return;
       }
+      this.cancelTables();
       this.pending = undefined;
       pending.cleanup();
       if (message.ok) { this.state = "ready"; pending.resolve(message); }
@@ -81,8 +85,10 @@ class WorkerParser implements DocParser {
   /** Copies the exact caller view so transfer cannot detach the caller's PDF buffer. */
   async parse(pdf: Uint8Array, options: ParseOptions = {}): Promise<DocumentResult> {
     this.assertReady(options.signal);
+    if (options.onTableStructure !== undefined && typeof options.onTableStructure !== "function") throw new DocParseError("InvalidTableOptions", "onTableStructure must be a function");
+    if (options.table?.mode && options.table.mode !== "rules_only" && !options.onTableStructure) throw new DocParseError("InvalidTableOptions", "External table mode requires onTableStructure");
     const bytes = new Uint8Array(pdf);
-    return await this.request({ method: "parse", payload: { bytes, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming), pageImages: Boolean(options.onPageImage) } }, [bytes.buffer], options.signal, options);
+    return await this.request({ method: "parse", payload: { bytes, table: options.table, externalTables: Boolean(options.onTableStructure), observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming), pageImages: Boolean(options.onPageImage) } }, [bytes.buffer], options.signal, options);
   }
 
   /** Reuses Rust renderers without running PDF extraction or model inference again. */
@@ -119,9 +125,36 @@ class WorkerParser implements DocParser {
     });
   }
 
+  /** Delivers provider results only to their still-active parse and table request. */
+  private resolveTable(pending: Pending, request: TsrTableRequest): void {
+    if (this.tableControllers.has(request.request_id)) return;
+    const controller = new AbortController();
+    this.tableControllers.set(request.request_id, controller);
+    const active = () => this.pending === pending && !controller.signal.aborted;
+    const reply = (result: { ok: true; value: TsrTableInput } | { ok: false; message: string }) => {
+      if (active()) this.worker.postMessage({ id: pending.id, method: "table_structure_reply", requestId: request.request_id, ...result } satisfies WorkerTableReply);
+    };
+    void Promise.resolve().then(() => {
+      if (!active()) throw new DocParseError("Aborted", "Table request canceled");
+      const handler = pending.callbacks.onTableStructure;
+      if (!handler) throw new DocParseError("InvalidTableOptions", "External table provider is unavailable");
+      return handler(request, controller.signal);
+    }).then(value => reply({ ok: true, value })).catch(error => {
+      try { reply({ ok: false, message: error instanceof Error ? error.message : String(error) }); }
+      catch { this.fail(new DocParseError("WorkerStopped", "Table response could not be transferred"), "failed"); }
+    }).finally(() => { if (this.tableControllers.get(request.request_id) === controller) this.tableControllers.delete(request.request_id); });
+  }
+
+  /** Aborts application-owned work when its parse completes, fails, or closes. */
+  private cancelTables(): void {
+    for (const controller of this.tableControllers.values()) controller.abort();
+    this.tableControllers.clear();
+  }
+
   /** Makes terminal transitions once and prevents late messages from settling a later request. */
   private fail(error: Error, state: "failed" | "closed"): void {
     this.state = state;
+    this.cancelTables();
     this.worker.terminate();
     const pending = this.pending;
     this.pending = undefined;

@@ -1,5 +1,9 @@
 //! Shared bounded grid geometry and source ownership.
 mod aligned;
+mod cells;
+mod header;
+pub(crate) use cells::CellGrid;
+use cells::GridRow;
 mod ruled;
 mod spans;
 mod sparse;
@@ -16,12 +20,6 @@ use super::{
     TableRule, TableStructureSource, TaggedTable,
 };
 
-/// A candidate grid with exactly one proposed cell for every source slice.
-pub(super) struct RecoveredGrid {
-    pub table: Table,
-    pub assignment: Vec<usize>,
-}
-
 /// One physical source row; logical rows may contain several such baselines.
 struct PhysicalRow {
     baseline: f64,
@@ -30,14 +28,14 @@ struct PhysicalRow {
 
 /// Page-local geometry and row evidence used by all reconstruction strategies.
 #[derive(TypedBuilder)]
-pub(super) struct TableGrid<'a> {
+pub(super) struct TableGeometry<'a> {
     bounds: Bbox,
     spans: &'a [LocatedSpan<'a>],
     rows: Vec<PhysicalRow>,
     font_size: f64,
 }
 
-impl<'a> TableGrid<'a> {
+impl<'a> TableGeometry<'a> {
     /// Combines already established line baselines across columns without losing word geometry.
     #[allow(
         clippy::indexing_slicing,
@@ -176,6 +174,18 @@ impl<'a> TableGrid<'a> {
         covered / (to - from).max(f64::EPSILON)
     }
 
+    /// Detects a column divider using union coverage so split strokes retain their meaning.
+    fn has_column_divider(
+        &self,
+        rules: &[TableRule],
+        top: f64,
+        bottom: f64,
+    ) -> bool {
+        rules.iter().any(|rule| matches!(*rule, TableRule::Vertical{x,..}
+            if x>self.bounds.left+self.rule_tolerance() && x<self.bounds.right-self.rule_tolerance()
+                && self.coverage(rules,false,x,top,bottom)>=0.7))
+    }
+
     /// Recognizes missing-value markers even when PDF words split their punctuation or spacing.
     fn is_missing_value(&self, words: &[usize]) -> bool {
         let mut words: Vec<_> = words
@@ -204,7 +214,15 @@ impl<'a> TableGrid<'a> {
         clippy::indexing_slicing,
         reason = "assignments contain only indices returned by cells.iter().enumerate()"
     )]
-    fn assign(&self, mut table: Table) -> Option<RecoveredGrid> {
+    fn assign(&self, mut grid: CellGrid) -> Option<CellGrid> {
+        let table = grid.table();
+        let assignment = self.assign_words(table)?;
+        self.mark_local_headers(&mut grid, &assignment)?;
+        grid.bind_words(assignment, self.spans.len()).ok()
+    }
+
+    /// Finds exactly one geometric owner for each word without inferring semantic headers.
+    pub(super) fn assign_words(&self, table: &Table) -> Option<Vec<usize>> {
         let mut assignment = Vec::with_capacity(self.spans.len());
         for span in self.spans {
             let b = span.span.bbox;
@@ -235,13 +253,26 @@ impl<'a> TableGrid<'a> {
             }
             assignment.push(*owner.first()?);
         }
+        Some(assignment)
+    }
+
+    /// Applies local bold-header inference only to candidates produced by local strategies.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "word/cell indices come from validated assignments"
+    )]
+    fn mark_local_headers(
+        &self,
+        grid: &mut CellGrid,
+        assignment: &[usize],
+    ) -> Option<()> {
         // Consecutive bold textual rows may form a multi-level header. Numeric rows
         // cannot become headers merely because Markdown requires a first header row.
-        for row in 0..table.row_count {
+        for row in 0..grid.table().row_count {
             let header_words: Vec<_> = assignment
                 .iter()
                 .enumerate()
-                .filter(|(_, cell)| table.cells[**cell].row == row)
+                .filter(|(_, cell)| grid.table().cells[**cell].row == row)
                 .map(|(index, _)| index)
                 .collect();
             let header = !header_words.is_empty()
@@ -258,10 +289,8 @@ impl<'a> TableGrid<'a> {
             if !header {
                 break;
             }
-            for cell in table.cells.iter_mut().filter(|cell| cell.row == row) {
-                cell.is_header = true;
-            }
+            grid.set_header(row).ok()?;
         }
-        Some(RecoveredGrid { table, assignment })
+        Some(())
     }
 }

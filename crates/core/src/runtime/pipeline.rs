@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use super::TableRuntime;
 use crate::wasm_compat::{TaskError, TaskSet};
 use docparse_config::{OcrPolicy, ValidatedConfig};
 use docparse_layout::timing::{TimingStage, Timings};
 use docparse_layout::{LayoutEngine, LayoutRequest};
 use tokio::sync::mpsc;
+use typed_builder::TypedBuilder;
 
 use super::{
     PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage, RenderedPage,
@@ -23,6 +25,9 @@ pub(crate) enum ParseRuntimeError {
     /// The serialized PDFium actor failed at document or page scope.
     #[error(transparent)]
     Pdfium(#[from] PdfiumRuntimeError),
+    /// External table configuration is checked before the document opens.
+    #[error(transparent)]
+    Table(#[from] crate::TableStructureError),
     /// Frozen document statistics could not be built from pre-scan facts.
     #[error(transparent)]
     Context(#[from] crate::ContextError),
@@ -65,12 +70,14 @@ impl ParseRuntime {
         }
     }
 
-    /// Parses one owned PDF source through pre-scan, bounded analysis, and linking.
-    pub(crate) async fn parse_document(
+    /// Keeps external table state confined to one document invocation.
+    pub(crate) async fn parse_document_with_options(
         &self,
         input: PdfInput,
-        observer: Option<&dyn crate::ParseObserver>,
+        options: crate::ParseOptions<'_>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
+        let observer = options.observer;
+        let tables = TableRuntime::shared(options.table, options.table_engine)?;
         let (collector, mut timing_receiver) = Timings::channel();
         let timings = if observer.is_some() {
             collector
@@ -290,6 +297,7 @@ impl ParseRuntime {
                             let config = Arc::clone(&self.config);
                             let layout_engine = Arc::clone(&self.layout_engine);
                             let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
+                            let tables = Arc::clone(&tables);
                             let context = Arc::clone(&context);
                             match result {
                                 Ok(rendered) => {
@@ -299,15 +307,9 @@ impl ParseRuntime {
                                         observer.on_page_image(page_number, rendered.image.as_ref());
                                     }
                                     page_tasks.spawn(async move {
-                                        analyze_rendered_page(
-                                            config,
-                                            layout_engine,
-                                            ocr_engine,
-                                            context,
-                                            extracted,
-                                            rendered,
-                                            page_timings,
-                                        )
+                                        analyze_rendered_page(PageAnalysisInput::builder()
+                                            .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine)
+                                            .context(context).extracted(extracted).rendered(rendered).timings(page_timings).tables(tables).build())
                                         .await
                                     });
                                 }
@@ -473,15 +475,33 @@ impl ParseRuntime {
 }
 
 /// Runs layout and optional OCR against one rendered page before pure fusion.
-pub(crate) async fn analyze_rendered_page(
+#[derive(TypedBuilder)]
+pub(crate) struct PageAnalysisInput {
     config: Arc<ValidatedConfig>,
     layout_engine: Arc<dyn LayoutEngine>,
+    #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
     context: Arc<DocumentContext>,
     extracted: ExtractedPage,
     rendered: RenderedPage,
     timings: Timings,
+    tables: Arc<TableRuntime>,
+}
+
+/// Runs layout, OCR, table resolution, and final page validation over owned page inputs.
+pub(crate) async fn analyze_rendered_page(
+    input: PageAnalysisInput,
 ) -> Result<PageResult, ParseRuntimeError> {
+    let PageAnalysisInput {
+        config,
+        layout_engine,
+        ocr_engine,
+        context,
+        extracted,
+        rendered,
+        timings,
+        tables,
+    } = input;
     let page_number = extracted.page_number;
     if rendered.page_number != page_number {
         return Err(ParseRuntimeError::RenderedPageMismatch {
@@ -536,7 +556,7 @@ pub(crate) async fn analyze_rendered_page(
         let request = OcrRequest::builder()
             .page_number(page_number)
             .image(Arc::clone(&rendered.image))
-            .transform(rendered.transform)
+            .transform(rendered.transform.clone())
             .dpi(config.render().dpi)
             .missing_regions(draft.missing_regions.clone())
             .native_text_coverage(draft.native_text_coverage)
@@ -550,7 +570,19 @@ pub(crate) async fn analyze_rendered_page(
         OcrCompletion::Unavailable
     };
     let finishing = timings.start(TimingStage::TextFinish);
-    let mut page = analyzer.finish(draft, completion)?;
+    let mut table_draft = analyzer.compose(draft, completion)?;
+    drop(finishing);
+    tables
+        .resolve(
+            &mut table_draft,
+            &rendered.image,
+            &rendered.transform,
+            config.fusion(),
+            &timings,
+        )
+        .await;
+    let finishing = timings.start(TimingStage::TextFinish);
+    let mut page = analyzer.complete(table_draft)?;
     drop(finishing);
     if let Some(warning) = layout_warning {
         page.warnings.push(warning);
@@ -690,7 +722,10 @@ mod tests {
             ParseRuntime::new(config(), Arc::new(EmptyLayoutEngine), None);
 
         let result = runtime
-            .parse_document(PdfInput::Path(fixture_path()), None)
+            .parse_document_with_options(
+                PdfInput::Path(fixture_path()),
+                crate::ParseOptions::default(),
+            )
             .await
             .expect("fixture parse must succeed");
 
@@ -740,7 +775,10 @@ mod tests {
             .join("tests/fixtures/pdf/multipage_layout.pdf");
 
         let _error = runtime
-            .parse_document(PdfInput::Path(path), None)
+            .parse_document_with_options(
+                PdfInput::Path(path),
+                crate::ParseOptions::default(),
+            )
             .await
             .expect_err("the injected layout error must fail parsing");
 

@@ -1,20 +1,53 @@
 use super::*;
 
-impl TableGrid<'_> {
-    /// Recovers sparse ruled tables from persistent gutters and a column of independent row labels.
-    #[allow(
-        clippy::indexing_slicing,
-        reason = "source indices, column cuts, and bounded row intervals are established locally"
-    )]
-    pub fn sparse(&self, rules: &[TableRule]) -> Option<RecoveredGrid> {
-        let rules = self.local_rules(rules);
-        let header_end = self
+/// A bounded sparse-column plan shared by the two row recovery modes.
+#[derive(TypedBuilder)]
+struct SparseLayout<'a, 's> {
+    geometry: &'a TableGeometry<'s>,
+    rules: Vec<TableRule>,
+    header_end: f64,
+    phrases: Vec<Bbox>,
+    gutters: BTreeMap<usize, (f64, f64)>,
+    cuts: Vec<f64>,
+    body: Vec<usize>,
+}
+
+/// Rows are established by an independent anchor column or complete ruled bands.
+enum SparseRows {
+    Anchored {
+        columns: Vec<Vec<PhysicalRow>>,
+        anchor: usize,
+        top_aligned: bool,
+    },
+    RuledBands,
+}
+
+impl TableGeometry<'_> {
+    /// Recovers sparse tables by composing independent column and row plans.
+    pub fn sparse(&self, rules: &[TableRule]) -> Option<CellGrid> {
+        SparseLayout::infer_columns(self, rules)?.build_grid()
+    }
+}
+
+#[allow(
+    clippy::indexing_slicing,
+    reason = "axes and source indices are bounded by column and row plans"
+)]
+impl<'a, 's> SparseLayout<'a, 's> {
+    /// Intersects body gutters with header whitespace to establish supported columns.
+    fn infer_columns(
+        geometry: &'a TableGeometry<'s>,
+        rules: &[TableRule],
+    ) -> Option<Self> {
+        let rules = geometry.local_rules(rules);
+        let header_end = geometry
             .snapped(
                 rules
                     .iter()
                     .filter_map(|rule| match *rule {
                         TableRule::Horizontal { y, left, right }
-                            if right - left >= self.bounds.width() * 0.7 =>
+                            if right - left
+                                >= geometry.bounds.width() * 0.7 =>
                         {
                             Some(y)
                         }
@@ -24,39 +57,47 @@ impl TableGrid<'_> {
             )
             .into_iter()
             .find(|&y| {
-                self.spans.iter().any(|span| span.span.bbox.center().y < y)
-                    && self
+                geometry
+                    .spans
+                    .iter()
+                    .any(|span| span.span.bbox.center().y < y)
+                    && geometry
                         .spans
                         .iter()
                         .any(|span| span.span.bbox.center().y > y)
             })?;
-        let (header, body): (Vec<_>, Vec<_>) = (0..self.spans.len())
-            .partition(|&i| self.spans[i].span.bbox.center().y < header_end);
+        let (header, body): (Vec<_>, Vec<_>) = (0..geometry.spans.len())
+            .partition(|&i| {
+                geometry.spans[i].span.bbox.center().y < header_end
+            });
         let first = header
             .iter()
-            .map(|&i| self.spans[i].baseline)
+            .map(|&i| geometry.spans[i].baseline)
             .min_by(f64::total_cmp)?;
         let last = header
             .iter()
-            .map(|&i| self.spans[i].baseline)
+            .map(|&i| geometry.spans[i].baseline)
             .max_by(f64::total_cmp)?;
         // Wrapped labels may share one header band. Internal header separators
         // identify distinct levels, which remain owned by the multi-level strategy.
         if body.is_empty()
-            || (last - first > self.font_size * 0.6 && rules.iter().any(|rule| {
+            || (last - first > geometry.font_size * 0.6 && rules.iter().any(|rule| {
                 matches!(*rule, TableRule::Horizontal { y, left, right }
-                    if y > first && y < last && right - left > self.font_size * 2.0)
+                    if y > first && y < last && right - left > geometry.font_size * 2.0)
             }))
         {
             return None;
         }
-        let mut header_boxes: Vec<_> =
-            header.iter().map(|&i| self.spans[i].span.bbox).collect();
+        let mut header_boxes: Vec<_> = header
+            .iter()
+            .map(|&i| geometry.spans[i].span.bbox)
+            .collect();
         header_boxes.sort_by(|a, b| a.left.total_cmp(&b.left));
         let mut phrases: Vec<Bbox> = Vec::new();
         for bbox in header_boxes {
             if let Some(previous) = phrases.last_mut()
-                && bbox.left - previous.right < (self.font_size * 0.6).max(3.0)
+                && bbox.left - previous.right
+                    < (geometry.font_size * 0.6).max(3.0)
             {
                 previous.right = previous.right.max(bbox.right);
                 previous.top = previous.top.min(bbox.top);
@@ -74,7 +115,7 @@ impl TableGrid<'_> {
         let mut intervals: Vec<_> = body
             .iter()
             .map(|&i| {
-                let bbox = self.spans[i].span.bbox;
+                let bbox = geometry.spans[i].span.bbox;
                 (
                     bbox.left + bbox.width() * 0.1,
                     bbox.right - bbox.width() * 0.1,
@@ -89,12 +130,12 @@ impl TableGrid<'_> {
                 // A wide body gutter can partly overlap a longer heading. Keep
                 // the shared whitespace instead of rejecting its original midpoint.
                 let from = end.max(if gap == 0 {
-                    self.bounds.left
+                    geometry.bounds.left
                 } else {
                     phrases[gap - 1].right
                 });
                 let to = left.min(if gap == phrases.len() {
-                    self.bounds.right
+                    geometry.bounds.right
                 } else {
                     phrases[gap].left
                 });
@@ -102,7 +143,7 @@ impl TableGrid<'_> {
                     continue;
                 }
                 let x = (from + to) * 0.5;
-                let support = self
+                let support = geometry
                     .rows
                     .iter()
                     .filter(|row| {
@@ -111,12 +152,12 @@ impl TableGrid<'_> {
                         }
                         let mut edge = None;
                         for &i in &row.spans {
-                            let b = self.spans[i].span.bbox;
+                            let b = geometry.spans[i].span.bbox;
                             if edge.is_some_and(|edge| {
                                 edge < x
                                     && b.left > x
                                     && b.left - edge
-                                        >= (self.font_size * 0.6).max(3.0)
+                                        >= (geometry.font_size * 0.6).max(3.0)
                             }) {
                                 return true;
                             }
@@ -141,37 +182,55 @@ impl TableGrid<'_> {
         if !(1..phrases.len()).all(|gap| gutters.contains_key(&gap)) {
             return None;
         }
-        let mut cuts = vec![self.bounds.left];
+        let mut cuts = vec![geometry.bounds.left];
         cuts.extend(gutters.values().map(|(left, right)| (left + right) * 0.5));
-        cuts.push(self.bounds.right);
+        cuts.push(geometry.bounds.right);
         let columns = cuts.len() - 1;
         if !(2..=MAX_TABLE_COLUMNS).contains(&columns) {
             return None;
         }
+        Some(
+            Self::builder()
+                .geometry(geometry)
+                .rules(rules)
+                .header_end(header_end)
+                .phrases(phrases)
+                .gutters(gutters)
+                .cuts(cuts)
+                .body(body)
+                .build(),
+        )
+    }
+
+    /// Selects a row strategy without changing the inferred columns.
+    fn infer_rows(&self) -> Option<SparseRows> {
+        let geometry = self.geometry;
+        let cuts = &self.cuts;
+        let columns = cuts.len().checked_sub(1)?;
         let mut column_rows: Vec<Vec<PhysicalRow>> =
             (0..columns).map(|_| Vec::new()).collect();
-        let mut body = body;
+        let mut body = self.body.clone();
         body.sort_by(|&a, &b| {
-            self.spans[a]
+            geometry.spans[a]
                 .baseline
-                .total_cmp(&self.spans[b].baseline)
+                .total_cmp(&geometry.spans[b].baseline)
                 .then_with(|| {
-                    self.spans[a]
+                    geometry.spans[a]
                         .span
                         .bbox
                         .left
-                        .total_cmp(&self.spans[b].span.bbox.left)
+                        .total_cmp(&geometry.spans[b].span.bbox.left)
                 })
         });
         for &index in &body {
-            let span = &self.spans[index];
+            let span = &geometry.spans[index];
             let x = span.span.bbox.center().x;
             let column = cuts
                 .windows(2)
                 .position(|pair| x >= pair[0] && x <= pair[1])?;
             let rows = &mut column_rows[column];
             if let Some(row) = rows.last_mut()
-                && span.baseline - row.baseline <= self.font_size * 0.6
+                && span.baseline - row.baseline <= geometry.font_size * 0.6
             {
                 row.spans.push(index);
             } else {
@@ -181,7 +240,7 @@ impl TableGrid<'_> {
                 });
             }
         }
-        let Some((anchor_column, top_aligned)) = column_rows
+        let anchor = column_rows
             .iter()
             .enumerate()
             .filter_map(|(column, rows)| {
@@ -192,9 +251,12 @@ impl TableGrid<'_> {
                     .iter()
                     .filter(|row| {
                         row.spans.iter().any(|&i| {
-                            self.spans[i].text().chars().any(char::is_numeric)
+                            geometry.spans[i]
+                                .text()
+                                .chars()
+                                .any(char::is_numeric)
                         }) && !row.spans.iter().any(|&i| {
-                            self.spans[i]
+                            geometry.spans[i]
                                 .text()
                                 .chars()
                                 .any(char::is_alphabetic)
@@ -207,7 +269,7 @@ impl TableGrid<'_> {
                     .windows(2)
                     .filter(|pair| {
                         pair[1].baseline - pair[0].baseline
-                            < self.font_size * 1.4
+                            < geometry.font_size * 1.4
                     })
                     .count();
                 (numeric || wraps * 5 < rows.len()).then_some((column, numeric))
@@ -218,69 +280,107 @@ impl TableGrid<'_> {
                     numeric,
                     std::cmp::Reverse(column),
                 )
-            })
-        else {
-            // All columns can contain wrapped prose. Complete horizontal rules
-            // still establish rows without a separate one-line label column.
-            // Reuse ruled topology with only the supported vertical gutters;
-            // each heading must describe exactly one column in this fallback.
-            if phrases.len() != columns {
-                return None;
-            }
-            let mut grid_rules: Vec<_> = rules.iter().copied().filter(|rule| {
-                    matches!(*rule, TableRule::Horizontal { y, .. }
-                        if self.coverage(&rules, true, y, cuts[0], cuts[columns]) >= 0.9)
-                }).collect();
-            let top = grid_rules
-                .iter()
-                .filter_map(|rule| match *rule {
-                    TableRule::Horizontal { y, .. } if y < header_end => {
-                        Some(y)
-                    }
-                    _ => None,
-                })
-                .min_by(f64::total_cmp)
-                .unwrap_or(self.bounds.top);
-            let bottom = grid_rules
-                .iter()
-                .filter_map(|rule| match *rule {
-                    TableRule::Horizontal { y, .. } => Some(y),
-                    _ => None,
-                })
-                .max_by(f64::total_cmp)?;
-            if body.iter().any(|&i| {
-                self.spans[i].span.bbox.bottom > bottom + self.rule_tolerance()
-            }) {
-                return None;
-            }
-            grid_rules.extend(cuts.iter().map(|&x| TableRule::Vertical {
-                x,
-                top,
-                bottom,
-            }));
-            let mut grid = self.ruled(&grid_rules)?;
-            for cell in grid.table.cells.iter_mut().filter(|cell| cell.row == 0)
-            {
-                cell.is_header = true;
-            }
-            tracing::debug!(
-                "recovered wrapped prose table at {:?} from complete row rules and {} supported columns",
-                self.bounds,
-                columns
-            );
-            return Some(grid);
-        };
-        let anchors = &column_rows[anchor_column];
-        let row_count = anchors.len() + 1;
-        if row_count > MAX_TABLE_ROWS || row_count * columns > MAX_TABLE_CELLS {
+            });
+        Some(match anchor {
+            Some((anchor, top_aligned)) => SparseRows::Anchored {
+                columns: column_rows,
+                anchor,
+                top_aligned,
+            },
+            None => SparseRows::RuledBands,
+        })
+    }
+
+    /// Dispatches the row plan into the shared candidate-grid representation.
+    fn build_grid(&self) -> Option<CellGrid> {
+        match self.infer_rows()? {
+            SparseRows::RuledBands => self.ruled_bands(),
+            SparseRows::Anchored {
+                columns,
+                anchor,
+                top_aligned,
+            } => self.anchored_rows(&columns, anchor, top_aligned),
+        }
+    }
+
+    /// Uses complete horizontal bands for prose tables without independent row anchors.
+    fn ruled_bands(&self) -> Option<CellGrid> {
+        let geometry = self.geometry;
+        let rules = &self.rules;
+        let cuts = &self.cuts;
+        let phrases = &self.phrases;
+        let body = &self.body;
+        let header_end = self.header_end;
+        let columns = cuts.len().checked_sub(1)?;
+        // All columns can contain wrapped prose. Complete horizontal rules
+        // still establish rows without a separate one-line label column.
+        // Reuse ruled topology with only the supported vertical gutters;
+        // each heading must describe exactly one column in this fallback.
+        if phrases.len() != columns {
             return None;
         }
+        let mut grid_rules: Vec<_> = rules.iter().copied().filter(|rule| {
+                    matches!(*rule, TableRule::Horizontal { y, .. }
+                        if geometry.coverage(rules, true, y, cuts[0], cuts[columns]) >= 0.9)
+                }).collect();
+        let top = grid_rules
+            .iter()
+            .filter_map(|rule| match *rule {
+                TableRule::Horizontal { y, .. } if y < header_end => Some(y),
+                _ => None,
+            })
+            .min_by(f64::total_cmp)
+            .unwrap_or(geometry.bounds.top);
+        let bottom = grid_rules
+            .iter()
+            .filter_map(|rule| match *rule {
+                TableRule::Horizontal { y, .. } => Some(y),
+                _ => None,
+            })
+            .max_by(f64::total_cmp)?;
+        if body.iter().any(|&i| {
+            geometry.spans[i].span.bbox.bottom
+                > bottom + geometry.rule_tolerance()
+        }) {
+            return None;
+        }
+        grid_rules.extend(cuts.iter().map(|&x| TableRule::Vertical {
+            x,
+            top,
+            bottom,
+        }));
+        let grid = geometry.ruled(&grid_rules)?;
+        // The ruled path already binds words; header inference is supplied before binding below.
+        let (table, assignment) = grid.into_parts().ok()?;
+        let mut grid = CellGrid::try_from(table).ok()?;
+        grid.set_header(0).ok()?;
+        let grid = grid.bind_words(assignment, geometry.spans.len()).ok()?;
+        tracing::debug!(
+            "recovered wrapped prose table at {:?} from complete row rules and {} supported columns",
+            geometry.bounds,
+            columns
+        );
+        Some(grid)
+    }
+
+    /// Derives logical row edges from dense columns and real separators.
+    fn row_edges(
+        &self,
+        column_rows: &[Vec<PhysicalRow>],
+        anchor_column: usize,
+        top_aligned: bool,
+    ) -> Option<Vec<f64>> {
+        let geometry = self.geometry;
+        let rules = &self.rules;
+        let cuts = &self.cuts;
+        let header_end = self.header_end;
+        let anchors = &column_rows[anchor_column];
         let anchor_for = |index: usize| {
-            let baseline = self.spans[index].baseline;
+            let baseline = geometry.spans[index].baseline;
             if top_aligned {
                 anchors
                     .partition_point(|row| {
-                        row.baseline <= baseline + self.font_size * 0.6
+                        row.baseline <= baseline + geometry.font_size * 0.6
                     })
                     .saturating_sub(1)
             } else {
@@ -302,13 +402,13 @@ impl TableGrid<'_> {
             .filter(|rows| rows.len() >= anchors.len())
         {
             for &index in rows.iter().flat_map(|row| &row.spans) {
-                let bbox = self.spans[index].span.bbox;
+                let bbox = geometry.spans[index].span.bbox;
                 let extent = &mut extents[anchor_for(index)];
                 extent.0 = extent.0.min(bbox.top);
                 extent.1 = extent.1.max(bbox.bottom);
             }
         }
-        let mut ys = vec![self.bounds.top, header_end];
+        let mut ys = vec![geometry.bounds.top, header_end];
         for (index, pair) in anchors.windows(2).enumerate() {
             let midpoint = (extents[index].1 + extents[index + 1].0) * 0.5;
             let boundary = rules
@@ -317,8 +417,8 @@ impl TableGrid<'_> {
                     TableRule::Horizontal { y, .. }
                         if y > pair[0].baseline
                             && y < pair[1].baseline
-                            && self.coverage(
-                                &rules,
+                            && geometry.coverage(
+                                rules,
                                 true,
                                 y,
                                 cuts[anchor_column],
@@ -335,7 +435,30 @@ impl TableGrid<'_> {
                 .unwrap_or(midpoint);
             ys.push(boundary);
         }
-        ys.push(self.bounds.bottom);
+        ys.push(geometry.bounds.bottom);
+        Some(ys)
+    }
+
+    /// Builds sparse rowspans from the column plan and chosen row anchors.
+    fn anchored_rows(
+        &self,
+        column_rows: &[Vec<PhysicalRow>],
+        anchor_column: usize,
+        top_aligned: bool,
+    ) -> Option<CellGrid> {
+        let geometry = self.geometry;
+        let rules = &self.rules;
+        let cuts = &self.cuts;
+        let phrases = &self.phrases;
+        let gutters = &self.gutters;
+        let header_end = self.header_end;
+        let columns = cuts.len().checked_sub(1)?;
+        let anchors = &column_rows[anchor_column];
+        let row_count = anchors.len() + 1;
+        if row_count > MAX_TABLE_ROWS || row_count * columns > MAX_TABLE_CELLS {
+            return None;
+        }
+        let ys = self.row_edges(column_rows, anchor_column, top_aligned)?;
         let mut cells = Vec::new();
         let mut first_column = 0;
         for heading in 0..phrases.len() {
@@ -366,13 +489,13 @@ impl TableGrid<'_> {
         for (column, rows) in column_rows.iter().enumerate() {
             let mut merged = BTreeMap::new();
             if rows.len() < anchors.len() {
-                let mut bands = vec![header_end, self.bounds.bottom];
+                let mut bands = vec![header_end, geometry.bounds.bottom];
                 bands.extend(rules.iter().filter_map(|rule| match *rule {
                     TableRule::Horizontal { y, .. }
                         if y > header_end
-                            && y < self.bounds.bottom
-                            && self.coverage(
-                                &rules,
+                            && y < geometry.bounds.bottom
+                            && geometry.coverage(
+                                rules,
                                 true,
                                 y,
                                 cuts[column],
@@ -383,7 +506,7 @@ impl TableGrid<'_> {
                     }
                     _ => None,
                 }));
-                for band in self.snapped(bands).windows(2) {
+                for band in geometry.snapped(bands).windows(2) {
                     let start =
                         anchors.partition_point(|row| row.baseline < band[0]);
                     let stop =
@@ -400,7 +523,7 @@ impl TableGrid<'_> {
                         && !labels.is_empty()
                         && labels.windows(2).all(|pair| {
                             pair[1].baseline - pair[0].baseline
-                                <= self.font_size * 1.4
+                                <= geometry.font_size * 1.4
                         })
                     {
                         merged.insert(start + 1, stop - start);
@@ -432,18 +555,21 @@ impl TableGrid<'_> {
         cells.sort_by_key(|cell| (cell.row, cell.column));
         tracing::debug!(
             "recovering sparse table at {:?} with {} rows, {} columns and anchor column {}",
-            self.bounds,
+            geometry.bounds,
             row_count,
             columns,
             anchor_column
         );
-        self.assign(
-            Table::builder()
-                .row_count(row_count)
-                .column_count(columns)
-                .cells(cells)
-                .source(TableStructureSource::Ruled)
-                .build(),
+        geometry.assign(
+            CellGrid::try_from(
+                Table::builder()
+                    .row_count(row_count)
+                    .column_count(columns)
+                    .cells(cells)
+                    .source(TableStructureSource::Ruled)
+                    .build(),
+            )
+            .ok()?,
         )
     }
 }

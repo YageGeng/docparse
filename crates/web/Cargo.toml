@@ -18,6 +18,9 @@ docparse-layout = { workspace = true, features = ["wasm"] }
 # config and serialization
 serde.workspace = true
 
+# builder
+typed-builder.workspace = true
+
 # inference and image
 ort = { workspace = true, features = ["api-17", "alternative-backend"] }
 

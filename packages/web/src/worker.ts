@@ -1,6 +1,6 @@
 import init, { default_config, WebParser } from "./pkg/docparse_web.js";
-import type { DocumentResult, ParserProgress, ParserTiming, WebParseConfig } from "./types.js";
-import type { WorkerRequest, WorkerResponse, WorkerSuccess } from "./protocol.js";
+import type { DocumentResult, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
+import type { WorkerInbound, WorkerResponse, WorkerSuccess, TsrCropPixels } from "./protocol.js";
 import { artifact } from "./artifacts.js";
 
 const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
@@ -42,7 +42,44 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
   return raw;
 }
 
-scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
+/** Pending table promises are correlated separately from the enclosing parse operation. */
+const tableRequests = new Map<string, { parseId: number; resolve: (value: TsrTableInput) => void; reject: (error: Error) => void }>();
+
+/** Releases a single in-flight provider and asks the calling thread to abort its application work. */
+function cancelTable(parseId: number, requestId: string): void {
+  const pending = tableRequests.get(requestId);
+  if (!pending || pending.parseId !== parseId) return;
+  tableRequests.delete(requestId);
+  pending.reject(new Error("External table request canceled"));
+  scope.postMessage({ id: parseId, event: "table_structure_cancel", requestId } satisfies WorkerResponse);
+}
+
+/** Encodes an owned crop before exposing it to the caller, preserving the exact pixel coordinate contract. */
+function requestTable(parseId: number, crop: TsrCropPixels): Promise<TsrTableInput> {
+  return new Promise((resolve, reject) => {
+    if (tableRequests.has(crop.request_id)) { reject(new Error("Duplicate table request ID")); return; }
+    tableRequests.set(crop.request_id, { parseId, resolve, reject });
+    void pageImage(crop.page_number, crop.width, crop.height, crop.pixels).then(({ blob }) => {
+      if (!tableRequests.has(crop.request_id)) return;
+      const { pixels: _pixels, width, height, ...metadata } = crop;
+      scope.postMessage({ id: parseId, event: "table_structure_request", value: { ...metadata, image: { width, height, blob } } } satisfies WorkerResponse);
+    }).catch(error => {
+      const pending = tableRequests.get(crop.request_id);
+      if (pending?.parseId === parseId) { tableRequests.delete(crop.request_id); pending.reject(error instanceof Error ? error : new Error(String(error))); }
+    });
+  });
+}
+
+scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => {
+  // Responses must be processed while Rust awaits the external provider; they are not new operations.
+  if (event.data.method === "table_structure_reply") {
+    const reply = event.data;
+    const pending = tableRequests.get(reply.requestId);
+    if (!pending || pending.parseId !== reply.id) return;
+    tableRequests.delete(reply.requestId);
+    if (reply.ok) pending.resolve(reply.value); else pending.reject(new Error(reply.message));
+    return;
+  }
   const { id, method, payload } = event.data;
   if (executing) { scope.postMessage({ id, ok: false, code: "ParserBusy", message: "Worker is busy" } satisfies WorkerResponse); return; }
   executing = true;
@@ -115,7 +152,11 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
       } : undefined;
       // Rust validates the canonical result before its WASM ABI serializes it.
       let document: DocumentResult;
-      try { document = await parser.parse_with_observer(payload.bytes, onProgress, onImage, timing); }
+      try { document = await parser.parse_with_options(payload.bytes, payload.table ?? {}, {
+        progress: onProgress, page_image: onImage, timing,
+        table_request: payload.externalTables ? (crop: TsrCropPixels) => requestTable(id, crop) : undefined,
+        table_cancel: payload.externalTables ? (requestId: string) => cancelTable(id, requestId) : undefined,
+      }); }
       finally { await Promise.all(images); }
       if (imageFailure) throw Object.assign(new Error(`Page preview failed: ${String(imageFailure)}`), { code: "ImageEncodingFailed" });
       if (completion) progress?.(completion);
@@ -130,5 +171,5 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => 
     timing?.({ stage: "worker_total", page_number: null, duration_ms: performance.now() - requestStarted });
     const failure = error as { code?: string; message?: string };
     scope.postMessage({ id, ok: false, code: failure?.code ?? "OperationFailed", message: failure?.message ?? String(error), stack: error instanceof Error ? error.stack : undefined } satisfies WorkerResponse);
-  } finally { executing = false; }
+  } finally { for (const [requestId, pending] of tableRequests) if (pending.parseId === id) cancelTable(id, requestId); executing = false; }
 });
