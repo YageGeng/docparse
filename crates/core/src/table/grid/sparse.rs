@@ -40,9 +40,14 @@ impl TableGrid<'_> {
             .iter()
             .map(|&i| self.spans[i].baseline)
             .max_by(f64::total_cmp)?;
-        // Multi-level headings already have a separate reconstruction path. Here a
-        // single heading band constrains which persistent spaces can really be columns.
-        if last - first > self.font_size * 0.6 || body.is_empty() {
+        // Wrapped labels may share one header band. Internal header separators
+        // identify distinct levels, which remain owned by the multi-level strategy.
+        if body.is_empty()
+            || (last - first > self.font_size * 0.6 && rules.iter().any(|rule| {
+                matches!(*rule, TableRule::Horizontal { y, left, right }
+                    if y > first && y < last && right - left > self.font_size * 2.0)
+            }))
+        {
             return None;
         }
         let mut header_boxes: Vec<_> =
@@ -80,12 +85,23 @@ impl TableGrid<'_> {
         let mut gutters: BTreeMap<usize, (f64, f64)> = BTreeMap::new();
         let mut end = intervals.first()?.1;
         for (left, right) in intervals.into_iter().skip(1) {
-            let x = (end + left) * 0.5;
-            if left - end >= 3.0
-                && !phrases
-                    .iter()
-                    .any(|phrase| x > phrase.left && x < phrase.right)
-            {
+            for gap in 0..=phrases.len() {
+                // A wide body gutter can partly overlap a longer heading. Keep
+                // the shared whitespace instead of rejecting its original midpoint.
+                let from = end.max(if gap == 0 {
+                    self.bounds.left
+                } else {
+                    phrases[gap - 1].right
+                });
+                let to = left.min(if gap == phrases.len() {
+                    self.bounds.right
+                } else {
+                    phrases[gap].left
+                });
+                if left - end < 3.0 || to - from <= 0.1 {
+                    continue;
+                }
+                let x = (from + to) * 0.5;
                 let support = self
                     .rows
                     .iter()
@@ -112,11 +128,9 @@ impl TableGrid<'_> {
                     })
                     .count();
                 if support >= 2 {
-                    let gap =
-                        phrases.partition_point(|phrase| phrase.right < x);
-                    let previous = gutters.entry(gap).or_insert((end, left));
-                    if left - end > previous.1 - previous.0 {
-                        *previous = (end, left);
+                    let previous = gutters.entry(gap).or_insert((from, to));
+                    if to - from > previous.1 - previous.0 {
+                        *previous = (from, to);
                     }
                 }
             }
@@ -167,7 +181,7 @@ impl TableGrid<'_> {
                 });
             }
         }
-        let (anchor_column, top_aligned) = column_rows
+        let Some((anchor_column, top_aligned)) = column_rows
             .iter()
             .enumerate()
             .filter_map(|(column, rows)| {
@@ -204,7 +218,58 @@ impl TableGrid<'_> {
                     numeric,
                     std::cmp::Reverse(column),
                 )
-            })?;
+            })
+        else {
+            // All columns can contain wrapped prose. Complete horizontal rules
+            // still establish rows without a separate one-line label column.
+            // Reuse ruled topology with only the supported vertical gutters;
+            // each heading must describe exactly one column in this fallback.
+            if phrases.len() != columns {
+                return None;
+            }
+            let mut grid_rules: Vec<_> = rules.iter().copied().filter(|rule| {
+                    matches!(*rule, TableRule::Horizontal { y, .. }
+                        if self.coverage(&rules, true, y, cuts[0], cuts[columns]) >= 0.9)
+                }).collect();
+            let top = grid_rules
+                .iter()
+                .filter_map(|rule| match *rule {
+                    TableRule::Horizontal { y, .. } if y < header_end => {
+                        Some(y)
+                    }
+                    _ => None,
+                })
+                .min_by(f64::total_cmp)
+                .unwrap_or(self.bounds.top);
+            let bottom = grid_rules
+                .iter()
+                .filter_map(|rule| match *rule {
+                    TableRule::Horizontal { y, .. } => Some(y),
+                    _ => None,
+                })
+                .max_by(f64::total_cmp)?;
+            if body.iter().any(|&i| {
+                self.spans[i].span.bbox.bottom > bottom + self.rule_tolerance()
+            }) {
+                return None;
+            }
+            grid_rules.extend(cuts.iter().map(|&x| TableRule::Vertical {
+                x,
+                top,
+                bottom,
+            }));
+            let mut grid = self.ruled(&grid_rules)?;
+            for cell in grid.table.cells.iter_mut().filter(|cell| cell.row == 0)
+            {
+                cell.is_header = true;
+            }
+            tracing::debug!(
+                "recovered wrapped prose table at {:?} from complete row rules and {} supported columns",
+                self.bounds,
+                columns
+            );
+            return Some(grid);
+        };
         let anchors = &column_rows[anchor_column];
         let row_count = anchors.len() + 1;
         if row_count > MAX_TABLE_ROWS || row_count * columns > MAX_TABLE_CELLS {

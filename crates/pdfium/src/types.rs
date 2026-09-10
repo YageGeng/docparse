@@ -13,6 +13,18 @@ pub struct RectF {
     pub bottom: f32,
 }
 
+impl From<RectF> for [f64; 4] {
+    /// Widens coordinates in left/top/right/bottom order without geometric validation.
+    fn from(rect: RectF) -> Self {
+        [
+            f64::from(rect.left),
+            f64::from(rect.top),
+            f64::from(rect.right),
+            f64::from(rect.bottom),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CharBox {
     pub left: f64,

@@ -6,6 +6,7 @@ use docparse_layout::{Bbox, Point};
 use pdfium::{Page, RectF, TextPage};
 use typed_builder::TypedBuilder;
 
+use super::glyph::GlyphNormalizer;
 use crate::line::TextAxes;
 
 use crate::{
@@ -54,6 +55,9 @@ pub(crate) struct TextCharFact {
     pub(crate) generated: bool,
     #[builder(default)]
     pub(crate) unicode_map_error: bool,
+    /// The glyph's explicit symbol name corrected its Unicode value before segmentation.
+    #[builder(default)]
+    pub(crate) symbol_recovered: bool,
     #[builder(default)]
     pub(crate) explicit_break: bool,
     #[builder(default)]
@@ -258,6 +262,11 @@ impl CurrentSegment {
             .stroke_color(fact.stroke_color)
             .char_codes(vec![fact.char_code])
             .unicode_error_count(usize::from(fact.unicode_map_error))
+            .repair_actions(if fact.symbol_recovered {
+                vec![RepairAction::GlyphNameRecovery]
+            } else {
+                Vec::new()
+            })
             .mcid(fact.mcid)
             .text_object_index(fact.text_object_index)
             .link(fact.link)
@@ -342,15 +351,41 @@ impl CurrentSegment {
             (Some(baseline), Some(next)) => baseline.end = next.end,
             _ => self.baseline = None,
         }
+        // Rules decide the replacement; this segment retains every source code and measured word.
+        let replacement = if self.mcid == fact.mcid
+            && (fact.symbol_recovered
+                || self
+                    .repair_actions
+                    .contains(&RepairAction::GlyphNameRecovery))
+        {
+            self.raw_text.chars().next_back().and_then(|previous| {
+                GlyphNormalizer::compose(
+                    (previous, self.last_bbox),
+                    (fact.character, fact.bbox),
+                )
+            })
+        } else {
+            None
+        };
+        let composed = replacement.is_some();
         let start = self.raw_text.len();
         // Keep source segmentation unchanged. Measured words allow a table to reference
         // different cells inside one long source run without inventing equal-width slices.
-        let new_word = self.raw_text.ends_with(char::is_whitespace)
-            || self.words.last().is_some_and(|word| word.mcid != fact.mcid)
-            || (!TextAxes::from(self.rotation).is_oblique()
-                && fact.bbox.left - self.last_bbox.right
-                    > fact.font_size.max(1.0) * 0.5);
-        self.raw_text.push(fact.character);
+        let new_word = !composed
+            && (self.raw_text.ends_with(char::is_whitespace)
+                || self
+                    .words
+                    .last()
+                    .is_some_and(|word| word.mcid != fact.mcid)
+                || (!TextAxes::from(self.rotation).is_oblique()
+                    && fact.bbox.left - self.last_bbox.right
+                        > fact.font_size.max(1.0) * 0.5));
+        if let Some(character) = replacement {
+            let _ = self.raw_text.pop();
+            self.raw_text.push(character);
+        } else {
+            self.raw_text.push(fact.character);
+        }
         if new_word {
             self.words.push(
                 crate::TableWord::builder()
@@ -372,7 +407,11 @@ impl CurrentSegment {
             };
         }
         self.bbox = Self::union(self.bbox, fact.loose_bbox);
-        self.last_bbox = fact.bbox;
+        self.last_bbox = if composed {
+            Self::union(self.last_bbox, fact.bbox)
+        } else {
+            fact.bbox
+        };
         self.width_sum += fact.bbox.width();
         self.font_size = Self::merge_metric(
             self.font_size,
@@ -397,6 +436,13 @@ impl CurrentSegment {
         self.character_count += 1;
         self.char_codes.push(fact.char_code);
         self.unicode_error_count += usize::from(fact.unicode_map_error);
+        if fact.symbol_recovered
+            && !self
+                .repair_actions
+                .contains(&RepairAction::GlyphNameRecovery)
+        {
+            self.repair_actions.push(RepairAction::GlyphNameRecovery);
+        }
         if self.text_object_index != fact.text_object_index {
             self.text_object_index = None;
         }
@@ -604,6 +650,7 @@ pub(crate) fn extract_page_text_items(
     table_evidence: &mut crate::TableEvidence,
 ) -> Result<Vec<TextItem>, ExtractError> {
     let mut builder = SegmentBuilder::new(page_number);
+    let mut glyphs = GlyphNormalizer::default();
     let viewport = page.viewport_transform(view_box);
     let objects = page.text_object_facts();
     let object_indices: std::collections::HashMap<_, _> = objects
@@ -620,13 +667,10 @@ pub(crate) fn extract_page_text_items(
         let Some(character) = text_page.char_at(index) else {
             continue;
         };
-        let unicode = character.unicode();
-        let Some(value) = char::from_u32(unicode) else {
+        let Some(glyph) = glyphs.resolve(&character) else {
             continue;
         };
-        if matches!(unicode, 0 | 0xFFFE | 0xFFFF) {
-            continue;
-        }
+        let value = glyph.character;
         if matches!(value, '\n' | '\r') {
             let dummy = Bbox::try_from([0.0, 0.0, 1.0, 1.0])?;
             builder.push(
@@ -662,15 +706,18 @@ pub(crate) fn extract_page_text_items(
                 right: bbox.right as f32,
                 bottom: bbox.bottom as f32,
             })
-            .map(|bbox| page.bounds_to_viewport(view_box, &bbox));
+            .map(|bbox| page.bounds_to_viewport(view_box, &bbox))
+            .map(<[f64; 4]>::from)
+            .and_then(|bounds| Bbox::try_from(bounds).ok());
         let loose = character
             .loose_char_box()
-            .map(|bbox| page.bounds_to_viewport(view_box, &bbox));
+            .map(|bbox| page.bounds_to_viewport(view_box, &bbox))
+            .map(<[f64; 4]>::from)
+            .and_then(|bounds| Bbox::try_from(bounds).ok());
         let strict = strict
-            .and_then(rect_to_bbox)
-            .or_else(|| loose.and_then(rect_to_bbox))
+            .or(loose)
             .ok_or(ExtractError::MissingCharacterGeometry { index })?;
-        let loose = loose.and_then(rect_to_bbox).unwrap_or(strict);
+        let loose = loose.unwrap_or(strict);
         let (font_name, font_flags) =
             character.font_info().map_or((None, None), |(name, flags)| {
                 (Some(name), u32::try_from(flags).ok())
@@ -698,7 +745,7 @@ pub(crate) fn extract_page_text_items(
             Point::new(f64::from(x), f64::from(y))
         });
         let font_size = character.font_size();
-        let font = character.font();
+        let font = glyph.font.or_else(|| character.font());
         let font_height = character
             .matrix()
             .map(|matrix| font_size * f64::from(matrix.c.hypot(matrix.d)));
@@ -759,6 +806,7 @@ pub(crate) fn extract_page_text_items(
                 .char_code(character.char_code())
                 .generated(character.is_generated())
                 .unicode_map_error(character.has_unicode_map_error())
+                .symbol_recovered(glyph.recovered)
                 .mcid(character.marked_content_id())
                 .text_object_index(text_object_index)
                 .watermark(
@@ -769,6 +817,13 @@ pub(crate) fn extract_page_text_items(
                 .link(link)
                 .build(),
         )?;
+    }
+    if glyphs.recovered_count > 0 {
+        tracing::debug!(
+            "recovered {} named symbol glyphs on page {}",
+            glyphs.recovered_count,
+            page_number
+        );
     }
     let drafts = builder.finish()?;
     let oblique_count = drafts
@@ -819,17 +874,6 @@ pub(crate) fn extract_page_text_items(
             Ok(item)
         })
         .collect()
-}
-
-/// Converts a PDFium viewport rectangle into a validated canonical box.
-fn rect_to_bbox(rect: RectF) -> Option<Bbox> {
-    Bbox::try_from([
-        f64::from(rect.left),
-        f64::from(rect.top),
-        f64::from(rect.right),
-        f64::from(rect.bottom),
-    ])
-    .ok()
 }
 
 #[cfg(test)]

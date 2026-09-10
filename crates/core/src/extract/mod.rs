@@ -1,3 +1,4 @@
+mod glyph;
 pub(crate) mod metadata;
 pub(crate) mod text;
 

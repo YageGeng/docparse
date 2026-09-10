@@ -12,8 +12,216 @@ use docparse_layout::{
     PageRotation, PageTransform, PageTransformInput, PixelFormat, Point,
 };
 
+/// Only a coherent centered or bold left-aligned title between complete rules spans the table.
+#[tokio::test]
+async fn ruled_section_rows_preserve_titles_without_merging_values() {
+    for (text, x, bold, complete_rules, separate_text, expected_span) in [
+        ("Group", 137.5, false, true, false, 3),
+        ("42.00", 137.5, false, true, false, 1),
+        ("Group", 20.0, false, true, false, 1),
+        ("Group", 20.0, true, true, false, 3),
+        ("42.00", 20.0, true, true, false, 1),
+        ("Group", 20.0, true, false, false, 1),
+        ("Group", 20.0, true, true, true, 1),
+        ("Group", 137.5, false, false, false, 1),
+        ("Group", 137.5, false, true, true, 1),
+        ("N/A", 137.5, false, true, false, 1),
+        ("n / a", 137.5, false, true, false, 1),
+        ("N.A.", 137.5, false, true, false, 1),
+        ("NaN", 137.5, false, true, false, 1),
+        ("NULL", 20.0, true, true, false, 1),
+    ] {
+        let mut items = vec![
+            TableLayout::item(0, "Name", 20.0, 25.0, true),
+            TableLayout::item(1, "Method", 115.0, 25.0, true),
+            TableLayout::item(2, "Value", 210.0, 25.0, true),
+            TableLayout::item(3, text, x, 55.0, bold),
+            TableLayout::item(4, "A", 20.0, 90.0, false),
+            TableLayout::item(5, "B", 115.0, 90.0, false),
+            TableLayout::item(6, "20", 210.0, 90.0, false),
+        ];
+        if separate_text {
+            items.push(TableLayout::item(7, "Note", 210.0, 55.0, false));
+        }
+        let evidence = docparse_core::TableEvidence {
+            rules: [10.0, 45.0, 75.0, 120.0]
+                .into_iter()
+                .enumerate()
+                .map(|(index, y)| docparse_core::TableRule::Horizontal {
+                    y,
+                    left: 10.0,
+                    right: if !complete_rules && index == 2 {
+                        200.0
+                    } else {
+                        290.0
+                    },
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let page = TableLayout::parse(items, evidence).await;
+        let table = page.blocks.iter().find_map(|b| b.table.as_ref());
+        assert!(
+            table.is_some(),
+            "{text}, {x}, bold={bold}, complete={complete_rules}, separate={separate_text}"
+        );
+        let table = table.expect("table");
+        let section = table
+            .cells
+            .iter()
+            .find(|c| c.text == text)
+            .expect("section or value");
+        assert_eq!(
+            section.column_span, expected_span,
+            "{text}, {x}, complete={complete_rules}, separate={separate_text}"
+        );
+        assert_eq!((table.row_count, table.column_count), (3, 3));
+        if ["N/A", "n / a", "N.A.", "NaN", "NULL"].contains(&text) {
+            assert!(!section.is_header, "missing values remain data");
+            assert_eq!(section.column, usize::from(x > 100.0));
+        }
+    }
+}
+
+/// Partial rule grids must retain a real divider when numeric tracks require finer columns.
+#[tokio::test]
+async fn section_rows_respect_partial_vertical_separators() {
+    for split_stroke in [false, true] {
+        let items = vec![
+            TableLayout::item(0, "Name", 20.0, 25.0, true),
+            TableLayout::item(1, "Mean", 115.0, 25.0, true),
+            TableLayout::item(2, "Spread", 210.0, 25.0, true),
+            TableLayout::item(3, "Group", 20.0, 55.0, true),
+            TableLayout::item(4, "A", 20.0, 90.0, false),
+            TableLayout::item(5, "10", 115.0, 90.0, false),
+            TableLayout::item(6, "20", 210.0, 90.0, false),
+            TableLayout::item(7, "B", 20.0, 110.0, false),
+            TableLayout::item(8, "30", 115.0, 110.0, false),
+            TableLayout::item(9, "40", 210.0, 110.0, false),
+        ];
+        let mut evidence = docparse_core::TableEvidence {
+            rules: [10.0, 45.0, 75.0, 125.0]
+                .map(|y| docparse_core::TableRule::Horizontal {
+                    y,
+                    left: 10.0,
+                    right: 290.0,
+                })
+                .to_vec(),
+            ..Default::default()
+        };
+        for (top, bottom) in if split_stroke {
+            vec![(10.0, 60.0), (60.0, 125.0)]
+        } else {
+            vec![(10.0, 125.0)]
+        } {
+            evidence.rules.push(docparse_core::TableRule::Vertical {
+                x: 95.0,
+                top,
+                bottom,
+            });
+        }
+        let page = TableLayout::parse(items, evidence).await;
+        let table = page
+            .blocks
+            .iter()
+            .find_map(|b| b.table.as_ref())
+            .expect("table");
+        assert_eq!((table.row_count, table.column_count), (4, 3));
+        let label = table
+            .cells
+            .iter()
+            .find(|c| c.text == "Group")
+            .expect("label");
+        assert_eq!((label.column, label.column_span), (0, 1));
+        assert!(label.bbox.expect("cell bounds").right <= 95.0);
+    }
+}
+
+/// A body section heading must survive coalescing overlapping wrapped column headings.
+#[tokio::test]
+async fn section_rows_preserve_wrapped_column_headers() {
+    let items = vec![
+        TableLayout::item(0, "Long", 20.0, 25.0, true),
+        TableLayout::item(1, "Label", 20.0, 35.0, true),
+        TableLayout::item(2, "Method", 115.0, 30.0, true),
+        TableLayout::item(3, "Value", 210.0, 30.0, true),
+        TableLayout::item(4, "Group", 137.5, 58.0, false),
+        TableLayout::item(5, "A", 20.0, 90.0, false),
+        TableLayout::item(6, "B", 115.0, 90.0, false),
+        TableLayout::item(7, "20", 210.0, 90.0, false),
+    ];
+    let evidence = docparse_core::TableEvidence {
+        rules: [10.0, 50.0, 75.0, 120.0]
+            .map(|y| docparse_core::TableRule::Horizontal {
+                y,
+                left: 10.0,
+                right: 290.0,
+            })
+            .to_vec(),
+        ..Default::default()
+    };
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|b| b.table.as_ref())
+        .expect("table");
+    assert_eq!((table.row_count, table.column_count), (3, 3));
+    assert!(
+        table
+            .cells
+            .iter()
+            .any(|c| c.row == 0 && c.column == 0 && c.text == "Long\nLabel")
+    );
+    assert!(table.cells.iter().any(|c| c.row == 1
+        && c.column == 0
+        && c.column_span == 3
+        && c.is_header
+        && c.text == "Group"));
+}
+
 /// Supplies only the already-known table region; the real Rust pipeline reconstructs its cells.
 struct TableLayout;
+
+/// A continued table with a rule after every data row must not invent column headings.
+#[tokio::test]
+async fn horizontal_data_rows_do_not_invent_headers() {
+    let items = ["Model A", "Model B", "Model C"]
+        .into_iter()
+        .enumerate()
+        .flat_map(|(row, model)| {
+            ["1", model, "20"].into_iter().enumerate().map(
+                move |(column, text)| {
+                    TableLayout::item(
+                        (row * 3 + column) as u32,
+                        text,
+                        20.0 + column as f64 * 95.0,
+                        25.0 + row as f64 * 30.0,
+                        false,
+                    )
+                },
+            )
+        })
+        .collect();
+    let evidence = docparse_core::TableEvidence {
+        rules: [10.0, 45.0, 75.0, 120.0]
+            .map(|y| docparse_core::TableRule::Horizontal {
+                y,
+                left: 10.0,
+                right: 290.0,
+            })
+            .to_vec(),
+        ..Default::default()
+    };
+    let page = TableLayout::parse(items, evidence).await;
+    let table = page
+        .blocks
+        .iter()
+        .find_map(|b| b.table.as_ref())
+        .expect("table");
+    assert_eq!((table.row_count, table.column_count), (3, 3));
+    assert!(table.cells.iter().all(|c| !c.is_header));
+}
 
 impl LayoutEngine for TableLayout {
     /// Identifies the deterministic region provider used by this native integration test.

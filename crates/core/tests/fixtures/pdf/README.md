@@ -4,6 +4,7 @@
 - `multipage_layout.pdf`: three pages with unembedded fonts, covering document context, different text coverage, and multipage processing.
 - `embedded_layout.pdf`: two pages with embedded Bitstream Vera, covering strict numeric parity and rotated text. Its license is in `embedded_layout.LICENSE.txt`.
 - `embedded_cjk_90.pdf`: embedded Noto Sans SC with Chinese text, 90-degree page rotation, CropBox `[20,20,592,772]`, and UserUnit 2. Its license is in `embedded_cjk.LICENSE.txt`.
+- `symbol_glyph_names.pdf`: an original Type3 font with named circle glyphs deliberately mapped to SPACE, `#`, `G`, U+0000, U+FFFF, and U+FFFD. It checks invalid-Unicode and visible-space recovery, both semicircle/outline paint orders, adjacent independent marks, ordinary-text controls, and source-code provenance. Its generator needs only pypdf and embeds no external font.
 
 The generation scripts live beside the PDFs. Vera comes from reportlab's fonts directory. The Chinese font is pinned to google/fonts commit `2894aab31764f10f29c421bdfd2340d3b382d384`, file `ofl/notosanssc/NotoSansSC[wght].ttf`, SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`. Only a font subset is embedded; the full font is not committed. Generating the Chinese fixture requires reportlab and pypdf.
 

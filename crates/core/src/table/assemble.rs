@@ -16,10 +16,21 @@ mod tests {
     /// A measured native word's byte range, ink bounds, and optional baseline.
     type WordFact = (usize, usize, [f64; 4], Option<f64>);
 
-    /// The survey's real native words must recover all data columns and multi-line/grouped headers.
+    /// Real native words must recover all data columns and multi-line/grouped headers.
     #[test]
     fn survey_tables_recover_source_columns_and_headers() {
         for source in [
+            include_str!("../../tests/fixtures/table/mathnet-page-8.json"),
+            include_str!("../../tests/fixtures/table/mathnet-page-10.json"),
+            include_str!("../../tests/fixtures/table/mathnet-page-15.json"),
+            include_str!("../../tests/fixtures/table/mathnet-page-28.json"),
+            include_str!("../../tests/fixtures/table/shadow-page-5.json"),
+            include_str!("../../tests/fixtures/table/shadow-page-6.json"),
+            include_str!("../../tests/fixtures/table/shadow-page-14.json"),
+            include_str!("../../tests/fixtures/table/shadow-page-16.json"),
+            include_str!("../../tests/fixtures/table/shadow-page-17.json"),
+            include_str!("../../tests/fixtures/table/enterprise-page-4.json"),
+            include_str!("../../tests/fixtures/table/enterprise-page-12.json"),
             include_str!("../../tests/fixtures/table/survey-page-29.json"),
             include_str!("../../tests/fixtures/table/survey-page-33.json"),
             include_str!("../../tests/fixtures/table/survey-page-35.json"),
@@ -52,6 +63,26 @@ mod tests {
                 fixture.get("rules").expect("rules").clone(),
             )
             .expect("rules");
+            let weights: BTreeMap<u32, u16> = fixture
+                .get("weights")
+                .map(|value| {
+                    serde_json::from_value::<Vec<(u32, u16)>>(value.clone())
+                        .expect("font weights")
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let repairs: BTreeMap<u32, Vec<crate::RepairAction>> = fixture
+                .get("repairs")
+                .map(|value| {
+                    serde_json::from_value::<
+                            Vec<(u32, Vec<crate::RepairAction>)>,
+                        >(value.clone())
+                        .expect("source repairs")
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
             let id = crate::BlockId::model(page, 0, 0);
             let lines = facts
                 .into_iter()
@@ -67,9 +98,13 @@ mod tests {
                         .style(Some(
                             crate::TextStyle::builder()
                                 .font_size(Some(size))
+                                .weight(weights.get(&index).copied())
                                 .build(),
                         ))
                         .source(crate::TextSource::Native)
+                        .repair_actions(
+                            repairs.get(&index).cloned().unwrap_or_default(),
+                        )
                         .build();
                     crate::Line::builder()
                         .id(crate::LineId::new(&id, index))
@@ -172,6 +207,43 @@ mod tests {
                     .expect("rows"),
                     "page {page}"
                 );
+                if let Some(expected) = fixture.get("expected_cells") {
+                    let expected: Vec<(usize, usize, usize, usize, String)> =
+                        serde_json::from_value(expected.clone())
+                            .expect("expected source cells");
+                    for (row, column, row_span, column_span, text) in expected {
+                        let cell = table
+                            .cells
+                            .iter()
+                            .find(|cell| {
+                                cell.row == row && cell.column == column
+                            })
+                            .expect("expected table cell");
+                        assert_eq!(
+                            (cell.row_span, cell.column_span),
+                            (row_span, column_span),
+                            "page {page} cell {row},{column}"
+                        );
+                        assert_eq!(
+                            cell.text.split_whitespace().collect::<String>(),
+                            text.split_whitespace().collect::<String>(),
+                            "page {page} cell {row},{column}"
+                        );
+                    }
+                }
+                if let Some(rows) = fixture.get("header_rows") {
+                    let rows: Vec<usize> = serde_json::from_value(rows.clone())
+                        .expect("header and section rows");
+                    for cell in &table.cells {
+                        assert_eq!(
+                            cell.is_header,
+                            rows.contains(&cell.row),
+                            "page {page} cell {},{} header",
+                            cell.row,
+                            cell.column
+                        );
+                    }
+                }
                 // Compare independently transcribed source cells, not only grid dimensions.
                 let row_text = |row| {
                     table
@@ -186,7 +258,165 @@ mod tests {
                         })
                         .collect::<Vec<_>>()
                 };
-                if page == 29 {
+                if page == 4 {
+                    assert_eq!(
+                        row_text(0),
+                        [
+                            "Model",
+                            "InferenceParadigm",
+                            "RAGQuality",
+                            "IAS",
+                            "LooseIAS"
+                        ]
+                    );
+                    assert_eq!(
+                        row_text(1),
+                        [
+                            "Faithfulness",
+                            "AnswerCoverage",
+                            "Loose",
+                            "Strict",
+                            "PersonaDefinition",
+                            "OutputConstraints",
+                            "KnowledgeInteractionProtocol"
+                        ]
+                    );
+                    for (row, title) in [
+                        (2, "open-source models"),
+                        (12, "closed-source models"),
+                    ] {
+                        let section = table
+                            .cells
+                            .iter()
+                            .find(|cell| cell.row == row)
+                            .expect("section title");
+                        assert_eq!(
+                            (
+                                section.column,
+                                section.row_span,
+                                section.column_span,
+                                section.is_header
+                            ),
+                            (0, 1, 9, true)
+                        );
+                        assert_eq!(section.text, title);
+                    }
+                    // Independently transcribed scores protect column alignment on both sides of each section.
+                    let expected = [
+                        [
+                            "64.8", "56.4", "75.5", "12.3", "70.1", "82.0",
+                            "70.3",
+                        ],
+                        [
+                            "66.8", "59.4", "77.0", "14.3", "74.2", "81.5",
+                            "72.4",
+                        ],
+                        [
+                            "64.9", "59.5", "77.2", "15.9", "75.4", "80.1",
+                            "75.1",
+                        ],
+                        [
+                            "67.1", "64.1", "83.8", "26.8", "82.2", "86.2",
+                            "82.5",
+                        ],
+                        [
+                            "63.9", "65.6", "76.4", "13.2", "79.0", "81.5",
+                            "68.9",
+                        ],
+                        [
+                            "67.4", "67.1", "80.6", "20.8", "82.3", "83.6",
+                            "76.3",
+                        ],
+                        [
+                            "68.9", "66.4", "83.1", "21.9", "81.3", "84.3",
+                            "82.9",
+                        ],
+                        [
+                            "69.9", "60.4", "82.2", "22.1", "79.9", "85.9",
+                            "78.8",
+                        ],
+                        [
+                            "76.6", "64.3", "81.6", "21.5", "75.4", "85.7",
+                            "78.7",
+                        ],
+                        [
+                            "73.5", "61.6", "83.7", "26.5", "86.6", "85.6",
+                            "80.3",
+                        ],
+                        [
+                            "69.8", "65.8", "80.0", "19.5", "79.4", "82.1",
+                            "77.8",
+                        ],
+                        [
+                            "76.4", "68.5", "83.3", "25.3", "84.7", "84.1",
+                            "82.4",
+                        ],
+                        [
+                            "76.8", "66.7", "79.8", "19.5", "77.1", "81.5",
+                            "79.1",
+                        ],
+                    ];
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.row >= 3 && cell.column >= 2)
+                            .map(|cell| cell.text.as_str())
+                            .collect::<Vec<_>>(),
+                        expected.into_iter().flatten().collect::<Vec<_>>()
+                    );
+                } else if page == 12 {
+                    assert_eq!(
+                        row_text(0),
+                        [
+                            "Model/Metric",
+                            "LooseIAS",
+                            "RejectAcc",
+                            "ConflictAcc"
+                        ]
+                    );
+                    let section = table
+                        .cells
+                        .iter()
+                        .find(|cell| cell.row == 2)
+                        .expect("evaluation section");
+                    assert_eq!(
+                        (
+                            section.column,
+                            section.column_span,
+                            section.is_header
+                        ),
+                        (0, 10, true)
+                    );
+                    assert_eq!(section.text, "Raw Evaluation Scores (%)");
+                    let expected = [
+                        [
+                            "89.6", "89.0", "91.9", "27.8", "27.9", "28.8",
+                            "37.8", "39.1", "39.1",
+                        ],
+                        [
+                            "86.0", "86.2", "90.4", "18.9", "19.4", "19.4",
+                            "28.3", "28.9", "31.0",
+                        ],
+                        [
+                            "84.9", "89.1", "88.3", "33.6", "35.8", "34.5",
+                            "37.2", "39.4", "36.9",
+                        ],
+                        [
+                            "82.7", "83.8", "85.8", "10.1", "9.3", "9.3",
+                            "16.6", "16.6", "17.6",
+                        ],
+                    ];
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.row >= 3 && cell.column >= 1)
+                            .map(|cell| cell.text.as_str())
+                            .collect::<Vec<_>>(),
+                        expected.into_iter().flatten().collect::<Vec<_>>()
+                    );
+                } else if page == 29 {
                     assert_eq!(
                         row_text(0),
                         [
@@ -667,6 +897,17 @@ impl<'a> TableAssembler<'a> {
                 let baseline = line
                     .baseline
                     .map_or(line.bbox.bottom, |baseline| baseline.start.y);
+                // Recovered symbol fonts can have oversized loose boxes that join
+                // adjacent markers into one source line. Their measured baselines
+                // still identify independent table rows without rewriting source facts.
+                let recovered_symbol = item
+                    .repair_actions
+                    .contains(&crate::RepairAction::GlyphNameRecovery);
+                let baseline = if recovered_symbol {
+                    item.baseline.map_or(baseline, |baseline| baseline.start.y)
+                } else {
+                    baseline
+                };
                 if let Some(words) = self
                     .evidence
                     .words
@@ -698,7 +939,13 @@ impl<'a> TableAssembler<'a> {
                                     bbox: word.bbox,
                                 })
                                 .item(item)
-                                .baseline(baseline)
+                                .baseline(if recovered_symbol {
+                                    word.baseline.map_or(baseline, |baseline| {
+                                        baseline.start.y
+                                    })
+                                } else {
+                                    baseline
+                                })
                                 .measured_baseline(
                                     word.baseline.or(item.baseline),
                                 )

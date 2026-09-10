@@ -43,36 +43,109 @@ impl TableGrid<'_> {
                     .collect()
             })
             .collect();
+        // Union fragmented vertical strokes before deciding whether an entire band can span columns.
+        let has_column_divider = |top, bottom| {
+            rules.iter().any(|rule| {
+                matches!(*rule, TableRule::Vertical { x, .. }
+                if x > self.bounds.left + self.rule_tolerance()
+                    && x < self.bounds.right - self.rule_tolerance()
+                    && self.coverage(rules, false, x, top, bottom) >= 0.7)
+            })
+        };
+        // A centered, uninterrupted title above a complete separator spans the table.
+        // Its separator starts the column headings rather than ending the whole header.
+        let title_end = row_spans.first().zip(row_spans.get(1)).and_then(
+            |(first, next)| {
+                let mut words = first.clone();
+                words.sort_by(|&a, &b| {
+                    self.spans[a]
+                        .span
+                        .bbox
+                        .left
+                        .total_cmp(&self.spans[b].span.bbox.left)
+                });
+                let left = self.spans[*words.first()?].span.bbox.left;
+                let right = words
+                    .iter()
+                    .map(|&i| self.spans[i].span.bbox.right)
+                    .max_by(f64::total_cmp)?;
+                if ((left + right) * 0.5 - self.bounds.center().x).abs()
+                    > self.font_size
+                    || self.is_missing_value(&words)
+                    || !words.iter().any(|&i| {
+                        self.spans[i].text().chars().any(char::is_alphabetic)
+                    })
+                    || !words.windows(2).all(|pair| {
+                        self.spans[pair[1]].span.bbox.left
+                            - self.spans[pair[0]].span.bbox.right
+                            < (self.font_size * 0.6).max(3.0)
+                    })
+                {
+                    return None;
+                }
+                full_rules.iter().copied().find(|&y| {
+                    first.iter().all(|&i| self.spans[i].span.bbox.bottom < y)
+                        && next.iter().all(|&i| self.spans[i].span.bbox.top > y)
+                        && !has_column_divider(self.bounds.top, y)
+                        && self.coverage(
+                            rules,
+                            true,
+                            y,
+                            cuts[0],
+                            cuts[table.column_count],
+                        ) >= 0.9
+                })
+            },
+        );
         // Booktabs rules separate a textual header from a body whose physical rows have
         // no complete grid. This evidence works even when the PDF reports no bold font.
-        let header_end = (full_rules.len() < self.rows.len())
-            .then(|| {
-                full_rules.iter().copied().find(|&y| {
-                    self.spans.iter().any(|span| span.span.bbox.center().y < y)
-                        && self
-                            .spans
-                            .iter()
-                            .any(|span| span.span.bbox.center().y > y)
-                })
-            })
-            .flatten();
+        let header_end = full_rules.iter().copied().find(|&y| {
+            title_end.is_none_or(|end| y > end + self.rule_tolerance())
+                && self.spans.iter().any(|span| span.span.bbox.center().y < y)
+                && self.spans.iter().any(|span| span.span.bbox.center().y > y)
+        });
         let mut header_rows = 0;
         for words in &row_spans {
             let alphabetic = words.iter().any(|&i| {
                 self.spans[i].text().chars().any(char::is_alphabetic)
             });
-            let ruled = header_end.is_some_and(|end| {
-                words
-                    .iter()
-                    .all(|&i| self.spans[i].span.bbox.center().y < end)
-            });
+            let ruled = full_rules.len() < self.rows.len()
+                && header_end.is_some_and(|end| {
+                    words
+                        .iter()
+                        .all(|&i| self.spans[i].span.bbox.center().y < end)
+                });
             let styled = words
                 .iter()
                 .all(|&i| !self.spans[i].text().chars().any(char::is_numeric))
                 && words.iter().filter(|&&i| self.spans[i].is_bold()).count()
                     * 2
                     >= words.len();
-            if alphabetic && (ruled || styled) {
+            // A complete separator isolates a body section from the following data.
+            // A wide bold continuation can still be a subtitle; a local bold note cannot.
+            let separated =
+                row_spans.get(header_rows + 1).is_some_and(|next| {
+                    full_rules.iter().any(|&y| {
+                        words
+                            .iter()
+                            .all(|&i| self.spans[i].span.bbox.bottom < y)
+                            && next
+                                .iter()
+                                .all(|&i| self.spans[i].span.bbox.top > y)
+                    })
+                });
+            let spanning = cuts[1..table.column_count].iter().any(|&x| {
+                words.iter().any(|&i| self.spans[i].span.bbox.right < x)
+                    && words.iter().any(|&i| self.spans[i].span.bbox.left > x)
+            });
+            if alphabetic
+                && !self.is_missing_value(words)
+                && (ruled
+                    || (styled
+                        && (header_rows == 0
+                            || header_end.is_none()
+                            || (!separated && spanning))))
+            {
                 header_rows += 1;
             } else {
                 break;
@@ -129,8 +202,23 @@ impl TableGrid<'_> {
         );
         // Coalesce observed rows only; decorative ink must not invent extra levels
         // or expand a candidate beyond the grid limits checked by the caller.
-        let ruled_header =
-            !header_rules.is_empty() && header_rules.len() < header_rows;
+        // A title divider alone cannot merge distinct, non-overlapping header baselines.
+        let ruled_header = !header_rules.is_empty()
+            && header_rules.len() < header_rows
+            && (title_end.is_none()
+                || header_rules.len() > 1
+                || header_rules.len() + 1 == header_rows
+                || row_spans[..header_rows].windows(2).any(|pair| {
+                    let bottom = pair[0]
+                        .iter()
+                        .map(|&i| self.spans[i].span.bbox.bottom)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let top = pair[1]
+                        .iter()
+                        .map(|&i| self.spans[i].span.bbox.top)
+                        .fold(f64::INFINITY, f64::min);
+                    bottom > top
+                }));
         if ruled_header {
             let physical_count = header_rows;
             header_rows = header_rules.len() + 1;
@@ -235,6 +323,10 @@ impl TableGrid<'_> {
                     columns: start..end,
                     anchored: false,
                 };
+                if row == 0 && title_end.is_some() {
+                    phrase.columns = 0..table.column_count;
+                    phrase.anchored = true;
+                }
                 // A partial underline identifies groups such as Accuracy over five
                 // subcolumns more reliably than the short centered heading's ink box.
                 let underline = rules
@@ -258,7 +350,9 @@ impl TableGrid<'_> {
                         _ => None,
                     })
                     .min_by(|a, b| a.0.total_cmp(&b.0));
-                if let Some((_, left, right)) = underline {
+                if let Some((_, left, right)) = underline
+                    && !phrase.anchored
+                {
                     let covered: Vec<_> = cuts
                         .windows(2)
                         .enumerate()
@@ -428,8 +522,8 @@ impl TableGrid<'_> {
         table.cells.retain(|cell| cell.row >= header_rows);
         table.cells.extend(headings);
 
-        // Sparse horizontal bands often delimit model/metric groups. A single text
-        // label centered over several populated rows owns a rowspan, not a new data row.
+        // Sparse horizontal bands delimit section titles and model/metric groups.
+        // An isolated centered title spans columns; a label beside several rows spans rows.
         for band in full_rules.windows(2) {
             let rows: Vec<_> = groups
                 .iter()
@@ -443,6 +537,78 @@ impl TableGrid<'_> {
                 })
                 .map(|(row, _)| row)
                 .collect();
+            if let [row] = rows.as_slice() {
+                let mut words = row_spans[*row].clone();
+                words.sort_by(|&a, &b| {
+                    self.spans[a]
+                        .span
+                        .bbox
+                        .left
+                        .total_cmp(&self.spans[b].span.bbox.left)
+                });
+                let left = words.first().map(|&i| self.spans[i].span.bbox.left);
+                let right = words
+                    .iter()
+                    .map(|&i| self.spans[i].span.bbox.right)
+                    .max_by(f64::total_cmp);
+                // Require a single phrase between complete rules. Left-aligned
+                // section labels additionally need bold evidence; ordinary notes stay local.
+                let title = groups[*row].len() == 1
+                    && !self.is_missing_value(&words)
+                    && !has_column_divider(band[0], band[1])
+                    && words.iter().any(|&i| {
+                        self.spans[i].text().chars().any(char::is_alphabetic)
+                    })
+                    && words.windows(2).all(|pair| {
+                        self.spans[pair[1]].span.bbox.left
+                            - self.spans[pair[0]].span.bbox.right
+                            < (self.font_size * 0.6).max(3.0)
+                    })
+                    && left.zip(right).is_some_and(|(left, right)| {
+                        ((left + right) * 0.5 - self.bounds.center().x).abs()
+                            <= self.font_size
+                            || ((left - self.bounds.left).abs()
+                                <= self.font_size
+                                && words
+                                    .iter()
+                                    .all(|&i| self.spans[i].is_bold()))
+                    })
+                    && band.iter().all(|&y| {
+                        self.coverage(
+                            rules,
+                            true,
+                            y,
+                            cuts[0],
+                            cuts[table.column_count],
+                        ) >= 0.9
+                    });
+                if title {
+                    table.cells.retain(|cell| cell.row != *row);
+                    table.cells.push(
+                        TableCell::builder()
+                            .row(*row)
+                            .column(0)
+                            .column_span(table.column_count)
+                            .is_header(true)
+                            .bbox(Some(
+                                Bbox::try_from([
+                                    cuts[0],
+                                    ys[*row],
+                                    cuts[table.column_count],
+                                    ys[*row + 1],
+                                ])
+                                .ok()?,
+                            ))
+                            .build(),
+                    );
+                    tracing::debug!(
+                        "recovered section row {} across {} table columns at {:?}",
+                        row,
+                        table.column_count,
+                        self.bounds
+                    );
+                }
+            }
             if rows.len() < 2 {
                 continue;
             }
@@ -520,7 +686,7 @@ impl TableGrid<'_> {
             && table
                 .cells
                 .iter()
-                .filter(|cell| cell.is_header)
+                .filter(|cell| cell.row < header_rows)
                 .all(|cell| cell.column_span == 1)
             && row_spans
                 .iter()
@@ -539,7 +705,7 @@ impl TableGrid<'_> {
                     bottom > top
                 });
         if wrapped_header {
-            table.cells.retain(|cell| !cell.is_header);
+            table.cells.retain(|cell| cell.row >= header_rows);
             for cell in &mut table.cells {
                 cell.row -= header_rows - 1;
             }

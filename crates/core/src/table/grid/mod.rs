@@ -176,6 +176,29 @@ impl<'a> TableGrid<'a> {
         covered / (to - from).max(f64::EPSILON)
     }
 
+    /// Recognizes missing-value markers even when PDF words split their punctuation or spacing.
+    fn is_missing_value(&self, words: &[usize]) -> bool {
+        let mut words: Vec<_> = words
+            .iter()
+            .filter_map(|&index| self.spans.get(index))
+            .collect();
+        words.sort_by(|a, b| {
+            a.baseline
+                .total_cmp(&b.baseline)
+                .then_with(|| a.span.bbox.left.total_cmp(&b.span.bbox.left))
+        });
+        let text: String = words
+            .into_iter()
+            .flat_map(|span| span.text().chars())
+            .filter(|ch| !ch.is_whitespace())
+            .map(|ch| ch.to_ascii_lowercase())
+            .collect();
+        matches!(
+            text.as_str(),
+            "n/a" | "n.a." | "na" | "nan" | "null" | "none"
+        )
+    }
+
     /// Accepts only a dominant geometric owner and identifies conservative textual header evidence.
     #[allow(
         clippy::indexing_slicing,
@@ -215,18 +238,21 @@ impl<'a> TableGrid<'a> {
         // Consecutive bold textual rows may form a multi-level header. Numeric rows
         // cannot become headers merely because Markdown requires a first header row.
         for row in 0..table.row_count {
-            let header_words: Vec<_> = self
-                .spans
+            let header_words: Vec<_> = assignment
                 .iter()
-                .zip(&assignment)
+                .enumerate()
                 .filter(|(_, cell)| table.cells[**cell].row == row)
-                .map(|(span, _)| span)
+                .map(|(index, _)| index)
                 .collect();
             let header = !header_words.is_empty()
+                && !self.is_missing_value(&header_words)
+                && header_words.iter().all(|&index| {
+                    !self.spans[index].text().chars().any(|ch| ch.is_numeric())
+                })
                 && header_words
                     .iter()
-                    .all(|span| !span.text().chars().any(|ch| ch.is_numeric()))
-                && header_words.iter().filter(|span| span.is_bold()).count()
+                    .filter(|&&index| self.spans[index].is_bold())
+                    .count()
                     * 2
                     >= header_words.len();
             if !header {

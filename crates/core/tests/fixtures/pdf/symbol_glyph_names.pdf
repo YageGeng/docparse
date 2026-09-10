@@ -1,0 +1,222 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+/Title (DocParse symbol glyph\055name regression)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 4 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Page
+/Resources <<
+/Font <<
+/F1 11 0 R
+/F2 12 0 R
+/F3 13 0 R
+/F4 14 0 R
+>>
+>>
+/MediaBox [ 0.0 0.0 300 160 ]
+/Parent 2 0 R
+/Contents 15 0 R
+>>
+endobj
+5 0 obj
+<<
+/Length 131
+>>
+stream
+600 0 0 0 600 600 d1 300 40 m 444 40 560 156 560 300 c 560 444 444 560 300 560 c 156 560 40 444 40 300 c 40 156 156 40 300 40 c h f
+endstream
+endobj
+6 0 obj
+<<
+/Length 136
+>>
+stream
+600 0 0 0 600 600 d1 20 w 300 40 m 444 40 560 156 560 300 c 560 444 444 560 300 560 c 156 560 40 444 40 300 c 40 156 156 40 300 40 c h S
+endstream
+endobj
+7 0 obj
+<<
+/Length 81
+>>
+stream
+600 0 0 0 300 600 d1 300 40 m 156 40 40 156 40 300 c 40 444 156 560 300 560 c h f
+endstream
+endobj
+8 0 obj
+<<
+/Length 350
+>>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /BrokenSymbols def /CMapType 2 def
+1 begincodespacerange <00> <FF> endcodespacerange
+3 beginbfchar <20> <0020> <23> <0023> <47> <0047> endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+9 0 obj
+<<
+/Length 350
+>>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /BrokenSymbols def /CMapType 2 def
+1 begincodespacerange <00> <FF> endcodespacerange
+3 beginbfchar <20> <2022> <23> <0023> <47> <0047> endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+10 0 obj
+<<
+/Length 350
+>>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /BrokenSymbols def /CMapType 2 def
+1 begincodespacerange <00> <FF> endcodespacerange
+3 beginbfchar <20> <0000> <23> <FFFF> <47> <FFFD> endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+11 0 obj
+<<
+/Type /Font
+/Subtype /Type3
+/Name /RegressionSymbols
+/FontBBox [ 0 0 600 600 ]
+/FontMatrix [ 0.001 0.0 0.0 0.001 0.0 0.0 ]
+/FirstChar 32
+/LastChar 71
+/Widths [ 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 ]
+/CharProcs <<
+/CIRCLE 5 0 R
+/Circle 6 0 R
+/LEFTCIRCLE 7 0 R
+>>
+/Encoding <<
+/Differences [ 32 /CIRCLE 35 /Circle 71 /LEFTCIRCLE ]
+>>
+/ToUnicode 8 0 R
+/Resources <<
+>>
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/Subtype /Type3
+/Name /RegressionSymbols
+/FontBBox [ 0 0 600 600 ]
+/FontMatrix [ 0.001 0.0 0.0 0.001 0.0 0.0 ]
+/FirstChar 32
+/LastChar 71
+/Widths [ 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 ]
+/CharProcs <<
+/CIRCLE 5 0 R
+/Circle 6 0 R
+/LEFTCIRCLE 7 0 R
+>>
+/Encoding <<
+/Differences [ 32 /CIRCLE 35 /Circle 71 /LEFTCIRCLE ]
+>>
+/ToUnicode 9 0 R
+/Resources <<
+>>
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/Subtype /Type3
+/Name /RegressionSymbols
+/FontBBox [ 0 0 600 600 ]
+/FontMatrix [ 0.001 0.0 0.0 0.001 0.0 0.0 ]
+/FirstChar 32
+/LastChar 71
+/Widths [ 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 ]
+/CharProcs <<
+/CIRCLE 5 0 R
+/Circle 6 0 R
+/LEFTCIRCLE 7 0 R
+>>
+/Encoding <<
+/Differences [ 32 /CIRCLE 35 /Circle 71 /LEFTCIRCLE ]
+>>
+/ToUnicode 10 0 R
+/Resources <<
+>>
+>>
+endobj
+15 0 obj
+<<
+/Length 505
+>>
+stream
+
+BT /F1 20 Tf 1 0 0 1 30 120 Tm <20> Tj ET
+BT /F1 20 Tf 1 0 0 1 90 120 Tm <23> Tj ET
+BT /F1 20 Tf 1 0 0 1 150 120 Tm <47> Tj 1 0 0 1 150 120 Tm <23> Tj ET
+BT /F1 20 Tf 1 0 0 1 210 120 Tm <23> Tj 1 0 0 1 210 120 Tm <47> Tj ET
+BT /F2 12 Tf 1 0 0 1 30 70 Tm (G # A B) Tj ET
+BT /F1 20 Tf 1 0 0 1 30 30 Tm <47> Tj 1 0 0 1 60 30 Tm <23> Tj ET
+BT /F3 20 Tf 1 0 0 1 120 30 Tm <20> Tj ET
+BT /F4 20 Tf 1 0 0 1 180 30 Tm <20> Tj ET
+BT /F4 20 Tf 1 0 0 1 210 30 Tm <23> Tj ET
+BT /F4 20 Tf 1 0 0 1 240 30 Tm <47> Tj ET
+
+endstream
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000015 00000 n 
+0000000104 00000 n 
+0000000163 00000 n 
+0000000212 00000 n 
+0000000379 00000 n 
+0000000561 00000 n 
+0000000748 00000 n 
+0000000879 00000 n 
+0000001280 00000 n 
+0000001681 00000 n 
+0000002083 00000 n 
+0000002594 00000 n 
+0000002665 00000 n 
+0000003176 00000 n 
+0000003688 00000 n 
+trailer
+<<
+/Size 16
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+4245
+%%EOF

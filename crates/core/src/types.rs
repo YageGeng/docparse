@@ -264,6 +264,8 @@ pub enum RepairAction {
     RemovedControl,
     EncodedHyphen,
     MergedFragment,
+    /// A named symbol repaired an incorrect Unicode mapping; source glyph codes remain in provenance.
+    GlyphNameRecovery,
 }
 
 /// Completeness of text located beneath one inline formula region.
