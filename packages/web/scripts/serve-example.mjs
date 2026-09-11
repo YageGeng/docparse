@@ -9,6 +9,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const routes = new Map([
   ["/example/", resolve(packageRoot, "example")],
   ["/dist/", resolve(packageRoot, "dist")],
+  ["/models/slanet-plus/", resolve(packageRoot, "../../models/slanet-plus")],
   ["/models/", resolve(packageRoot, "../../models/pp-doclayout-v3")],
 ]);
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json" };

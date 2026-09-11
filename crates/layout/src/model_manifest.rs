@@ -26,13 +26,20 @@ pub struct ModelArtifacts {
 impl ModelArtifacts {
     /// Verifies the immutable model identity and the actual bytes before session creation.
     pub fn verify(&self) -> Result<ModelManifest, ModelManifestError> {
+        self.verify_against(&ModelContract::pp_doclayout_v3())
+    }
+
+    /// Shares byte verification with other pinned ONNX model families without weakening their contracts.
+    pub fn verify_against(
+        &self,
+        contract: &ModelContract,
+    ) -> Result<ModelManifest, ModelManifestError> {
         let result = (|| {
             let manifest: ModelManifest =
                 serde_json::from_slice(&self.manifest).map_err(|source| {
                     ModelManifestError::ContentParse { source }
                 })?;
-            let contract = ModelContract::pp_doclayout_v3();
-            manifest.verify_identity(&contract)?;
+            manifest.verify_identity(contract)?;
             for (artifact, bytes, expected) in [
                 (
                     "inference.onnx",
@@ -65,12 +72,12 @@ impl ModelArtifacts {
 
 /// Fixed identity and artifact hashes expected for one supported model export.
 #[derive(Debug, Clone, PartialEq, Eq, TypedBuilder)]
-pub(crate) struct ModelContract {
-    pub(crate) repository: String,
-    pub(crate) revision: String,
-    pub(crate) license: String,
-    pub(crate) model_sha256: String,
-    pub(crate) config_sha256: String,
+pub struct ModelContract {
+    pub repository: String,
+    pub revision: String,
+    pub license: String,
+    pub model_sha256: String,
+    pub config_sha256: String,
 }
 
 impl ModelContract {

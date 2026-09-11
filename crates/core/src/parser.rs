@@ -24,6 +24,12 @@ pub enum DocParseError {
     /// A builder cannot construct a parser without validated configuration.
     #[error("DocParserBuilder requires validated configuration")]
     MissingConfiguration,
+    /// Byte-based construction requires every enabled model to be supplied explicitly.
+    #[error("table recovery requires explicit TSR model artifacts")]
+    MissingTsrArtifacts,
+    /// The default table model failed to initialize.
+    #[error(transparent)]
+    Tsr(#[from] docparse_tsr::TsrError),
     /// Per-call table policy or provider configuration is invalid.
     #[error(transparent)]
     TableStructure(#[from] crate::TableStructureError),
@@ -60,8 +66,11 @@ pub enum DocParseError {
 impl From<ParseRuntimeError> for DocParseError {
     /// Boxes the private runtime error while retaining its complete source chain.
     fn from(source: ParseRuntimeError) -> Self {
-        Self::Runtime {
-            source: Box::new(source),
+        match source {
+            ParseRuntimeError::Table(error) => Self::TableStructure(error),
+            source => Self::Runtime {
+                source: Box::new(source),
+            },
         }
     }
 }
@@ -77,20 +86,46 @@ pub struct PageInput {
 /// Per-call table policy, optional structure provider, and serial progress observations.
 #[derive(Default, Clone, TypedBuilder)]
 pub struct ParseOptions<'a> {
-    #[builder(default)]
-    pub table: crate::TableOptions,
+    /// Missing values inherit the parser instance's table configuration.
+    #[builder(default, setter(strip_option))]
+    pub table: Option<crate::TableOptions>,
     #[builder(default)]
     pub table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
     #[builder(default)]
     pub observer: Option<&'a dyn crate::ParseObserver>,
 }
 
+impl ParseOptions<'_> {
+    /// Combines per-call overrides with the parser's built-in provider without allocating a second model.
+    pub(crate) fn table_runtime(
+        &self,
+        config: &ValidatedConfig,
+        default_engine: Option<&Arc<dyn crate::TableStructureEngine>>,
+    ) -> Result<Arc<crate::runtime::TableRuntime>, crate::TableStructureError>
+    {
+        let options = self
+            .table
+            .clone()
+            .unwrap_or_else(|| crate::TableOptions::from(config.tsr()));
+        let engine = self
+            .table_engine
+            .as_ref()
+            .or(default_engine)
+            .map(Arc::clone);
+        crate::runtime::TableRuntime::shared(options, engine)
+    }
+}
+
 /// Public reusable parser with immutable shared configuration and engines.
-#[derive(Clone)]
+#[derive(Clone, TypedBuilder)]
+#[builder(builder_method(name = with_engines, vis = "pub(crate)"), builder_type(name = ParserAssembly, vis = "pub(crate)"))]
 pub struct DocParser {
     config: Arc<ValidatedConfig>,
     layout_engine: Arc<dyn LayoutEngine>,
+    #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
+    #[builder(default)]
+    table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
 }
 
 impl fmt::Debug for DocParser {
@@ -107,15 +142,50 @@ impl fmt::Debug for DocParser {
     }
 }
 
+/// Explicit model bytes for filesystem-independent parser construction on native and Web.
+#[derive(Clone)]
+pub struct ParserArtifacts {
+    pub layout: docparse_layout::ModelArtifacts,
+    /// Required when table recovery is enabled and no table engine is injected.
+    pub tsr: Option<docparse_layout::ModelArtifacts>,
+}
+
+impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
+    /// Preserves the single-model convenience input for rules-only parsers.
+    fn from(layout: docparse_layout::ModelArtifacts) -> Self {
+        Self { layout, tsr: None }
+    }
+}
+
 /// Consuming dependency-injection builder for one reusable parser instance.
-#[derive(Default)]
+#[derive(TypedBuilder)]
 pub struct DocParserBuilder {
+    #[builder(default)]
+    artifacts: Option<ParserArtifacts>,
+    #[builder(default)]
     config: Option<Arc<ValidatedConfig>>,
+    #[builder(default)]
     layout_engine: Option<Arc<dyn LayoutEngine>>,
+    #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
+    #[builder(default)]
+    table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+}
+
+impl Default for DocParserBuilder {
+    /// Starts with no injected engines; build resolves configured defaults.
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 impl DocParserBuilder {
+    /// Supplies owned bytes; enabled models never fall back to filesystem loading in this mode.
+    pub fn artifacts(mut self, artifacts: impl Into<ParserArtifacts>) -> Self {
+        self.artifacts = Some(artifacts.into());
+        self
+    }
+
     /// Sets the mandatory immutable validated configuration.
     pub fn config(mut self, config: Arc<ValidatedConfig>) -> Self {
         self.config = Some(config);
@@ -134,20 +204,76 @@ impl DocParserBuilder {
         self
     }
 
-    /// Builds a parser, loading the default PP-DocLayoutV3 engine only when absent.
+    /// Injects a table structure engine and bypasses built-in TSR artifact loading.
+    pub fn table_engine(
+        mut self,
+        engine: Arc<dyn crate::TableStructureEngine>,
+    ) -> Self {
+        self.table_engine = Some(engine);
+        self
+    }
+
+    /// Loads missing layout and enabled table models once for this parser instance.
     pub async fn build(self) -> Result<DocParser, DocParseError> {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
-        let layout_engine: Arc<dyn LayoutEngine> = match self.layout_engine {
-            Some(engine) => engine,
-            None => Arc::new(
-                PpDocLayoutV3Engine::from_config(Arc::clone(&config)).await?,
-            ),
-        };
-        Ok(DocParser {
-            config,
-            layout_engine,
-            ocr_engine: self.ocr_engine,
-        })
+        let table_enabled = config.tsr().mode != crate::TableMode::RulesOnly;
+        if self
+            .artifacts
+            .as_ref()
+            .is_some_and(|artifacts| artifacts.tsr.is_none())
+            && table_enabled
+            && self.table_engine.is_none()
+        {
+            tracing::error!(
+                "parser artifact set is missing the enabled TSR model"
+            );
+            return Err(DocParseError::MissingTsrArtifacts);
+        }
+        let (layout_artifacts, table_artifacts) =
+            self.artifacts.map_or((None, None), |artifacts| {
+                (Some(artifacts.layout), artifacts.tsr)
+            });
+        let layout_engine: Arc<dyn LayoutEngine> =
+            match (self.layout_engine, layout_artifacts) {
+                (Some(engine), _) => engine,
+                (None, Some(artifacts)) => Arc::new(
+                    PpDocLayoutV3Engine::from_artifacts(
+                        Arc::clone(&config),
+                        artifacts,
+                    )
+                    .await?,
+                ),
+                (None, None) => Arc::new(
+                    PpDocLayoutV3Engine::from_config(Arc::clone(&config))
+                        .await?,
+                ),
+            };
+        let table_engine =
+            match (self.table_engine, table_enabled, table_artifacts) {
+                (Some(engine), _, _) => Some(engine),
+                (None, true, Some(artifacts)) => Some(Arc::new(
+                    docparse_tsr::SlanetPlusEngine::from_artifacts(
+                        Arc::clone(&config),
+                        artifacts,
+                    )
+                    .await?,
+                )
+                    as Arc<dyn crate::TableStructureEngine>),
+                (None, true, None) => Some(Arc::new(
+                    docparse_tsr::SlanetPlusEngine::from_config(Arc::clone(
+                        &config,
+                    ))
+                    .await?,
+                )
+                    as Arc<dyn crate::TableStructureEngine>),
+                (None, false, _) => None,
+            };
+        Ok(DocParser::with_engines()
+            .config(config)
+            .layout_engine(layout_engine)
+            .ocr_engine(self.ocr_engine)
+            .table_engine(table_engine)
+            .build())
     }
 }
 
@@ -164,18 +290,14 @@ impl DocParser {
         Self::builder().config(Arc::new(config)).build().await
     }
 
-    /// Creates the same parser pipeline from verified owned model artifacts on either platform.
+    /// Builds from explicit layout and enabled TSR bytes without accessing model paths.
     pub async fn from_artifacts(
         config: ValidatedConfig,
-        artifacts: docparse_layout::ModelArtifacts,
+        artifacts: impl Into<ParserArtifacts>,
     ) -> Result<Self, DocParseError> {
-        let config = Arc::new(config);
-        let engine =
-            PpDocLayoutV3Engine::from_artifacts(Arc::clone(&config), artifacts)
-                .await?;
         Self::builder()
-            .config(config)
-            .layout_engine(Arc::new(engine))
+            .config(Arc::new(config))
+            .artifacts(artifacts)
             .build()
             .await
     }
@@ -195,7 +317,6 @@ impl DocParser {
         bytes: Arc<[u8]>,
         options: ParseOptions<'_>,
     ) -> Result<DocumentResult, DocParseError> {
-        options.table.validate(options.table_engine.is_some())?;
         self.runtime()
             .parse_document_with_options(PdfInput::Bytes(bytes), options)
             .await
@@ -238,10 +359,8 @@ impl DocParser {
         } else {
             docparse_layout::timing::Timings::default()
         };
-        let tables = crate::runtime::TableRuntime::shared(
-            options.table,
-            options.table_engine,
-        )?;
+        let tables =
+            options.table_runtime(&self.config, self.table_engine.as_ref())?;
         let source_page_number = input.extracted.page_number;
         crate::watermark::classify(
             std::iter::once(&mut input.extracted),
@@ -326,10 +445,11 @@ impl DocParser {
 
     /// Creates one short-lived runtime facade that clones only shared ownership handles.
     pub(crate) fn runtime(&self) -> ParseRuntime {
-        ParseRuntime::new(
-            Arc::clone(&self.config),
-            Arc::clone(&self.layout_engine),
-            self.ocr_engine.as_ref().map(Arc::clone),
-        )
+        ParseRuntime::builder()
+            .config(Arc::clone(&self.config))
+            .layout_engine(Arc::clone(&self.layout_engine))
+            .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
+            .table_engine(self.table_engine.as_ref().map(Arc::clone))
+            .build()
     }
 }

@@ -1,5 +1,5 @@
 import { createParser, DocParseError } from "../../dist/index.js";
-import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress, ParserTiming } from "../../dist/index.js";
+import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress, ParserTiming, Table, TableMode } from "../../dist/index.js";
 
 /** The example owns these fixed elements; PDF text is always inserted with textContent. */
 const ui = {
@@ -9,6 +9,7 @@ const ui = {
   parse: document.querySelector<HTMLButtonElement>("#parse")!,
   cancel: document.querySelector<HTMLButtonElement>("#cancel")!,
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
+  tableMode: document.querySelector<HTMLSelectElement>("#table-mode")!,
   timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
   timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
   timingRows: document.querySelector<HTMLElement>("#timing-rows")!,
@@ -45,6 +46,13 @@ const ui = {
   exportDetail: document.querySelector<HTMLElement>("#export-detail")!,
   saveExport: document.querySelector<HTMLAnchorElement>("#save-export")!,
 };
+/** Labels the accepted table reconstruction path, independently of the page's layout model. */
+const tableSources: Record<Table["source"], string> = {
+  tagged_pdf: "Rules · PDF tags",
+  ruled: "Rules · separators",
+  text_alignment: "Rules · text alignment",
+  external_tsr: "TSR input",
+};
 const initialView = ui.viewer.cloneNode(true) as HTMLElement;
 const initialPages = ui.pages.cloneNode(true) as HTMLElement;
 const previews = new Map<number, PageImageResult & { url: string }>();
@@ -78,6 +86,7 @@ function status(title: string, detail: string, state = "idle", fraction?: number
 function controls(): void {
   ui.parse.disabled = !selectedFile || busy;
   ui.provider.disabled = busy;
+  ui.tableMode.disabled = busy;
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -208,6 +217,7 @@ function selectBlock(id: string): void {
   if (selectedBlock?.table) {
     const source = selectedBlock.table;
     const table = document.createElement("table"); table.className = "table-view";
+    table.dataset.source = source.source;
     table.setAttribute("aria-label", `Table with ${source.row_count} rows and ${source.column_count} columns`);
     const body = document.createElement("tbody");
     for (let row = 0; row < source.row_count; row++) {
@@ -221,7 +231,7 @@ function selectBlock(id: string): void {
       body.append(tr);
     }
     table.append(body); ui.text.replaceChildren(table);
-    ui.meta.textContent += ` · ${source.row_count} rows × ${source.column_count} columns`;
+    ui.meta.textContent += ` · ${source.row_count} rows × ${source.column_count} columns · Source: ${tableSources[source.source] ?? "Unknown"}`;
   }
   ui.characters.textContent = selectedBlock ? `${Array.from(selectedBlock.text).length} characters` : "—";
   ui.copy.disabled = !selectedBlock?.text; ui.copyStatus.textContent = "";
@@ -315,10 +325,11 @@ async function parse(): Promise<void> {
       delete ui.engine.dataset.provider;
       current = await createParser({
         artifacts: { kind: "urls", model: new URL("../models/inference.onnx", location.href).href, config: new URL("../models/inference.yml", location.href).href, manifest: new URL("../models/model-manifest.json", location.href).href },
+        tsrArtifacts: { kind: "urls", model: new URL("../models/slanet-plus/inference.onnx", location.href).href, config: new URL("../models/slanet-plus/inference.yml", location.href).href, manifest: new URL("../models/slanet-plus/model-manifest.json", location.href).href },
         // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
         executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
         allowCpuFallback: true,
-        config: { render: { dpi: 144, max_long_edge_pixels: 2000 } },
+        config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode } },
         signal, onProgress: event => { if (run === generation) progress(event); },
         onTiming: event => { if (run === generation) recordTiming("Initialization", event); },
       });
@@ -451,6 +462,14 @@ ui.provider.addEventListener("change", () => {
   clearDocument(); delete ui.engine.dataset.provider;
   ui.engine.textContent = ui.provider.value === "webgpu" ? "GPU preferred · CPU fallback if unavailable" : "CPU selected";
   status("Layout engine selected", "Start parsing to initialize the selected engine.");
+  controls();
+});
+/** Reinitializes only when the table model policy changes, keeping its default visible. */
+ui.tableMode.addEventListener("change", () => {
+  if (busy) return;
+  generation++; void parser?.close(); parser = undefined;
+  clearDocument(); delete ui.engine.dataset.provider;
+  status("Table recovery selected", "Start parsing to use the selected table recovery mode.");
   controls();
 });
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));

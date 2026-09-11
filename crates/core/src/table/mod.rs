@@ -7,7 +7,7 @@ mod tsr;
 mod validate;
 pub use tsr::{
     TableMode, TableOptions, TableStructureEngine, TableStructureError,
-    TsrRequestReason, TsrTableInput, TsrTableRequest,
+    TsrGeometryPolicy, TsrRequestReason, TsrTableInput, TsrTableRequest,
 };
 
 use std::ops::Range;
@@ -30,9 +30,13 @@ pub(crate) const MAX_TABLE_ROWS: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TableStructureSource {
+    /// Local reconstruction from explicit PDF table tags.
     TaggedPdf,
+    /// Local rules using painted separators, including supported geometric refinement.
     Ruled,
+    /// Local rules using aligned source text and whitespace.
     TextAlignment,
+    /// Topology supplied by a TSR model or caller, then filled with canonical source text.
     ExternalTsr,
 }
 
@@ -78,5 +82,6 @@ pub struct Table {
     pub row_count: usize,
     pub column_count: usize,
     pub cells: Vec<TableCell>,
+    /// Records the accepted reconstruction path, independently of layout detection provenance.
     pub source: TableStructureSource,
 }

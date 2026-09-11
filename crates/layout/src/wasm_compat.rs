@@ -1,5 +1,7 @@
 //! Platform-specific execution and thread bounds with explicitly scoped compatibility submodules.
+mod backend;
 mod session_pool;
+pub use backend::OnnxBackend;
 
 pub(crate) use session_pool::LayoutSessionPool;
 

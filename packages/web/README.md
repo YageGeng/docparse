@@ -1,6 +1,6 @@
 # DocParse Web
 
-Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3 model inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
+Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3 / SLANet_plus models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
 
 ## Build
 
@@ -10,6 +10,7 @@ Prepare the pinned model and tools from the repository root:
 rtk rustup target add wasm32-unknown-unknown
 rtk cargo install wasm-bindgen-cli --version 0.2.125 --locked
 rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
+rtk uv run scripts/download_models.py --model slanet-plus
 ```
 
 Run these commands in `packages/web`:
@@ -25,7 +26,7 @@ rtk npm run build
 
 The SDK build excludes the example. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
 
-Copy the complete `dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The default single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
+Copy the complete `dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The explicit single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
 
 ## Usage
 
@@ -39,6 +40,12 @@ const parser = await createParser({
     config: "/models/pp-doclayout-v3/inference.yml",
     manifest: "/models/pp-doclayout-v3/model-manifest.json",
   },
+  tsrArtifacts: {
+    kind: "urls",
+    model: "/models/slanet-plus/inference.onnx",
+    config: "/models/slanet-plus/inference.yml",
+    manifest: "/models/slanet-plus/model-manifest.json",
+  },
 });
 
 try {
@@ -51,9 +58,15 @@ try {
 }
 ```
 
+Table recovery defaults to `config.tsr.mode = "fallback"`: local rules run first,
+then the built-in TSR processes unresolved tables. Use `"external_only"` to send
+all tables to TSR, or `"rules_only"` to omit TSR artifacts and model loading.
+`tsrArtifacts` uses the same URLs/bytes contract as `artifacts`. The table model
+uses the same selected backend as layout; both default to WebGPU.
+
 Here, `file` is a caller-selected File. To manage authentication or caching, obtain the model yourself and pass `{kind: "bytes", model, config, manifest}` with three Uint8Array values. The library does not detach caller-owned PDF or model buffers.
 
-`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
+`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout/tsr.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
@@ -79,6 +92,7 @@ console.table(timings);
 | `layout_inference` | Input binding and the synchronous ORT run or asynchronous ORT Promise. Includes runtime transfers/lazy compilation performed inside that call; this is not GPU kernel time. |
 | `layout_readback` | Web output synchronization plus conversion of the two consumed outputs; native output conversion. Native provider-internal transfers remain in `layout_inference`. |
 | `layout_postprocess` | Detection filtering and coordinate conversion. |
+| `tsr_preprocess`, `tsr_queue`, `tsr_inference`, `tsr_postprocess` | Table crop preparation, single-session wait, selected-backend model execution, and token/location decoding. |
 | `text_prepare`, `ocr`, `text_finish` | Native text/layout preparation, an actual OCR call when needed, then final text/layout composition. |
 | `link_validate` | Cross-page linking, result assembly, and validation. |
 | `result_serialize`, `preview_encode` | Rust result conversion to JavaScript; each Worker PNG encoding operation, including asynchronous waiting. |
@@ -90,7 +104,7 @@ Observations describe elapsed attempts, not success. Error/cancellation can leav
 
 ## Interactive example
 
-The example selects WebGPU by default and explicitly allows CPU fallback on unsupported devices. Its layout engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
+The example selects WebGPU with rules-first TSR fallback by default. Its table selector also provides TSR-only and rules-only modes. The example explicitly allows CPU fallback for both models on unsupported devices. Its engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
 
 After preparing the model and building the package, run this command in `packages/web`:
 
@@ -186,9 +200,9 @@ text remains inspectable and retained in text/Markdown output.
 - Fatal Worker/WASM failures settle pending requests instead of leaving Promises suspended.
 - Errors contain a stable `code` and readable message; Worker error stacks are retained for diagnostics.
 
-Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM dependency graph enables `ort/webgpu`; the host loads the pinned WebGPU distribution and registers its execution provider. The SDK retains its CPU default for compatibility. PDFium rendering, text extraction, and fusion still run on CPU.
+Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM dependency graph enables `ort/webgpu`; the host loads the pinned WebGPU distribution and registers its execution provider. WebGPU is the SDK default for both layout and TSR; select `executionProvider: "wasm"` for CPU. PDFium rendering, text extraction, and fusion still run on CPU.
 
-Fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
+GPU-to-CPU fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. Browser layout and TSR serialize actual inference through output readback to avoid cross-session GPU buffer reuse after a caller timeout. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
 
 Run `rtk npm run test:e2e -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
 
@@ -261,13 +275,14 @@ Original text remains owned once by `block.lines[].text_items`. Cell lines conta
 
 The example displays a selected table in the text inspector with its rows and merged cells. Copy uses the table's plain-text projection. The page overlay stays one parent table region. Per-page `table_structure` measures the default local reconstruction stage; `text_finish` covers composition and final validation around that stage. `text_extract` includes the PDFium word, vector, and tag evidence scan.
 
-Recovery is limited to already-detected table layouts. It uses existing native text or supplied OCR facts; it does not add a table/OCR model, infer missing scan text, or merge tables across pages. Ambiguous grids retain source lines with `TableStructureUnavailable`. Sparse-rule and borderless reconstruction use geometry-based heuristics, so complex/irregular structures still require inspection.
+Recovery is limited to already-detected table layouts. It uses existing native text or supplied OCR facts; the built-in TSR predicts structure, while OCR remains a separate extension. It does not invent missing scan text or merge tables across pages. Ambiguous grids retain source lines with `TableStructureUnavailable`. Sparse-rule and borderless reconstruction use geometry-based heuristics, so complex/irregular structures still require inspection.
 
 ## Caller-supplied table structure
 
-Existing parsing remains local by default. A per-call `table` option enables an
-external structure callback for regions the production layout model already
-identified as tables. This SDK does not ship a table recognition service.
+Parsing uses the local SLANet_plus model by default. A per-call `onTableStructure`
+callback can override it for regions already identified by layout. For callback-only
+integrations, initialize with `config.tsr.mode = "rules_only"` to omit built-in
+artifacts, then select `fallback` or `external_only` on the parse call.
 
 ```javascript
 const document = await parser.parse(bytes, {
@@ -285,8 +300,8 @@ const document = await parser.parse(bytes, {
 ```
 
 Use `external_only` to bypass local topology inference for all layout tables,
-or `rules_only` to disable the callback. Either external mode requires the
-callback. A failed provider retains the original text and emits table warnings;
+or `rules_only` to disable TSR. Without a callback, the built-in model handles
+TSR when initialized; a missing built-in and missing callback fail explicitly. A failed provider retains the original text and emits table warnings;
 external-only mode does not silently substitute a local structure.
 
 The callback receives a PNG Blob, its actual width/height, one-based page number,
@@ -319,3 +334,21 @@ Use a PDF containing multiple tables on one page and at least one locally
 unresolved table. The check uses the production SDK and layout model to verify
 fallback, external-only input, partial failures, timeout, and cancellation. Its
 declared test topology evaluates the input contract, not a TSR model's accuracy.
+
+
+Run real-model table acceptance after building the SDK and example and starting
+the production example server:
+
+```sh
+rtk proxy node crates/web/tests/paddle_tsr.mjs /absolute/path/to/document.pdf
+rtk proxy node crates/web/tests/paddle_tsr.mjs --mode fallback --output packages/web/test-results/paddle-tsr/browser-fallback.json /absolute/path/to/document.pdf
+```
+
+Reports distinguish layout tables, actual model calls, accepted structures, and
+source-validation warnings. The default test requires model evidence in every
+accepted table and never substitutes caller-supplied or local-rule results.
+
+The JSON `table.source` identifies the accepted structure: `tagged_pdf`, `ruled`,
+and `text_alignment` are local reconstruction; `external_tsr` is structure supplied
+by the built-in TSR model or an external caller. The inspector labels these paths
+Rules and TSR input, independently of the layout model that detected the region.

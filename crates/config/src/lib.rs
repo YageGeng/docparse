@@ -8,7 +8,7 @@ mod wasm_compat;
 pub use error::ConfigError;
 pub use types::{
     ExecutionProviderConfig, FusionConfig, LayoutConfig, OcrConfig, OcrPolicy,
-    OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
+    OutputConfig, RawConfig, RenderConfig, RuntimeConfig, TableMode, TsrConfig,
 };
 
 pub use validate::ValidatedConfig;

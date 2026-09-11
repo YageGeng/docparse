@@ -3,7 +3,7 @@ import type { DocumentResult, ExecutionProvider, ModelSource, PageImageResult, P
 /** Correlates each private Worker operation with its payload and successful result. */
 export interface WorkerOperations {
   init: {
-    payload: { artifacts: ModelSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean; observeTiming: boolean };
+    payload: { artifacts: ModelSource; tsrArtifacts?: ModelSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean; observeTiming: boolean };
     result: ExecutionProvider;
   };
   parse: {

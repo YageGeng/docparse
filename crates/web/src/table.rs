@@ -1,6 +1,7 @@
 //! Worker-local bridge to caller-owned external table structure callbacks.
 use std::sync::Arc;
 
+use crate::js::{self, FunctionExt, ValueExt};
 use docparse_core::{
     BlockId, TableStructureEngine, TableStructureError, TsrRequestReason,
     TsrTableInput, TsrTableRequest,
@@ -8,7 +9,7 @@ use docparse_core::{
 use docparse_layout::{AffineTransform, Bbox};
 use serde::Serialize;
 use typed_builder::TypedBuilder;
-use wasm_bindgen::{JsCast, prelude::*};
+use wasm_bindgen::prelude::*;
 
 /// Metadata is serialized separately from an owned pixel copy.
 #[derive(Serialize, TypedBuilder)]
@@ -25,8 +26,8 @@ struct CropMetadata<'a> {
 
 /// The JS promise broker lives inside the Worker, never in serialized parse options.
 pub(super) struct BrowserTableEngine {
-    request: js_sys::Function,
-    cancel: js_sys::Function,
+    request: js::Function,
+    cancel: js::Function,
 }
 
 impl BrowserTableEngine {
@@ -36,8 +37,8 @@ impl BrowserTableEngine {
         reason = "the core API uses Arc but browser callbacks remain confined to one Worker"
     )]
     pub fn shared(
-        request: js_sys::Function,
-        cancel: js_sys::Function,
+        request: js::Function,
+        cancel: js::Function,
     ) -> Arc<dyn TableStructureEngine> {
         Arc::new(Self { request, cancel })
     }
@@ -46,16 +47,21 @@ impl BrowserTableEngine {
 /// A pending provider promise is canceled if Rust times out or the parse task is dropped.
 struct PendingRequest {
     id: String,
-    cancel: js_sys::Function,
+    cancel: js::Function,
     settled: bool,
 }
 impl Drop for PendingRequest {
     /// Releases the JS broker entry and notifies the calling thread about cancellation.
     fn drop(&mut self) {
-        if !self.settled {
-            let _ = self
-                .cancel
-                .call1(&JsValue::NULL, &JsValue::from_str(&self.id));
+        if !self.settled
+            && let Err(error) =
+                self.cancel.invoke(&[JsValue::from_str(&self.id)])
+        {
+            tracing::warn!(
+                "table request {} cancellation callback failed: {}",
+                self.id,
+                error.exception_message()
+            );
         }
     }
 }
@@ -90,31 +96,23 @@ impl TableStructureEngine for BrowserTableEngine {
                 .map_err(|e| TableStructureError::Engine {
                     message: e.to_string(),
                 })?;
-            // Uint8Array::from owns its storage; a borrowed WASM view cannot survive the external await.
-            let pixels =
-                js_sys::Uint8Array::from(request.image.data().as_ref());
-            js_sys::Reflect::set(&wire, &JsValue::from_str("pixels"), &pixels)
-                .map_err(|error| TableStructureError::Engine {
-                    message: js_message(error),
-                })?;
+            let pixels = js::copy_pixels(request.image.data().as_ref());
+            wire.set_property("pixels", &pixels).map_err(|error| {
+                TableStructureError::Engine {
+                    message: error.exception_message(),
+                }
+            })?;
             let mut pending = PendingRequest {
                 id: request.request_id.clone(),
                 cancel: self.cancel.clone(),
                 settled: false,
             };
             let value =
-                self.request.call1(&JsValue::NULL, &wire).map_err(|error| {
+                self.request.invoke_async(&wire).await.map_err(|error| {
                     TableStructureError::Engine {
-                        message: js_message(error),
+                        message: error.exception_message(),
                     }
                 })?;
-            let value = wasm_bindgen_futures::JsFuture::from(
-                js_sys::Promise::resolve(&value),
-            )
-            .await
-            .map_err(|error| TableStructureError::Engine {
-                message: js_message(error),
-            })?;
             pending.settled = true;
             serde_wasm_bindgen::from_value(value).map_err(|e| {
                 TableStructureError::InvalidInput {
@@ -123,50 +121,4 @@ impl TableStructureEngine for BrowserTableEngine {
             })
         })
     }
-}
-
-/// Validated access to the per-call Worker callback object.
-pub(super) struct Callbacks(JsValue);
-impl From<JsValue> for Callbacks {
-    /// Missing callbacks are represented by an empty object, preserving legacy calls.
-    fn from(value: JsValue) -> Self {
-        Self(if value.is_null() || value.is_undefined() {
-            js_sys::Object::new().into()
-        } else {
-            value
-        })
-    }
-}
-impl Callbacks {
-    /// Checks each callback before exposing it to an async Rust extension point.
-    pub fn function(
-        &self,
-        name: &str,
-    ) -> Result<Option<js_sys::Function>, JsValue> {
-        let value = js_sys::Reflect::get(&self.0, &JsValue::from_str(name))
-            .map_err(|_error| {
-                super::WebError::value(
-                    "InvalidOptions",
-                    format!("cannot read callback {name}"),
-                )
-            })?;
-        if value.is_null() || value.is_undefined() {
-            return Ok(None);
-        }
-        value.dyn_into().map(Some).map_err(|_error| {
-            super::WebError::value(
-                "InvalidOptions",
-                format!("callback {name} must be a function"),
-            )
-        })
-    }
-}
-
-/// Converts arbitrary JS failures to owned messages without retaining JS handles across core boundaries.
-fn js_message(value: JsValue) -> String {
-    js_sys::Reflect::get(&value, &JsValue::from_str("message"))
-        .ok()
-        .and_then(|m| m.as_string())
-        .or_else(|| value.as_string())
-        .unwrap_or_else(|| "external table callback rejected".to_owned())
 }

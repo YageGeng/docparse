@@ -1,0 +1,751 @@
+//! Table rules tests and support, compiled only within the parent test module.
+use super::*;
+
+/// A measured native word's byte range, ink bounds, and optional baseline.
+type WordFact = (usize, usize, [f64; 4], Option<f64>);
+
+/// Real native words must recover all data columns and multi-line/grouped headers.
+#[test]
+fn survey_tables_recover_source_columns_and_headers() {
+    for source in [
+        include_str!(
+            "../fixtures/table/terminal-universe-page-32-statistics.json"
+        ),
+        include_str!("../fixtures/table/mathnet-page-8.json"),
+        include_str!("../fixtures/table/mathnet-page-10.json"),
+        include_str!("../fixtures/table/mathnet-page-15.json"),
+        include_str!("../fixtures/table/mathnet-page-28.json"),
+        include_str!("../fixtures/table/shadow-page-5.json"),
+        include_str!("../fixtures/table/shadow-page-6.json"),
+        include_str!("../fixtures/table/shadow-page-14.json"),
+        include_str!("../fixtures/table/shadow-page-16.json"),
+        include_str!("../fixtures/table/shadow-page-17.json"),
+        include_str!("../fixtures/table/enterprise-page-4.json"),
+        include_str!("../fixtures/table/enterprise-page-12.json"),
+        include_str!("../fixtures/table/survey-page-29.json"),
+        include_str!("../fixtures/table/survey-page-33.json"),
+        include_str!("../fixtures/table/survey-page-35.json"),
+        include_str!("../fixtures/table/survey-page-47-0.json"),
+        include_str!("../fixtures/table/survey-page-57-0.json"),
+        include_str!("../fixtures/table/survey-page-68-0.json"),
+        include_str!("../fixtures/table/survey-page-84-0.json"),
+        include_str!("../fixtures/table/survey-page-84-1.json"),
+    ] {
+        let fixture: serde_json::Value =
+            serde_json::from_str(source).expect("native table");
+        let page: u32 =
+            serde_json::from_value(fixture.get("page").expect("page").clone())
+                .expect("page");
+        let bounds: [f64; 4] =
+            serde_json::from_value(fixture.get("bbox").expect("bbox").clone())
+                .expect("bounds");
+        let facts: Vec<(u32, String, [f64; 4], f64, f64, f64)> =
+            serde_json::from_value(
+                fixture.get("items").expect("items").clone(),
+            )
+            .expect("items");
+        let words: Vec<(u32, Vec<WordFact>)> = serde_json::from_value(
+            fixture.get("words").expect("words").clone(),
+        )
+        .expect("words");
+        let rules: Vec<(String, f64, f64, f64)> = serde_json::from_value(
+            fixture.get("rules").expect("rules").clone(),
+        )
+        .expect("rules");
+        let weights: BTreeMap<u32, u16> = fixture
+            .get("weights")
+            .map(|value| {
+                serde_json::from_value::<Vec<(u32, u16)>>(value.clone())
+                    .expect("font weights")
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let repairs: BTreeMap<u32, Vec<crate::RepairAction>> = fixture
+            .get("repairs")
+            .map(|value| {
+                serde_json::from_value::<Vec<(u32, Vec<crate::RepairAction>)>>(
+                    value.clone(),
+                )
+                .expect("source repairs")
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let id = crate::BlockId::model(page, 0, 0);
+        let lines = facts
+            .into_iter()
+            .map(|(index, text, b, size, y, row_y)| {
+                let item = TextItem::builder()
+                    .id(TextItemId::native(page, index))
+                    .raw_text(text.clone())
+                    .bbox(Bbox::try_from(b).expect("item"))
+                    .baseline(Some(Baseline {
+                        start: docparse_layout::Point::new(b[0], y),
+                        end: docparse_layout::Point::new(b[2], y),
+                    }))
+                    .style(Some(
+                        crate::TextStyle::builder()
+                            .font_size(Some(size))
+                            .weight(weights.get(&index).copied())
+                            .build(),
+                    ))
+                    .source(crate::TextSource::Native)
+                    .repair_actions(
+                        repairs.get(&index).cloned().unwrap_or_default(),
+                    )
+                    .build();
+                crate::Line::builder()
+                    .id(crate::LineId::new(&id, index))
+                    .text(text)
+                    .bbox(item.bbox)
+                    .baseline(Some(Baseline {
+                        start: docparse_layout::Point::new(b[0], row_y),
+                        end: docparse_layout::Point::new(b[2], row_y),
+                    }))
+                    .direction(crate::WritingDirection::LeftToRight)
+                    .text_items(vec![item])
+                    .build()
+            })
+            .collect();
+        let mut evidence = TableEvidence {
+            rules: rules
+                .into_iter()
+                .map(|(kind, at, from, to)| {
+                    if kind == "h" {
+                        crate::table::TableRule::Horizontal {
+                            y: at,
+                            left: from,
+                            right: to,
+                        }
+                    } else {
+                        crate::table::TableRule::Vertical {
+                            x: at,
+                            top: from,
+                            bottom: to,
+                        }
+                    }
+                })
+                .collect(),
+            ..TableEvidence::default()
+        };
+        for (index, words) in words {
+            evidence.words.insert(
+                TextItemId::native(page, index),
+                words
+                    .into_iter()
+                    .map(|(start, end, b, y)| {
+                        crate::table::TableWord::builder()
+                            .byte_range(start..end)
+                            .bbox(Bbox::try_from(b).expect("word"))
+                            .baseline(y.map(|y| Baseline {
+                                start: docparse_layout::Point::new(b[0], y),
+                                end: docparse_layout::Point::new(b[2], y),
+                            }))
+                            .build()
+                    })
+                    .collect(),
+            );
+        }
+        let block = Block::builder()
+            .id(id)
+            .label(docparse_layout::LayoutLabel::Table)
+            .text(String::new())
+            .label_source(crate::LabelSource::Model)
+            .bbox(Bbox::try_from(bounds).expect("table bounds"))
+            .final_order(0)
+            .lines(lines)
+            .build();
+        let config = FusionConfig::default();
+        for reverse in [false, true] {
+            let mut block = block.clone();
+            let mut evidence = evidence.clone();
+            if reverse {
+                block.lines.reverse();
+                evidence.rules.reverse();
+                for words in evidence.words.values_mut() {
+                    words.reverse();
+                }
+            }
+            let original = block.lines.clone();
+            let reconstructed = TableAssembler::new(&config, &evidence, &[])
+                .reconstruct(&mut block);
+            assert!(reconstructed.is_ok(), "page {page}: {reconstructed:?}");
+            assert_eq!(
+                block.lines, original,
+                "canonical source facts stay unchanged"
+            );
+            let table = block.table.expect("structured table");
+            assert_eq!(
+                table.column_count,
+                serde_json::from_value::<usize>(
+                    fixture.get("columns").expect("columns").clone()
+                )
+                .expect("columns"),
+                "page {page}"
+            );
+            assert_eq!(
+                table.row_count,
+                serde_json::from_value::<usize>(
+                    fixture.get("rows").expect("rows").clone()
+                )
+                .expect("rows"),
+                "page {page}"
+            );
+            if let Some(expected) = fixture.get("expected_cells") {
+                let expected: Vec<(usize, usize, usize, usize, String)> =
+                    serde_json::from_value(expected.clone())
+                        .expect("expected source cells");
+                for (row, column, row_span, column_span, text) in expected {
+                    let cell = table
+                        .cells
+                        .iter()
+                        .find(|cell| cell.row == row && cell.column == column)
+                        .expect("expected table cell");
+                    assert_eq!(
+                        (cell.row_span, cell.column_span),
+                        (row_span, column_span),
+                        "page {page} cell {row},{column}"
+                    );
+                    assert_eq!(
+                        cell.text.split_whitespace().collect::<String>(),
+                        text.split_whitespace().collect::<String>(),
+                        "page {page} cell {row},{column}"
+                    );
+                }
+            }
+            if let Some(rows) = fixture.get("header_rows") {
+                let rows: Vec<usize> = serde_json::from_value(rows.clone())
+                    .expect("header and section rows");
+                for cell in &table.cells {
+                    assert_eq!(
+                        cell.is_header,
+                        rows.contains(&cell.row),
+                        "page {page} cell {},{} header",
+                        cell.row,
+                        cell.column
+                    );
+                }
+            }
+            // Compare independently transcribed source cells, not only grid dimensions.
+            let row_text = |row| {
+                table
+                    .cells
+                    .iter()
+                    .filter(|cell| cell.row == row)
+                    .map(|cell| {
+                        cell.text
+                            .chars()
+                            .filter(|c| !c.is_whitespace())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            if page == 4 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Model",
+                        "InferenceParadigm",
+                        "RAGQuality",
+                        "IAS",
+                        "LooseIAS"
+                    ]
+                );
+                assert_eq!(
+                    row_text(1),
+                    [
+                        "Faithfulness",
+                        "AnswerCoverage",
+                        "Loose",
+                        "Strict",
+                        "PersonaDefinition",
+                        "OutputConstraints",
+                        "KnowledgeInteractionProtocol"
+                    ]
+                );
+                for (row, title) in
+                    [(2, "open-source models"), (12, "closed-source models")]
+                {
+                    let section = table
+                        .cells
+                        .iter()
+                        .find(|cell| cell.row == row)
+                        .expect("section title");
+                    assert_eq!(
+                        (
+                            section.column,
+                            section.row_span,
+                            section.column_span,
+                            section.is_header
+                        ),
+                        (0, 1, 9, true)
+                    );
+                    assert_eq!(section.text, title);
+                }
+                // Independently transcribed scores protect column alignment on both sides of each section.
+                let expected = [
+                    ["64.8", "56.4", "75.5", "12.3", "70.1", "82.0", "70.3"],
+                    ["66.8", "59.4", "77.0", "14.3", "74.2", "81.5", "72.4"],
+                    ["64.9", "59.5", "77.2", "15.9", "75.4", "80.1", "75.1"],
+                    ["67.1", "64.1", "83.8", "26.8", "82.2", "86.2", "82.5"],
+                    ["63.9", "65.6", "76.4", "13.2", "79.0", "81.5", "68.9"],
+                    ["67.4", "67.1", "80.6", "20.8", "82.3", "83.6", "76.3"],
+                    ["68.9", "66.4", "83.1", "21.9", "81.3", "84.3", "82.9"],
+                    ["69.9", "60.4", "82.2", "22.1", "79.9", "85.9", "78.8"],
+                    ["76.6", "64.3", "81.6", "21.5", "75.4", "85.7", "78.7"],
+                    ["73.5", "61.6", "83.7", "26.5", "86.6", "85.6", "80.3"],
+                    ["69.8", "65.8", "80.0", "19.5", "79.4", "82.1", "77.8"],
+                    ["76.4", "68.5", "83.3", "25.3", "84.7", "84.1", "82.4"],
+                    ["76.8", "66.7", "79.8", "19.5", "77.1", "81.5", "79.1"],
+                ];
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.row >= 3 && cell.column >= 2)
+                        .map(|cell| cell.text.as_str())
+                        .collect::<Vec<_>>(),
+                    expected.into_iter().flatten().collect::<Vec<_>>()
+                );
+            } else if page == 12 {
+                assert_eq!(
+                    row_text(0),
+                    ["Model/Metric", "LooseIAS", "RejectAcc", "ConflictAcc"]
+                );
+                let section = table
+                    .cells
+                    .iter()
+                    .find(|cell| cell.row == 2)
+                    .expect("evaluation section");
+                assert_eq!(
+                    (section.column, section.column_span, section.is_header),
+                    (0, 10, true)
+                );
+                assert_eq!(section.text, "Raw Evaluation Scores (%)");
+                let expected = [
+                    [
+                        "89.6", "89.0", "91.9", "27.8", "27.9", "28.8", "37.8",
+                        "39.1", "39.1",
+                    ],
+                    [
+                        "86.0", "86.2", "90.4", "18.9", "19.4", "19.4", "28.3",
+                        "28.9", "31.0",
+                    ],
+                    [
+                        "84.9", "89.1", "88.3", "33.6", "35.8", "34.5", "37.2",
+                        "39.4", "36.9",
+                    ],
+                    [
+                        "82.7", "83.8", "85.8", "10.1", "9.3", "9.3", "16.6",
+                        "16.6", "17.6",
+                    ],
+                ];
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.row >= 3 && cell.column >= 1)
+                        .map(|cell| cell.text.as_str())
+                        .collect::<Vec<_>>(),
+                    expected.into_iter().flatten().collect::<Vec<_>>()
+                );
+            } else if page == 29 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Model",
+                        "BatchSize(#tokens)",
+                        "LearningRate",
+                        "Warmup",
+                        "DecayMethod",
+                        "Optimizer",
+                        "PrecisionType",
+                        "WeightDecay",
+                        "GradClip",
+                        "Dropout"
+                    ]
+                );
+                assert_eq!(
+                    row_text(1),
+                    [
+                        "GPT3(175B)",
+                        "32K→3.2M",
+                        "6×10−5",
+                        "yes",
+                        "cosinedecayto10%",
+                        "Adam",
+                        "FP16",
+                        "0.1",
+                        "1.0",
+                        "-"
+                    ]
+                );
+            } else if page == 33 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Models",
+                        "A800FullTuning",
+                        "A800LoRATuning",
+                        "A800Inference(16-bit)",
+                        "3090Inference(16-bit)",
+                        "3090Inference(8-bit)"
+                    ]
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.row == 0)
+                        .map(|cell| (
+                            cell.column,
+                            cell.row_span,
+                            cell.column_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [
+                        (0, 2, 1),
+                        (1, 1, 3),
+                        (4, 1, 3),
+                        (7, 1, 2),
+                        (9, 1, 2),
+                        (11, 1, 2)
+                    ]
+                );
+                assert_eq!(
+                    row_text(2),
+                    [
+                        "LLaMA(7B)",
+                        "2",
+                        "8",
+                        "3.0h",
+                        "1",
+                        "80",
+                        "3.5h",
+                        "1",
+                        "36.6",
+                        "1",
+                        "24.3",
+                        "1",
+                        "7.5"
+                    ]
+                );
+                assert_eq!(
+                    row_text(5),
+                    [
+                        "LLaMA(65B)",
+                        "16",
+                        "2",
+                        "11.2h",
+                        "1",
+                        "4",
+                        "60.6h",
+                        "2",
+                        "8.8",
+                        "8",
+                        "2.0",
+                        "4",
+                        "1.5"
+                    ]
+                );
+            } else if page == 35 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Models",
+                        "DatasetMixtures",
+                        "InstructionNumbers",
+                        "LexicalDiversity",
+                        "Chat",
+                        "QA"
+                    ]
+                );
+                assert_eq!(row_text(1), ["AlpacaFarm", "MMLU", "BBH3k"]);
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.row == 0)
+                        .map(|cell| (
+                            cell.column,
+                            cell.row_span,
+                            cell.column_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [
+                        (0, 2, 1),
+                        (1, 2, 1),
+                        (2, 2, 1),
+                        (3, 2, 1),
+                        (4, 1, 1),
+                        (5, 1, 2)
+                    ]
+                );
+                // These values are transcribed from Table 10, independently of reconstruction.
+                let expected = [
+                    ["80,000", "48.48", "23.77", "38.58", "32.79"],
+                    ["63,184", "77.31", "81.30", "38.11", "27.71"],
+                    ["82,439", "25.92", "/∗", "37.52", "29.81"],
+                    ["145,623", "48.22", "71.36", "41.26", "28.36"],
+                    ["225,623", "48.28", "70.00", "43.69", "29.69"],
+                    ["82,439", "25.92", "/∗", "37.52", "29.81"],
+                    ["70,000", "70.43", "76.96", "39.73", "33.25"],
+                    ["70,000", "75.59", "81.55", "38.01", "30.03"],
+                    ["70,000", "73.48", "79.15", "32.55", "31.25"],
+                    ["220,000", "57.78", "51.13", "33.81", "26.63"],
+                    ["80,000", "48.48", "22.12", "34.12", "34.05"],
+                    ["63,184", "77.31", "77.13", "47.49", "33.82"],
+                    ["82,439", "25.92", "/∗", "36.73", "25.43"],
+                    ["145,623", "48.22", "72.85", "41.16", "29.49"],
+                    ["225,623", "48.28", "69.49", "43.50", "31.16"],
+                    ["82,439", "25.92", "/∗", "36.73", "25.43"],
+                    ["70,000", "70.43", "77.94", "46.89", "35.75"],
+                    ["70,000", "75.59", "78.92", "44.97", "36.40"],
+                    ["70,000", "73.48", "80.45", "43.15", "34.59"],
+                    ["220,000", "57.78", "58.12", "38.07", "27.28"],
+                ];
+                for (index, expected) in expected.iter().enumerate() {
+                    assert_eq!(
+                        table
+                            .cells
+                            .iter()
+                            .filter(|cell| cell.row == index + 2
+                                && cell.column >= 2)
+                            .map(|cell| cell
+                                .text
+                                .chars()
+                                .filter(|c| !c.is_whitespace())
+                                .collect::<String>())
+                            .collect::<Vec<_>>(),
+                        *expected,
+                        "data row {index}"
+                    );
+                }
+            } else if page == 47 {
+                assert_eq!(
+                    row_text(0),
+                    ["Ingredient", "CollectedPrompts", "Prin."]
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 0 && cell.row > 0)
+                        .map(|cell| (
+                            cell.text.as_str(),
+                            cell.row,
+                            cell.row_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [
+                        ("Task Description", 1, 4),
+                        ("Input Data", 5, 2),
+                        ("Contextual Information", 7, 4),
+                        ("Demonstration", 11, 9),
+                        ("Other Designs", 20, 8)
+                    ]
+                );
+                let prefixes: Vec<_> =
+                    [('T', 4), ('I', 2), ('C', 4), ('D', 9), ('O', 8)]
+                        .into_iter()
+                        .flat_map(|(prefix, count)| {
+                            (1..=count).map(move |i| format!("{prefix}{i}."))
+                        })
+                        .collect();
+                for (row, prefix) in prefixes.iter().enumerate() {
+                    let cell = table
+                        .cells
+                        .iter()
+                        .find(|cell| cell.row == row + 1 && cell.column == 1)
+                        .expect("prompt cell");
+                    assert!(
+                        cell.text.starts_with(prefix),
+                        "row {row}: {}",
+                        cell.text
+                    );
+                    assert!(
+                        prefixes
+                            .iter()
+                            .filter(|p| *p != prefix)
+                            .all(|p| !cell.text.contains(p)),
+                        "prompts must stay in separate cells"
+                    );
+                }
+            } else if page == 57 {
+                assert_eq!(
+                    row_text(0),
+                    ["Level", "Ability", "Task", "Dataset"]
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 0 && cell.row > 0)
+                        .map(|cell| (
+                            cell.text.as_str(),
+                            cell.row,
+                            cell.row_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [("Basic", 1, 9), ("Advanced", 10, 11)]
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 1 && cell.row > 0)
+                        .map(|cell| (
+                            cell.text.split_whitespace().collect::<String>(),
+                            cell.row,
+                            cell.row_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [
+                        ("LanguageGeneration", 1, 3),
+                        ("KnowledgeUtilization", 4, 3),
+                        ("ComplexReasoning", 7, 3),
+                        ("HumanAlignment", 10, 3),
+                        ("InteractionwithExternalEnvironment", 13, 3),
+                        ("ToolManipulation", 16, 5)
+                    ]
+                    .map(|(text, row, span)| (
+                        text.to_owned(),
+                        row,
+                        span
+                    ))
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 2 && cell.row > 0)
+                        .map(|cell| cell
+                            .text
+                            .split_whitespace()
+                            .collect::<String>())
+                        .collect::<Vec<_>>(),
+                    [
+                        "LanguageModeling",
+                        "ConditionalTextGeneration",
+                        "CodeSynthesis",
+                        "Closed-BookQA",
+                        "Open-BookQA",
+                        "KnowledgeCompletion",
+                        "KnowledgeReasoning",
+                        "SymbolicReasoning",
+                        "MathematicalReasoning",
+                        "Honestness",
+                        "Helpfulness",
+                        "Harmlessness",
+                        "Household",
+                        "WebsiteEnvironment",
+                        "OpenWorld",
+                        "SearchEngine",
+                        "CodeExecutor",
+                        "Calculator",
+                        "ModelInterface",
+                        "DataInterface"
+                    ]
+                );
+            } else if page == 68 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Tasks",
+                        "Datasets",
+                        "Instructions",
+                        "ChatGPT",
+                        "Supervised"
+                    ]
+                );
+                assert!(table.cells.iter().any(|cell| cell.row == 0
+                    && cell.column == 0
+                    && cell.column_span == 2));
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 0 && cell.row > 0)
+                        .map(|cell| (
+                            cell.text.as_str(),
+                            cell.row,
+                            cell.row_span
+                        ))
+                        .collect::<Vec<_>>(),
+                    [
+                        ("LG", 1, 4),
+                        ("KU", 5, 6),
+                        ("CR", 11, 4),
+                        ("SDG", 15, 2),
+                        ("IR", 17, 2)
+                    ]
+                );
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 4 && cell.row > 0)
+                        .map(|cell| cell.text.as_str())
+                        .collect::<Vec<_>>(),
+                    [
+                        "20.66", "21.12", "21.71", "23.01", "85.19", "85.86",
+                        "81.20", "82.20", "29.25", "31.21", "53.20", "66.75",
+                        "78.47", "79.30", "79.88", "70.10", "48.80", "17.20"
+                    ]
+                );
+                assert!(table.cells.iter().any(|cell| cell.column == 3
+                    && cell.row == 14
+                    && cell.text.contains("money_left")));
+            } else if page == 84 {
+                assert_eq!(
+                    row_text(0),
+                    [
+                        "Equations",
+                        "Computation",
+                        "Datatransfer",
+                        "Arithmeticintensity"
+                    ]
+                );
+                let expected: &[&str] = if table.row_count == 10 {
+                    &[
+                        "6BTH2",
+                        "6BTH",
+                        "4BT2ND+4BT2N",
+                        "2BTH2",
+                        "5BTH",
+                        "4BTHH′",
+                        "2BTH′",
+                        "2BTHH′",
+                        "5BTH",
+                    ]
+                } else {
+                    &[
+                        "6BH2",
+                        "6BH",
+                        "-",
+                        "4BTND+4BTN",
+                        "2BH2",
+                        "5BH",
+                        "4BHH′",
+                        "2BH′",
+                        "2BHH′",
+                        "5BH",
+                    ]
+                };
+                assert_eq!(
+                    table
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.column == 1 && cell.row > 0)
+                        .map(|cell| cell
+                            .text
+                            .split_whitespace()
+                            .collect::<String>())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+    }
+}

@@ -20,7 +20,7 @@ Validated inline/display formula detections constrain script ownership before mo
 
 Tagged cells use MCIDs and explicit spans; filtered empty tagged cells are realigned using complete-row geometry. Vector separators provide stronger topology evidence than text spacing. Coarse partial grids are refined when they still contain repeated numeric subcolumns. Text-aligned grids refine gutters using complete rows and contiguous subheaders, retain sparse rows, and use sparse rules and centered labels to recover supported spans. The same code runs natively and inside the browser Worker.
 
-## External table structures
+## Table model and external structures
 
 `TableGeometry` holds immutable source evidence. `CellGrid` owns candidate cells,
 logical row bands, and occupied grid positions. Its validated edits are atomic;
@@ -32,12 +32,15 @@ validation.
 Use `ParseOptions` with `parse_bytes_with_options`, `parse_path_with_options`, or
 `parse_page_with_options` to select a per-call `TableOptions` policy:
 
-- `RulesOnly` (default): preserves the existing local path and never calls a provider.
-- `Fallback`: requests external structure only after local reconstruction or source validation fails.
-- `ExternalOnly`: every layout table uses the provider; provider failures retain source lines without silently running local reconstruction.
+- `RulesOnly`: preserves the existing local path and does not load or call a TSR model.
+- `Fallback` (default): requests external structure only after local reconstruction or source validation fails.
+- `ExternalOnly`: every layout table uses the configured TSR engine; provider failures retain source lines without silently running local reconstruction.
 
-Supply an `Arc<dyn TableStructureEngine>` through `ParseOptions.table_engine` for
-either external mode. No service or model is built in. The engine receives one
+The independent `docparse-tsr` crate supplies the default SLANet_plus ONNX engine.
+Its artifacts load once through `[tsr]` configuration. `ParseOptions.table` inherits
+that configuration when absent; an explicit value replaces the per-call policy.
+Supply an `Arc<dyn TableStructureEngine>` through the parser builder or
+`ParseOptions.table_engine` to override the built-in engine. The engine receives one
 `TsrTableRequest` containing an owned RGB crop, one-based page number, block ID,
 request ID, reason, and the actual crop-to-viewport transform. It returns a
 `TsrTableInput` with the same request ID, structure tokens, and one 4/8-coordinate
@@ -77,3 +80,22 @@ must accept the additional enum value. Failed input, provider failures, timeouts
 and source-assignment failures have distinct warning codes, while the original
 block lines remain intact. `fallback` cannot detect a semantically wrong local
 result that nevertheless passes all structural/source checks.
+
+The built-in position head produces approximate boxes. Its adapter uses the
+predicted topology to form shared row/column boundaries. `TsrGeometryPolicy::Predicted`
+allows those boundaries to align to existing source-ink gaps within half a median
+font size, with strict majority ownership and frozen block edges. Rows, columns,
+spans, and header flags remain unchanged; the normal 80% ownership and complete
+UTF-8 coverage checks still apply afterward. Caller-provided engines default to
+`Declared` geometry and retain their supplied positions.
+
+`ParserArtifacts { layout, tsr }` provides explicit model bytes for native and Web.
+Pass it to `DocParser::from_artifacts` or `DocParserBuilder::artifacts`; enabled
+TSR requires `Some(tsr)` unless a table engine is injected. Byte-based creation
+never falls back to configured model paths. A single layout `ModelArtifacts`
+remains accepted for `rules_only`. The browser ABI delegates to this same builder.
+
+The shared TSR decoder applies `TsrGeometryPolicy` before grid occupancy is
+validated: declared input remains strict, while model predictions may reconcile
+learned spans. Built-in and external model adapters use that same path. Geometric
+word coverage alone does not skip source-supported topology refinement.

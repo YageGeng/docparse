@@ -95,6 +95,8 @@ async function verifyReferenceInput(bytes, name) {
 
 const base = new URL("../../../", import.meta.url);
 const options = { artifacts: { kind: "urls", model: new URL("models/pp-doclayout-v3/inference.onnx", base).href, config: new URL("models/pp-doclayout-v3/inference.yml", base).href, manifest: new URL("models/pp-doclayout-v3/model-manifest.json", base).href } };
+options.tsrArtifacts = { kind: "urls", model: new URL("models/slanet-plus/inference.onnx", base).href, config: new URL("models/slanet-plus/inference.yml", base).href, manifest: new URL("models/slanet-plus/model-manifest.json", base).href };
+options.config = { tsr: { mode: "rules_only" } };
 options.executionProvider = parameters.get("provider") === "webgpu" ? "webgpu" : "wasm";
 if (parameters.has("fallback")) options.allowCpuFallback = true;
 let parser;

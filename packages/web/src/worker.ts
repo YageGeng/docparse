@@ -35,7 +35,7 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
   for (const [group, values] of Object.entries(overrides ?? {})) {
     if (!Object.hasOwn(raw, group) || !values || typeof values !== "object" || Array.isArray(values)) throw Object.assign(new Error(`Unknown or invalid configuration group ${group}`), { code: "InvalidConfig" });
     for (const key of Object.keys(values)) {
-      if (group === "layout" && ["model_path", "model_config_path", "model_manifest_path", "execution_provider"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept layout.${key}`), { code: "InvalidConfig" });
+      if (["layout", "tsr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     raw[group] = { ...raw[group], ...values };
   }
@@ -118,15 +118,20 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         ? await Promise.all([artifact("model", source.model, progress), artifact("config", source.config, progress), artifact("manifest", source.manifest, progress)])
         : [source.model, source.config, source.manifest];
       if (source.kind === "urls") timing?.({ stage: "model_download", page_number: null, duration_ms: performance.now() - downloadStarted });
+      const tableSource = payload.tsrArtifacts;
+      const tableBytes = tableSource?.kind === "urls"
+        ? await Promise.all([artifact("tsr_model", tableSource.model, progress), artifact("tsr_config", tableSource.config, progress), artifact("tsr_manifest", tableSource.manifest, progress)])
+        : tableSource ? [tableSource.model, tableSource.config, tableSource.manifest] : undefined;
+      const tableArtifacts = tableBytes ? { model: tableBytes[0], config: tableBytes[1], manifest: tableBytes[2] } : undefined;
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();
-      try { parser = await WebParser.create(model, modelConfig, manifest, config, base, webgpu); }
+      try { parser = await WebParser.create(model, modelConfig, manifest, config, base, webgpu, tableArtifacts); }
       catch (error) {
         const code = (error as { code?: string }).code;
         if (!webgpu || !payload.allowCpuFallback || !["ExecutionProviderUnavailable", "ExecutionProviderInitializationFailed"].includes(code ?? "")) throw error;
         console.warn("WebGPU initialization failed; using explicitly allowed CPU fallback");
-        parser = await WebParser.create(model, modelConfig, manifest, config, base, false);
+        parser = await WebParser.create(model, modelConfig, manifest, config, base, false, tableArtifacts);
         webgpu = false;
       }
       finally { timing?.({ stage: "model_init", page_number: null, duration_ms: performance.now() - modelStarted }); }
@@ -152,7 +157,7 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
       } : undefined;
       // Rust validates the canonical result before its WASM ABI serializes it.
       let document: DocumentResult;
-      try { document = await parser.parse_with_options(payload.bytes, payload.table ?? {}, {
+      try { document = await parser.parse_with_options(payload.bytes, payload.table, {
         progress: onProgress, page_image: onImage, timing,
         table_request: payload.externalTables ? (crop: TsrCropPixels) => requestTable(id, crop) : undefined,
         table_cancel: payload.externalTables ? (requestId: string) => cancelTable(id, requestId) : undefined,

@@ -28,6 +28,14 @@ pub enum TimingStage {
     TableExternal,
     /// External topology binding and final source validation.
     TableFill,
+    /// SLANet_plus crop preparation, independent of layout preprocessing.
+    TsrPreprocess,
+    /// Waiting for the single owned TSR session.
+    TsrQueue,
+    /// Real ONNX table model execution.
+    TsrInference,
+    /// Table model token and location decoding.
+    TsrPostprocess,
     LinkValidate,
     ParseTotal,
     ResultSerialize,

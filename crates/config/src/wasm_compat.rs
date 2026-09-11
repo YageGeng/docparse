@@ -6,6 +6,13 @@ compile_error!("docparse supports wasm32-unknown-unknown browser builds only");
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
+    impl Default for crate::ExecutionProviderConfig {
+        /// Selects the platform default shared by layout and TSR.
+        fn default() -> Self {
+            Self::Cpu
+        }
+    }
+
     use std::env;
     use std::path::{Path, PathBuf};
 
@@ -186,17 +193,17 @@ mod platform {
     impl RawConfig {
         /// Resolves all relative model artifact paths against the primary configuration directory.
         fn resolve_paths(&mut self, base_directory: &Path) {
-            if self.layout.model_path.is_relative() {
-                self.layout.model_path =
-                    base_directory.join(&self.layout.model_path);
-            }
-            if self.layout.model_config_path.is_relative() {
-                self.layout.model_config_path =
-                    base_directory.join(&self.layout.model_config_path);
-            }
-            if self.layout.model_manifest_path.is_relative() {
-                self.layout.model_manifest_path =
-                    base_directory.join(&self.layout.model_manifest_path);
+            for path in [
+                &mut self.layout.model_path,
+                &mut self.layout.model_config_path,
+                &mut self.layout.model_manifest_path,
+                &mut self.tsr.model_path,
+                &mut self.tsr.model_config_path,
+                &mut self.tsr.model_manifest_path,
+            ] {
+                if path.is_relative() {
+                    *path = base_directory.join(&*path);
+                }
             }
         }
     }
@@ -213,6 +220,13 @@ mod platform {
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod platform {
+    impl Default for crate::ExecutionProviderConfig {
+        /// Selects the platform default shared by layout and TSR.
+        fn default() -> Self {
+            Self::WebGpu
+        }
+    }
+
     impl crate::ValidatedConfig {
         /// Rejects browser concurrency that the single-Worker implementation cannot provide.
         pub(crate) fn validate_platform(

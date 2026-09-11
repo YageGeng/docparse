@@ -1,6 +1,6 @@
 # DocParse
 
-DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
+DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, SLANet_plus predicts table structures, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
 Model regions are candidates rather than a one-to-one final block contract. Ownership is assigned at the `TextItem` boundary, with short, unambiguous superscripts/subscripts attached to their parent before model assignment; residual XY-cut preserves column gutters before line assembly. Page-wide normalization merges content only when one bbox fully contains the other, including identical boxes, then computes reading order. Every native text fact remains owned exactly once.
 
@@ -13,6 +13,8 @@ Models are distributed separately from the repository and crates. Download and v
 ```bash
 rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
 rtk uv run scripts/download_models.py --output models/pp-doclayout-v3 --verify-only
+rtk uv run scripts/download_models.py --model slanet-plus
+rtk uv run scripts/download_models.py --model slanet-plus --verify-only
 ```
 
 The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
@@ -22,6 +24,18 @@ The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08ae
 The root `docparse.toml` is an example configuration. Select an execution provider available on your machine. Relative model paths resolve against the primary configuration directory. Precedence is: code defaults, primary TOML, explicit/`DOCPARSE_PROFILE` profile file, `DOCPARSE_...` environment variables, then explicit caller overrides.
 
 Without `--config`, the CLI reads only `./docparse.toml` in the current directory and does not search parents. Library APIs do not load configuration files implicitly.
+
+Table recovery defaults to `tsr.mode = "fallback"`: local rules run first and
+unresolved tables use the pinned
+`PaddlePaddle/SLANet_plus_onnx` revision `7dbe640e127602bf506815e822c09758de73c482`.
+Set `tsr.mode = "external_only"` to send every table to the model,
+or `"rules_only"` to retain local behavior without loading TSR artifacts. The TSR
+model uses `tsr.execution_provider`, with the same backend choices as layout. Structured
+output keeps the existing `external_tsr` source value and records the engine in
+evidence; a model prediction is accepted only after topology and source validation.
+`table.source` distinguishes local `tagged_pdf`, `ruled`, and `text_alignment`
+reconstruction from `external_tsr` model/caller input. The Web inspector displays
+this as Rules or TSR input.
 
 ## Build and CUDA
 
@@ -34,11 +48,11 @@ rtk cargo build -p docparse-cli
 NVIDIA CUDA:
 
 ```bash
-rtk cargo build -p docparse-cli --features layout-cuda
+rtk cargo build -p docparse-cli --features layout-cuda,tsr-cuda
 rtk docparse parse input.pdf --config docparse.cuda.toml --format json
 ```
 
-CUDA configurations use `execution_provider = "cuda"`. A requested accelerator that cannot initialize fails explicitly. `layout-cuda`, `layout-coreml`, and `layout-openvino` are mutually exclusive; do not use `--all-features` for the provider matrix. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
+CUDA configurations use `execution_provider = "cuda"` in both `[layout]` and `[tsr]`. CPU builds require `"cpu"` in both sections. `tsr-coreml`, `tsr-cuda`, and `tsr-openvino` enable the corresponding TSR backend; `layout-metal` and `tsr-metal` use CoreML with CPU/GPU compute units, without ANE. A requested accelerator that cannot initialize fails explicitly. `layout-cuda`, `layout-coreml`, and `layout-openvino` are mutually exclusive; do not use `--all-features` for the provider matrix. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
 ## Rust API
 
@@ -54,13 +68,13 @@ let document = parser.parse_path("input.pdf").await?;
 # }
 ```
 
-`DocParserBuilder` accepts an `Arc<dyn LayoutEngine>` and optional `Arc<dyn OcrEngine>`. OCR is an extension interface; no OCR model is bundled. Synchronous callers can use `parse_path_blocking`; callers already inside Tokio must use the async API.
+`DocParserBuilder` accepts an `Arc<dyn LayoutEngine>`, optional `Arc<dyn OcrEngine>`, and optional `Arc<dyn TableStructureEngine>`. An injected table engine overrides built-in model loading. Per-call `ParseOptions.table` is optional and inherits the configured policy when absent. OCR is an extension interface; no OCR model is bundled. Synchronous callers can use `parse_path_blocking`; callers already inside Tokio must use the async API.
 
 ## WebAssembly and browsers
 
 The `wasm32-unknown-unknown` build runs the same PDFium, model, preprocessing, and fusion algorithms in a dedicated module Worker. See the [Web package guide](packages/web/README.md) and [native/Web specification](docs/superpowers/specs/2026-09-07-native-web-wasm-design.md).
 
-The shared Rust entry points are `DocParser::from_artifacts(config, ModelArtifacts)` and `parse_bytes(Arc<[u8]>)`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
+The shared Rust entry points are `DocParser::from_artifacts(config, ParserArtifacts { layout, tsr: Some(tsr) })` and `parse_bytes(Arc<[u8]>)`. Both enabled models use the supplied bytes without reading configured paths. Rules-only parsers may still pass a single layout `ModelArtifacts`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
 
 Custom LayoutEngine/OcrEngine implementations must return `WasmBoxedFuture` instead of using async_trait. This preserves native Send/Sync bounds while allowing local browser futures:
 
@@ -76,7 +90,7 @@ impl LayoutEngine for MyEngine {
 }
 ```
 
-`ValidatedConfig::try_from` checks shared parameters. ConfigLoader and native model entry points handle paths; explicit artifacts and injected engines need no placeholder absolute paths. Native async APIs require Tokio. Direct browser hosts must initialize ort-web and WASI in the same Worker; the Web SDK handles this setup.
+`ValidatedConfig::try_from` checks shared parameters. ConfigLoader and native model entry points handle paths; explicit artifacts and injected engines need no placeholder absolute paths. Browser hosts inject both layout and table engines from artifacts, or select `rules_only` to omit the table model. Native async APIs require Tokio. Direct browser hosts must initialize ort-web and WASI in the same Worker; the Web SDK handles this setup.
 
 Platform conditions are restricted to `wasm_compat.rs` and explicitly listed compatibility submodules. The browser-only `docparse-web` crate exports its API directly. Run `rtk proxy python3 scripts/check_wasm_compat.py` to check the boundary.
 

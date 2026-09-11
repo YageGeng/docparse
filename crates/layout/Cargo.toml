@@ -10,6 +10,7 @@ description = "Layout detection interfaces and PP-DocLayoutV3 inference for docp
 [features]
 wasm = ["docparse-config/wasm"]
 default = []
+metal = ["coreml"]
 coreml = ["ort/coreml"]
 cuda = ["ort/cuda"]
 openvino = ["ort/openvino"]

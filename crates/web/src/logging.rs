@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) fn init() {
     let _ = tracing::subscriber::set_global_default(BrowserLog);
     std::panic::set_hook(Box::new(|info| {
-        web_sys::console::error_1(
-            &format!("DocParse WASM panic: {info}").into(),
-        )
+        crate::js::console(&format!("DocParse WASM panic: {info}").into(), true)
     }));
 }
 
@@ -44,11 +42,10 @@ impl tracing::Subscriber for BrowserLog {
     fn event(&self, event: &tracing::Event<'_>) {
         let mut message = Message(String::new());
         event.record(&mut message);
-        if *event.metadata().level() == tracing::Level::ERROR {
-            web_sys::console::error_1(&message.0.into());
-        } else {
-            web_sys::console::log_1(&message.0.into());
-        }
+        crate::js::console(
+            &message.0.into(),
+            *event.metadata().level() == tracing::Level::ERROR,
+        );
     }
     /// Does not retain Worker-local span entry state.
     fn enter(&self, _span: &tracing::span::Id) {}

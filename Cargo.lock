@@ -474,7 +474,9 @@ dependencies = [
  "docparse-config",
  "docparse-layout",
  "docparse-pdfium",
+ "docparse-tsr",
  "figment",
+ "flate2",
  "futures-util",
  "image",
  "js-sys",
@@ -486,9 +488,11 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "typed-builder",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]
@@ -538,12 +542,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "docparse-tsr"
+version = "0.1.0"
+dependencies = [
+ "docparse-config",
+ "docparse-layout",
+ "flate2",
+ "image",
+ "ndarray",
+ "ort",
+ "ort-web",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "typed-builder",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "docparse-web"
 version = "0.1.0"
 dependencies = [
  "docparse-config",
  "docparse-core",
  "docparse-layout",
+ "docparse-tsr",
  "js-sys",
  "ort",
  "ort-web",

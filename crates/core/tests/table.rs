@@ -292,8 +292,12 @@ impl TableLayout {
     ) -> docparse_core::PageResult {
         let parser = DocParser::builder()
             .config(Arc::new(
-                ValidatedConfig::try_from(RawConfig::default())
-                    .expect("config"),
+                ValidatedConfig::try_from({
+                    let mut raw = RawConfig::default();
+                    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+                    raw
+                })
+                .expect("config"),
             ))
             .layout_engine(Arc::new(TableLayout))
             .build()

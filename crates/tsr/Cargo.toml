@@ -1,0 +1,63 @@
+[package]
+name = "docparse-tsr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Paddle SLANet_plus table structure recognition through ONNX Runtime"
+
+[features]
+default = []
+metal = ["coreml"]
+coreml = ["docparse-layout/coreml"]
+cuda = ["docparse-layout/cuda"]
+openvino = ["docparse-layout/openvino"]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm"]
+
+[dependencies]
+# workspace crates
+docparse-config.workspace = true
+docparse-layout.workspace = true
+
+# error
+thiserror.workspace = true
+
+# async
+tokio.workspace = true
+
+# config and serialization
+serde.workspace = true
+serde_yml.workspace = true
+
+# builder
+typed-builder.workspace = true
+
+# inference and image
+ndarray.workspace = true
+ort.workspace = true
+
+# cli and diagnostics
+tracing.workspace = true
+
+[dev-dependencies]
+# config and serialization
+serde_json.workspace = true
+
+# inference and image
+image.workspace = true
+
+# build
+flate2.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# browser
+ort-web.workspace = true
+wasm-bindgen-futures.workspace = true

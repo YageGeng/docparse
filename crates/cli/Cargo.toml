@@ -9,6 +9,11 @@ description = "Command-line interface for docparse"
 
 [features]
 default = []
+layout-metal = ["docparse-core/layout-metal"]
+tsr-coreml = ["docparse-core/tsr-coreml"]
+tsr-cuda = ["docparse-core/tsr-cuda"]
+tsr-metal = ["docparse-core/tsr-metal"]
+tsr-openvino = ["docparse-core/tsr-openvino"]
 layout-coreml = ["docparse-core/layout-coreml"]
 layout-cuda = ["docparse-core/layout-cuda"]
 layout-openvino = ["docparse-core/layout-openvino"]

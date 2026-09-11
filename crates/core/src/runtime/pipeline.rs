@@ -49,27 +49,17 @@ pub(crate) enum ParseRuntimeError {
 }
 
 /// Document pipeline with immutable injected engines and bounded runtime settings.
-#[derive(Clone)]
+#[derive(Clone, TypedBuilder)]
 pub(crate) struct ParseRuntime {
     config: Arc<ValidatedConfig>,
     layout_engine: Arc<dyn LayoutEngine>,
+    #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
+    #[builder(default)]
+    table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
 }
 
 impl ParseRuntime {
-    /// Creates a runtime without touching default model artifacts.
-    pub(crate) const fn new(
-        config: Arc<ValidatedConfig>,
-        layout_engine: Arc<dyn LayoutEngine>,
-        ocr_engine: Option<Arc<dyn OcrEngine>>,
-    ) -> Self {
-        Self {
-            config,
-            layout_engine,
-            ocr_engine,
-        }
-    }
-
     /// Keeps external table state confined to one document invocation.
     pub(crate) async fn parse_document_with_options(
         &self,
@@ -77,7 +67,8 @@ impl ParseRuntime {
         options: crate::ParseOptions<'_>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
         let observer = options.observer;
-        let tables = TableRuntime::shared(options.table, options.table_engine)?;
+        let tables =
+            options.table_runtime(&self.config, self.table_engine.as_ref())?;
         let (collector, mut timing_receiver) = Timings::channel();
         let timings = if observer.is_some() {
             collector
@@ -706,6 +697,7 @@ mod tests {
     /// Builds valid runtime configuration without requiring model files.
     fn config() -> Arc<ValidatedConfig> {
         let mut raw = RawConfig::default();
+        raw.tsr.mode = docparse_config::TableMode::RulesOnly;
         raw.layout.model_path = PathBuf::from("/tmp/missing-model.onnx");
         raw.layout.model_config_path = PathBuf::from("/tmp/missing-model.yml");
         raw.layout.model_manifest_path =
@@ -718,8 +710,10 @@ mod tests {
     /// Verifies the complete actor-to-analyzer path produces a valid document.
     #[tokio::test]
     async fn runtime_parses_document_with_injected_layout_engine() {
-        let runtime =
-            ParseRuntime::new(config(), Arc::new(EmptyLayoutEngine), None);
+        let runtime = ParseRuntime::builder()
+            .config(config())
+            .layout_engine(Arc::new(EmptyLayoutEngine) as Arc<dyn LayoutEngine>)
+            .build();
 
         let result = runtime
             .parse_document_with_options(
@@ -753,6 +747,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_stops_scheduling_after_first_fatal_page() {
         let mut raw = RawConfig::default();
+        raw.tsr.mode = docparse_config::TableMode::RulesOnly;
         raw.layout.model_path = PathBuf::from("/tmp/missing-model.onnx");
         raw.layout.model_config_path = PathBuf::from("/tmp/missing-model.yml");
         raw.layout.model_manifest_path =
@@ -764,13 +759,12 @@ mod tests {
             ValidatedConfig::try_from(raw).expect("test config must validate"),
         );
         let calls = Arc::new(AtomicUsize::new(0));
-        let runtime = ParseRuntime::new(
-            config,
-            Arc::new(PanickingLayoutEngine {
+        let runtime = ParseRuntime::builder()
+            .config(config)
+            .layout_engine(Arc::new(PanickingLayoutEngine {
                 calls: Arc::clone(&calls),
-            }),
-            None,
-        );
+            }) as Arc<dyn LayoutEngine>)
+            .build();
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/pdf/multipage_layout.pdf");
 

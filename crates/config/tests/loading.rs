@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use docparse_config::{ConfigError, ConfigLoader};
+use docparse_config::{ConfigError, ConfigLoader, RawConfig};
 use figment::Figment;
 use figment::providers::Serialized;
 use figment::value::{Dict, Value};
@@ -45,6 +45,10 @@ model_config_path = "artifacts/model.yml"
 model_manifest_path = "artifacts/manifest.json"
 score_threshold = 0.4
 
+[tsr]
+model_path = "tables/model.onnx"
+mode = "external_only"
+
 [runtime]
 page_concurrency = 2
 "#,
@@ -55,6 +59,9 @@ page_concurrency = 2
         r#"
 [layout]
 score_threshold = 0.6
+
+[tsr]
+mode = "fallback"
 
 [runtime]
 page_concurrency = 3
@@ -68,6 +75,15 @@ page_concurrency = 3
 
     assert!((config.layout.score_threshold - 0.6).abs() < f64::EPSILON);
     assert_eq!(config.runtime.page_concurrency, 3);
+    assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
+    assert_eq!(
+        config.tsr.model_path,
+        directory
+            .path()
+            .canonicalize()
+            .expect("directory")
+            .join("tables/model.onnx")
+    );
     assert_eq!(
         config.layout.model_path,
         directory
@@ -266,4 +282,42 @@ fn repository_default_config_matches_documented_defaults() {
     assert_eq!(config.runtime.page_concurrency, 4);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
+    assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
+    assert_eq!(
+        RawConfig::default().tsr.mode,
+        docparse_config::TableMode::Fallback
+    );
+    assert_eq!(
+        docparse_config::TableMode::default(),
+        docparse_config::TableMode::Fallback
+    );
+}
+
+/// Older configurations retain native CPU defaults, while explicit TSR providers round-trip independently.
+#[test]
+fn table_and_layout_backends_share_names_and_native_defaults() {
+    let defaults = RawConfig::default();
+    assert_eq!(
+        defaults.layout.execution_provider,
+        docparse_config::ExecutionProviderConfig::Cpu
+    );
+    assert_eq!(
+        defaults.tsr.execution_provider,
+        defaults.layout.execution_provider
+    );
+    for provider in ["cpu", "cuda", "coreml", "metal", "openvino", "webgpu"] {
+        let mut value =
+            serde_json::to_value(&defaults).expect("serialized defaults");
+        *value
+            .get_mut("tsr")
+            .and_then(|tsr| tsr.get_mut("execution_provider"))
+            .expect("serialized backend field") = json!(provider);
+        let raw: RawConfig =
+            serde_json::from_value(value).expect("provider config");
+        assert_eq!(raw.tsr.execution_provider.to_string(), provider);
+        assert_eq!(
+            raw.layout.execution_provider,
+            defaults.layout.execution_provider
+        );
+    }
 }

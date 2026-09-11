@@ -16,7 +16,7 @@ class WorkerParser implements DocParser {
   private pending?: Pending;
   private nextId = 0;
   private readonly tableControllers = new Map<string, AbortController>();
-  private provider: ExecutionProvider = "wasm";
+  private provider: ExecutionProvider = "webgpu";
   private state: "initializing" | "ready" | "busy" | "failed" | "closed" = "initializing";
 
   /** Installs fatal handlers before any initialization request is dispatched. */
@@ -63,20 +63,22 @@ class WorkerParser implements DocParser {
   /** Transfers owned initialization data while retaining caller-owned buffers. */
   async initialize(options: WebParserOptions): Promise<void> {
     const transfers: Transferable[] = [];
-    let artifacts: ModelSource;
-    if (options.artifacts.kind === "urls") {
-      artifacts = { kind: "urls", model: new URL(options.artifacts.model, location.href).href, config: new URL(options.artifacts.config, location.href).href, manifest: new URL(options.artifacts.manifest, location.href).href };
-    } else {
-      const model = new Uint8Array(options.artifacts.model);
-      const config = new Uint8Array(options.artifacts.config);
-      const manifest = new Uint8Array(options.artifacts.manifest);
-      transfers.push(model.buffer, config.buffer, manifest.buffer);
-      artifacts = { kind: "bytes", model, config, manifest };
-    }
+    const artifacts = WorkerParser.transferSource(options.artifacts, transfers);
+    const tsrEnabled = options.config?.tsr?.mode !== "rules_only";
+    if (tsrEnabled && !options.tsrArtifacts) throw new DocParseError("TableArtifactsRequired", "TSR requires tsrArtifacts; select rules_only to disable model loading");
+    const tsrArtifacts = tsrEnabled && options.tsrArtifacts ? WorkerParser.transferSource(options.tsrArtifacts, transfers) : undefined;
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
-    const payload: WorkerOperations["init"]["payload"] = { artifacts, config: options.config, executionProvider: options.executionProvider ?? "wasm", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
+    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
     this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress, onTiming: options.onTiming });
+  }
+
+  /** Copies both model sources through the same ownership-safe transfer path. */
+  private static transferSource(source: ModelSource, transfers: Transferable[]): ModelSource {
+    if (source.kind === "urls") return { kind: "urls", model: new URL(source.model, location.href).href, config: new URL(source.config, location.href).href, manifest: new URL(source.manifest, location.href).href };
+    const model = new Uint8Array(source.model), config = new Uint8Array(source.config), manifest = new Uint8Array(source.manifest);
+    transfers.push(model.buffer, config.buffer, manifest.buffer);
+    return { kind: "bytes", model, config, manifest };
   }
 
   /** Reports the backend selected by the Worker after successful model initialization. */
@@ -86,7 +88,6 @@ class WorkerParser implements DocParser {
   async parse(pdf: Uint8Array, options: ParseOptions = {}): Promise<DocumentResult> {
     this.assertReady(options.signal);
     if (options.onTableStructure !== undefined && typeof options.onTableStructure !== "function") throw new DocParseError("InvalidTableOptions", "onTableStructure must be a function");
-    if (options.table?.mode && options.table.mode !== "rules_only" && !options.onTableStructure) throw new DocParseError("InvalidTableOptions", "External table mode requires onTableStructure");
     const bytes = new Uint8Array(pdf);
     return await this.request({ method: "parse", payload: { bytes, table: options.table, externalTables: Boolean(options.onTableStructure), observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming), pageImages: Boolean(options.onPageImage) } }, [bytes.buffer], options.signal, options);
   }

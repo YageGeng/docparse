@@ -33,6 +33,7 @@ pub use ocr::{
 };
 pub use parser::{
     DocParseError, DocParser, DocParserBuilder, PageInput, ParseOptions,
+    ParserArtifacts,
 };
 pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{
@@ -42,8 +43,8 @@ pub use render::{
 pub use table::{
     Table, TableCell, TableCellLine, TableEvidence, TableMode, TableOptions,
     TableRule, TableStructureEngine, TableStructureError, TableStructureSource,
-    TableTextSpan, TableWord, TaggedTable, TaggedTableCell, TsrRequestReason,
-    TsrTableInput, TsrTableRequest,
+    TableTextSpan, TableWord, TaggedTable, TaggedTableCell, TsrGeometryPolicy,
+    TsrRequestReason, TsrTableInput, TsrTableRequest,
 };
 pub use types::*;
 pub use validate::ResultValidator;

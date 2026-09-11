@@ -22,14 +22,12 @@ impl DocParser {
                 source: Box::new(source),
             })
     }
-    /// Runs the async path parser from an ordinary synchronous thread.
     /// Parses a native path with per-call table policy and an optional external structure engine.
     pub async fn parse_path_with_options(
         &self,
         path: impl AsRef<Path>,
         options: crate::ParseOptions<'_>,
     ) -> Result<DocumentResult, DocParseError> {
-        options.table.validate(options.table_engine.is_some())?;
         let path = path.as_ref().to_path_buf();
         self.runtime()
             .parse_document_with_options(PdfInput::Path(path.clone()), options)

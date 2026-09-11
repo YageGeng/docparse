@@ -16,7 +16,7 @@ export interface TableTextSpan { text_item_id: string; byte_range: { start: numb
 export interface TableCellLine { text: string; bbox: Bbox; spans: TableTextSpan[] }
 /** A zero-based logical cell; covered positions do not appear as duplicate cells. */
 export interface TableCell { row: number; column: number; row_span: number; column_span: number; bbox: Bbox | null; is_header: boolean; text: string; lines: TableCellLine[] }
-/** A recovered table view; original TextItems remain owned by the parent block's lines. */
+/** A recovered table view; source distinguishes local tagged/rule/alignment recovery from external_tsr input. Original TextItems remain owned by the parent block's lines. */
 export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" | "external_tsr" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
 export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
@@ -39,6 +39,7 @@ export type ModelSource =
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
   layout?: { score_threshold?: number; session_pool_size?: number };
+  tsr?: TableOptions;
   runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
   render?: { dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;
@@ -46,14 +47,16 @@ export interface WebParseConfig {
   output?: { formula_placeholder?: string; include_evidence?: boolean; include_diagnostics?: boolean };
 }
 
-/** Layout inference backends; PDFium and text processing still run in WebAssembly. */
+/** Shared layout and TSR inference backends; PDFium and text processing still run in WebAssembly. */
 export type ExecutionProvider = "wasm" | "webgpu";
 
 /** Browser runtime options, separate from the serializable Worker payload. */
 export interface WebParserOptions {
   artifacts: ModelSource;
+  /** Required for the default rules-first TSR fallback; omit only with config.tsr.mode = "rules_only". */
+  tsrArtifacts?: ModelSource;
   runtimeBaseUrl?: string;
-  /** Defaults to CPU/WASM for compatibility; request WebGPU to accelerate inference. */
+  /** Defaults to WebGPU for both layout and TSR; select wasm explicitly for CPU. */
   executionProvider?: ExecutionProvider;
   /** Allows CPU initialization only when the requested GPU is unavailable; defaults to false. */
   allowCpuFallback?: boolean;
@@ -73,7 +76,7 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }
@@ -81,7 +84,7 @@ export interface ParserTiming {
 export interface PageImageResult { pageNumber: number; width: number; height: number; blob: Blob }
 /** Structural recovery is scoped to regions already labeled table by layout. */
 export type TableMode = "rules_only" | "fallback" | "external_only";
-/** Per-parse external table limits; the default never calls a provider. */
+/** Per-parse table overrides; omitted options inherit the parser's configured TSR policy. */
 export interface TableOptions { mode?: TableMode; max_in_flight?: number; timeout_ms?: number }
 /** An affine map from crop pixels to canonical viewport points. */
 export interface AffineTransform { a: number; b: number; c: number; d: number; e: number; f: number }
@@ -112,7 +115,7 @@ export type RenderFormat = "json" | "text" | "markdown";
 
 /** Public asynchronous parser operations. */
 export interface DocParser {
-  /** The initialized layout backend, including any explicitly allowed CPU fallback. */
+  /** The initialized layout and TSR backend, including any explicitly allowed CPU fallback. */
   readonly executionProvider: ExecutionProvider;
   /** Parses a copy of the caller's PDF bytes. */
   parse(pdf: Uint8Array, options?: ParseOptions): Promise<DocumentResult>;

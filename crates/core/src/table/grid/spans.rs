@@ -21,7 +21,7 @@ impl TableGeometry<'_> {
         clippy::indexing_slicing,
         reason = "row and source indices are derived from the validated candidate"
     )]
-    fn recover_body_bands(
+    pub(super) fn recover_body_bands(
         &self,
         grid: &mut CellGrid,
         cuts: &[f64],

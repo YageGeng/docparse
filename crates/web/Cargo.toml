@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 docparse-config = { workspace = true, features = ["wasm"] }
 docparse-core = { workspace = true, features = ["wasm"] }
 docparse-layout = { workspace = true, features = ["wasm"] }
+docparse-tsr = { workspace = true, features = ["wasm"] }
 
 # config and serialization
 serde.workspace = true

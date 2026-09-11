@@ -8,6 +8,9 @@ use typed_builder::TypedBuilder;
 #[serde(deny_unknown_fields)]
 pub struct RawConfig {
     pub layout: LayoutConfig,
+    #[builder(default)]
+    #[serde(default)]
+    pub tsr: TsrConfig,
     pub runtime: RuntimeConfig,
     pub render: RenderConfig,
     pub fusion: FusionConfig,
@@ -20,6 +23,7 @@ impl Default for RawConfig {
     fn default() -> Self {
         Self::builder()
             .layout(LayoutConfig::default())
+            .tsr(TsrConfig::default())
             .runtime(RuntimeConfig::default())
             .render(RenderConfig::default())
             .fusion(FusionConfig::default())
@@ -53,7 +57,7 @@ impl Default for LayoutConfig {
                 "models/pp-doclayout-v3/model-manifest.json",
             ))
             .score_threshold(0.5)
-            .execution_provider(ExecutionProviderConfig::Cpu)
+            .execution_provider(ExecutionProviderConfig::default())
             .session_pool_size(1)
             .build()
     }
@@ -67,15 +71,30 @@ pub enum ExecutionProviderConfig {
     Cuda,
     #[serde(rename = "coreml")]
     CoreMl,
+    /// Apple GPU through CoreML with CPUAndGPU compute units.
+    Metal,
     Openvino,
     /// Browser WebGPU execution, validated at the platform boundary.
     WebGpu,
 }
 
-impl Default for ExecutionProviderConfig {
-    /// Selects the universally available CPU provider.
-    fn default() -> Self {
-        Self::Cpu
+impl ExecutionProviderConfig {
+    /// Returns the stable configuration and diagnostic name of a backend.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+            Self::CoreMl => "coreml",
+            Self::Metal => "metal",
+            Self::Openvino => "openvino",
+            Self::WebGpu => "webgpu",
+        }
+    }
+}
+impl std::fmt::Display for ExecutionProviderConfig {
+    /// Formats backend names consistently across model initialization and inference logs.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -197,6 +216,51 @@ impl Default for OutputConfig {
             .formula_placeholder("[formula]".to_owned())
             .include_evidence(true)
             .include_diagnostics(false)
+            .build()
+    }
+}
+
+/// Selects structure recovery for the table regions already owned by layout.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TableMode {
+    RulesOnly,
+    #[default]
+    Fallback,
+    ExternalOnly,
+}
+
+/// Independent SLANet_plus artifacts, execution backend, and per-document table policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(deny_unknown_fields)]
+pub struct TsrConfig {
+    #[builder(default)]
+    #[serde(default)]
+    pub execution_provider: ExecutionProviderConfig,
+    pub model_path: PathBuf,
+    pub model_config_path: PathBuf,
+    pub model_manifest_path: PathBuf,
+    pub mode: TableMode,
+    pub max_in_flight: usize,
+    pub timeout_ms: u64,
+}
+
+impl Default for TsrConfig {
+    /// Uses local reconstruction first and the pinned TSR model for unresolved tables.
+    fn default() -> Self {
+        Self::builder()
+            .model_path(PathBuf::from("models/slanet-plus/inference.onnx"))
+            .model_config_path(PathBuf::from(
+                "models/slanet-plus/inference.yml",
+            ))
+            .model_manifest_path(PathBuf::from(
+                "models/slanet-plus/model-manifest.json",
+            ))
+            .mode(TableMode::default())
+            .max_in_flight(2)
+            .timeout_ms(60_000)
             .build()
     }
 }

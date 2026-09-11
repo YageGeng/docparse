@@ -102,7 +102,8 @@ impl TableRuntime {
                     .build(),
             );
             let result = match request {
-                Ok(request) => {
+                Ok(mut request) => {
+                    request.timings = timings.for_page(page);
                     tracing::info!(
                         "requesting table structure {} from {} for page {} block {}",
                         request.request_id,
@@ -119,7 +120,7 @@ impl TableRuntime {
                                 .for_page(page)
                                 .start(TimingStage::TableFill);
                             assembler
-                                .reconstruct_external(block, &request, input)
+                                .reconstruct_external(block, &request, input, engine.geometry_policy())
                                 .map(|()| {
                                     let details = std::collections::BTreeMap::from([
                                         ("request_id".to_owned(), request.request_id.clone()),

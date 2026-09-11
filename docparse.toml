@@ -7,6 +7,15 @@ score_threshold = 0.5
 execution_provider = "coreml"
 session_pool_size = 1
 
+[tsr]
+execution_provider = "coreml"
+mode = "fallback"
+model_path = "models/slanet-plus/inference.onnx"
+model_config_path = "models/slanet-plus/inference.yml"
+model_manifest_path = "models/slanet-plus/model-manifest.json"
+max_in_flight = 2
+timeout_ms = 60000
+
 [runtime]
 page_concurrency = 4
 render_queue_capacity = 2

@@ -21,7 +21,8 @@ pub use geometry::{
     Point, Polygon, Quad,
 };
 pub use model_manifest::{
-    ModelArtifacts, ModelManifest, ModelManifestError, PP_DOCLAYOUT_V3_REVISION,
+    ModelArtifacts, ModelContract, ModelManifest, ModelManifestError,
+    PP_DOCLAYOUT_V3_REVISION,
 };
 pub use pp_doclayout_v3::PpDocLayoutV3Engine;
 pub use pp_doclayout_v3::schema::{

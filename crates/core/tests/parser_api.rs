@@ -44,6 +44,7 @@ fn fixture_path() -> PathBuf {
 /// Builds valid configuration pointing at intentionally absent model files.
 fn config() -> ValidatedConfig {
     let mut raw = RawConfig::default();
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.layout.model_path = PathBuf::from("/tmp/parser-api-missing-model.onnx");
     raw.layout.model_config_path =
         PathBuf::from("/tmp/parser-api-missing-model.yml");
@@ -161,4 +162,20 @@ async fn parse_page_preserves_original_page_number() {
         .expect("positive standalone page numbers must parse");
 
     assert_eq!(page.page_number, 7);
+}
+
+/// Explicit artifact construction must reject missing TSR bytes before loading any model or path.
+#[tokio::test]
+async fn enabled_tsr_requires_explicit_artifacts_in_the_byte_constructor() {
+    let config =
+        ValidatedConfig::try_from(RawConfig::default()).expect("config");
+    let artifacts = docparse_layout::ModelArtifacts {
+        model: Arc::from([]),
+        config: Arc::from([]),
+        manifest: Arc::from([]),
+    };
+    let error = DocParser::from_artifacts(config, artifacts)
+        .await
+        .expect_err("incomplete artifact set");
+    assert!(matches!(error, DocParseError::MissingTsrArtifacts));
 }

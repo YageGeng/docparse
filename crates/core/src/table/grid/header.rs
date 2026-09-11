@@ -352,6 +352,7 @@ impl<'a, 's> HeaderRecovery<'a, 's> {
         &self,
         words: &[usize],
         full_title: bool,
+        leaf: bool,
     ) -> Option<Vec<HeadingPhrase>> {
         let cuts = self.cuts;
         let rules = self.rules;
@@ -364,12 +365,27 @@ impl<'a, 's> HeaderRecovery<'a, 's> {
                 .left
                 .total_cmp(&self.geometry.spans[b].span.bbox.left)
         });
+        // An uninterrupted row-wide phrase can be a section title below the
+        // column headings. Separate heading groups distinguish a dense leaf row.
+        let split_columns = leaf
+            && words.windows(2).any(|pair| {
+                self.geometry.spans[pair[1]].span.bbox.left
+                    - self.geometry.spans[pair[0]].span.bbox.right
+                    >= (self.geometry.font_size * 0.6).max(3.0)
+            });
         let mut boxes: Vec<Bbox> = Vec::new();
         for index in words {
             let bbox = self.geometry.spans[index].span.bbox;
             if let Some(previous) = boxes.last_mut()
                 && bbox.left - previous.right
                     < (self.geometry.font_size * 0.6).max(3.0)
+                // Leaf headings may be closer than an ordinary word gap. Distinct
+                // dominant data columns still separate them; full titles and
+                // upper group headings retain their multi-column phrases.
+                && (!split_columns || full_title || !cuts[1..columns].iter().any(|&cut| {
+                    (cut - previous.left).clamp(0.0, previous.width()) / previous.width() >= 0.8
+                        && (bbox.right - cut).clamp(0.0, bbox.width()) / bbox.width() >= 0.8
+                }))
             {
                 *previous = Bbox::try_from([
                     previous.left.min(bbox.left),
@@ -488,6 +504,7 @@ impl<'a, 's> HeaderRecovery<'a, 's> {
             let mut phrases = self.phrases(
                 &plan.rows[row].words,
                 row == 0 && plan.title_end.is_some(),
+                row + 1 == header_rows,
             )?;
             let mut owners = vec![None; columns];
             for (index, phrase) in phrases.iter().enumerate() {

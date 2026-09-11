@@ -8,8 +8,13 @@ readme = "README.md"
 description = "Native PDF extraction and layout-text fusion for docparse"
 
 [features]
-wasm = ["docparse-config/wasm", "docparse-layout/wasm", "pdfium/wasm"]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
 default = []
+layout-metal = ["docparse-layout/metal"]
+tsr-coreml = ["docparse-tsr/coreml"]
+tsr-cuda = ["docparse-tsr/cuda"]
+tsr-metal = ["docparse-tsr/metal"]
+tsr-openvino = ["docparse-tsr/openvino"]
 layout-coreml = ["docparse-layout/coreml"]
 layout-cuda = ["docparse-layout/cuda"]
 layout-openvino = ["docparse-layout/openvino"]
@@ -18,6 +23,7 @@ layout-openvino = ["docparse-layout/openvino"]
 # workspace crates
 docparse-config.workspace = true
 docparse-layout.workspace = true
+docparse-tsr.workspace = true
 pdfium.workspace = true
 
 # error
@@ -38,6 +44,7 @@ image.workspace = true
 
 # cli and diagnostics
 tracing.workspace = true
+web-time.workspace = true
 
 [dev-dependencies]
 # config and serialization
@@ -46,7 +53,12 @@ figment.workspace = true
 # inference and image
 sha2.workspace = true
 
+
+# cli and diagnostics
+tracing-subscriber.workspace = true
+
 # testing
+flate2.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 

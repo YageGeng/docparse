@@ -1,6 +1,6 @@
 use crate::{
     ConfigError, FusionConfig, LayoutConfig, OcrConfig, OutputConfig,
-    RawConfig, RenderConfig, RuntimeConfig,
+    RawConfig, RenderConfig, RuntimeConfig, TsrConfig,
 };
 use typed_builder::TypedBuilder;
 
@@ -11,6 +11,7 @@ const MINIMUM_MODEL_INPUT_EDGE: u32 = 800;
 #[derive(Debug, Clone, PartialEq, TypedBuilder)]
 pub struct ValidatedConfig {
     layout: LayoutConfig,
+    tsr: TsrConfig,
     runtime: RuntimeConfig,
     render: RenderConfig,
     fusion: FusionConfig,
@@ -22,6 +23,11 @@ impl ValidatedConfig {
     /// Returns validated layout engine configuration.
     pub fn layout(&self) -> &LayoutConfig {
         &self.layout
+    }
+
+    /// Returns validated table model paths and recovery policy.
+    pub fn tsr(&self) -> &TsrConfig {
+        &self.tsr
     }
 
     /// Returns validated runtime limits.
@@ -112,6 +118,18 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             });
         }
 
+        if !(1..=32).contains(&config.tsr.max_in_flight) {
+            return Err(ConfigError::InvalidValue {
+                field: "tsr.max_in_flight",
+                reason: "must be between one and 32",
+            });
+        }
+        if !(1..=86_400_000).contains(&config.tsr.timeout_ms) {
+            return Err(ConfigError::InvalidValue {
+                field: "tsr.timeout_ms",
+                reason: "must be between one and 86400000 milliseconds",
+            });
+        }
         if config.runtime.page_concurrency == 0 {
             return Err(ConfigError::InvalidValue {
                 field: "runtime.page_concurrency",
@@ -211,6 +229,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
 
         let RawConfig {
             layout,
+            tsr,
             runtime,
             render,
             fusion,
@@ -219,6 +238,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         } = config;
         Ok(Self::builder()
             .layout(layout)
+            .tsr(tsr)
             .runtime(runtime)
             .render(render)
             .fusion(fusion)

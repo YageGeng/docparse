@@ -102,6 +102,7 @@ fn fixture_path() -> PathBuf {
 /// Builds validated fake-engine configuration at one page concurrency.
 fn config(page_concurrency: usize) -> Arc<ValidatedConfig> {
     let mut raw = RawConfig::default();
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.layout.model_path = PathBuf::from("/tmp/multipage-missing.onnx");
     raw.layout.model_config_path = PathBuf::from("/tmp/multipage-missing.yml");
     raw.layout.model_manifest_path =

@@ -1,4 +1,5 @@
 //! Caller-supplied table topology with no detector or model implementation.
+mod builtin;
 mod decode;
 
 use std::sync::Arc;
@@ -9,19 +10,9 @@ use typed_builder::TypedBuilder;
 
 use crate::BlockId;
 
-/// Selects topology recovery for existing layout table blocks.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TableMode {
-    #[default]
-    RulesOnly,
-    Fallback,
-    ExternalOnly,
-}
+pub use docparse_config::TableMode;
 
-/// Per-parse external-table limits; the default never calls an external engine.
+/// Per-parse table limits; the default tries local rules before the configured TSR engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TableOptions {
@@ -34,7 +25,7 @@ pub struct TableOptions {
 }
 
 impl Default for TableOptions {
-    /// Retains local parsing unless the caller explicitly enables external structures.
+    /// Tries local rules before TSR unless the caller explicitly selects another mode.
     fn default() -> Self {
         Self::builder().build()
     }
@@ -88,6 +79,9 @@ pub struct TsrTableRequest {
     /// Converts original crop pixels to canonical viewport points, including rounding and scale limits.
     pub crop_to_viewport: AffineTransform,
     pub reason: TsrRequestReason,
+    /// Stage observations remain local to the parser and are not serialized to external providers.
+    #[builder(default)]
+    pub timings: docparse_layout::timing::Timings,
 }
 
 /// External structure tokens and one crop-pixel box for each cell opening tag.
@@ -128,12 +122,27 @@ impl TableStructureError {
     }
 }
 
+/// Distinguishes authoritative caller structures from model predictions requiring source calibration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TsrGeometryPolicy {
+    /// Preserves declared topology, header decisions, and geometry under strict validation.
+    #[default]
+    Declared,
+    /// Allows source-supported correction of learned topology, headers, and positions.
+    Predicted,
+}
+
 /// Async extension point; callers supply service/model adapters and cancellation-aware futures.
 pub trait TableStructureEngine:
     crate::wasm_compat::WasmCompatSend + crate::wasm_compat::WasmCompatSync
 {
     /// Identifies the engine in diagnostics without exposing service credentials.
     fn name(&self) -> &str;
+
+    /// Declared structures remain exact; model adapters may opt into validated source-supported refinement.
+    fn geometry_policy(&self) -> TsrGeometryPolicy {
+        TsrGeometryPolicy::Declared
+    }
 
     /// Recognizes structure within the supplied crop, returning boxes in its original pixel coordinates.
     fn recognize(
@@ -143,4 +152,15 @@ pub trait TableStructureEngine:
         '_,
         Result<TsrTableInput, TableStructureError>,
     >;
+}
+
+impl From<&docparse_config::TsrConfig> for TableOptions {
+    /// Resolves the parser instance policy into one call's bounded table stage.
+    fn from(config: &docparse_config::TsrConfig) -> Self {
+        Self::builder()
+            .mode(config.mode)
+            .max_in_flight(config.max_in_flight)
+            .timeout_ms(config.timeout_ms)
+            .build()
+    }
 }

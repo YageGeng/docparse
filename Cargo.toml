@@ -8,6 +8,7 @@ default-members = [
   "crates/config",
   "crates/core",
   "crates/layout",
+  "crates/tsr",
   "crates/pdfium",
   "crates/pdfium-sys",
 ]
@@ -65,6 +66,7 @@ mem_forget = "warn"
 docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
+docparse-tsr = { version = "0.1.0", path = "crates/tsr" }
 docparse-web = { version = "0.1.0", path = "crates/web" }
 pdfium = { package = "docparse-pdfium", version = "1.9.0", path = "crates/pdfium" }
 pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }

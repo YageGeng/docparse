@@ -1,7 +1,12 @@
 //! Browser-only parser ABI and ORT initialization.
+#![deny(unsafe_code)]
+
+mod js;
 mod libc;
 mod logging;
 mod table;
+
+use js::{FunctionExt, ValueExt};
 
 use docparse_config::{
     ExecutionProviderConfig, OutputConfig, RawConfig, ValidatedConfig,
@@ -11,7 +16,7 @@ use docparse_core::{
     ParseProgress, TextRenderer,
 };
 use docparse_layout::ModelArtifacts;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
@@ -29,13 +34,26 @@ impl WebError {
             message: error.to_string(),
         };
         tracing::error!("{}: {}", error.code, error.message);
-        let value = js_sys::Error::new(&error.message);
-        let _ = js_sys::Reflect::set(
-            &value,
-            &JsValue::from_str("code"),
-            &JsValue::from_str(error.code),
-        );
-        value.into()
+        js::error(error.code, &error.message)
+    }
+}
+
+/// Owned bytes for the independently configured table model.
+#[derive(Deserialize)]
+struct TableArtifacts {
+    model: Vec<u8>,
+    config: Vec<u8>,
+    manifest: Vec<u8>,
+}
+
+impl From<TableArtifacts> for ModelArtifacts {
+    /// Transfers deserialized model buffers into the shared immutable artifact container.
+    fn from(value: TableArtifacts) -> Self {
+        Self {
+            model: Arc::from(value.model),
+            config: Arc::from(value.config),
+            manifest: Arc::from(value.manifest),
+        }
     }
 }
 
@@ -56,6 +74,7 @@ impl WebParser {
         options: JsValue,
         runtime_base: String,
         webgpu: bool,
+        tsr_artifacts: JsValue,
     ) -> Result<WebParser, JsValue> {
         logging::init();
         let mut raw: RawConfig = serde_wasm_bindgen::from_value(options)
@@ -65,9 +84,22 @@ impl WebParser {
         } else {
             ExecutionProviderConfig::Cpu
         };
+        raw.tsr.execution_provider = raw.layout.execution_provider;
         let output = raw.output.clone();
         let validated = ValidatedConfig::try_from(raw)
             .map_err(|error| WebError::value("InvalidConfig", error))?;
+        let table_artifacts = if validated.tsr().mode
+            == docparse_core::TableMode::RulesOnly
+        {
+            None
+        } else {
+            Some(ModelArtifacts::from(
+                serde_wasm_bindgen::from_value::<TableArtifacts>(tsr_artifacts)
+                    .map_err(|error| {
+                        WebError::value("TableArtifactsRequired", error)
+                    })?,
+            ))
+        };
         let script = if webgpu {
             "ort.webgpu.min.mjs"
         } else {
@@ -82,59 +114,47 @@ impl WebParser {
         })?;
         ort::set_api(api);
         ort::init().with_telemetry(false).commit();
-        // The host uses a dedicated Worker; ORT need not create another proxy or thread pool.
-        let runtime = js_sys::Reflect::get(&js_sys::global(), &"ort".into())
-            .map_err(|error| {
-                WebError::value(
-                    "RuntimeInitializationFailed",
-                    format!("{error:?}"),
-                )
-            })?;
-        let env =
-            js_sys::Reflect::get(&runtime, &"env".into()).map_err(|error| {
-                WebError::value(
-                    "RuntimeInitializationFailed",
-                    format!("{error:?}"),
-                )
-            })?;
-        let wasm =
-            js_sys::Reflect::get(&env, &"wasm".into()).map_err(|error| {
-                WebError::value(
-                    "RuntimeInitializationFailed",
-                    format!("{error:?}"),
-                )
-            })?;
-        js_sys::Reflect::set(&wasm, &"numThreads".into(), &1.into()).map_err(
-            |error| {
-                WebError::value(
-                    "RuntimeInitializationFailed",
-                    format!("{error:?}"),
-                )
-            },
-        )?;
-        js_sys::Reflect::set(&wasm, &"proxy".into(), &false.into()).map_err(
-            |error| {
-                WebError::value(
-                    "RuntimeInitializationFailed",
-                    format!("{error:?}"),
-                )
-            },
-        )?;
+        js::configure_runtime().map_err(|error| {
+            WebError::value(
+                "RuntimeInitializationFailed",
+                error.exception_message(),
+            )
+        })?;
         let artifacts = ModelArtifacts {
             model: Arc::from(model),
             config: Arc::from(config),
             manifest: Arc::from(manifest),
         };
-        let parser = DocParser::from_artifacts(validated, artifacts)
-            .await
-            .map_err(|error| {
-                let code = match &error {
-                    docparse_core::DocParseError::Layout(docparse_layout::LayoutError::ExecutionProviderUnavailable { .. }) => "ExecutionProviderUnavailable",
-                    docparse_core::DocParseError::Layout(docparse_layout::LayoutError::Ort { .. }) if webgpu => "ExecutionProviderInitializationFailed",
-                    _ => "ModelInitializationFailed",
-                };
-                WebError::value(code, error)
-            })?;
+        let parser = DocParser::from_artifacts(
+            validated,
+            docparse_core::ParserArtifacts {
+                layout: artifacts,
+                tsr: table_artifacts,
+            },
+        )
+        .await
+        .map_err(|error| {
+            use docparse_core::DocParseError;
+            use docparse_layout::LayoutError;
+            use docparse_tsr::TsrError;
+            let code = match &error {
+                DocParseError::Layout(
+                    LayoutError::ExecutionProviderUnavailable { .. },
+                )
+                | DocParseError::Tsr(TsrError::Backend(
+                    LayoutError::ExecutionProviderUnavailable { .. },
+                )) => "ExecutionProviderUnavailable",
+                DocParseError::Layout(LayoutError::Ort { .. })
+                | DocParseError::Tsr(
+                    TsrError::Backend(LayoutError::Ort { .. })
+                    | TsrError::Ort(_),
+                ) if webgpu => "ExecutionProviderInitializationFailed",
+                DocParseError::Tsr(_) => "TableModelInitializationFailed",
+                DocParseError::MissingTsrArtifacts => "TableArtifactsRequired",
+                _ => "ModelInitializationFailed",
+            };
+            WebError::value(code, error)
+        })?;
         tracing::info!(
             "initialized browser parser with provider {}",
             if webgpu { "webgpu" } else { "wasm" }
@@ -151,22 +171,16 @@ impl WebParser {
     pub async fn parse_with_observer(
         &self,
         bytes: Vec<u8>,
-        progress: Option<js_sys::Function>,
-        page_image: Option<js_sys::Function>,
-        timing: Option<js_sys::Function>,
+        progress: Option<js::Function>,
+        page_image: Option<js::Function>,
+        timing: Option<js::Function>,
     ) -> Result<JsValue, JsValue> {
         let observer = BrowserObserver {
             progress,
             page_image,
             timing,
         };
-        self.parse_observed(
-            bytes,
-            docparse_core::TableOptions::default(),
-            None,
-            observer,
-        )
-        .await
+        self.parse_observed(bytes, None, None, observer).await
     }
 
     /// Runs table policy and an optional promise broker while preserving the legacy observer ABI.
@@ -177,12 +191,14 @@ impl WebParser {
         callbacks: JsValue,
     ) -> Result<JsValue, JsValue> {
         let options = if options.is_null() || options.is_undefined() {
-            docparse_core::TableOptions::default()
+            None
         } else {
-            serde_wasm_bindgen::from_value(options)
-                .map_err(|e| WebError::value("InvalidTableOptions", e))?
+            Some(
+                serde_wasm_bindgen::from_value(options)
+                    .map_err(|e| WebError::value("InvalidTableOptions", e))?,
+            )
         };
-        let callbacks = table::Callbacks::from(callbacks);
+        let callbacks = js::Callbacks::from(callbacks);
         let observer = BrowserObserver {
             progress: callbacks.function("progress")?,
             page_image: callbacks.function("page_image")?,
@@ -242,7 +258,7 @@ impl WebParser {
     async fn parse_observed(
         &self,
         bytes: Vec<u8>,
-        options: docparse_core::TableOptions,
+        options: Option<docparse_core::TableOptions>,
         engine: Option<Arc<dyn docparse_core::TableStructureEngine>>,
         observer: BrowserObserver,
     ) -> Result<JsValue, JsValue> {
@@ -250,11 +266,11 @@ impl WebParser {
             .parser
             .parse_bytes_with_options(
                 Arc::from(bytes),
-                docparse_core::ParseOptions::builder()
-                    .table(options)
-                    .table_engine(engine)
-                    .observer(Some(&observer))
-                    .build(),
+                docparse_core::ParseOptions {
+                    table: options,
+                    table_engine: engine,
+                    observer: Some(&observer),
+                },
             )
             .await
             .map_err(|error| {
@@ -281,9 +297,9 @@ impl WebParser {
 
 /// Callbacks remain local to the dedicated Worker and never enter native thread bounds.
 struct BrowserObserver {
-    progress: Option<js_sys::Function>,
-    page_image: Option<js_sys::Function>,
-    timing: Option<js_sys::Function>,
+    progress: Option<js::Function>,
+    page_image: Option<js::Function>,
+    timing: Option<js::Function>,
 }
 
 impl ParseObserver for BrowserObserver {
@@ -293,9 +309,9 @@ impl ParseObserver for BrowserObserver {
             let result = timing
                 .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
                 .map_err(JsValue::from)
-                .and_then(|value| callback.call1(&JsValue::NULL, &value));
+                .and_then(|value| callback.invoke(&[value]));
             if let Err(error) = result {
-                web_sys::console::error_1(&error);
+                js::console(&error, true);
             }
         }
     }
@@ -306,9 +322,9 @@ impl ParseObserver for BrowserObserver {
             let result = progress
                 .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
                 .map_err(JsValue::from)
-                .and_then(|value| callback.call1(&JsValue::NULL, &value));
+                .and_then(|value| callback.invoke(&[value]));
             if let Err(error) = result {
-                web_sys::console::error_1(&error);
+                js::console(&error, true);
             }
         }
     }
@@ -320,15 +336,14 @@ impl ParseObserver for BrowserObserver {
         image: &docparse_layout::PageImage,
     ) {
         if let Some(callback) = &self.page_image {
-            let pixels = js_sys::Uint8Array::from(image.data().as_ref());
-            if let Err(error) = callback.call4(
-                &JsValue::NULL,
-                &page_number.into(),
-                &image.width().into(),
-                &image.height().into(),
-                &pixels.into(),
-            ) {
-                web_sys::console::error_1(&error);
+            let pixels = js::copy_pixels(image.data().as_ref());
+            if let Err(error) = callback.invoke(&[
+                page_number.into(),
+                image.width().into(),
+                image.height().into(),
+                pixels,
+            ]) {
+                js::console(&error, true);
             }
         }
     }

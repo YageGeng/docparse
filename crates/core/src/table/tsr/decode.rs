@@ -1,7 +1,9 @@
 //! Strict, bounded decoding of the restricted table-structure token grammar.
 use docparse_layout::{Bbox, Point, Quad};
 
-use super::{TableStructureError, TsrTableInput, TsrTableRequest};
+use super::{
+    TableStructureError, TsrGeometryPolicy, TsrTableInput, TsrTableRequest,
+};
 use crate::table::grid::CellGrid;
 use crate::table::{
     MAX_TABLE_CELLS, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS, Table, TableCell,
@@ -47,10 +49,61 @@ impl TryFrom<&str> for SpanAttribute {
     }
 }
 
-impl TryFrom<(&TsrTableRequest, Bbox, TsrTableInput)> for CellGrid {
+impl TryFrom<(&TsrTableRequest, Bbox, TsrTableInput, TsrGeometryPolicy)>
+    for CellGrid
+{
     type Error = TableStructureError;
 
-    /// Resolves a response against its crop and frozen layout bounds, then validates grid occupancy.
+    /// Decodes once, repairs only predicted topology, then freezes geometry inside the owning block.
+    fn try_from(
+        (request, table_bbox, input, policy): (
+            &TsrTableRequest,
+            Bbox,
+            TsrTableInput,
+            TsrGeometryPolicy,
+        ),
+    ) -> Result<Self, Self::Error> {
+        let invalid = |reason| TableStructureError::InvalidInput { reason };
+        let bounds = if policy == TsrGeometryPolicy::Predicted {
+            request.crop_bbox
+        } else {
+            table_bbox
+        };
+        let mut table = Table::try_from((request, bounds, input))?;
+        if policy == TsrGeometryPolicy::Predicted {
+            if Self::try_from(table.clone()).is_err() {
+                table.reconcile_predicted_grid(bounds).map_err(invalid)?;
+            }
+            // Preserve crop-based model anchors during normalization. Trim only the
+            // outer sampling margin before any canonical source words are assigned.
+            for cell in &mut table.cells {
+                let bbox = cell.bbox.ok_or_else(|| {
+                    invalid("model cell lacks position".to_owned())
+                })?;
+                cell.bbox = Some(
+                    Bbox::try_from([
+                        bbox.left.max(table_bbox.left),
+                        bbox.top.max(table_bbox.top),
+                        bbox.right.min(table_bbox.right),
+                        bbox.bottom.min(table_bbox.bottom),
+                    ])
+                    .map_err(|_empty_intersection| {
+                        invalid(
+                            "cell has no positive area inside its table region"
+                                .to_owned(),
+                        )
+                    })?,
+                );
+            }
+        }
+        Self::try_from(table).map_err(invalid)
+    }
+}
+
+impl TryFrom<(&TsrTableRequest, Bbox, TsrTableInput)> for Table {
+    type Error = TableStructureError;
+
+    /// Decodes syntax and bounded positions before the caller chooses declared or predicted topology validation.
     fn try_from(
         (request, table_bbox, input): (&TsrTableRequest, Bbox, TsrTableInput),
     ) -> Result<Self, Self::Error> {
@@ -68,7 +121,7 @@ impl StructureDecoder {
         request: &TsrTableRequest,
         table_bbox: Bbox,
         input: TsrTableInput,
-    ) -> Result<CellGrid, String> {
+    ) -> Result<Table, String> {
         if request.request_id != input.request_id {
             return Err(
                 "response request_id does not match its crop".to_owned()
@@ -255,14 +308,12 @@ impl StructureDecoder {
         if !stack.is_empty() || cells.len() != input.cell_bboxes.len() {
             return Err("unbalanced tokens or unmatched cell boxes".to_owned());
         }
-        CellGrid::try_from(
-            Table::builder()
-                .row_count(row_count)
-                .column_count(column_count)
-                .cells(cells)
-                .source(TableStructureSource::ExternalTsr)
-                .build(),
-        )
+        Ok(Table::builder()
+            .row_count(row_count)
+            .column_count(column_count)
+            .cells(cells)
+            .source(TableStructureSource::ExternalTsr)
+            .build())
     }
 
     /// Validates crop pixels, transforms their corners, and removes sampling margins outside the layout.
@@ -432,12 +483,51 @@ mod tests {
             .build()
     }
 
+    /// Model adapters share repair behavior, while authoritative caller input remains strict.
+    #[test]
+    fn topology_repair_depends_on_policy_in_the_shared_decoder() {
+        let request = request();
+        let mut malformed = input();
+        for token in &mut malformed.structure_tokens {
+            if token == " rowspan=\"2\"" {
+                *token = " rowspan=\"3\"".to_owned();
+            }
+        }
+        CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            malformed.clone(),
+            TsrGeometryPolicy::Declared,
+        ))
+        .expect_err("declared overlong rowspan");
+        let repaired = CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            malformed,
+            TsrGeometryPolicy::Predicted,
+        ))
+        .expect("model topology repair");
+        assert_eq!(
+            (repaired.table().row_count, repaired.table().column_count),
+            (2, 2)
+        );
+        assert_eq!(
+            repaired.table().cells.first().expect("first cell").row_span,
+            2
+        );
+    }
+
     /// Spans occupy one owner and all coordinates use the actual crop transform.
     #[test]
     fn external_topology_and_crop_geometry_are_preserved() {
         let request = request();
-        let grid = CellGrid::try_from((&request, request.crop_bbox, input()))
-            .expect("external grid");
+        let grid = CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            input(),
+            TsrGeometryPolicy::Declared,
+        ))
+        .expect("external grid");
         assert_eq!(
             (
                 grid.table().row_count,
@@ -463,8 +553,13 @@ mod tests {
     fn table_clipping_preserves_internal_geometry_and_spans() {
         let request = request();
         let bounds = Bbox::try_from([10.2, 20.2, 109.8, 69.8]).expect("layout");
-        let grid = CellGrid::try_from((&request, bounds, input()))
-            .expect("clipped grid");
+        let grid = CellGrid::try_from((
+            &request,
+            bounds,
+            input(),
+            TsrGeometryPolicy::Declared,
+        ))
+        .expect("clipped grid");
         assert_eq!((grid.table().row_count, grid.table().column_count), (2, 2));
         let actual = grid
             .table()
@@ -529,7 +624,12 @@ mod tests {
             let bounds =
                 Bbox::try_from([left, 20.0, 110.0, 70.0]).expect("layout");
             assert!(matches!(
-                CellGrid::try_from((&request, bounds, input())),
+                CellGrid::try_from((
+                    &request,
+                    bounds,
+                    input(),
+                    TsrGeometryPolicy::Declared
+                )),
                 Err(TableStructureError::InvalidInput { .. })
             ));
         }
@@ -570,8 +670,13 @@ mod tests {
                 }
             }
             assert!(
-                CellGrid::try_from((&request, request.crop_bbox, input))
-                    .is_err(),
+                CellGrid::try_from((
+                    &request,
+                    request.crop_bbox,
+                    input,
+                    TsrGeometryPolicy::Declared
+                ))
+                .is_err(),
                 "mutation {changed}"
             );
         }

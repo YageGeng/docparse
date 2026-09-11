@@ -20,6 +20,7 @@ async fn native_artifacts_parse_real_pdf_bytes() {
     )
     .expect("fixed model artifacts");
     let mut raw = RawConfig::default();
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.runtime.page_concurrency = 1;
     raw.runtime.render_queue_capacity = 1;
     raw.runtime.blocking_task_limit = 1;

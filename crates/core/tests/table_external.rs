@@ -104,6 +104,7 @@ impl LayoutEngine for PartialTables {
 /// Controlled external outcomes cover policy and rollback independently of any network service.
 enum Reply {
     Grid(usize, usize),
+    PredictedGrid(usize, usize),
     Invalid,
     Failure,
     Pending(Arc<AtomicBool>),
@@ -136,6 +137,15 @@ impl TableStructureEngine for Engine {
     fn name(&self) -> &str {
         "controlled-structure-input"
     }
+    /// Only learned location probes opt into source-aware bounded alignment.
+    fn geometry_policy(&self) -> docparse_core::TsrGeometryPolicy {
+        if matches!(self.reply, Reply::PredictedGrid(..)) {
+            docparse_core::TsrGeometryPolicy::Predicted
+        } else {
+            docparse_core::TsrGeometryPolicy::Declared
+        }
+    }
+
     /// Returns a valid, rejected, failed, or cancelable pending structure response.
     fn recognize(
         &self,
@@ -163,7 +173,8 @@ impl TableStructureEngine for Engine {
                     .structure_tokens(Vec::new())
                     .cell_bboxes(Vec::new())
                     .build()),
-                Reply::Grid(rows, columns) => {
+                Reply::Grid(rows, columns)
+                | Reply::PredictedGrid(rows, columns) => {
                     let mut tokens = vec!["<table>".to_owned()];
                     let mut boxes = Vec::new();
                     for r in 0..*rows {
@@ -204,8 +215,12 @@ impl Fixture {
     async fn parser() -> DocParser {
         DocParser::builder()
             .config(Arc::new(
-                ValidatedConfig::try_from(RawConfig::default())
-                    .expect("config"),
+                ValidatedConfig::try_from({
+                    let mut raw = RawConfig::default();
+                    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+                    raw
+                })
+                .expect("config"),
             ))
             .layout_engine(Arc::new(WholeTable))
             .build()
@@ -559,6 +574,7 @@ impl TableStructureEngine for ConcurrentEngine {
 #[tokio::test]
 async fn external_budget_is_shared_across_pages() {
     let mut raw = RawConfig::default();
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.runtime.page_concurrency = 4;
     raw.render.max_long_edge_pixels = 800;
     let parser = DocParser::builder()
@@ -613,7 +629,12 @@ async fn external_budget_is_shared_across_pages() {
 async fn external_crop_rounding_preserves_layout_boundaries() {
     let parser = DocParser::builder()
         .config(Arc::new(
-            ValidatedConfig::try_from(RawConfig::default()).expect("config"),
+            ValidatedConfig::try_from({
+                let mut raw = RawConfig::default();
+                raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+                raw
+            })
+            .expect("config"),
         ))
         .layout_engine(Arc::new(PartialTables))
         .build()
@@ -746,5 +767,124 @@ async fn external_crop_rounding_preserves_layout_boundaries() {
                 );
             }
         }
+    }
+}
+
+/// Minor learned row drift can align, but large column moves must remain unresolved with original text intact.
+#[tokio::test]
+async fn predicted_geometry_alignment_is_bounded_and_preserves_topology() {
+    let parser = Fixture::parser().await;
+    for (local, rows, columns, accepted) in
+        [(true, 3, 2, true), (false, 1, 3, false)]
+    {
+        let input = Fixture::page(local);
+        let original = input
+            .extracted
+            .text_items
+            .iter()
+            .map(|i| (i.id.clone(), i.raw_text.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let page = parser
+            .parse_page_with_options(
+                input,
+                ParseOptions::builder()
+                    .table(
+                        TableOptions::builder()
+                            .mode(TableMode::ExternalOnly)
+                            .build(),
+                    )
+                    .table_engine(Some(Arc::new(Engine::new(
+                        Reply::PredictedGrid(rows, columns),
+                    ))
+                        as Arc<dyn TableStructureEngine>))
+                    .build(),
+            )
+            .await
+            .expect("page");
+        let actual = page
+            .iter_text_items()
+            .map(|i| (i.id.clone(), i.raw_text.clone()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(actual, original);
+        let table = page.blocks.iter().find_map(|b| b.table.as_ref());
+        if accepted {
+            let table = table.expect("aligned grid");
+            assert_eq!((table.row_count, table.column_count), (3, 2));
+            assert!(table.cells.iter().all(|c| !c.is_header));
+        } else {
+            assert!(table.is_none());
+            assert!(
+                page.warnings
+                    .iter()
+                    .any(|w| w.code == "TableTextAssignmentFailed")
+            );
+        }
+    }
+}
+
+/// An omitted per-call policy inherits model-first or rules-first behavior from the parser instance.
+#[tokio::test]
+async fn parser_table_defaults_and_explicit_rule_override_select_the_provider()
+{
+    for (mode, expected_calls) in [
+        (None, 1),
+        (Some(TableMode::ExternalOnly), 2),
+        (Some(TableMode::Fallback), 1),
+    ] {
+        let mut raw = RawConfig::default();
+        if let Some(mode) = mode {
+            raw.tsr.mode = mode;
+        }
+        let engine = Arc::new(Engine::new(Reply::Grid(1, 2)));
+        let parser = DocParser::builder()
+            .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+            .layout_engine(Arc::new(WholeTable))
+            .table_engine(Arc::clone(&engine) as Arc<dyn TableStructureEngine>)
+            .build()
+            .await
+            .expect("injected providers");
+        for local in [true, false] {
+            let page = parser
+                .parse_page(Fixture::page(local))
+                .await
+                .expect("default policy");
+            let table = page
+                .blocks
+                .iter()
+                .find_map(|b| b.table.as_ref())
+                .expect("recovered table");
+            let from_model = !local || mode == Some(TableMode::ExternalOnly);
+            assert_eq!(
+                table.source == TableStructureSource::ExternalTsr,
+                from_model
+            );
+            let json = serde_json::to_value(table).expect("table JSON");
+            assert_eq!(
+                json.get("source").and_then(serde_json::Value::as_str)
+                    == Some("external_tsr"),
+                from_model
+            );
+        }
+        assert_eq!(engine.calls.load(Ordering::SeqCst), expected_calls);
+        let page = parser
+            .parse_page_with_options(
+                Fixture::page(true),
+                ParseOptions::builder()
+                    .table(
+                        TableOptions::builder()
+                            .mode(TableMode::RulesOnly)
+                            .build(),
+                    )
+                    .build(),
+            )
+            .await
+            .expect("override");
+        assert_eq!(engine.calls.load(Ordering::SeqCst), expected_calls);
+        assert!(
+            page.blocks
+                .iter()
+                .filter_map(|b| b.table.as_ref())
+                .all(|t| t.source != TableStructureSource::ExternalTsr)
+        );
     }
 }

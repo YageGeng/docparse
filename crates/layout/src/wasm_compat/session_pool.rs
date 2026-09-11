@@ -2,8 +2,8 @@
 use crate::pp_doclayout_v3::{preprocess::ModelInputs, session::ModelOutputs};
 use crate::timing::{TimingStage, Timings};
 use crate::{LayoutError, ModelArtifacts, ModelSchema};
-use docparse_config::{ExecutionProviderConfig, ValidatedConfig};
-use ort::session::{OutputSelector, RunOptions, Session};
+use docparse_config::ValidatedConfig;
+use ort::session::{OutputSelector, RunOptions};
 use ort::value::TensorRef;
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use std::sync::Arc;
 mod platform {
     use super::*;
     use crate::wasm_compat::run_cpu;
-    use ort::session::HasSelectedOutputs;
+    use ort::session::{HasSelectedOutputs, Session};
     use std::sync::Mutex;
     use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -25,89 +25,11 @@ mod platform {
         /// Creates one native session from the same bytes that passed artifact verification.
         fn load(
             bytes: &[u8],
-            provider: ExecutionProviderConfig,
+            provider: docparse_config::ExecutionProviderConfig,
         ) -> Result<Self, LayoutError> {
-            let builder = Session::builder()?;
-            let mut builder = match provider {
-                ExecutionProviderConfig::Cpu => builder,
-                ExecutionProviderConfig::WebGpu => {
-                    return Err(LayoutError::ExecutionProviderUnavailable {
-                        provider: "webgpu",
-                    });
-                }
-                ExecutionProviderConfig::Cuda => {
-                    #[cfg(feature = "cuda")]
-                    {
-                        builder
-                            .with_execution_providers([
-                                // A requested accelerator must fail visibly instead of silently using CPU.
-                                ort::ep::CUDA::default()
-                                    .build()
-                                    .error_on_failure(),
-                            ])
-                            .map_err(|source| {
-                                LayoutError::from(ort::Error::from(source))
-                            })?
-                    }
-                    #[cfg(not(feature = "cuda"))]
-                    {
-                        let _builder = builder;
-                        return Err(
-                            LayoutError::ExecutionProviderUnavailable {
-                                provider: "cuda",
-                            },
-                        );
-                    }
-                }
-                ExecutionProviderConfig::CoreMl => {
-                    #[cfg(feature = "coreml")]
-                    {
-                        builder
-                            .with_execution_providers([
-                                // A requested accelerator must fail visibly instead of silently using CPU.
-                                ort::ep::CoreML::default()
-                                    .build()
-                                    .error_on_failure(),
-                            ])
-                            .map_err(|source| {
-                                LayoutError::from(ort::Error::from(source))
-                            })?
-                    }
-                    #[cfg(not(feature = "coreml"))]
-                    {
-                        let _builder = builder;
-                        return Err(
-                            LayoutError::ExecutionProviderUnavailable {
-                                provider: "coreml",
-                            },
-                        );
-                    }
-                }
-                ExecutionProviderConfig::Openvino => {
-                    #[cfg(feature = "openvino")]
-                    {
-                        builder
-                            .with_execution_providers([
-                                // A requested accelerator must fail visibly instead of silently using CPU.
-                                ort::ep::OpenVINO::default()
-                                    .build()
-                                    .error_on_failure(),
-                            ])
-                            .map_err(|source| {
-                                LayoutError::from(ort::Error::from(source))
-                            })?
-                    }
-                    #[cfg(not(feature = "openvino"))]
-                    {
-                        let _builder = builder;
-                        return Err(
-                            LayoutError::ExecutionProviderUnavailable {
-                                provider: "openvino",
-                            },
-                        );
-                    }
-                }
-            };
+            let mut builder = ort::session::builder::SessionBuilder::try_from(
+                crate::wasm_compat::OnnxBackend(provider),
+            )?;
             let session = builder.commit_from_memory(bytes)?;
             ModelSchema::from_session(&session)?.validate_pp_doclayout_v3()?;
             let options = RunOptions::new()?.with_outputs(
@@ -353,24 +275,11 @@ mod platform {
             artifacts: ModelArtifacts,
             config: Arc<ValidatedConfig>,
         ) -> Result<Arc<Self>, LayoutError> {
-            let mut builder = Session::builder()?;
-            match config.layout().execution_provider {
-                ExecutionProviderConfig::Cpu => {}
-                ExecutionProviderConfig::WebGpu => {
-                    builder = builder
-                        .with_execution_providers([ort::ep::WebGPU::default()
-                            .build()
-                            .error_on_failure()])
-                        .map_err(|error| {
-                            LayoutError::from(ort::Error::from(error))
-                        })?;
-                }
-                _ => {
-                    return Err(LayoutError::ExecutionProviderUnavailable {
-                        provider: "native provider on Web",
-                    });
-                }
-            }
+            let mut builder = ort::session::builder::SessionBuilder::try_from(
+                crate::wasm_compat::OnnxBackend(
+                    config.layout().execution_provider,
+                ),
+            )?;
             let mut session =
                 builder.commit_from_memory(&artifacts.model).await?;
             ModelSchema::from_session(&session)?.validate_pp_doclayout_v3()?;
@@ -383,6 +292,9 @@ mod platform {
             wasm_bindgen_futures::spawn_local(async move {
                 while let Some(request) = receiver.recv().await {
                     // The actor keeps inputs and the session alive until the JS Promise completes.
+                    let _inference =
+                        crate::wasm_compat::OnnxBackend::inference_guard()
+                            .await;
                     drop(request.queued);
                     let result = async {
                         let inference = request.timings.start(TimingStage::LayoutInference);

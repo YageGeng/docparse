@@ -91,4 +91,32 @@ mod platform {
     }
 }
 
-pub(crate) use platform::timeout;
+/// Rejects late-ready results even if synchronous CPU work delayed the platform timer callback.
+pub(crate) async fn timeout<F: Future>(
+    duration: Duration,
+    future: F,
+) -> Result<F::Output, ()> {
+    let started = web_time::Instant::now();
+    let result = platform::timeout(duration, future).await;
+    if started.elapsed() >= duration {
+        Err(())
+    } else {
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A non-cooperative model poll may finish physically, but cannot publish after its deadline.
+    #[tokio::test]
+    async fn delayed_timer_cannot_accept_a_late_ready_result() {
+        let result = timeout(Duration::from_millis(1), async {
+            std::thread::sleep(Duration::from_millis(8));
+            42
+        })
+        .await;
+        assert_eq!(result, Err(()));
+    }
+}

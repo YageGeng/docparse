@@ -2,6 +2,7 @@
 mod aligned;
 mod cells;
 mod header;
+mod predicted;
 pub(crate) use cells::CellGrid;
 use cells::GridRow;
 mod ruled;

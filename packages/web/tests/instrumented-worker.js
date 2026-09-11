@@ -2,7 +2,7 @@
 if (new URL(location.href).searchParams.has("noGpu")) Object.defineProperty(navigator, "gpu", {value: undefined, configurable: true});
 // Exercise older engines at the capability boundary while retaining the actual parser and ORT.
 if (new URL(location.href).searchParams.has("legacyMemory")) Object.defineProperty(WebAssembly.Memory.prototype, "toResizableBuffer", {value: undefined, configurable: true});
-const metrics = { calls: 0, liveTensors: 0, sessions: 0, fetches: [], outputs: [], memoryBytes: [], providers: [], gpuSubmissions: 0, inferenceMs: [], borrowedInputBytes: 0, copiedInputBytes: 0 };
+const metrics = { calls: 0, liveTensors: 0, sessions: 0, fetches: [], outputs: [], memoryBytes: [], providers: [], models: [], gpuSubmissions: 0, inferenceMs: [], borrowedInputBytes: 0, copiedInputBytes: 0 };
 const toResizableBuffer = WebAssembly.Memory.prototype.toResizableBuffer;
 if (toResizableBuffer) {
   /** Observes conversion without allocating or replacing the real module memory. */
@@ -68,11 +68,13 @@ Object.defineProperty(globalThis, "ort", {
     value.InferenceSession.create = async function (...args) {
       metrics.providers = args[1]?.executionProviders ?? ["wasm"];
       // Reject only the GPU session boundary; recovery must initialize and run real CPU inference.
-      if (new URL(location.href).searchParams.has("failGpuInit") && metrics.providers.some(provider => (provider.name ?? provider) === "webgpu")) {
+      if ((new URL(location.href).searchParams.has("failGpuInit") || (new URL(location.href).searchParams.has("failTsrGpuInit") && metrics.sessions === 1)) && metrics.providers.some(provider => (provider.name ?? provider) === "webgpu")) {
         throw new Error("Injected WebGPU session initialization failure");
       }
       const session = await create.apply(this, args);
       metrics.sessions++;
+      const model = { name: session.inputNames.includes("x") ? "tsr" : "layout", providers: metrics.providers, calls: 0, gpuSubmissions: 0 };
+      metrics.models.push(model);
       const release = session.release;
       session.release = async function (...args) { const result = await release.apply(this, args); metrics.sessions--; return result; };
       const run = session.run;
@@ -87,7 +89,10 @@ Object.defineProperty(globalThis, "ort", {
         metrics.calls++;
         metrics.fetches = Array.isArray(args[1]) ? args[1] : Object.keys(args[1] ?? {});
         const started = performance.now();
+        const submissions = metrics.gpuSubmissions;
         const outputs = await run.apply(this, args);
+        model.calls++;
+        model.gpuSubmissions += metrics.gpuSubmissions - submissions;
         metrics.inferenceMs.push(performance.now() - started);
         metrics.outputs = Object.keys(outputs);
         for (const value of Object.values(outputs)) observe(value);
