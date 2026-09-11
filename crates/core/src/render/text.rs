@@ -53,8 +53,48 @@ impl TextRenderer {
                         .filter(|line| !line.is_empty()),
                 );
             }
-            pages.push(lines.join("\n"));
+            // Remove page margins after layout is rendered, preserving internal alignment.
+            pages.push(clean_rendered_text(&lines.join("\n")));
         }
         pages.join("\n\u{000c}\n")
+    }
+}
+
+/// Removes NUL placeholders and common page margins without slicing through UTF-8 indentation.
+fn clean_rendered_text(text: &str) -> String {
+    let text = text.replace('\0', " ");
+    let lines: Vec<_> = text.split('\n').collect();
+    let Some(first) = lines.iter().position(|line| !line.trim().is_empty())
+    else {
+        return String::new();
+    };
+    let last = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .unwrap_or(first);
+    let content = lines.get(first..=last).unwrap_or_default();
+    let indent = content
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
+        .min()
+        .unwrap_or(0);
+    content
+        .iter()
+        .map(|line| line.chars().skip(indent).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_rendered_text;
+
+    /// Mixed Unicode indentation and empty pages cannot panic or retain NUL sentinels.
+    #[test]
+    fn trims_only_common_layout_margins() {
+        assert_eq!(clean_rendered_text("\n　 a\0b\n  c\n\n"), "a b\nc");
+        assert_eq!(clean_rendered_text("\n \n"), "");
+        assert_eq!(clean_rendered_text("  a\n    b\n"), "a\n  b");
     }
 }

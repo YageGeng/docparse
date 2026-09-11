@@ -1,4 +1,6 @@
+mod font_cmap;
 mod glyph;
+mod glyph_names;
 pub(crate) mod metadata;
 pub(crate) mod text;
 

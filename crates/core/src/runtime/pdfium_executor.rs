@@ -89,6 +89,7 @@ pub(crate) enum PdfiumRuntimeError {
 pub(crate) enum PdfiumCommand {
     PreScan {
         page_number: u32,
+        resolver: Option<Arc<dyn crate::GlyphResolver>>,
         response: oneshot::Sender<Result<PreScannedPage, PdfiumRuntimeError>>,
     },
     Render {
@@ -137,12 +138,15 @@ impl PdfiumExecutor {
     pub(crate) async fn pre_scan_page(
         &self,
         page_number: u32,
+        resolver: Option<Arc<dyn crate::GlyphResolver>>,
     ) -> Result<PreScannedPage, PdfiumRuntimeError> {
         self.validate_page(page_number)?;
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(PdfiumCommand::PreScan {
                 page_number,
+                // Only the owned resolver crosses the worker boundary, never a borrowed font.
+                resolver,
                 response,
             })
             .await
@@ -251,10 +255,14 @@ pub(crate) async fn worker_main(
         match command {
             PdfiumCommand::PreScan {
                 page_number,
+                resolver,
                 response,
             } => {
-                let _ = response
-                    .send(pre_scan_document_page(&document, page_number));
+                let _ = response.send(pre_scan_document_page(
+                    &document,
+                    page_number,
+                    resolver.as_deref(),
+                ));
             }
             PdfiumCommand::Render {
                 page_number,
@@ -279,6 +287,7 @@ pub(crate) async fn worker_main(
 fn pre_scan_document_page(
     document: &Document<'_>,
     page_number: u32,
+    resolver: Option<&dyn crate::GlyphResolver>,
 ) -> Result<PreScannedPage, PdfiumRuntimeError> {
     let page_index = i32::try_from(page_number.saturating_sub(1)).map_err(
         |_conversion_error| PdfiumRuntimeError::InvalidPage {
@@ -323,6 +332,7 @@ fn pre_scan_document_page(
             &view_box,
             page_number,
             &mut table_evidence,
+            resolver,
         ) {
             Ok(text_items) => (text_items, None),
             Err(source) => (
@@ -527,7 +537,7 @@ mod tests {
 
         assert_eq!(executor.page_count(), 1);
         let pre_scanned = executor
-            .pre_scan_page(1)
+            .pre_scan_page(1, None)
             .await
             .expect("fixture page must extract");
         let rendered = executor
@@ -560,11 +570,11 @@ mod tests {
         .expect("fixture bytes must open");
 
         let first = executor
-            .pre_scan_page(1)
+            .pre_scan_page(1, None)
             .await
             .expect("first extraction must succeed");
         let second = executor
-            .pre_scan_page(1)
+            .pre_scan_page(1, None)
             .await
             .expect("second extraction must succeed");
 
@@ -585,15 +595,15 @@ mod tests {
         .expect("fixture document must open");
 
         let _zero_error = executor
-            .pre_scan_page(0)
+            .pre_scan_page(0, None)
             .await
             .expect_err("page zero must fail");
         let _past_end_error = executor
-            .pre_scan_page(2)
+            .pre_scan_page(2, None)
             .await
             .expect_err("past-end page must fail");
         let _page = executor
-            .pre_scan_page(1)
+            .pre_scan_page(1, None)
             .await
             .expect("valid page must remain available");
         executor.close().await.expect("executor must close cleanly");

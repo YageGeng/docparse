@@ -122,9 +122,17 @@ impl<'a> TableAssembler<'a> {
                 // Recovered symbol fonts can have oversized loose boxes that join
                 // adjacent markers into one source line. Their measured baselines
                 // still identify independent table rows without rewriting source facts.
-                let recovered_symbol = item
-                    .repair_actions
-                    .contains(&crate::RepairAction::GlyphNameRecovery);
+                // Name recovery now also covers ordinary prose; only recovered symbol runs need this baseline override.
+                let recovered_symbol =
+                    item.repair_actions.iter().any(|action| {
+                        matches!(
+                            action,
+                            crate::RepairAction::GlyphNameRecovery
+                                | crate::RepairAction::FontCmapRecovery
+                                | crate::RepairAction::GlyphOutlineRecovery
+                                | crate::RepairAction::GlyphComposition
+                        )
+                    }) && item.raw_text.chars().all(|c| !c.is_alphanumeric());
                 let baseline = if recovered_symbol {
                     item.baseline.map_or(baseline, |baseline| baseline.start.y)
                 } else {

@@ -10,6 +10,12 @@ Imported directories:
 - crates/pdfium
 - crates/pdfium-sys
 
+Character recovery and cleanup also adapt LiteParse revision
+4d4a51c246ff56d382166930942898f3ff563eba in the core extraction modules,
+optional outline database and render projections. Changes add shared circle
+aliases, geometry/provenance preservation, bounded parsing and native/Web
+compatibility boundaries.
+
 The imported files were modified for docparse. Changes include renaming the
 Rust crates and package references, integrating them into the docparse Cargo
 workspace, applying project formatting, and adding provenance and licensing

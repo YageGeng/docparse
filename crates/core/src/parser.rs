@@ -126,6 +126,9 @@ pub struct DocParser {
     ocr_engine: Option<Arc<dyn OcrEngine>>,
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+    /// Shared outline recovery is consulted only after deterministic font decoding fails.
+    #[builder(default)]
+    glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
 impl fmt::Debug for DocParser {
@@ -170,6 +173,8 @@ pub struct DocParserBuilder {
     ocr_engine: Option<Arc<dyn OcrEngine>>,
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+    #[builder(default)]
+    glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
 impl Default for DocParserBuilder {
@@ -180,6 +185,15 @@ impl Default for DocParserBuilder {
 }
 
 impl DocParserBuilder {
+    /// Injects outline recovery for fonts without usable names or embedded Unicode mappings.
+    pub fn glyph_resolver(
+        mut self,
+        resolver: Arc<dyn crate::GlyphResolver>,
+    ) -> Self {
+        self.glyph_resolver = Some(resolver);
+        self
+    }
+
     /// Supplies owned bytes; enabled models never fall back to filesystem loading in this mode.
     pub fn artifacts(mut self, artifacts: impl Into<ParserArtifacts>) -> Self {
         self.artifacts = Some(artifacts.into());
@@ -273,6 +287,11 @@ impl DocParserBuilder {
             .layout_engine(layout_engine)
             .ocr_engine(self.ocr_engine)
             .table_engine(table_engine)
+            // Resolve the optional native database once per parser, sharing its shard cache across documents.
+            .glyph_resolver(
+                self.glyph_resolver
+                    .or_else(crate::wasm_compat::default_glyph_resolver),
+            )
             .build())
     }
 }
@@ -450,6 +469,7 @@ impl DocParser {
             .layout_engine(Arc::clone(&self.layout_engine))
             .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
             .table_engine(self.table_engine.as_ref().map(Arc::clone))
+            .glyph_resolver(self.glyph_resolver.as_ref().map(Arc::clone))
             .build()
     }
 }

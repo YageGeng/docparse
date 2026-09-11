@@ -2,6 +2,7 @@ use docparse_config::FusionConfig;
 
 use crate::RepairAction;
 use crate::line::{LineAnchor, LineFragment};
+use crate::text_rules::is_list_marker;
 
 /// One explainable decision between adjacent local lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,27 +115,8 @@ impl LineFragment {
 
     /// Returns whether source text begins with a conservative list marker.
     fn starts_list_item(&self) -> bool {
-        let Some(text) = self
-            .items
-            .iter()
-            .map(|item| item.raw_text.as_str())
-            .find(|text| !text.trim().is_empty())
-        else {
-            return false;
-        };
-        let trimmed = text.trim_start();
-        if ["- ", "* ", "• ", "– "]
-            .iter()
-            .any(|marker| trimmed.starts_with(marker))
-        {
-            return true;
-        }
-        let digit_count =
-            trimmed.chars().take_while(char::is_ascii_digit).count();
-        digit_count > 0
-            && trimmed.get(digit_count..).is_some_and(|suffix| {
-                suffix.starts_with(". ") || suffix.starts_with(") ")
-            })
+        // Scan across style-split source items without allocating a second line string.
+        is_list_marker(self.items.iter().flat_map(|item| item.raw_text.chars()))
     }
 }
 

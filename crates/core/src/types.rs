@@ -266,6 +266,16 @@ pub enum RepairAction {
     MergedFragment,
     /// A named symbol repaired an incorrect Unicode mapping; source glyph codes remain in provenance.
     GlyphNameRecovery,
+    /// The embedded font's Unicode cmap recovered an otherwise untrusted glyph.
+    FontCmapRecovery,
+    /// A caller-supplied outline resolver recovered an otherwise untrusted glyph.
+    GlyphOutlineRecovery,
+    /// Geometrically coincident source glyphs were combined into one visible symbol.
+    GlyphComposition,
+    /// One source glyph expanded into its ordinary character sequence.
+    LigatureExpansion,
+    /// Typographic punctuation was folded to the extraction policy's ASCII equivalent.
+    PunctuationNormalization,
 }
 
 /// Completeness of text located beneath one inline formula region.

@@ -108,6 +108,62 @@ fn renderers_preserve_canonical_document() {
     );
 }
 
+/// Semantic prose heals wrapped words while raw and non-prose output retain physical lines.
+#[test]
+fn character_cleanup_is_a_read_only_presentation() {
+    let mut document = document();
+    let block = document
+        .pages
+        .first_mut()
+        .expect("page")
+        .blocks
+        .first_mut()
+        .expect("block");
+    let template = block.lines.first().expect("line").clone();
+    block.lines = ["  architec-", "    ture   works", "  well-", "  Known"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let mut line = template.clone();
+            line.id = LineId::new(&block.id, index as u32);
+            line.inline_spans.clear();
+            line.text = text.to_owned();
+            line.text_items.first_mut().expect("item").raw_text =
+                text.to_owned();
+            line
+        })
+        .collect();
+    let before = document.clone();
+    assert_eq!(
+        MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+            .render(&document),
+        "architecture works well- Known"
+    );
+    assert!(
+        MarkdownRenderer::new(RenderView::Raw, "[formula]")
+            .render(&document)
+            .contains("architec-\n    ture")
+    );
+    assert_eq!(
+        TextRenderer::new(RenderView::Raw, "[formula]").render(&document),
+        "architec-\n  ture   works\nwell-\nKnown"
+    );
+    assert_eq!(document, before);
+    document
+        .pages
+        .first_mut()
+        .expect("page")
+        .blocks
+        .first_mut()
+        .expect("block")
+        .label = LayoutLabel::Algorithm;
+    assert!(
+        MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+            .render(&document)
+            .contains("architec-\n    ture")
+    );
+}
+
 /// Configured JSON must retain merged source regions just like the direct serializer.
 #[test]
 fn configured_json_preserves_merged_layout_sources() {

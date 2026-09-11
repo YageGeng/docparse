@@ -69,6 +69,12 @@ workspace = true
 # async
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
+# config and serialization
+rmp.workspace = true
+
+# hashing
+blake3.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # async
 futures-util.workspace = true

@@ -82,6 +82,48 @@ async fn injected_layout_engine_parses_path_and_bytes() {
     );
 }
 
+/// Parser injection must reach the PDFium worker and retain repaired geometry through canonical validation.
+#[tokio::test]
+async fn injected_glyph_resolver_reaches_document_extraction() {
+    struct Outline;
+    impl docparse_core::GlyphResolver for Outline {
+        /// Returns a known symbol for the fixture's otherwise undecodable real vector outlines.
+        fn resolve(&self, segments: &[(i32, f32, f32)]) -> Option<String> {
+            (!segments.is_empty()).then(|| "✓".to_owned())
+        }
+    }
+    let parser = DocParser::builder()
+        .config(Arc::new(config()))
+        .layout_engine(Arc::new(EmptyLayoutEngine))
+        .glyph_resolver(Arc::new(Outline))
+        .build()
+        .await
+        .expect("parser");
+    let bytes: Arc<[u8]> =
+        Arc::from(include_bytes!("fixtures/pdf/glyph_recovery.pdf").as_slice());
+    let result = parser.parse_bytes(bytes).await.expect("recovered document");
+    let recovered: Vec<_> = result
+        .pages
+        .iter()
+        .flat_map(|page| &page.blocks)
+        .flat_map(|block| &block.lines)
+        .flat_map(|line| &line.text_items)
+        .filter(|item| {
+            item.repair_actions
+                .contains(&docparse_core::RepairAction::GlyphOutlineRecovery)
+        })
+        .collect();
+    assert!(
+        !recovered.is_empty(),
+        "the injected resolver must reach real extraction"
+    );
+    assert!(
+        recovered
+            .iter()
+            .all(|item| item.raw_text.contains('✓') && item.bbox.width() > 0.0)
+    );
+}
+
 /// Verifies the default engine validates missing artifacts during construction.
 #[tokio::test]
 async fn default_engine_rejects_missing_model() {

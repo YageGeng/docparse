@@ -17,10 +17,13 @@ use crate::{
 const MAX_INLINE_GAP: f64 = 15.0;
 const ROTATION_TOLERANCE_DEGREES: f64 = 2.0;
 
-/// One immutable PDFium character fact in canonical viewport coordinates.
+/// One normalized PDFium character fact in canonical viewport coordinates.
 #[derive(Debug, Clone, TypedBuilder)]
 pub(crate) struct TextCharFact {
     pub(crate) character: char,
+    /// Remaining decoded characters share this source glyph's geometry and encoding.
+    #[builder(default)]
+    pub(crate) tail: String,
     pub(crate) bbox: Bbox,
     pub(crate) loose_bbox: Bbox,
     #[builder(default)]
@@ -55,9 +58,9 @@ pub(crate) struct TextCharFact {
     pub(crate) generated: bool,
     #[builder(default)]
     pub(crate) unicode_map_error: bool,
-    /// The glyph's explicit symbol name corrected its Unicode value before segmentation.
+    /// Recovery and normalization evidence for this source glyph.
     #[builder(default)]
-    pub(crate) symbol_recovered: bool,
+    pub(crate) repair_actions: Vec<RepairAction>,
     #[builder(default)]
     pub(crate) explicit_break: bool,
     #[builder(default)]
@@ -232,7 +235,8 @@ pub(crate) struct CurrentSegment {
 impl CurrentSegment {
     /// Starts one segment from its first visible character fact.
     fn from_fact(fact: TextCharFact) -> Self {
-        let character = fact.character.to_string();
+        // A decoded ligature contributes one measured source glyph, even when its text grows.
+        let character = format!("{}{}", fact.character, fact.tail);
         let baseline = fact.measured_baseline();
         let word = crate::TableWord::builder()
             .byte_range(0..character.len())
@@ -262,11 +266,7 @@ impl CurrentSegment {
             .stroke_color(fact.stroke_color)
             .char_codes(vec![fact.char_code])
             .unicode_error_count(usize::from(fact.unicode_map_error))
-            .repair_actions(if fact.symbol_recovered {
-                vec![RepairAction::GlyphNameRecovery]
-            } else {
-                Vec::new()
-            })
+            .repair_actions(fact.repair_actions)
             .mcid(fact.mcid)
             .text_object_index(fact.text_object_index)
             .link(fact.link)
@@ -276,6 +276,10 @@ impl CurrentSegment {
 
     /// Returns whether an incoming visible character must start a new segment.
     fn must_split(&self, fact: &TextCharFact) -> bool {
+        // A proven overlay can cross a font/style boundary without creating a second visible marker.
+        if self.overlay(fact).is_some() {
+            return false;
+        }
         let axes = TextAxes::from(self.rotation);
         // Preserve exact object geometry and explicit PDF semantics at segment boundaries.
         if self.watermark != fact.watermark
@@ -343,6 +347,27 @@ impl CurrentSegment {
         }
         self.generated_space |= fact.generated;
         self.char_codes.push(fact.char_code);
+        for action in &fact.repair_actions {
+            if !self.repair_actions.contains(action) {
+                self.repair_actions.push(action.clone());
+            }
+        }
+    }
+
+    /// Recognizes a coincident overlay independently of the font or recovery path that supplied its symbols.
+    fn overlay(&self, fact: &TextCharFact) -> Option<char> {
+        if self.mcid != fact.mcid
+            || self.watermark != fact.watermark
+            || !fact.tail.is_empty()
+            || (self.rotation - fact.rotation).abs()
+                > ROTATION_TOLERANCE_DEGREES
+        {
+            return None;
+        }
+        GlyphNormalizer::compose(
+            (self.raw_text.chars().next_back()?, self.last_bbox),
+            (fact.character, fact.bbox),
+        )
     }
 
     /// Appends one visible source character without inferring missing text.
@@ -352,21 +377,7 @@ impl CurrentSegment {
             _ => self.baseline = None,
         }
         // Rules decide the replacement; this segment retains every source code and measured word.
-        let replacement = if self.mcid == fact.mcid
-            && (fact.symbol_recovered
-                || self
-                    .repair_actions
-                    .contains(&RepairAction::GlyphNameRecovery))
-        {
-            self.raw_text.chars().next_back().and_then(|previous| {
-                GlyphNormalizer::compose(
-                    (previous, self.last_bbox),
-                    (fact.character, fact.bbox),
-                )
-            })
-        } else {
-            None
-        };
+        let replacement = self.overlay(&fact);
         let composed = replacement.is_some();
         let start = self.raw_text.len();
         // Keep source segmentation unchanged. Measured words allow a table to reference
@@ -383,8 +394,15 @@ impl CurrentSegment {
         if let Some(character) = replacement {
             let _ = self.raw_text.pop();
             self.raw_text.push(character);
+            if !self
+                .repair_actions
+                .contains(&RepairAction::GlyphComposition)
+            {
+                self.repair_actions.push(RepairAction::GlyphComposition);
+            }
         } else {
             self.raw_text.push(fact.character);
+            self.raw_text.push_str(&fact.tail);
         }
         if new_word {
             self.words.push(
@@ -436,12 +454,11 @@ impl CurrentSegment {
         self.character_count += 1;
         self.char_codes.push(fact.char_code);
         self.unicode_error_count += usize::from(fact.unicode_map_error);
-        if fact.symbol_recovered
-            && !self
-                .repair_actions
-                .contains(&RepairAction::GlyphNameRecovery)
-        {
-            self.repair_actions.push(RepairAction::GlyphNameRecovery);
+        // Keep distinct recovery causes without duplicating them for every source glyph.
+        for action in fact.repair_actions {
+            if !self.repair_actions.contains(&action) {
+                self.repair_actions.push(action);
+            }
         }
         if self.text_object_index != fact.text_object_index {
             self.text_object_index = None;
@@ -563,39 +580,30 @@ impl SegmentBuilder {
     /// Consumes one character fact, flushing only at explicit discontinuities.
     pub(crate) fn push(
         &mut self,
-        mut fact: TextCharFact,
+        fact: TextCharFact,
     ) -> Result<(), ExtractError> {
         if fact.explicit_break || matches!(fact.character, '\n' | '\r') {
             self.flush()?;
             return Ok(());
         }
-        // Some embedded subset fonts expose a visible space or encoded hyphen
-        // through PDFium as SOH/STX. Decode only these established
-        // mappings before the generic control-character rejection path.
-        if fact.character == '\u{0001}' {
-            if let Some(current) = &mut self.current {
-                current.push_source_space(&fact);
-            }
-            return Ok(());
-        }
-        if fact.character == '\u{0002}' {
-            fact.character = '-';
-            // Isolate the mapped glyph so its repair evidence identifies the exact
-            // trailing character instead of ambiguously annotating a whole text run.
+        // Decoding owns text transformations; segmentation only honors their structural consequences.
+        if fact.repair_actions.contains(&RepairAction::EncodedHyphen) {
             self.flush()?;
-            let mut hyphen = CurrentSegment::from_fact(fact);
-            hyphen.repair_actions.push(RepairAction::EncodedHyphen);
-            self.current = Some(hyphen);
+            self.current = Some(CurrentSegment::from_fact(fact));
             self.flush()?;
             return Ok(());
         }
-        if fact.character.is_control() {
-            if let Some(current) = &mut self.current {
+        if fact.repair_actions.contains(&RepairAction::RemovedControl) {
+            if let Some(current) = &mut self.current
+                && !current
+                    .repair_actions
+                    .contains(&RepairAction::RemovedControl)
+            {
                 current.repair_actions.push(RepairAction::RemovedControl);
             }
             return Ok(());
         }
-        if fact.character.is_whitespace() {
+        if fact.character.is_whitespace() && fact.tail.is_empty() {
             if let Some(current) = &mut self.current {
                 current.push_source_space(&fact);
             }
@@ -648,9 +656,11 @@ pub(crate) fn extract_page_text_items(
     view_box: &RectF,
     page_number: u32,
     table_evidence: &mut crate::TableEvidence,
+    resolver: Option<&dyn crate::GlyphResolver>,
 ) -> Result<Vec<TextItem>, ExtractError> {
     let mut builder = SegmentBuilder::new(page_number);
-    let mut glyphs = GlyphNormalizer::default();
+    // Font recovery runs before segmentation so every consumer shares corrected source facts.
+    let mut glyphs = GlyphNormalizer::new(text_page, resolver);
     let viewport = page.viewport_transform(view_box);
     let objects = page.text_object_facts();
     let object_indices: std::collections::HashMap<_, _> = objects
@@ -663,14 +673,22 @@ pub(crate) fn extract_page_text_items(
         })
         .collect();
     let links = page.links(view_box);
-    for index in 0..text_page.char_count() {
-        let Some(character) = text_page.char_at(index) else {
+    // The iterator caches PDFium's character count instead of crossing FFI again at every index.
+    for (index, character) in (0_i32..).zip(text_page.chars()) {
+        let Some(glyph) = glyphs.resolve(&character, text_page, index) else {
             continue;
         };
-        let Some(glyph) = glyphs.resolve(&character) else {
-            continue;
-        };
+        let unicode_map_error = character.has_unicode_map_error()
+            && !glyph.repair_actions.iter().any(|action| {
+                matches!(
+                    action,
+                    RepairAction::GlyphNameRecovery
+                        | RepairAction::FontCmapRecovery
+                        | RepairAction::GlyphOutlineRecovery
+                )
+            });
         let value = glyph.character;
+        let tail = glyph.tail;
         if matches!(value, '\n' | '\r') {
             let dummy = Bbox::try_from([0.0, 0.0, 1.0, 1.0])?;
             builder.push(
@@ -683,7 +701,7 @@ pub(crate) fn extract_page_text_items(
             )?;
             continue;
         }
-        if value.is_whitespace() {
+        if value.is_whitespace() && tail.is_empty() {
             let dummy = Bbox::try_from([0.0, 0.0, 1.0, 1.0])?;
             builder.push(
                 TextCharFact::builder()
@@ -692,7 +710,8 @@ pub(crate) fn extract_page_text_items(
                     .loose_bbox(dummy)
                     .char_code(character.char_code())
                     .generated(character.is_generated())
-                    .unicode_map_error(character.has_unicode_map_error())
+                    .unicode_map_error(unicode_map_error)
+                    .repair_actions(glyph.repair_actions)
                     .build(),
             )?;
             continue;
@@ -805,8 +824,9 @@ pub(crate) fn extract_page_text_items(
                 .rotation(rotation)
                 .char_code(character.char_code())
                 .generated(character.is_generated())
-                .unicode_map_error(character.has_unicode_map_error())
-                .symbol_recovered(glyph.recovered)
+                .unicode_map_error(unicode_map_error)
+                .tail(tail)
+                .repair_actions(glyph.repair_actions)
                 .mcid(character.marked_content_id())
                 .text_object_index(text_object_index)
                 .watermark(
@@ -820,7 +840,7 @@ pub(crate) fn extract_page_text_items(
     }
     if glyphs.recovered_count > 0 {
         tracing::debug!(
-            "recovered {} named symbol glyphs on page {}",
+            "recovered {} source glyphs on page {}",
             glyphs.recovered_count,
             page_number
         );
@@ -878,6 +898,10 @@ pub(crate) fn extract_page_text_items(
 
 #[cfg(test)]
 mod tests {
+    // Share PDF serialization while keeping every test helper inside the test-only module.
+    mod pdf {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/pdf.rs"));
+    }
     use std::path::{Path, PathBuf};
 
     use docparse_layout::Bbox;
@@ -890,8 +914,15 @@ mod tests {
     fn fact(character: char, x: f64, y: f64) -> TextCharFact {
         let bbox = Bbox::try_from([x, y, x + 5.0, y + 10.0])
             .expect("the test glyph bbox must be valid");
-        TextCharFact::builder()
+        // Exercise the same normalization boundary as native extraction before testing segmentation.
+        let glyph = super::super::glyph::ResolvedGlyph::builder()
             .character(character)
+            .build()
+            .normalize();
+        TextCharFact::builder()
+            .character(glyph.character)
+            .tail(glyph.tail)
+            .repair_actions(glyph.repair_actions)
             .bbox(bbox)
             .loose_bbox(bbox)
             .font_size(10.0)
@@ -1076,6 +1107,67 @@ mod tests {
         assert!(item.repair_actions.is_empty());
     }
 
+    /// Expanding a source ligature must keep one source code and cover every output byte.
+    #[test]
+    fn character_recovery_expands_ligatures_and_normalizes_punctuation() {
+        for (source, expected) in [
+            ('\u{001A}', "ff"),
+            ('\u{001B}', "ft"),
+            ('\u{001C}', "fi"),
+            ('\u{001D}', "Th"),
+            ('\u{001E}', "ffi"),
+            ('\u{001F}', "fl"),
+            ('ﬁ', "fi"),
+            ('ﬃ', "ffi"),
+            ('ﬄ', "ffl"),
+            ('ﬅ', "st"),
+            ('‘', "'"),
+            ('′', "'"),
+            ('“', "\""),
+            ('″', "\""),
+            ('−', "-"),
+            ('—', "-"),
+            ('①', "①"),
+            ('é', "é"),
+        ] {
+            let items = build([fact(source, 0.0, 0.0)]);
+            let item = items.first().expect("the source glyph must survive");
+            assert_eq!(item.raw_text, expected, "source {source:?}");
+            assert_eq!(item.char_codes, [u32::from(source)]);
+            assert_eq!(
+                item.words.first().expect("word").byte_range,
+                0..expected.len()
+            );
+            assert!((item.bbox.width() - 5.0).abs() < f64::EPSILON);
+        }
+    }
+
+    /// Already-correct Unicode circles can compose across fonts without requiring a name-repair flag.
+    #[test]
+    fn circle_composition_uses_geometry_for_all_decoding_paths() {
+        let half = fact('◖', 0.0, 0.0);
+        let mut circle = fact('○', 0.0, 0.0);
+        circle.bbox = Bbox::try_from([0.0, 0.0, 10.0, 10.0]).expect("circle");
+        circle.loose_bbox = circle.bbox;
+        circle.font_name = Some("outline-font".to_owned());
+        let items = build([half.clone(), circle.clone()]);
+        let item = items.first().expect("composed glyph");
+        assert_eq!(item.raw_text, "◐");
+        assert_eq!(item.char_codes, [u32::from('◖'), u32::from('○')]);
+        assert!(
+            item.repair_actions
+                .contains(&crate::RepairAction::GlyphComposition)
+        );
+        circle.mcid = Some(42);
+        assert_eq!(
+            build([half, circle])
+                .iter()
+                .map(|item| item.raw_text.as_str())
+                .collect::<String>(),
+            "◖○"
+        );
+    }
+
     /// Verifies a subset-font STX glyph remains a positionally isolated hyphen fact.
     #[test]
     fn subset_font_hyphen_control_is_restored() {
@@ -1129,28 +1221,7 @@ mod tests {
                 content.len()
             ),
         ];
-        let mut pdf = b"%PDF-1.7\n".to_vec();
-        let mut offsets = Vec::new();
-        for (index, object) in objects.iter().enumerate() {
-            offsets.push(pdf.len());
-            pdf.extend_from_slice(
-                format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes(),
-            );
-        }
-        let xref = pdf.len();
-        pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
-        for offset in offsets {
-            pdf.extend_from_slice(
-                format!("{offset:010} 00000 n \n").as_bytes(),
-            );
-        }
-        pdf.extend_from_slice(
-            format!(
-                "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
-            )
-            .as_bytes(),
-        );
-        pdf
+        pdf::document(&objects)
     }
 
     /// Preserves a complete oblique run and its measured direction under every page rotation.
@@ -1172,6 +1243,7 @@ mod tests {
                     &view_box,
                     1,
                     &mut crate::TableEvidence::default(),
+                    None,
                 )
                 .expect("rotated extraction must succeed");
                 assert_eq!(
@@ -1229,6 +1301,7 @@ mod tests {
                 &view_box,
                 1,
                 &mut crate::TableEvidence::default(),
+                None,
             )
             .expect("fixture extraction must succeed");
             runs.push(

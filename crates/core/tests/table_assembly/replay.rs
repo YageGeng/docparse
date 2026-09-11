@@ -90,7 +90,7 @@ async fn capture_tsr_source_facts() {
             continue;
         }
         let extracted = executor
-            .pre_scan_page(page.page_number)
+            .pre_scan_page(page.page_number, None)
             .await
             .expect("source facts")
             .extracted;

@@ -8,6 +8,14 @@ The Rust source under `crates/pdfium` and `crates/pdfium-sys` is derived from [L
 
 License: Apache License 2.0. The complete license text is in [LICENSE](LICENSE). Modified imported files carry an SPDX identifier and a prominent source/change notice.
 
+Character recovery in `crates/core/src/extract/{glyph,glyph_names,font_cmap}.rs`,
+the optional outline database, and text-cleanup rules are adapted from LiteParse
+revision `4d4a51c246ff56d382166930942898f3ff563eba`. Adaptations integrate circle
+aliases, preserve source geometry and provenance for multi-character results,
+bound untrusted font/database parsing, and isolate native filesystem access.
+The derived `glyph_recovery.pdf` test fixture reuses the embedded Bitstream Vera
+font and license recorded for `embedded_layout.pdf` below.
+
 ## PDFium binary distribution
 
 The build script downloads target-specific PDFium release `chromium/8028` from [run-llama/pdfium-binaries](https://github.com/run-llama/pdfium-binaries). This source repository does not contain a PDFium binary.

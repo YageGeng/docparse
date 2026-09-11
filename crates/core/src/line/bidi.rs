@@ -106,11 +106,12 @@ pub(crate) fn order_items(items: &mut [TextItem], direction: WritingDirection) {
     }
 }
 
-/// Returns true for strong Hebrew, Arabic, and presentation-form code points.
+/// Recognizes LiteParse's RTL script ranges, including supplementary-plane scripts and presentation forms.
 fn is_rtl_character(character: char) -> bool {
     matches!(
         character as u32,
-        0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF
+        0x0590..=0x07BF | 0x0800..=0x085F | 0x08A0..=0x08FF
+            | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF
     )
 }
 

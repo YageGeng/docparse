@@ -82,6 +82,7 @@ tokio = { version = "1", default-features = false, features = ["macros", "sync"]
 
 # config and serialization
 figment = { version = "0.10", features = ["toml", "env"] }
+rmp = "0.8"
 serde = { version = "1", features = ["derive"] }
 # Exact float parsing keeps canonical page coordinates byte-stable after JSON round trips.
 serde_json = { version = "1", features = ["float_roundtrip"] }
@@ -90,6 +91,9 @@ serde_yml = "0.0.13"
 
 # builder
 typed-builder = "0.23"
+
+# hashing
+blake3 = "1"
 
 # inference and image
 geo = "0.33.1"
@@ -116,7 +120,6 @@ libloading = "0.9"
 
 # testing
 assert_cmd = "2"
-blake3 = "1"
 predicates = "3"
 proptest = "1"
 tempfile = "3"

@@ -7,6 +7,7 @@ mod context;
 mod error;
 mod extract;
 mod fusion;
+mod glyph_resolver;
 mod label_policy;
 mod line;
 mod ocr;
@@ -17,6 +18,7 @@ mod render;
 mod runtime;
 mod semantic;
 mod table;
+mod text_rules;
 mod types;
 mod validate;
 mod watermark;
@@ -28,6 +30,7 @@ pub use error::{
 };
 pub use extract::ExtractedPage;
 pub use extract::metadata::PageProbe;
+pub use glyph_resolver::{GLYPH_RESOLVER_FONT_SIZE, GlyphResolver};
 pub use ocr::{
     OcrContentStatus, OcrEngine, OcrError, OcrRequest, OcrResult, OcrTextItem,
 };

@@ -57,6 +57,8 @@ pub(crate) struct ParseRuntime {
     ocr_engine: Option<Arc<dyn OcrEngine>>,
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+    #[builder(default)]
+    glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
 impl ParseRuntime {
@@ -112,7 +114,13 @@ impl ParseRuntime {
             let extraction = timings
                 .for_page(page_number)
                 .start(TimingStage::TextExtract);
-            let outcome = executor.pre_scan_page(page_number).await;
+            // Preserve the parser's recovery policy across every page handled by the PDFium worker.
+            let outcome = executor
+                .pre_scan_page(
+                    page_number,
+                    self.glyph_resolver.as_ref().map(Arc::clone),
+                )
+                .await;
             drop(extraction);
             while let Ok(timing) = timing_receiver.try_recv() {
                 if let Some(observer) = observer {

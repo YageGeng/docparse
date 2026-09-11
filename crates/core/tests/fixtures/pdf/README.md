@@ -3,6 +3,7 @@
 - `extraction_metadata.pdf`: unembedded Helvetica/Courier fonts for text, style, and metadata regression. Native/Web substitute-font differences are recorded separately.
 - `multipage_layout.pdf`: three pages with unembedded fonts, covering document context, different text coverage, and multipage processing.
 - `embedded_layout.pdf`: two pages with embedded Bitstream Vera, covering strict numeric parity and rotated text. Its license is in `embedded_layout.LICENSE.txt`.
+- `glyph_recovery.pdf`: derived from `embedded_layout.pdf` with deliberately broken TrueType Unicode mappings and a buggy-subset font name. Real outlines exercise the injected resolver through the parser and PDFium worker. Run `uv run --with pypdf python crates/core/tests/fixtures/pdf/generate_glyph_recovery.py` to regenerate it; the Vera license remains `embedded_layout.LICENSE.txt`.
 - `embedded_cjk_90.pdf`: embedded Noto Sans SC with Chinese text, 90-degree page rotation, CropBox `[20,20,592,772]`, and UserUnit 2. Its license is in `embedded_cjk.LICENSE.txt`.
 - `symbol_glyph_names.pdf`: an original Type3 font with named circle glyphs deliberately mapped to SPACE, `#`, `G`, U+0000, U+FFFF, and U+FFFD. It checks invalid-Unicode and visible-space recovery, both semicircle/outline paint orders, adjacent independent marks, ordinary-text controls, and source-code provenance. Its generator needs only pypdf and embeds no external font.
 
