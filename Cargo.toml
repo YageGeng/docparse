@@ -106,7 +106,7 @@ tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
 web-time = "1.1"
 
 # build
-bindgen = "0.72"
+bindgen = "=0.72"
 flate2 = "1"
 tar = "0.4"
 ureq = "3"
