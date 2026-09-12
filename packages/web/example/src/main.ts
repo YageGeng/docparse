@@ -1,4 +1,4 @@
-import { createParser, DocParseError } from "../../dist/index.js";
+import { prepareModels, DocParseError } from "../../dist/index.js";
 import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress, ParserTiming, Table, TableMode } from "../../dist/index.js";
 
 /** The example owns these fixed elements; PDF text is always inserted with textContent. */
@@ -7,6 +7,7 @@ const ui = {
   name: document.querySelector<HTMLElement>("#file-name")!,
   detail: document.querySelector<HTMLElement>("#file-detail")!,
   parse: document.querySelector<HTMLButtonElement>("#parse")!,
+  prepare: document.querySelector<HTMLButtonElement>("#prepare")!,
   cancel: document.querySelector<HTMLButtonElement>("#cancel")!,
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
   tableMode: document.querySelector<HTMLSelectElement>("#table-mode")!,
@@ -65,7 +66,7 @@ let result: DocumentResult | undefined;
 let controller: AbortController | undefined;
 let generation = 0, pageNumber = 1, pageCount = 0;
 let selectedBlock: Block | undefined;
-let busy = false;
+let operation: "prepare" | "parse" | undefined;
 let zoom = 1;
 /** Identity and resources of one export, independent of the PDF parse generation. */
 type ImageExport = { url?: string };
@@ -85,6 +86,10 @@ function status(title: string, detail: string, state = "idle", fraction?: number
 
 /** Enables navigation only for rasters already delivered by the current parse. */
 function controls(): void {
+  const busy = operation !== undefined;
+  ui.prepare.disabled = busy || Boolean(parser);
+  ui.prepare.textContent = parser ? "Models ready" : operation === "prepare" ? "Preparing models…" : "Prepare models";
+  ui.cancel.textContent = operation === "prepare" ? "Cancel preparation" : "Cancel parsing";
   ui.parse.disabled = !selectedFile || busy;
   ui.provider.disabled = busy;
   ui.tableMode.disabled = busy;
@@ -122,7 +127,9 @@ function setPageCount(count: number): void {
 
 /** Clears document-owned blobs while keeping a ready model available for another PDF. */
 function clearDocument(): void {
-  timingTotals.clear(); ui.timingDetails.disabled = true; ui.timingDialog.close();
+  // Model preparation belongs to the reusable session, not to the PDF being cleared.
+  for (const key of timingTotals.keys()) if (key.startsWith("Document · ")) timingTotals.delete(key);
+  ui.timingDetails.disabled = timingTotals.size === 0; ui.timingDialog.close();
   for (const preview of previews.values()) URL.revokeObjectURL(preview.url);
   previews.clear(); result = undefined; pageNumber = 1; selectedBlock = undefined;
   setPageCount(0); ui.pages.replaceChildren(...Array.from(initialPages.cloneNode(true).childNodes));
@@ -141,26 +148,28 @@ function clearDocument(): void {
 
 /** Cancels the active Worker and invalidates every pending callback before another run starts. */
 function cancel(): void {
+  const preparing = operation === "prepare";
   generation++;
   controller?.abort(); controller = undefined;
-  if (busy) { void parser?.close(); parser = undefined; }
-  if (!parser) { ui.engine.textContent = "Engine stopped"; delete ui.engine.dataset.provider; }
-  busy = false;
-  status("Parsing canceled", "Select Parse document to start again.");
+  void parser?.close(); parser = undefined;
+  ui.engine.textContent = "Engine stopped"; delete ui.engine.dataset.provider;
+  operation = undefined;
+  status(preparing ? "Preparation canceled" : "Parsing canceled", "Select Prepare models or Parse document to start again.");
   controls();
 }
 
 /** Selects local bytes without uploading the PDF or leaving stale results visible. */
 function choose(file: File | undefined): void {
   if (!file) return;
-  if (busy) cancel();
-  else generation++;
+  // Selecting a PDF during model preparation must not discard the sessions being created.
+  if (operation === "parse") cancel();
+  else if (!operation) generation++;
   clearDocument();
   selectedFile = file;
   document.body.dataset.hasFile = "true";
   ui.name.textContent = file.name; ui.name.title = file.name;
   ui.detail.textContent = `${file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1024 / 1024).toFixed(2)} MB`} · Local PDF`;
-  status("Document selected", "Start parsing to inspect the page structure.");
+  if (operation !== "prepare") status("Document selected", "Start parsing to inspect the page structure.");
   controls();
 }
 
@@ -314,44 +323,62 @@ function showTimings(): void {
   ui.timingDialog.showModal();
 }
 
-/** Uses the same local immutable artifact layout for each independently verified OCR model. */
-function ocrModelSource(name: string): import("../../dist/index.js").ModelSource {
-  const base = new URL(`../models/${name}/`, location.href);
+/** Resolves fixed layout, TSR and OCR triples through the same local artifact convention. */
+function modelSource(name = ""): import("../../dist/index.js").ModelSource {
+  const base = new URL(`../models/${name ? `${name}/` : ""}`, location.href);
   return { kind: "urls", model: new URL("inference.onnx", base).href, config: new URL("inference.yml", base).href, manifest: new URL("model-manifest.json", base).href };
 }
 
+/** Shares one real preparation path between the standalone action and parsing, fencing stale completions. */
+async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser> {
+  let current = parser;
+  if (!current) {
+    // A retry starts a new preparation observation, while repeated parses reuse the existing one.
+    for (const key of timingTotals.keys()) if (key.startsWith("Preparation · ")) timingTotals.delete(key);
+    ui.timingDetails.disabled = timingTotals.size === 0;
+    ui.engine.textContent = ui.provider.value === "webgpu" ? "Preparing WebGPU…" : "Preparing CPU…";
+    delete ui.engine.dataset.provider;
+    current = await prepareModels({
+      artifacts: modelSource(),
+      tsrArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("slanet-plus"),
+      ocrArtifacts: ui.ocrPolicy.value === "disabled" ? undefined : {
+        detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),
+        orientation: modelSource("pp-lcnet-textline-ori"),
+      },
+      // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
+      executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
+      allowCpuFallback: true,
+      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" } },
+      signal, onProgress: event => { if (run === generation) progress(event); },
+      onTiming: event => { if (run === generation) recordTiming("Preparation", event); },
+    });
+    if (run !== generation) { await current.close(); throw new DocParseError("Aborted", "Model preparation was canceled"); }
+    parser = current;
+  }
+  ui.engine.dataset.provider = current.executionProvider;
+  ui.engine.textContent = current.executionProvider === "webgpu" ? "WebGPU active" : ui.provider.value === "webgpu" ? "CPU fallback · WebGPU unavailable" : "CPU active";
+  return current;
+}
+
 /** Runs one cancellable operation while keeping stale callbacks from replacing a newer document. */
-async function parse(): Promise<void> {
-  if (!selectedFile || busy) return;
+async function runOperation(mode: "prepare" | "parse"): Promise<void> {
+  if (operation || (mode === "parse" && !selectedFile) || (mode === "prepare" && parser)) return;
   const file = selectedFile;
-  clearDocument(); busy = true; controls();
+  if (mode === "parse") clearDocument();
+  operation = mode; controls();
+  // Clear the previous completion before asynchronous model preparation or file reading begins.
+  status(mode === "prepare" ? "Preparing document models" : "Opening document", mode === "prepare" ? "Initializing the selected inference engine and models." : "Reading the selected PDF.", "busy");
   const run = ++generation;
   const signal = (controller = new AbortController()).signal;
   const started = performance.now();
   try {
-    let current = parser;
-    if (!current) {
-      ui.engine.textContent = ui.provider.value === "webgpu" ? "Preparing WebGPU…" : "Preparing CPU…";
-      delete ui.engine.dataset.provider;
-      current = await createParser({
-        artifacts: { kind: "urls", model: new URL("../models/inference.onnx", location.href).href, config: new URL("../models/inference.yml", location.href).href, manifest: new URL("../models/model-manifest.json", location.href).href },
-        tsrArtifacts: { kind: "urls", model: new URL("../models/slanet-plus/inference.onnx", location.href).href, config: new URL("../models/slanet-plus/inference.yml", location.href).href, manifest: new URL("../models/slanet-plus/model-manifest.json", location.href).href },
-        ocrArtifacts: ui.ocrPolicy.value === "disabled" ? undefined : {
-          detection: ocrModelSource("pp-ocrv6-medium-det"), recognition: ocrModelSource("pp-ocrv6-medium-rec"),
-          orientation: ocrModelSource("pp-lcnet-textline-ori"),
-        },
-        // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
-        executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
-        allowCpuFallback: true,
-        config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" } },
-        signal, onProgress: event => { if (run === generation) progress(event); },
-        onTiming: event => { if (run === generation) recordTiming("Initialization", event); },
-      });
-      if (run !== generation) { await current.close(); return; }
-      parser = current;
+    const current = await ensureParser(run, signal);
+    if (mode === "prepare") {
+      const models = ["layout", ...(ui.tableMode.value === "rules_only" ? [] : ["TSR"]), ...(ui.ocrPolicy.value === "disabled" ? [] : ["OCR"])];
+      status("Models ready", `${models.join(" + ")} initialized. ${selectedFile ? "Select Parse document to continue." : "Choose a PDF to start parsing."}`, "done");
+      return;
     }
-    ui.engine.dataset.provider = current.executionProvider;
-    ui.engine.textContent = current.executionProvider === "webgpu" ? "WebGPU active" : ui.provider.value === "webgpu" ? "CPU fallback · WebGPU unavailable" : "CPU active";
+    if (!file) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (run !== generation) return;
     const parsed = await current.parse(bytes, {
@@ -385,11 +412,11 @@ async function parse(): Promise<void> {
     status(parsed.errors.length ? "Finished with page errors" : "Your document is ready", `${parsed.pages.length} pages · ${parsed.pages.reduce((sum, page) => sum + page.blocks.length, 0)} regions · ${elapsed}s${parsed.errors.length ? ` · ${parsed.errors.length} page errors` : ""}`, parsed.errors.length ? "error" : "done");
   } catch (error) {
     if (run !== generation) return;
-    status("Could not parse this PDF", error instanceof Error ? error.message : String(error), "error");
+    status(mode === "prepare" ? "Could not prepare models" : "Could not parse this PDF", error instanceof Error ? error.message : String(error), "error");
     if (!(error instanceof DocParseError) || ["ParserClosed", "WorkerStopped", "Aborted"].includes(error.code)) { void parser?.close(); parser = undefined; }
     if (!parser) { ui.engine.textContent = "Engine unavailable"; delete ui.engine.dataset.provider; }
   } finally {
-    if (run === generation) { busy = false; controller = undefined; controls(); }
+    if (run === generation) { operation = undefined; controller = undefined; controls(); }
   }
 }
 
@@ -467,33 +494,21 @@ function setZoom(value: number): void {
 
 ui.file.addEventListener("change", () => choose(ui.file.files?.[0]));
 document.querySelector("#choose")!.addEventListener("click", () => ui.file.click());
-ui.parse.addEventListener("click", () => { void parse(); });
+ui.parse.addEventListener("click", () => { void runOperation("parse"); });
+ui.prepare.addEventListener("click", () => { void runOperation("prepare"); });
 ui.cancel.addEventListener("click", cancel);
-/** Releases the old session before a different backend can parse the selected document. */
-ui.provider.addEventListener("change", () => {
-  if (busy) return;
+/** Invalidates preparation after any model policy or provider change, preserving one lifecycle owner. */
+function modelSettingsChanged(): void {
+  if (operation) return;
   generation++; void parser?.close(); parser = undefined;
-  clearDocument(); delete ui.engine.dataset.provider;
+  timingTotals.clear(); clearDocument(); delete ui.engine.dataset.provider;
   ui.engine.textContent = ui.provider.value === "webgpu" ? "GPU preferred · CPU fallback if unavailable" : "CPU selected";
-  status("Inference engine selected", "Start parsing to initialize the selected engine.");
+  status("Model settings changed", "Select Prepare models or Parse document to initialize the selected models.");
   controls();
-});
-/** Reinitializes only when the table model policy changes, keeping its default visible. */
-ui.tableMode.addEventListener("change", () => {
-  if (busy) return;
-  generation++; void parser?.close(); parser = undefined;
-  clearDocument(); delete ui.engine.dataset.provider;
-  status("Table recovery selected", "Start parsing to use the selected table recovery mode.");
-  controls();
-});
-/** Releases OCR sessions when the user changes visual recovery policy. */
-ui.ocrPolicy.addEventListener("change", () => {
-  if (busy) return;
-  generation++; void parser?.close(); parser = undefined;
-  clearDocument(); delete ui.engine.dataset.provider;
-  status("OCR selected", "Start parsing to use the selected text recovery mode.");
-  controls();
-});
+}
+ui.provider.addEventListener("change", modelSettingsChanged);
+ui.tableMode.addEventListener("change", modelSettingsChanged);
+ui.ocrPolicy.addEventListener("change", modelSettingsChanged);
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));
 ui.next.addEventListener("click", () => showPage(pageNumber + 1));
 ui.select.addEventListener("change", () => selectBlock(ui.select.value));
@@ -525,7 +540,8 @@ window.addEventListener("pagehide", () => {
   generation++; controller?.abort(); controller = undefined;
   void parser?.close(); parser = undefined;
   ui.engine.textContent = "Engine stopped"; delete ui.engine.dataset.provider;
-  if (busy) { busy = false; status("Parsing canceled", "Select Parse document to start again."); controls(); }
+  if (operation) status(operation === "prepare" ? "Preparation canceled" : "Parsing canceled", "Select Prepare models or Parse document to start again.");
+  operation = undefined; controls();
 });
 
 ui.timingDetails.addEventListener("click", showTimings);

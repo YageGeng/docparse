@@ -34,9 +34,10 @@ Copy the complete `dist/` directory to any static-site directory while preservin
 ## Usage
 
 ```javascript
-import { createParser } from "/assets/docparse/index.js";
+import { prepareModels } from "/assets/docparse/index.js";
 
-const parser = await createParser({
+// Prepare the runtime and enabled sessions before a PDF is selected.
+const parser = await prepareModels({
   artifacts: {
     kind: "urls",
     model: "/models/pp-doclayout-v3/inference.onnx",
@@ -69,13 +70,32 @@ uses the same selected backend as layout; both default to WebGPU.
 
 Here, `file` is a caller-selected File. To manage authentication or caching, obtain the model yourself and pass `{kind: "bytes", model, config, manifest}` with three Uint8Array values. The library does not detach caller-owned PDF or model buffers.
 
+`prepareModels(options)` initializes ONNX Runtime and returns a ready, reusable
+parser without opening a PDF or running dummy inference. `createParser(options)`
+remains compatible and delegates to the same preparation path. Reuse the returned
+parser across documents; call `close()` and prepare again when model settings or
+the execution provider change. Native callers already prepare their sessions in
+`DocParser::from_config` or `DocParserBuilder::build`.
+
+| Model | Preparation policy |
+| --- | --- |
+| Layout | Always initialized; there is no layout-disable setting. |
+| TSR | Initialized by default and for `external_only`; skipped for `config.tsr.mode = "rules_only"`. |
+| OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
+| OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
+
+Disabled models do not require artifact sources and are not downloaded or
+initialized, even if sources are supplied. Preparation accepts `signal`,
+`onProgress`, and `onTiming` for cancellation and observation. First inference
+can still include provider-specific lazy kernel compilation.
+
 `config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout/tsr/ocr.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
 ## Stage timings
 
-Both `createParser({ onTiming })` and `parser.parse(bytes, { onTiming })` accept a callback with `{stage, page_number, duration_ms}`. Page numbers are one-based; `null` denotes document-wide work. Timings never enter `DocumentResult`, so native/Web comparison and stored JSON stay deterministic. Rust callers use `ParseObserver::on_timing`; `RUST_LOG=debug` also reports elapsed stages.
+`prepareModels({ onTiming })`, its compatible `createParser` entry, and `parser.parse(bytes, { onTiming })` accept a callback with `{stage, page_number, duration_ms}`. Page numbers are one-based; `null` denotes document-wide work. Timings never enter `DocumentResult`, so native/Web comparison and stored JSON stay deterministic. Rust callers use `ParseObserver::on_timing`; `RUST_LOG=debug` also reports elapsed stages.
 
 ```javascript
 const timings = [];
@@ -117,7 +137,7 @@ rtk npm run example
 
 This compiles `example/src/main.ts` through its own TypeScript configuration and starts the static server. Use `rtk npm run build:example` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM.
 
-Open <http://127.0.0.1:8768/example/>. Choose a local PDF, then select **Parse document**. The example displays actual model-download, text-extraction, and page-analysis progress. Browse the PDFium page thumbnails, zoom the page, and toggle overlays without changing the parsed geometry. Click an overlay, or use the region menu, to inspect and copy its text. On narrow screens the selected text opens in a dismissible floating inspector.
+Open <http://127.0.0.1:8768/example/>. Select **Prepare models** to initialize the selected models before choosing a PDF. Choosing a PDF during preparation keeps that preparation running. **Parse document** also prepares automatically when needed and reuses ready sessions. Changing the engine, table mode, or OCR policy releases those sessions and enables preparation again. The example displays actual model-download, text-extraction, and page-analysis progress. Browse the PDFium page thumbnails, zoom the page, and toggle overlays without changing the parsed geometry. Click an overlay, or use the region menu, to inspect and copy its text. On narrow screens the selected text opens in a dismissible floating inspector.
 
 The workspace fills the remaining viewport height and fits the entire PDF page by
 default. The introduction collapses after file selection. Zoom percentages are relative
@@ -125,13 +145,22 @@ to this fitted size; click **Fit entire page** to reset both scale and scroll po
 Window resizing refits the image and overlays together. Thumbnails, enlarged pages, and
 long extracted text scroll within their own panels. Exported PNG resolution is unchanged.
 
-**Stage timings** opens a snapshot with counts, cumulative time, mean, and first measurement for each stage. Initialization is listed only when this run created a Worker; reusing a model does not count as new initialization. The dialog preserves the fitted workspace height.
+**Stage timings** opens a snapshot with counts, cumulative time, mean, and first measurement for each stage. **Preparation** timings describe the last preparation attempt and survive PDF selection and repeated parses; **Document** timings reset for each PDF. Changing model settings clears both scopes. Reusing a ready parser does not record another initialization. The dialog preserves the fitted workspace height.
 
 **Export PNG** opens the generated image for inspection; **Save PNG** then downloads it. Some embedded browsers cancel file downloads, but the image remains available in the preview. Cancel stops the Worker; the next parse creates a fresh parser. A ready model is reused when choosing another PDF. Returning through browser history does not revoke a cached document's preview URLs.
 
 The static server exposes only the example, built SDK, and model directory. It does not receive PDF uploads or perform parsing. Set `PORT` to use another local port. The example uses PDFium's inference raster and SVG hit targets; it has no pdf.js dependency. Native PDF text is extracted; image-only and outlined text still require OCR.
 
 ### UI end-to-end acceptance
+
+`crates/web/tests/browser_prepare_acceptance.mjs` exports the Browser-skill
+generator `runPreparation(tab, pdf, outputDirectory)`. Run it on a fresh example
+tab with the generated `native-ocr-overlap.pdf` regression input. It checks
+preparation without a PDF, OCR/TSR switch combinations, cancellation, text output,
+and two parses per prepared session on WebGPU and CPU. Pass
+`{ providers: ["wasm"] }` as the fourth argument to resume only CPU checks. Allow
+at least 60 seconds for each generator step in browser-control hosts; CPU parsing
+and subsequent UI assertions can exceed a 30-second host limit.
 
 The unified entry builds the SDK and example, regenerates native references, starts owned servers on free ports, and runs SDK acceptance, UI flows, and export-race checks against the real model:
 
@@ -196,7 +225,7 @@ text remains inspectable and retained in text/Markdown output.
 
 ## Lifecycle
 
-- `createParser` resolves only after fixed artifact validation and actual model initialization.
+- `prepareModels` and `createParser` resolve only after fixed artifact validation and actual initialization of every enabled model.
 - Each parser accepts one parse/render operation at a time; concurrent calls fail with `ParserBusy`.
 - `parse(bytes, {signal})` accepts an AbortSignal. An already-aborted request leaves a ready instance usable. Active cancellation terminates the Worker and requires a new `createParser` call.
 - `close()` is idempotent, rejects pending work, and makes the instance unusable.

@@ -171,10 +171,15 @@ class WorkerParser implements DocParser {
   }
 }
 
-/** Resolves only after the real model and shared parser are initialized inside the Worker. */
-export async function createParser(options: WebParserOptions): Promise<DocParser> {
+/** Prepares ONNX Runtime and every enabled model without a PDF; reuse the returned parser for documents. */
+export async function prepareModels(options: WebParserOptions): Promise<DocParser> {
   if (options.signal?.aborted) throw new DocParseError("Aborted", "Initialization was already aborted");
   const parser = new WorkerParser();
   try { await parser.initialize(options); return parser; }
   catch (error) { await parser.close(); throw error; }
+}
+
+/** Preserves the existing eager constructor while sharing the explicit model preparation path. */
+export async function createParser(options: WebParserOptions): Promise<DocParser> {
+  return prepareModels(options);
 }
