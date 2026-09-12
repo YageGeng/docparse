@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use docparse_config::{OcrPolicy, ValidatedConfig};
-use docparse_layout::{Bbox, LayoutDetection, LayoutLabel, Point};
+use docparse_config::ValidatedConfig;
+use docparse_layout::{Bbox, LayoutDetection, LayoutLabel};
 use typed_builder::TypedBuilder;
 
 use crate::fusion::assign::{AssignmentEngine, AssignmentResult};
@@ -10,8 +10,8 @@ use crate::fusion::fallback::xy_cut;
 use crate::fusion::order::order_blocks;
 use crate::semantic::{FormulaMatcher, SemanticAssembler};
 use crate::{
-    Baseline, DocumentContext, ExtractedPage, OcrResult, PageAnalysisError,
-    PageResult, PageWarning, ResultValidator, TextItem, TextItemId, TextSource,
+    DocumentContext, ExtractedPage, OcrResult, PageAnalysisError, PageResult,
+    PageWarning, ResultValidator, TextItem, TextSource,
 };
 
 /// Outcome supplied after the optional external OCR stage.
@@ -47,6 +47,7 @@ pub(crate) struct PageTableDraft {
     inline_formulas: Vec<LayoutDetection>,
     assignment_diagnostics: Vec<String>,
     native_text_coverage: f64,
+    replaced_native_text: Vec<TextItem>,
 }
 
 impl PageTableDraft {
@@ -152,50 +153,16 @@ impl PageAnalyzer {
                 .map_err(|error| PageAnalysisError::InvalidInput {
                     reason: error.to_string(),
                 })?;
-        let native_area: f64 = extracted
-            .text_items
-            .iter()
-            .filter(|item| item.watermark.is_none())
-            .map(|item| item.bbox.area())
-            .filter(|area| area.is_finite() && *area > 0.0)
-            .sum();
-        let native_text_coverage =
-            (native_area / page_bbox.area()).clamp(0.0, 1.0);
-        let mut missing_regions = Vec::new();
-        if extracted
-            .text_items
-            .iter()
-            .all(|item| item.watermark.is_some())
-        {
-            missing_regions.push(extracted.content_bounds.unwrap_or(page_bbox));
-        } else {
-            for detection in &detections {
-                if matches!(
-                    detection.label,
-                    LayoutLabel::InlineFormula | LayoutLabel::Reference
-                ) || !Self::valid_page_bbox(detection.bbox, page_bbox)
-                {
-                    continue;
-                }
-                let has_native_text = extracted.text_items.iter().any(|item| {
-                    item.watermark.is_none()
-                        && Self::intersection_area(item.bbox, detection.bbox)
-                            / item.bbox.area().max(f64::EPSILON)
-                            >= self.config.fusion().center_minimum_line_coverage
-                });
-                if !has_native_text {
-                    missing_regions.push(detection.bbox);
-                }
-            }
-        }
-        missing_regions.sort_by(|left, right| {
-            left.top
-                .total_cmp(&right.top)
-                .then_with(|| left.left.total_cmp(&right.left))
-                .then_with(|| left.bottom.total_cmp(&right.bottom))
-                .then_with(|| left.right.total_cmp(&right.right))
-        });
-        missing_regions.dedup();
+        // OCR planning owns mapping classification and region selection; page assembly consumes its facts.
+        let crate::ocr::plan::OcrPlan {
+            regions: missing_regions,
+            native_text_coverage,
+        } = crate::ocr::plan::OcrPlan::new(
+            &extracted.text_items,
+            &detections,
+            page_bbox,
+            &self.config,
+        );
         tracing::debug!(
             "prepared page {} with {} native items, {} detections, and {} OCR regions",
             extracted.page_number,
@@ -288,7 +255,7 @@ impl PageAnalyzer {
                 !watermarks.iter().any(|watermark| {
                     !watermark.text.is_empty()
                         && Self::equivalent_text(&watermark.text, &fact.text)
-                        && Self::intersection_area(watermark.bbox, fact.bbox)
+                        && watermark.bbox.intersection_area(fact.bbox)
                             / watermark
                                 .bbox
                                 .area()
@@ -298,14 +265,13 @@ impl PageAnalyzer {
                 })
             });
         }
-        self.merge_ocr(
-            extracted.page_number,
-            page_bbox,
-            &mut text_items,
-            &mut warnings,
-            ocr,
-            &missing_regions,
-        );
+        let replaced_native_text = crate::ocr::merge::OcrMerger::builder()
+            .config(self.config.ocr())
+            .page_number(extracted.page_number)
+            .page_bbox(page_bbox)
+            .missing_regions(&missing_regions)
+            .build()
+            .merge(&mut text_items, &mut warnings, ocr);
 
         let AssignmentResult {
             model_seeds,
@@ -353,6 +319,7 @@ impl PageAnalyzer {
             .formula_regions(formula_regions)
             .context(context)
             .expected_native_ids(expected_native_ids)
+            .replaced_native_text(replaced_native_text)
             .references(references)
             .watermarks(watermarks)
             .inline_formulas(inline_formulas)
@@ -372,6 +339,7 @@ impl PageAnalyzer {
             extracted,
             context,
             expected_native_ids,
+            replaced_native_text,
             references,
             watermarks,
             inline_formulas,
@@ -419,7 +387,7 @@ impl PageAnalyzer {
         for block in &mut ordered.blocks {
             if block.label == LayoutLabel::Text
                 && references.iter().any(|reference| {
-                    Self::intersection_area(block.bbox, reference.bbox)
+                    block.bbox.intersection_area(reference.bbox)
                         >= block.bbox.area() * 0.5
                 })
             {
@@ -535,11 +503,13 @@ impl PageAnalyzer {
             .height(extracted.height)
             .rotation(extracted.rotation)
             .blocks(ordered.blocks)
+            .replaced_native_text(replaced_native_text)
             .warnings(warnings)
             .diagnostics(diagnostics)
             .build();
         let actual_native_ids: BTreeMap<_, usize> = page
             .iter_text_items()
+            .chain(page.replaced_native_text.iter())
             .filter(|item| item.source == TextSource::Native)
             .fold(BTreeMap::new(), |mut counts, item| {
                 *counts.entry(item.id.as_str().to_owned()).or_default() += 1;
@@ -560,102 +530,6 @@ impl PageAnalyzer {
         Ok(page)
     }
 
-    /// Validates, indexes, and deduplicates optional OCR facts against native text.
-    fn merge_ocr(
-        &self,
-        page_number: u32,
-        page_bbox: Bbox,
-        text_items: &mut Vec<TextItem>,
-        warnings: &mut Vec<PageWarning>,
-        completion: OcrCompletion,
-        missing_regions: &[Bbox],
-    ) {
-        if self.config.ocr().policy == OcrPolicy::Disabled {
-            return;
-        }
-        if missing_regions.is_empty() {
-            return;
-        }
-        let result = match completion {
-            OcrCompletion::Succeeded(result) => result,
-            OcrCompletion::Unavailable | OcrCompletion::NotRequested => {
-                warnings.push(PageWarning {
-                    code: "OcrUnavailable".to_owned(),
-                    stage: "ocr".to_owned(),
-                    message: "OCR was requested for missing regions but no engine was available"
-                        .to_owned(),
-                });
-                return;
-            }
-            OcrCompletion::Failed(message) => {
-                warnings.push(PageWarning {
-                    code: "OcrFailed".to_owned(),
-                    stage: "ocr".to_owned(),
-                    message,
-                });
-                return;
-            }
-        };
-        for (source_index, fact) in result.items.into_iter().enumerate() {
-            let Ok(source_index) = u32::try_from(source_index) else {
-                warnings.push(PageWarning {
-                    code: "InvalidOcrResult".to_owned(),
-                    stage: "ocr".to_owned(),
-                    message: "OCR result index exceeds u32".to_owned(),
-                });
-                continue;
-            };
-            let polygon_valid = fact.polygon.as_ref().is_none_or(|polygon| {
-                polygon.area().is_finite()
-                    && polygon.area() > 0.0
-                    && Self::valid_page_bbox(polygon.bbox(), page_bbox)
-            });
-            if fact.text.trim().is_empty()
-                || !fact.confidence.is_finite()
-                || !(0.0..=1.0).contains(&fact.confidence)
-                || !Self::valid_page_bbox(fact.bbox, page_bbox)
-                || !polygon_valid
-            {
-                warnings.push(PageWarning {
-                    code: "InvalidOcrResult".to_owned(),
-                    stage: "ocr".to_owned(),
-                    message: format!("ignored OCR result {source_index}"),
-                });
-                continue;
-            }
-            let trimmed_text = fact.text.trim();
-            let duplicate = text_items.iter().any(|native| {
-                native.source == TextSource::Native
-                    && Self::equivalent_text(&native.raw_text, trimmed_text)
-                    && Self::intersection_area(native.bbox, fact.bbox)
-                        / native
-                            .bbox
-                            .area()
-                            .min(fact.bbox.area())
-                            .max(f64::EPSILON)
-                        >= 0.8
-            });
-            if duplicate {
-                continue;
-            }
-            text_items.push(
-                TextItem::builder()
-                    .id(TextItemId::ocr(page_number, source_index))
-                    .raw_text(fact.text)
-                    .raw_bbox(Some(fact.bbox))
-                    .bbox(fact.bbox)
-                    .baseline(Some(Baseline {
-                        start: Point::new(fact.bbox.left, fact.bbox.bottom),
-                        end: Point::new(fact.bbox.right, fact.bbox.bottom),
-                    }))
-                    .source(TextSource::Ocr)
-                    .confidence(Some(fact.confidence))
-                    .extraction_order(source_index)
-                    .build(),
-            );
-        }
-    }
-
     /// Returns whether a candidate box is finite, positive, and contained by the page.
     fn valid_page_bbox(candidate: Bbox, page: Bbox) -> bool {
         [
@@ -674,15 +548,6 @@ impl PageAnalyzer {
             && candidate.bottom <= page.bottom
     }
 
-    /// Returns axis-aligned overlap area for OCR and missing-region decisions.
-    fn intersection_area(left: Bbox, right: Bbox) -> f64 {
-        let width =
-            (left.right.min(right.right) - left.left.max(right.left)).max(0.0);
-        let height =
-            (left.bottom.min(right.bottom) - left.top.max(right.top)).max(0.0);
-        width * height
-    }
-
     /// Compares text after stable case and whitespace normalization for native deduplication.
     fn equivalent_text(left: &str, right: &str) -> bool {
         let normalize = |value: &str| {
@@ -694,6 +559,225 @@ impl PageAnalyzer {
 
 #[cfg(test)]
 mod tests {
+    /// Disabled OCR keeps coverage diagnostics but performs no missing-region work.
+    #[test]
+    fn disabled_ocr_has_no_missing_region_plan() {
+        let page = extracted();
+        let draft = PageAnalyzer::new(config())
+            .prepare(
+                page.clone(),
+                vec![detection(0, [0.0, 80.0, 100.0, 100.0])],
+                context(&page),
+            )
+            .expect("prepare");
+        assert!(draft.missing_regions.is_empty());
+        assert!(draft.native_text_coverage > 0.0);
+    }
+
+    /// Sparse native text cannot hide a scan when layout misses its image region.
+    #[test]
+    fn sparse_native_page_requests_full_page_ocr() {
+        let page = extracted();
+        // This policy test must explicitly enable OCR; disabled planning deliberately does no region work.
+        let mut raw = RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::MissingRegions;
+        let draft = PageAnalyzer::new(Arc::new(
+            ValidatedConfig::try_from(raw).expect("config"),
+        ))
+        .prepare(page.clone(), vec![], context(&page))
+        .expect("prepare");
+        assert_eq!(
+            draft.missing_regions,
+            [Bbox::try_from([0.0, 0.0, 100.0, 100.0]).expect("page")]
+        );
+    }
+
+    /// Sideways OCR lines must follow their cross-line axis rather than noisy page-top coordinates.
+    #[test]
+    fn sideways_ocr_paragraph_keeps_line_order() {
+        let mut page = extracted();
+        page.text_items.clear();
+        let mut raw = RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::Always;
+        let analyzer = PageAnalyzer::new(Arc::new(
+            ValidatedConfig::try_from(raw).expect("config"),
+        ));
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                vec![detection(0, [0.0, 0.0, 100.0, 100.0])],
+                context(&page),
+            )
+            .expect("prepare");
+        let items = [0, 1, 2]
+            .into_iter()
+            .map(|index| {
+                let x = 10.0 + f64::from(index) * 15.0;
+                let y = 10.0 - f64::from(index);
+                let polygon = docparse_layout::Polygon::try_from(vec![
+                    docparse_layout::Point::new(x, 70.0),
+                    docparse_layout::Point::new(x, y),
+                    docparse_layout::Point::new(x + 8.0, y),
+                    docparse_layout::Point::new(x + 8.0, 70.0),
+                ])
+                .expect("rotated polygon");
+                crate::OcrTextItem::builder()
+                    .text(format!("Line {}", index + 1))
+                    .bbox(polygon.bbox())
+                    .polygon(Some(polygon))
+                    .confidence(0.95)
+                    .build()
+            })
+            .collect();
+        let result = analyzer
+            .finish(
+                draft,
+                OcrCompletion::Succeeded(
+                    crate::OcrResult::builder().items(items).build(),
+                ),
+            )
+            .expect("finish");
+        assert_eq!(
+            result
+                .iter_text_items()
+                .map(|item| item.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            ["Line 1", "Line 2", "Line 3"]
+        );
+        assert!(
+            result
+                .iter_lines()
+                .all(|line| (line.rotation - 270.0).abs() < 1e-6)
+        );
+    }
+
+    /// Only a successful, confident OCR replacement removes unusable native text from reading order.
+    #[test]
+    fn ocr_replacement_archives_native_and_failure_preserves_it() {
+        let mut page = extracted();
+        let original = page.text_items.first_mut().expect("native item");
+        original.raw_text = "\u{fffd}\u{fffd}".into();
+        let original = original.clone();
+        let mut raw = RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::MissingRegions;
+        let analyzer = PageAnalyzer::new(Arc::new(
+            ValidatedConfig::try_from(raw).expect("config"),
+        ));
+        let draft = analyzer
+            .prepare(page.clone(), vec![], context(&page))
+            .expect("prepare");
+        assert!(
+            draft
+                .missing_regions
+                .iter()
+                .any(|region| region.contains_bbox(original.bbox))
+        );
+        let failed = analyzer
+            .finish(
+                draft.clone(),
+                OcrCompletion::Failed("test engine failure".into()),
+            )
+            .expect("failure result");
+        assert!(failed.replaced_native_text.is_empty());
+        assert!(
+            failed
+                .iter_text_items()
+                .any(|item| item.raw_text == original.raw_text)
+        );
+        let result = crate::OcrResult::builder()
+            .items(vec![
+                crate::OcrTextItem::builder()
+                    .text("recovered".into())
+                    .bbox(original.bbox)
+                    .confidence(0.95)
+                    .build(),
+            ])
+            .build();
+        let recovered = analyzer
+            .finish(draft, OcrCompletion::Succeeded(result))
+            .expect("replacement result");
+        assert_eq!(recovered.replaced_native_text, [original]);
+        assert!(
+            recovered
+                .iter_text_items()
+                .any(|item| item.raw_text == "recovered"
+                    && item.source == TextSource::Ocr)
+        );
+        assert!(!recovered.iter_text_items().any(TextItem::needs_ocr));
+        let json = serde_json::to_string(&recovered).expect("serialize");
+        assert_eq!(
+            serde_json::from_str::<crate::PageResult>(&json)
+                .expect("deserialize"),
+            recovered
+        );
+    }
+
+    /// Healthy native text wins over overlapping OCR even when recognition differs by a character.
+    #[test]
+    fn ocr_enrichment_preserves_native_and_adjacent_ocr_lines() {
+        let mut raw = docparse_config::RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::MissingRegions;
+        let analyzer = super::PageAnalyzer::new(std::sync::Arc::new(
+            docparse_config::ValidatedConfig::try_from(raw).expect("config"),
+        ));
+        let page = docparse_layout::Bbox::try_from([0.0, 0.0, 100.0, 100.0])
+            .expect("page");
+        let mut items = vec![
+            crate::TextItem::builder()
+                .id(crate::TextItemId::native(1, 0))
+                .raw_text("native text".into())
+                .bbox(
+                    docparse_layout::Bbox::try_from([10.0, 10.0, 60.0, 20.0])
+                        .expect("box"),
+                )
+                .source(crate::TextSource::Native)
+                .build(),
+        ];
+        let native = items.first().expect("native").clone();
+        let result = crate::OcrResult::builder()
+            .items(
+                [
+                    ("native texf", [10.0, 10.0, 60.0, 20.0]),
+                    ("first new", [10.0, 30.0, 60.0, 40.0]),
+                    ("second new", [10.0, 39.0, 60.0, 49.0]),
+                ]
+                .into_iter()
+                .map(|(text, bounds)| {
+                    crate::OcrTextItem::builder()
+                        .text(text.into())
+                        .bbox(
+                            docparse_layout::Bbox::try_from(bounds)
+                                .expect("box"),
+                        )
+                        .confidence(0.95)
+                        .build()
+                })
+                .collect(),
+            )
+            .build();
+        crate::ocr::merge::OcrMerger::builder()
+            .config(analyzer.config.ocr())
+            .page_number(1)
+            .page_bbox(page)
+            .missing_regions(&[page])
+            .build()
+            .merge(
+                &mut items,
+                &mut Vec::new(),
+                super::OcrCompletion::Succeeded(result),
+            );
+        assert_eq!(items.len(), 3);
+        assert_eq!(items.first(), Some(&native));
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.source == crate::TextSource::Ocr)
+                .map(|item| item.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            ["first new", "second new"]
+        );
+    }
+
     use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1657,5 +1741,454 @@ mod tests {
                 .iter()
                 .all(|block| block.model_region_id.is_none())
         );
+    }
+
+    /// Runs merger and semantic assembly with deterministic image-space OCR facts.
+    fn ocr_regression_page(
+        native: Vec<TextItem>,
+        facts: Vec<crate::OcrTextItem>,
+    ) -> crate::PageResult {
+        let mut page = extracted();
+        page.text_items = native;
+        let mut raw = RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::Always;
+        let analyzer = PageAnalyzer::new(Arc::new(
+            ValidatedConfig::try_from(raw).expect("config"),
+        ));
+        let draft = analyzer
+            .prepare(
+                page.clone(),
+                vec![detection(0, [0.0, 0.0, 100.0, 100.0])],
+                context(&page),
+            )
+            .expect("prepare");
+        analyzer
+            .finish(
+                draft,
+                OcrCompletion::Succeeded(
+                    crate::OcrResult::builder().items(facts).build(),
+                ),
+            )
+            .expect("finish")
+    }
+
+    /// Constructs an original PDF span before visual recovery.
+    fn ocr_regression_native(text: &str, bounds: [f64; 4]) -> TextItem {
+        TextItem::builder()
+            .id(TextItemId::native(1, 0))
+            .raw_text(text.into())
+            .bbox(Bbox::try_from(bounds).expect("bbox"))
+            .source(TextSource::Native)
+            .build()
+    }
+
+    /// Constructs a confident OCR box with optional upside-down reading corners.
+    fn ocr_regression_fact(
+        text: &str,
+        bounds: [f64; 4],
+        upside_down: bool,
+    ) -> crate::OcrTextItem {
+        let [left, top, right, bottom] = bounds;
+        let mut corners = vec![
+            docparse_layout::Point::new(left, top),
+            docparse_layout::Point::new(right, top),
+            docparse_layout::Point::new(right, bottom),
+            docparse_layout::Point::new(left, bottom),
+        ];
+        if upside_down {
+            corners.rotate_left(2);
+        }
+        crate::OcrTextItem::builder()
+            .text(text.into())
+            .bbox(Bbox::try_from(bounds).expect("bbox"))
+            .polygon(Some(
+                docparse_layout::Polygon::try_from(corners).expect("polygon"),
+            ))
+            .confidence(0.99)
+            .build()
+    }
+
+    /// A native label must not suppress the scanned value sharing its detector line.
+    #[test]
+    fn ocr_regression_partial_native_overlap_retains_scanned_value() {
+        let result = ocr_regression_page(
+            vec![ocr_regression_native("Total:", [10.0, 10.0, 30.0, 20.0])],
+            vec![ocr_regression_fact(
+                "Total: 100",
+                [10.0, 10.0, 90.0, 20.0],
+                false,
+            )],
+        );
+        let texts: Vec<_> = result
+            .iter_text_items()
+            .map(|item| item.raw_text.as_str())
+            .collect();
+        assert_eq!(texts.concat(), "Total: 100");
+        assert_eq!(
+            result
+                .iter_text_items()
+                .filter(|item| item.source == TextSource::Native)
+                .count(),
+            1
+        );
+    }
+
+    /// Multiple confident boxes covering a bad native line must replace it collectively.
+    #[test]
+    fn ocr_regression_split_ocr_replaces_one_bad_native_span() {
+        let result = ocr_regression_page(
+            vec![ocr_regression_native(
+                "\u{fffd}\u{fffd}\u{fffd}\u{fffd}",
+                [10.0, 10.0, 90.0, 20.0],
+            )],
+            vec![
+                ocr_regression_fact("Hello", [10.0, 10.0, 47.0, 20.0], false),
+                ocr_regression_fact("world", [50.0, 10.0, 90.0, 20.0], false),
+            ],
+        );
+        assert_eq!(
+            result.replaced_native_text.len(),
+            1,
+            "canonical text still contains {:?}",
+            result
+                .iter_text_items()
+                .map(|item| item.raw_text.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Upside-down English words follow the reversed physical inline axis.
+    #[test]
+    fn ocr_regression_upside_down_words_keep_reading_order() {
+        let result = ocr_regression_page(
+            vec![],
+            vec![
+                ocr_regression_fact("world", [10.0, 10.0, 45.0, 20.0], true),
+                ocr_regression_fact("Hello", [50.0, 10.0, 85.0, 20.0], true),
+            ],
+        );
+        let text = result
+            .iter_lines()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text, "Hello world");
+    }
+
+    /// A visible word gap after punctuation still separates recognized English words.
+    #[test]
+    fn ocr_regression_ocr_word_spacing_after_punctuation() {
+        let result = ocr_regression_page(
+            vec![],
+            vec![
+                ocr_regression_fact("Hello,", [10.0, 10.0, 45.0, 20.0], false),
+                ocr_regression_fact("world", [50.0, 10.0, 85.0, 20.0], false),
+            ],
+        );
+        let text = result
+            .iter_lines()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text, "Hello, world");
+    }
+    /// Estimated OCR sizes must retain the tolerant paragraph policy despite having numeric hints.
+    #[test]
+    fn ocr_regression_ocr_font_metric_retains_estimation() {
+        let result = ocr_regression_page(
+            vec![],
+            vec![
+                ocr_regression_fact(
+                    "first line",
+                    [10.0, 10.0, 85.0, 20.0],
+                    false,
+                ),
+                ocr_regression_fact(
+                    "second line",
+                    [10.0, 24.0, 85.0, 35.0],
+                    false,
+                ),
+            ],
+        );
+        let fragments: Vec<_> = result
+            .iter_lines()
+            .map(|line| {
+                crate::line::LineFragment::from_items(
+                    line.text_items.clone(),
+                    100.0,
+                )
+                .expect("fragment")
+            })
+            .collect();
+        assert_eq!(fragments.len(), 2);
+        assert!(fragments.iter().flat_map(|line| &line.items).all(|item| {
+            item.style
+                .as_ref()
+                .is_some_and(|style| style.font_size_estimated)
+        }));
+        let decision = crate::semantic::ParagraphSplitter::new(
+            docparse_config::FusionConfig::default(),
+        )
+        .between(
+            fragments.first().expect("first"),
+            fragments.last().expect("last"),
+        );
+        assert_eq!(
+            decision,
+            crate::semantic::ParagraphDecision::Continue,
+            "estimated flags: {:?}",
+            fragments
+                .iter()
+                .map(|line| line.metrics.font_size_estimated)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Internal native spans divide OCR into independently owned fragments in reading order.
+    #[test]
+    fn ocr_regression_internal_native_keeps_source_ids_and_geometry() {
+        let native = ocr_regression_native("USD", [40.0, 10.0, 60.0, 20.0]);
+        let result = ocr_regression_page(
+            vec![native.clone()],
+            vec![ocr_regression_fact(
+                "10 USD 20",
+                [10.0, 10.0, 90.0, 20.0],
+                false,
+            )],
+        );
+        let items: Vec<_> = result.iter_text_items().collect();
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.raw_text.as_str())
+                .collect::<String>(),
+            "10 USD 20"
+        );
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["p1:o0", "p1:t0", "p1:o0:s1"]
+        );
+        assert!(items.first().expect("prefix").bbox.right <= native.bbox.left);
+        assert!(items.last().expect("suffix").bbox.left >= native.bbox.right);
+        assert_eq!(items.get(1).expect("native").bbox, native.bbox);
+    }
+
+    /// Native suffixes, half turns, explicit spaces and multi-byte prefixes retain exact canonical text.
+    #[test]
+    fn ocr_regression_partial_overlap_respects_boundaries() {
+        for (native_text, bounds, recognized, upside_down, expected) in [
+            ("USD", [65.0, 10.0, 90.0, 20.0], "100 USD", false, "100 USD"),
+            (
+                "Total:",
+                [70.0, 10.0, 90.0, 20.0],
+                "Total: 100",
+                true,
+                "Total: 100",
+            ),
+            (
+                "Total: ",
+                [10.0, 10.0, 30.0, 20.0],
+                "Total: 100",
+                false,
+                "Total: 100",
+            ),
+            (
+                "金额：",
+                [10.0, 10.0, 30.0, 20.0],
+                "金额： 100",
+                false,
+                "金额： 100",
+            ),
+        ] {
+            let mut native = ocr_regression_native(native_text, bounds);
+            if upside_down {
+                native.rotation = 180.0;
+            }
+            let result = ocr_regression_page(
+                vec![native],
+                vec![ocr_regression_fact(
+                    recognized,
+                    [10.0, 10.0, 90.0, 20.0],
+                    upside_down,
+                )],
+            );
+            assert_eq!(
+                result
+                    .iter_lines()
+                    .map(|line| line.text.as_str())
+                    .collect::<String>(),
+                expected
+            );
+            assert_eq!(
+                result
+                    .iter_text_items()
+                    .filter(|item| item.source == TextSource::Native)
+                    .count(),
+                1
+            );
+        }
+    }
+
+    /// Duplicate or weak boxes must not manufacture enough evidence to remove the original PDF facts.
+    #[test]
+    fn ocr_regression_incomplete_replacement_preserves_native() {
+        let native =
+            ocr_regression_native("\u{fffd}\u{fffd}", [10.0, 10.0, 90.0, 20.0]);
+        let repeated =
+            ocr_regression_fact("Hello", [10.0, 10.0, 45.0, 20.0], false);
+        let mut weak =
+            ocr_regression_fact("Hello world", [10.0, 10.0, 90.0, 20.0], false);
+        weak.confidence = 0.79;
+        for facts in [vec![repeated.clone(), repeated], vec![weak]] {
+            let result = ocr_regression_page(vec![native.clone()], facts);
+            assert!(result.replaced_native_text.is_empty());
+            assert_eq!(
+                result
+                    .iter_text_items()
+                    .map(|item| item.raw_text.as_str())
+                    .collect::<Vec<_>>(),
+                [native.raw_text.as_str()]
+            );
+        }
+    }
+
+    /// All matching PDF glyph spans jointly remove only their duplicate OCR prefix.
+    #[test]
+    fn ocr_regression_fragmented_native_prefix_is_preserved_once() {
+        let native =
+            [("To", 10.0, 17.0), ("tal", 17.0, 26.0), (":", 26.0, 30.0)]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (text, left, right))| {
+                    let mut item =
+                        ocr_regression_native(text, [left, 10.0, right, 20.0]);
+                    item.id = TextItemId::native(1, index as u32);
+                    item
+                })
+                .collect();
+        let result = ocr_regression_page(
+            native,
+            vec![ocr_regression_fact(
+                "Total: 100",
+                [10.0, 10.0, 90.0, 20.0],
+                false,
+            )],
+        );
+        assert_eq!(
+            result
+                .iter_lines()
+                .map(|line| line.text.as_str())
+                .collect::<String>(),
+            "Total: 100"
+        );
+        assert_eq!(
+            result
+                .iter_text_items()
+                .filter(|item| item.source == TextSource::Native)
+                .count(),
+            3
+        );
+    }
+
+    /// Detection padding must not put a matched native label ahead of the OCR words on its own row.
+    #[test]
+    fn ocr_regression_native_anchor_calibrates_padded_fragments() {
+        let mut native = ocr_regression_native("USD", [40.0, 30.0, 60.0, 50.0]);
+        native.style = Some(
+            crate::TextStyle::builder()
+                .font_size(Some(20.0))
+                .font_height(Some(20.0))
+                .build(),
+        );
+        native.baseline = Some(crate::Baseline {
+            start: docparse_layout::Point::new(40.0, 45.0),
+            end: docparse_layout::Point::new(60.0, 45.0),
+        });
+        let result = ocr_regression_page(
+            vec![native],
+            vec![ocr_regression_fact(
+                "Pay USD 20",
+                [10.0, 25.0, 90.0, 50.0],
+                false,
+            )],
+        );
+        assert_eq!(
+            result
+                .iter_lines()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Pay USD 20"]
+        );
+        assert!(
+            result
+                .iter_text_items()
+                .filter(|item| item.source == TextSource::Ocr)
+                .all(|item| item
+                    .style
+                    .as_ref()
+                    .is_some_and(|style| style.font_size_estimated))
+        );
+    }
+    /// Measures native classification and missing-region planning in optimized builds, including input ownership costs.
+    #[test]
+    #[ignore = "release-mode microbenchmark; run ocr_perf_ with --ignored --nocapture --test-threads=1"]
+    fn ocr_perf_page_preparation() {
+        let mut page = extracted();
+        page.width = 2000.0;
+        page.height = 2000.0;
+        page.text_items = (0..600).map(|index| TextItem::builder()
+            .id(TextItemId::native(1, index)).raw_text("A native document line with figures and character mapping checks.".into())
+            .bbox(Bbox::try_from([10.0 + f64::from(index % 20) * 80.0, 10.0 + f64::from(index / 20) * 18.0,
+                85.0 + f64::from(index % 20) * 80.0, 20.0 + f64::from(index / 20) * 18.0]).expect("box"))
+            .source(TextSource::Native).build()).collect();
+        let regions: Vec<_> = (0..60)
+            .map(|index| {
+                detection(
+                    index,
+                    [
+                        10.0,
+                        900.0 + f64::from(index) * 16.0,
+                        1600.0,
+                        912.0 + f64::from(index) * 16.0,
+                    ],
+                )
+            })
+            .collect();
+        let context = context(&page);
+        for policy in [
+            docparse_config::OcrPolicy::Disabled,
+            docparse_config::OcrPolicy::MissingRegions,
+        ] {
+            let mut raw = RawConfig::default();
+            raw.ocr.policy = policy;
+            let analyzer = PageAnalyzer::new(Arc::new(
+                ValidatedConfig::try_from(raw).expect("config"),
+            ));
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let start = std::time::Instant::now();
+                for _ in 0..20 {
+                    std::hint::black_box(
+                        analyzer
+                            .prepare(
+                                page.clone(),
+                                regions.clone(),
+                                Arc::clone(&context),
+                            )
+                            .expect("prepare"),
+                    );
+                }
+                samples
+                    .push(start.elapsed().as_secs_f64() * 1_000_000.0 / 20.0);
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "ocr_perf preparation {policy:?}: {:.3} us/page",
+                samples.get(3).expect("median")
+            );
+        }
     }
 }

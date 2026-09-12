@@ -474,6 +474,7 @@ dependencies = [
  "blake3",
  "docparse-config",
  "docparse-layout",
+ "docparse-ocr",
  "docparse-pdfium",
  "docparse-tsr",
  "figment",
@@ -520,6 +521,26 @@ dependencies = [
  "typed-builder",
  "wasm-bindgen-futures",
  "web-time",
+]
+
+[[package]]
+name = "docparse-ocr"
+version = "0.1.0"
+dependencies = [
+ "docparse-config",
+ "docparse-layout",
+ "geo",
+ "image",
+ "ndarray",
+ "ort",
+ "ort-web",
+ "serde",
+ "serde_yml",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "typed-builder",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -571,6 +592,7 @@ dependencies = [
  "docparse-config",
  "docparse-core",
  "docparse-layout",
+ "docparse-ocr",
  "docparse-tsr",
  "js-sys",
  "ort",

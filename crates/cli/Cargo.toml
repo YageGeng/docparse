@@ -9,6 +9,10 @@ description = "Command-line interface for docparse"
 
 [features]
 default = []
+ocr-coreml = ["docparse-core/ocr-coreml"]
+ocr-cuda = ["docparse-core/ocr-cuda"]
+ocr-metal = ["docparse-core/ocr-metal"]
+ocr-openvino = ["docparse-core/ocr-openvino"]
 layout-metal = ["docparse-core/layout-metal"]
 tsr-coreml = ["docparse-core/tsr-coreml"]
 tsr-cuda = ["docparse-core/tsr-cuda"]

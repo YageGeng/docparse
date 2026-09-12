@@ -26,3 +26,21 @@ fn quad_preserves_tilt_and_validates_corners() {
         .expect_err("crossed quad");
     Quad::try_from([points[0]; 4]).expect_err("degenerate quad");
 }
+
+/// Scalar overlap and streamed union retain clipping and duplicate-coverage semantics.
+#[test]
+fn rectangle_coverage_clips_and_counts_duplicate_boxes_once() {
+    let page =
+        docparse_layout::Bbox::try_from([0.0, 0.0, 10.0, 10.0]).expect("page");
+    let left =
+        docparse_layout::Bbox::try_from([-5.0, 0.0, 6.0, 10.0]).expect("left");
+    let right =
+        docparse_layout::Bbox::try_from([4.0, 0.0, 15.0, 10.0]).expect("right");
+    let touching = docparse_layout::Bbox::try_from([10.0, 0.0, 20.0, 10.0])
+        .expect("touching");
+    assert!((page.intersection_area(left) - 60.0).abs() < 1e-9);
+    assert!((page.covered_area([left, left]) - 60.0).abs() < 1e-9);
+    assert!((page.covered_area([left, right]) - 100.0).abs() < 1e-9);
+    assert!(page.covered_area([touching]).abs() < 1e-9);
+    assert!(page.covered_area([]).abs() < 1e-9);
+}

@@ -39,6 +39,7 @@ impl LineMetrics {
         let mut character_count = 0_usize;
         let mut font_size_sum = 0.0;
         let mut font_size_characters = 0_usize;
+        let mut has_estimated_size = false;
         let mut bold_characters = 0_usize;
         let mut italic_characters = 0_usize;
         for item in items {
@@ -54,6 +55,8 @@ impl LineMetrics {
                 if let Some(font_size) = style.font_size {
                     font_size_sum += font_size * count as f64;
                     font_size_characters += count;
+                    // OCR provides numeric hints, but they must keep the tolerant estimated-size policy.
+                    has_estimated_size |= style.font_size_estimated;
                 }
                 if style.bold {
                     bold_characters += count;
@@ -63,8 +66,9 @@ impl LineMetrics {
                 }
             }
         }
-        let font_size_estimated = font_size_characters == 0;
-        let font_size = if font_size_estimated {
+        let font_size_estimated =
+            font_size_characters == 0 || has_estimated_size;
+        let font_size = if font_size_characters == 0 {
             bbox.height()
         } else {
             font_size_sum / font_size_characters as f64
@@ -78,7 +82,10 @@ impl LineMetrics {
             LineAnchor::Right
         };
         let axes = super::TextAxes::from(first.rotation);
-        let baseline = if axes.is_oblique() {
+        // Preserve the reversed measured baseline when composing corrected upside-down words.
+        let baseline = if axes.is_oblique()
+            || super::bidi::canonical_rotation(first.rotation) == 180
+        {
             match (first.baseline, items.last().and_then(|item| item.baseline))
             {
                 (Some(first), Some(last)) => Baseline {

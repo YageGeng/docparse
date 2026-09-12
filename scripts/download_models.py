@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Download and verify pinned layout or SLANet_plus ONNX artifacts."""
+"""Download and verify pinned layout, table and PaddleOCR ONNX artifacts."""
 
 from __future__ import annotations
 
@@ -62,6 +62,38 @@ class Model:
         """Selects a compiled contract, preserving the legacy layout default."""
         if name == "pp-doclayout-v3":
             return cls(name, MODEL_REPOSITORY, MODEL_REVISION, ARTIFACTS)
+        # OCR model/config pairs carry their dictionaries and preprocessing contract together.
+        ocr_models = {
+            "pp-ocrv6-medium-det": (
+                "PP-OCRv6_medium_det_onnx",
+                "61323801669c338b7891481ec7bac61ce31b576a",
+                "eb13b44b25bb36f89528b68720af8a61d9cf381176107f465db1757b65d086e1",
+                "7298d5ead546584af2504d03355f881ac7a7bc0eb1e282d3e159277c1d0af871",
+            ),
+            "pp-ocrv6-medium-rec": (
+                "PP-OCRv6_medium_rec_onnx",
+                "50c7eacafc52fa7bcf4194e8cd08e46f8558504b",
+                "9c09abf0957f7968c7586464b7397b84ad2387a0497a351af40e9acc71b673ba",
+                "991b700facf5b50a7de193468207d5f4255b538dde0d312ae3b7c7a9b6873129",
+            ),
+            "pp-lcnet-textline-ori": (
+                "PP-LCNet_x1_0_textline_ori_onnx",
+                "7fdcf3cf7061163eda7183b224aa334bd33068f7",
+                "38aa97cd4be591e0ad304e659f07ba30d946f27a63315433f6659c69c8778345",
+                "8d5120d0e1a30a9df7ed46aa9119da3796ed066777089d1c1d705f132d5e90f9",
+            ),
+        }
+        if name in ocr_models:
+            repo, revision, model_hash, config_hash = ocr_models[name]
+            repository = f"PaddlePaddle/{repo}"
+            base = f"https://huggingface.co/{repository}/resolve/{revision}"
+            artifacts = tuple(
+                Artifact(filename, f"{base}/{filename}?download=true", digest)
+                for filename, digest in [
+                    ("inference.onnx", model_hash), ("inference.yml", config_hash)
+                ]
+            )
+            return cls(name, repository, revision, artifacts)
         if name != "slanet-plus":
             raise ValueError(f"unsupported model {name}")
         repository = "PaddlePaddle/SLANet_plus_onnx"
@@ -195,9 +227,9 @@ def install_model(output: Path, force: bool, model: Model | None = None) -> bool
 def parse_args() -> argparse.Namespace:
     """Parses command-line arguments for install or verification mode."""
     parser = argparse.ArgumentParser(
-        description="Download pinned layout or table structure ONNX artifacts."
+        description="Download pinned layout, table and PaddleOCR ONNX artifacts."
     )
-    parser.add_argument("--model", choices=["pp-doclayout-v3", "slanet-plus"], default="pp-doclayout-v3")
+    parser.add_argument("--model", choices=["pp-doclayout-v3", "slanet-plus", "pp-ocrv6-medium-det", "pp-ocrv6-medium-rec", "pp-lcnet-textline-ori"], default="pp-doclayout-v3")
     parser.add_argument(
         "--output",
         type=Path,

@@ -19,7 +19,7 @@ export interface TableCell { row: number; column: number; row_span: number; colu
 /** A recovered table view; source distinguishes local tagged/rule/alignment recovery from external_tsr input. Original TextItems remain owned by the parent block's lines. */
 export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" | "external_tsr" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
-export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
+export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; replaced_native_text?: TextItem[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */
 export interface PageWarning { code: string; stage: string; message: string }
 /** The same JSON-compatible document aggregate emitted by native DocParse. */
@@ -36,6 +36,16 @@ export type ModelSource =
   | { kind: "urls"; model: string; config: string; manifest: string }
   | { kind: "bytes"; model: Uint8Array; config: Uint8Array; manifest: Uint8Array };
 
+/** Independently pinned detection, recognition and optional line-orientation models. */
+export interface OcrArtifacts { detection: ModelSource; recognition: ModelSource; orientation?: ModelSource }
+/** Shared OCR settings; model bytes and the runtime backend are supplied separately. */
+export interface OcrOptions {
+  policy?: "disabled" | "missing_regions" | "always";
+  detection_max_side?: number; detection_threshold?: number; box_threshold?: number; unclip_ratio?: number;
+  max_candidates?: number; recognition_max_width?: number; recognition_threshold?: number;
+  classify_orientation?: boolean; orientation_threshold?: number; timeout_ms?: number;
+}
+
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
   layout?: { score_threshold?: number; session_pool_size?: number };
@@ -43,11 +53,11 @@ export interface WebParseConfig {
   runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
   render?: { dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;
-  ocr?: { policy?: "disabled" | "missing_regions" };
+  ocr?: OcrOptions;
   output?: { formula_placeholder?: string; include_evidence?: boolean; include_diagnostics?: boolean };
 }
 
-/** Shared layout and TSR inference backends; PDFium and text processing still run in WebAssembly. */
+/** Shared layout, TSR and OCR inference backends; PDFium and text processing still run in WebAssembly. */
 export type ExecutionProvider = "wasm" | "webgpu";
 
 /** Browser runtime options, separate from the serializable Worker payload. */
@@ -55,8 +65,10 @@ export interface WebParserOptions {
   artifacts: ModelSource;
   /** Required for the default rules-first TSR fallback; omit only with config.tsr.mode = "rules_only". */
   tsrArtifacts?: ModelSource;
+  /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
+  ocrArtifacts?: OcrArtifacts;
   runtimeBaseUrl?: string;
-  /** Defaults to WebGPU for both layout and TSR; select wasm explicitly for CPU. */
+  /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */
   executionProvider?: ExecutionProvider;
   /** Allows CPU initialization only when the requested GPU is unavailable; defaults to false. */
   allowCpuFallback?: boolean;
@@ -76,7 +88,7 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }
@@ -115,7 +127,7 @@ export type RenderFormat = "json" | "text" | "markdown";
 
 /** Public asynchronous parser operations. */
 export interface DocParser {
-  /** The initialized layout and TSR backend, including any explicitly allowed CPU fallback. */
+  /** The initialized layout, TSR and OCR backend, including any explicitly allowed CPU fallback. */
   readonly executionProvider: ExecutionProvider;
   /** Parses a copy of the caller's PDF bytes. */
   parse(pdf: Uint8Array, options?: ParseOptions): Promise<DocumentResult>;

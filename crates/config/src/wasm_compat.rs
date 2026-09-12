@@ -200,6 +200,10 @@ mod platform {
                 &mut self.tsr.model_path,
                 &mut self.tsr.model_config_path,
                 &mut self.tsr.model_manifest_path,
+                // OCR directories follow the same config-file-relative policy as other model artifacts.
+                &mut self.ocr.detection_model_dir,
+                &mut self.ocr.recognition_model_dir,
+                &mut self.ocr.orientation_model_dir,
             ] {
                 if path.is_relative() {
                     *path = base_directory.join(&*path);

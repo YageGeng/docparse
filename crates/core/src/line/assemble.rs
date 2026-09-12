@@ -21,8 +21,15 @@ pub(crate) struct LineFragment {
 }
 
 impl LineFragment {
-    /// Orders upright fragments by the body baseline so raised scripts cannot jump ahead.
+    /// Orders lines across their reading axis; upright body baselines keep raised scripts in place.
     pub(crate) fn reading_order_y(&self) -> f64 {
+        let rotation = super::bidi::canonical_rotation(self.rotation);
+        if rotation != 0 {
+            // Page-top sorting scrambles sideways OCR lines and reverses upside-down paragraphs.
+            return super::TextAxes::from(f64::from(rotation))
+                .project(self.baseline.start)
+                .y;
+        }
         if self.direction != WritingDirection::Vertical
             && !super::TextAxes::from(self.rotation).is_oblique()
             && self.items.iter().any(|item| item.baseline.is_some())
@@ -346,8 +353,9 @@ impl LineAssembler for ConservativeLineAssembler {
         fragments = Self::join_script_gaps(fragments, page_width, config)?;
         // Restore canonical page order after orientation-specific band construction.
         fragments.sort_by(|left, right| {
-            left.rotation
-                .total_cmp(&right.rotation)
+            // Near-cardinal detector jitter must not outrank the actual cross-line position.
+            super::bidi::canonical_rotation(left.rotation)
+                .cmp(&super::bidi::canonical_rotation(right.rotation))
                 .then_with(|| {
                     left.reading_order_y().total_cmp(&right.reading_order_y())
                 })

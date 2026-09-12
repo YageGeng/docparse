@@ -13,7 +13,7 @@ pub enum OcrContentStatus {
     Failed,
 }
 
-/// Immutable page facts supplied to one externally injected OCR engine.
+/// Immutable page facts supplied to built-in or externally injected OCR engines.
 #[derive(Debug, Clone, TypedBuilder)]
 pub struct OcrRequest {
     pub page_number: u32,
@@ -22,6 +22,9 @@ pub struct OcrRequest {
     pub dpi: u32,
     pub missing_regions: Vec<Bbox>,
     pub native_text_coverage: f64,
+    /// Shared stage observations remain separate from deterministic OCR results.
+    #[builder(default)]
+    pub timings: docparse_layout::timing::Timings,
 }
 
 /// One raw OCR fact before DocParse assigns stable source-result indices.
@@ -71,3 +74,9 @@ pub trait OcrEngine:
         Result<OcrResult, OcrError>,
     >;
 }
+mod builtin;
+mod index;
+pub(crate) mod merge;
+mod overlap;
+pub(crate) mod plan;
+mod spacing;

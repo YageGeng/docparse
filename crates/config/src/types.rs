@@ -177,6 +177,8 @@ impl Default for FusionConfig {
 pub enum OcrPolicy {
     Disabled,
     MissingRegions,
+    /// Runs OCR over the whole page while retaining healthy native text during fusion.
+    Always,
 }
 
 impl Default for OcrPolicy {
@@ -186,17 +188,49 @@ impl Default for OcrPolicy {
     }
 }
 
-/// OCR configuration exposed even though the first version ships no engine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+/// Built-in PaddleOCR artifacts, inference limits and native-text enrichment policy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct OcrConfig {
     pub policy: OcrPolicy,
+    pub execution_provider: ExecutionProviderConfig,
+    pub detection_model_dir: PathBuf,
+    pub recognition_model_dir: PathBuf,
+    pub orientation_model_dir: PathBuf,
+    pub detection_max_side: u32,
+    pub detection_threshold: f64,
+    pub box_threshold: f64,
+    pub unclip_ratio: f64,
+    pub max_candidates: usize,
+    pub recognition_max_width: u32,
+    pub recognition_threshold: f64,
+    pub classify_orientation: bool,
+    pub orientation_threshold: f64,
+    pub timeout_ms: u64,
 }
 
 impl Default for OcrConfig {
     /// Builds the default disabled OCR policy.
     fn default() -> Self {
-        Self::builder().policy(OcrPolicy::default()).build()
+        Self::builder()
+            .policy(OcrPolicy::default())
+            .execution_provider(ExecutionProviderConfig::default())
+            .detection_model_dir(PathBuf::from("models/pp-ocrv6-medium-det"))
+            .recognition_model_dir(PathBuf::from("models/pp-ocrv6-medium-rec"))
+            .orientation_model_dir(PathBuf::from(
+                "models/pp-lcnet-textline-ori",
+            ))
+            .detection_max_side(2048)
+            .detection_threshold(0.2)
+            .box_threshold(0.45)
+            .unclip_ratio(1.4)
+            .max_candidates(3000)
+            .recognition_max_width(3200)
+            .recognition_threshold(0.5)
+            .classify_orientation(true)
+            .orientation_threshold(0.9)
+            .timeout_ms(120_000)
+            .build()
     }
 }
 

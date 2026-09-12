@@ -112,7 +112,10 @@ impl Serialize for ConfiguredPage<'_> {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("PageResult", 7)?;
+        let mut state = serializer.serialize_struct(
+            "PageResult",
+            7 + usize::from(!self.page.replaced_native_text.is_empty()),
+        )?;
         state.serialize_field("page_number", &self.page.page_number)?;
         state.serialize_field("width", &self.page.width)?;
         state.serialize_field("height", &self.page.height)?;
@@ -124,6 +127,13 @@ impl Serialize for ConfiguredPage<'_> {
                 include_evidence: self.config.include_evidence,
             },
         )?;
+        // Archived PDF evidence survives the same output filtering as canonical text facts.
+        if !self.page.replaced_native_text.is_empty() {
+            state.serialize_field(
+                "replaced_native_text",
+                &self.page.replaced_native_text,
+            )?;
+        }
         state.serialize_field("warnings", &self.page.warnings)?;
         if self.config.include_diagnostics {
             state.serialize_field("diagnostics", &self.page.diagnostics)?;

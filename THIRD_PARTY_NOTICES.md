@@ -97,3 +97,23 @@ ONNX Runtime Web 1.27.0 is installed through the npm lockfile. Its MIT license a
 The embedded-font integration PDF includes a subset of Bitstream Vera from ReportLab. The accompanying notice is `crates/core/tests/fixtures/pdf/embedded_layout.LICENSE.txt`. This font is a test-fixture dependency, not a bundled production font replacement.
 
 The Chinese geometry fixture embeds a subset of Noto Sans SC, distributed under the SIL Open Font License 1.1. Its license and pinned source are recorded in `crates/core/tests/fixtures/pdf/embedded_cjk.LICENSE.txt` and the fixture README.
+
+## PaddleOCR and OAR reference implementation
+
+`crates/ocr` independently implements the PaddleOCR DB, crop, normalization and
+CTC pipeline with reference to [OAR](https://github.com/GreatV/oar-ocr), revision
+`7feb044d74be09e3e2078a89cec0f0f8688e942b` (Apache-2.0). OAR is not a dependency
+or distributed binary. OCR/native merge policy in `crates/core/src/ocr/merge.rs`
+references the Apache-2.0 LiteParse revision recorded above, with conservative
+mapping-failure replacement and retained original evidence.
+
+The separately downloaded official Apache-2.0 model artifacts are pinned to:
+
+- [PP-OCRv6 medium detection](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_onnx): `61323801669c338b7891481ec7bac61ce31b576a`.
+- [PP-OCRv6 medium recognition](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_onnx): `50c7eacafc52fa7bcf4194e8cd08e46f8558504b`.
+- [PP-LCNet text-line orientation](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_textline_ori_onnx): `7fdcf3cf7061163eda7183b224aa334bd33068f7`.
+
+Model and configuration SHA-256 values are checked by the downloader and OCR
+runtime. Model weights are not packaged in the source or browser distribution.
+The OCR raster fixtures reuse the Bitstream Vera and Noto Sans SC test fonts
+and notices listed above; they do not introduce a production font dependency.

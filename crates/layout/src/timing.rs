@@ -20,6 +20,16 @@ pub enum TimingStage {
     LayoutPostprocess,
     TextPrepare,
     Ocr,
+    /// PaddleOCR image tensor preparation and DB box decoding.
+    OcrDetectionPreprocess,
+    OcrDetectionInference,
+    OcrDetectionPostprocess,
+    /// Waiting for an OCR model session.
+    OcrQueue,
+    OcrOrientationInference,
+    OcrRecognitionPreprocess,
+    OcrRecognitionInference,
+    OcrDecode,
     TextFinish,
     TableStructure,
     /// Local table topology and source validation.

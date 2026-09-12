@@ -27,6 +27,13 @@ pub enum DocParseError {
     /// Byte-based construction requires every enabled model to be supplied explicitly.
     #[error("table recovery requires explicit TSR model artifacts")]
     MissingTsrArtifacts,
+    /// Enabled built-in OCR cannot load models implicitly in byte-artifact mode.
+    #[error(
+        "OCR requires explicit detector, recognizer and enabled orientation artifacts"
+    )]
+    MissingOcrArtifacts,
+    #[error(transparent)]
+    BuiltinOcr(#[from] docparse_ocr::OcrError),
     /// The default table model failed to initialize.
     #[error(transparent)]
     Tsr(#[from] docparse_tsr::TsrError),
@@ -151,12 +158,18 @@ pub struct ParserArtifacts {
     pub layout: docparse_layout::ModelArtifacts,
     /// Required when table recovery is enabled and no table engine is injected.
     pub tsr: Option<docparse_layout::ModelArtifacts>,
+    /// Required for enabled built-in OCR when no external engine is injected.
+    pub ocr: Option<docparse_ocr::OcrArtifacts>,
 }
 
 impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
     /// Preserves the single-model convenience input for rules-only parsers.
     fn from(layout: docparse_layout::ModelArtifacts) -> Self {
-        Self { layout, tsr: None }
+        Self {
+            layout,
+            tsr: None,
+            ocr: None,
+        }
     }
 }
 
@@ -227,10 +240,21 @@ impl DocParserBuilder {
         self
     }
 
-    /// Loads missing layout and enabled table models once for this parser instance.
+    /// Loads layout and enabled OCR/table models once, preserving explicitly injected engines.
     pub async fn build(self) -> Result<DocParser, DocParseError> {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
         let table_enabled = config.tsr().mode != crate::TableMode::RulesOnly;
+        let ocr_enabled =
+            config.ocr().policy != docparse_config::OcrPolicy::Disabled;
+        if ocr_enabled
+            && self.ocr_engine.is_none()
+            && self
+                .artifacts
+                .as_ref()
+                .is_some_and(|artifacts| artifacts.ocr.is_none())
+        {
+            return Err(DocParseError::MissingOcrArtifacts);
+        }
         if self
             .artifacts
             .as_ref()
@@ -243,9 +267,9 @@ impl DocParserBuilder {
             );
             return Err(DocParseError::MissingTsrArtifacts);
         }
-        let (layout_artifacts, table_artifacts) =
-            self.artifacts.map_or((None, None), |artifacts| {
-                (Some(artifacts.layout), artifacts.tsr)
+        let (layout_artifacts, table_artifacts, ocr_artifacts) =
+            self.artifacts.map_or((None, None, None), |artifacts| {
+                (Some(artifacts.layout), artifacts.tsr, artifacts.ocr)
             });
         let layout_engine: Arc<dyn LayoutEngine> =
             match (self.layout_engine, layout_artifacts) {
@@ -282,10 +306,27 @@ impl DocParserBuilder {
                     as Arc<dyn crate::TableStructureEngine>),
                 (None, false, _) => None,
             };
+        // Keep injected engines authoritative and initialize built-in OCR only when explicitly enabled.
+        let ocr_engine = match (self.ocr_engine, ocr_enabled, ocr_artifacts) {
+            (Some(engine), _, _) => Some(engine),
+            (None, true, Some(artifacts)) => Some(Arc::new(
+                docparse_ocr::PaddleOcrEngine::from_artifacts(
+                    Arc::clone(&config),
+                    artifacts,
+                )
+                .await?,
+            )
+                as Arc<dyn OcrEngine>),
+            (None, true, None) => Some(Arc::new(
+                docparse_ocr::PaddleOcrEngine::from_config(Arc::clone(&config))
+                    .await?,
+            ) as Arc<dyn OcrEngine>),
+            (None, false, _) => None,
+        };
         Ok(DocParser::with_engines()
             .config(config)
             .layout_engine(layout_engine)
-            .ocr_engine(self.ocr_engine)
+            .ocr_engine(ocr_engine)
             .table_engine(table_engine)
             // Resolve the optional native database once per parser, sharing its shard cache across documents.
             .glyph_resolver(

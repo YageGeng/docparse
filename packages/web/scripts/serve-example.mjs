@@ -10,6 +10,8 @@ const routes = new Map([
   ["/example/", resolve(packageRoot, "example")],
   ["/dist/", resolve(packageRoot, "dist")],
   ["/models/slanet-plus/", resolve(packageRoot, "../../models/slanet-plus")],
+  // Specific OCR routes precede the legacy layout-model prefix.
+  ...["pp-ocrv6-medium-det", "pp-ocrv6-medium-rec", "pp-lcnet-textline-ori"].map(name => [`/models/${name}/`, resolve(packageRoot, "../../models", name)]),
   ["/models/", resolve(packageRoot, "../../models/pp-doclayout-v3")],
 ]);
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json" };

@@ -33,3 +33,9 @@ The Rust runtime integrates the ort crate and ONNX Runtime. Their licenses and
 the geo crate dual license are recorded in THIRD_PARTY_NOTICES.md at the
 repository root. Python oracle dependencies are development/test tools only
 and are not part of the Rust runtime packages.
+
+The independent PaddleOCR implementation references Apache-2.0 PaddleOCR,
+OAR revision 7feb044d74be09e3e2078a89cec0f0f8688e942b, and LiteParse's
+OCR/native merge policy. OAR is not a library dependency. Pinned PP-OCRv6
+medium and PP-LCNet artifacts are downloaded separately. See
+THIRD_PARTY_NOTICES.md for revisions, sources, and fixture font notices.

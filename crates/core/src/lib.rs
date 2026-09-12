@@ -24,6 +24,7 @@ mod validate;
 mod watermark;
 
 pub use context::{DocumentContextBuilder, DocumentLinker};
+pub use docparse_ocr::{OcrArtifacts, PaddleOcrEngine};
 pub use error::{
     ContextError, ExtractError, LineError, OrderError, PageAnalysisError,
     SemanticError, ValidationError,

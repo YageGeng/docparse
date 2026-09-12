@@ -346,6 +346,7 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
         docparse_core::ParserArtifacts {
             layout,
             tsr: Some(tsr),
+            ocr: None,
         },
     )
     .await

@@ -125,13 +125,43 @@ impl Bbox {
             && self.bottom >= other.bottom
     }
 
+    /// Measures two validated boxes directly; touching or disjoint boxes have no overlap.
+    pub fn intersection_area(self, other: Self) -> f64 {
+        (self.right.min(other.right) - self.left.max(other.left)).max(0.0)
+            * (self.bottom.min(other.bottom) - self.top.max(other.top)).max(0.0)
+    }
+
+    /// Measures the union of clipped covering boxes without counting overlapping evidence twice.
+    pub fn covered_area(self, boxes: impl IntoIterator<Item = Self>) -> f64 {
+        let mut clipped = boxes.into_iter().filter_map(|bbox| {
+            Self::try_from([bbox.left, bbox.top, bbox.right, bbox.bottom])
+                .ok()?;
+            Self::try_from([
+                self.left.max(bbox.left),
+                self.top.max(bbox.top),
+                self.right.min(bbox.right),
+                self.bottom.min(bbox.bottom),
+            ])
+            .ok()
+        });
+        // Delay every allocation until a genuine multi-box union is required.
+        let Some(first) = clipped.next() else {
+            return 0.0;
+        };
+        let Some(second) = clipped.next() else {
+            return first.area();
+        };
+        let polygons: Vec<_> = [first, second]
+            .into_iter()
+            .chain(clipped)
+            .map(Self::as_geo_polygon)
+            .collect();
+        geo::unary_union(&polygons).unsigned_area().min(self.area())
+    }
+
     /// Returns intersection over union; touching boxes and non-finite areas have no usable overlap.
     pub fn iou(self, other: Self) -> f64 {
-        let width =
-            (self.right.min(other.right) - self.left.max(other.left)).max(0.0);
-        let height =
-            (self.bottom.min(other.bottom) - self.top.max(other.top)).max(0.0);
-        let intersection = width * height;
+        let intersection = self.intersection_area(other);
         let union = self.area() + other.area() - intersection;
         if union.is_finite() && union > 0.0 {
             (intersection / union).clamp(0.0, 1.0)

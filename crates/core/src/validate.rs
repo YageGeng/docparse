@@ -107,6 +107,38 @@ impl ResultValidator {
             ));
         }
 
+        // Replaced mapping failures still own their original IDs outside canonical reading order.
+        for (index, item) in page.replaced_native_text.iter().enumerate() {
+            let item_path = format!("{path}.replaced_native_text[{index}]");
+            Self::validate_id_page(
+                item.id.as_str(),
+                page.page_number,
+                &item_path,
+            )?;
+            if item.source != crate::TextSource::Native
+                || item.watermark.is_some()
+                || !text_item_ids.insert(item.id.as_str().to_owned())
+            {
+                return Err(Self::invalid(
+                    &item_path,
+                    "archive must uniquely own non-watermark native facts",
+                ));
+            }
+            Self::validate_bbox(item.bbox, &item_path)?;
+            Self::validate_optional_confidence(item.confidence, &item_path)?;
+            if !item.rotation.is_finite()
+                || item
+                    .polygon
+                    .as_ref()
+                    .is_some_and(|p| !Self::bbox_contains(item.bbox, p.bbox()))
+            {
+                return Err(Self::invalid(
+                    &item_path,
+                    "invalid archived text geometry",
+                ));
+            }
+        }
+
         // A merged block keeps a primary identity while every original model region
         // still contributes to exactly one final owner.
         let mut model_region_ids = BTreeSet::new();

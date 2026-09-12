@@ -559,11 +559,22 @@ pub(crate) async fn analyze_rendered_page(
             .dpi(config.render().dpi)
             .missing_regions(draft.missing_regions.clone())
             .native_text_coverage(draft.native_text_coverage)
+            .timings(timings.clone())
             .build();
         let _ocr = timings.start(TimingStage::Ocr);
-        match engine.recognize(request).await {
-            Ok(result) => OcrCompletion::Succeeded(result),
-            Err(error) => OcrCompletion::Failed(error.to_string()),
+        // Bound optional enrichment without losing native facts when an engine stalls.
+        match crate::wasm_compat::timeout(
+            std::time::Duration::from_millis(config.ocr().timeout_ms),
+            engine.recognize(request),
+        )
+        .await
+        {
+            Ok(Ok(result)) => OcrCompletion::Succeeded(result),
+            Ok(Err(error)) => OcrCompletion::Failed(error.to_string()),
+            Err(_) => OcrCompletion::Failed(format!(
+                "OCR exceeded {} ms",
+                config.ocr().timeout_ms
+            )),
         }
     } else {
         OcrCompletion::Unavailable

@@ -1,6 +1,6 @@
 # DocParse
 
-DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, SLANet_plus predicts table structures, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
+DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, SLANet_plus predicts table structures, PaddleOCR recovers scanned text, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
 Model regions are candidates rather than a one-to-one final block contract. Ownership is assigned at the `TextItem` boundary, with short, unambiguous superscripts/subscripts attached to their parent before model assignment; residual XY-cut preserves column gutters before line assembly. Page-wide normalization merges content only when one bbox fully contains the other, including identical boxes, then computes reading order. Every native text fact remains owned exactly once.
 
@@ -129,7 +129,7 @@ visually affected by a watermark even though its recognized text is isolated fro
 
 ## Tests
 
-The workspace uses `members = ["crates/*"]`; `default-members` selects six native crates. Default checks use local fixtures without model downloads:
+The workspace uses `members = ["crates/*"]`; `default-members` selects eight native crates. Default checks use local fixtures without model downloads:
 
 ```bash
 rtk cargo fmt --all -- --check
@@ -182,3 +182,42 @@ E2E builds release tests before timing their binaries directly. Use `--cargo-pro
 ## Provenance and licensing
 
 DocParse uses Apache-2.0. PDFium, PP-DocLayoutV3, ONNX Runtime, development dependencies, and source derived from LiteParse have their own terms. Read [NOTICE](NOTICE) and the single root [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before distributing artifacts.
+
+## Built-in PaddleOCR
+
+`docparse-ocr` implements DB detection/unclip, perspective rectification, line
+orientation, recognition and CTC decoding without an OAR dependency. Native and
+Web use the same algorithms and pinned PP-OCRv6 medium models. Download all three:
+
+```sh
+rtk uv run scripts/download_models.py --model pp-ocrv6-medium-det
+rtk uv run scripts/download_models.py --model pp-ocrv6-medium-rec
+rtk uv run scripts/download_models.py --model pp-lcnet-textline-ori
+```
+
+Enable native OCR in your TOML configuration:
+
+```toml
+[ocr]
+policy = "missing_regions" # disabled (library default), missing_regions, or always
+execution_provider = "cpu"
+detection_model_dir = "models/pp-ocrv6-medium-det"
+recognition_model_dir = "models/pp-ocrv6-medium-rec"
+orientation_model_dir = "models/pp-lcnet-textline-ori"
+classify_orientation = true
+recognition_threshold = 0.5
+timeout_ms = 120000
+```
+
+The CLI exposes `ocr-cuda`, `ocr-coreml`, `ocr-metal`, and `ocr-openvino`
+features. Select one optional native provider per build; CPU remains available.
+CoreML requires a compatible macOS runtime; `metal` selects CoreML's CPU/GPU
+compute units. Browser WebGPU/CPU is selected through `executionProvider` for
+all model families. Model contracts reject unknown weights or dictionaries.
+
+Healthy native text wins over overlapping OCR. Confident OCR may replace only
+strongly invalid native mappings; original facts remain in
+`PageResult.replaced_native_text` for auditing and native-ID conservation.
+OCR retains its quadrilateral, rotation, confidence and estimated font size;
+line, paragraph and table composition use the ordinary parser pipeline.
+The WebUI defaults to automatic OCR; the SDK and native library default to off.

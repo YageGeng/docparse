@@ -107,6 +107,33 @@ impl TryFrom<RawConfig> for ValidatedConfig {
     /// Validates all lexical and numeric invariants without reading model artifacts.
     fn try_from(config: RawConfig) -> Result<Self, Self::Error> {
         Self::validate_platform(&config)?;
+        // Bound OCR tensors, candidate work and deadlines before any model or image is loaded.
+        for (value, field) in [
+            (config.ocr.detection_threshold, "ocr.detection_threshold"),
+            (config.ocr.box_threshold, "ocr.box_threshold"),
+            (
+                config.ocr.recognition_threshold,
+                "ocr.recognition_threshold",
+            ),
+            (
+                config.ocr.orientation_threshold,
+                "ocr.orientation_threshold",
+            ),
+        ] {
+            Self::validate_unit_interval(value, field)?;
+        }
+        if !(32..=4096).contains(&config.ocr.detection_max_side)
+            || !(320..=4096).contains(&config.ocr.recognition_max_width)
+            || !(1..=10_000).contains(&config.ocr.max_candidates)
+            || !(1..=86_400_000).contains(&config.ocr.timeout_ms)
+            || !config.ocr.unclip_ratio.is_finite()
+            || !(0.1..=5.0).contains(&config.ocr.unclip_ratio)
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "ocr",
+                reason: "invalid OCR dimensions, candidate limit, expansion or timeout",
+            });
+        }
         Self::validate_unit_interval(
             config.layout.score_threshold,
             "layout.score_threshold",

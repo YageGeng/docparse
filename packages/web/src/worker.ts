@@ -1,5 +1,5 @@
 import init, { default_config, WebParser } from "./pkg/docparse_web.js";
-import type { DocumentResult, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
+import type { DocumentResult, ModelSource, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
 import type { WorkerInbound, WorkerResponse, WorkerSuccess, TsrCropPixels } from "./protocol.js";
 import { artifact } from "./artifacts.js";
 
@@ -35,11 +35,19 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
   for (const [group, values] of Object.entries(overrides ?? {})) {
     if (!Object.hasOwn(raw, group) || !values || typeof values !== "object" || Array.isArray(values)) throw Object.assign(new Error(`Unknown or invalid configuration group ${group}`), { code: "InvalidConfig" });
     for (const key of Object.keys(values)) {
-      if (["layout", "tsr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
+      if (["layout", "tsr", "ocr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider", "detection_model_dir", "recognition_model_dir", "orientation_model_dir"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     raw[group] = { ...raw[group], ...values };
   }
   return raw;
+}
+
+/** Resolves each model family through the same verified artifact cache and progress channel. */
+async function modelBytes(source: ModelSource, prefix: string, progress?: (value: ParserProgress) => void) {
+  const [model, config, manifest] = source.kind === "urls"
+    ? await Promise.all([artifact(`${prefix}_model`, source.model, progress), artifact(`${prefix}_config`, source.config, progress), artifact(`${prefix}_manifest`, source.manifest, progress)])
+    : [source.model, source.config, source.manifest];
+  return { model, config, manifest };
 }
 
 /** Pending table promises are correlated separately from the enclosing parse operation. */
@@ -118,20 +126,24 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         ? await Promise.all([artifact("model", source.model, progress), artifact("config", source.config, progress), artifact("manifest", source.manifest, progress)])
         : [source.model, source.config, source.manifest];
       if (source.kind === "urls") timing?.({ stage: "model_download", page_number: null, duration_ms: performance.now() - downloadStarted });
-      const tableSource = payload.tsrArtifacts;
-      const tableBytes = tableSource?.kind === "urls"
-        ? await Promise.all([artifact("tsr_model", tableSource.model, progress), artifact("tsr_config", tableSource.config, progress), artifact("tsr_manifest", tableSource.manifest, progress)])
-        : tableSource ? [tableSource.model, tableSource.config, tableSource.manifest] : undefined;
-      const tableArtifacts = tableBytes ? { model: tableBytes[0], config: tableBytes[1], manifest: tableBytes[2] } : undefined;
+      const tableArtifacts = payload.tsrArtifacts ? await modelBytes(payload.tsrArtifacts, "tsr", progress) : undefined;
+      const ocrSource = payload.ocrArtifacts;
+      // Load sequentially to bound transient copies of large recognition weights in a Worker.
+      const ocrArtifacts = ocrSource ? {
+        detection: await modelBytes(ocrSource.detection, "ocr_detection", progress),
+        recognition: await modelBytes(ocrSource.recognition, "ocr_recognition", progress),
+        orientation: ocrSource.orientation ? await modelBytes(ocrSource.orientation, "ocr_orientation", progress) : undefined,
+      } : undefined;
+      const auxiliaryArtifacts = { tsr: tableArtifacts, ocr: ocrArtifacts };
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();
-      try { parser = await WebParser.create(model, modelConfig, manifest, config, base, webgpu, tableArtifacts); }
+      try { parser = await WebParser.create(model, modelConfig, manifest, config, base, webgpu, auxiliaryArtifacts); }
       catch (error) {
         const code = (error as { code?: string }).code;
         if (!webgpu || !payload.allowCpuFallback || !["ExecutionProviderUnavailable", "ExecutionProviderInitializationFailed"].includes(code ?? "")) throw error;
         console.warn("WebGPU initialization failed; using explicitly allowed CPU fallback");
-        parser = await WebParser.create(model, modelConfig, manifest, config, base, false, tableArtifacts);
+        parser = await WebParser.create(model, modelConfig, manifest, config, base, false, auxiliaryArtifacts);
         webgpu = false;
       }
       finally { timing?.({ stage: "model_init", page_number: null, duration_ms: performance.now() - modelStarted }); }

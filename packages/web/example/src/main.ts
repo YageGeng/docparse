@@ -10,6 +10,7 @@ const ui = {
   cancel: document.querySelector<HTMLButtonElement>("#cancel")!,
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
   tableMode: document.querySelector<HTMLSelectElement>("#table-mode")!,
+  ocrPolicy: document.querySelector<HTMLSelectElement>("#ocr-policy")!,
   timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
   timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
   timingRows: document.querySelector<HTMLElement>("#timing-rows")!,
@@ -87,6 +88,7 @@ function controls(): void {
   ui.parse.disabled = !selectedFile || busy;
   ui.provider.disabled = busy;
   ui.tableMode.disabled = busy;
+  ui.ocrPolicy.disabled = busy;
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -129,7 +131,7 @@ function clearDocument(): void {
   ui.regions.textContent = "0 regions";
   ui.select.replaceChildren(new Option("Select a region…", "")); ui.select.disabled = true;
   ui.selected.textContent = "—"; ui.meta.textContent = "A closer look, one region at a time.";
-  ui.text.textContent = "Select an overlay to reveal the original text from your PDF.";
+  ui.text.textContent = "Select an overlay to inspect the extracted text.";
   ui.copy.disabled = true; ui.copyStatus.textContent = ""; ui.warnings.hidden = true;
   ui.characters.textContent = "—"; document.body.dataset.hasSelection = "false";
   zoom = 1; ui.zoomFit.textContent = "100%";
@@ -169,7 +171,7 @@ function progress(event: ParserProgress): void {
     case "downloading":
       if (event.artifact === "model") status("Downloading the layout model", `${(event.loaded / 1024 / 1024).toFixed(1)}${event.total ? ` / ${(event.total / 1024 / 1024).toFixed(1)}` : ""} MB`, "busy", event.total ? event.loaded / event.total : undefined);
       break;
-    case "initializing_model": status("Preparing the layout model", "Creating the inference session. This can take a moment on the first run.", "busy"); break;
+    case "initializing_model": status("Preparing document models", "Creating the inference session. This can take a moment on the first run.", "busy"); break;
     case "opening": status("Opening your PDF", "Reading the document with PDFium…", "busy"); break;
     case "scanning":
       setPageCount(event.total);
@@ -210,10 +212,10 @@ function selectBlock(id: string): void {
     group.classList.toggle("selected", selected); group.setAttribute("aria-pressed", String(selected));
   }
   ui.selected.textContent = selectedBlock ? String(selectedBlock.final_order + 1) : "—";
-  ui.meta.textContent = selectedBlock ? `${selectedBlock.label.replaceAll("_", " ")} · Page ${pageNumber}` : "A closer look, one region at a time.";
+  ui.meta.textContent = selectedBlock ? `${selectedBlock.label.replaceAll("_", " ")} · Page ${pageNumber} · ${selectedBlock.lines.flatMap(line => line.text_items).filter(item => item.source === "Ocr").length} OCR items` : "A closer look, one region at a time.";
   ui.text.textContent = selectedBlock?.label === "reference"
     ? "Visual reference area. Select a reference content region to read its text."
-    : selectedBlock ? selectedBlock.text || "No native text was extracted for this region. Image and outline text require OCR." : "Select an overlay to reveal the original text from your PDF.";
+    : selectedBlock ? selectedBlock.text || "No text was recovered for this region." : "Select an overlay to inspect the extracted text.";
   if (selectedBlock?.table) {
     const source = selectedBlock.table;
     const table = document.createElement("table"); table.className = "table-view";
@@ -283,6 +285,8 @@ function showPage(number: number): void {
   // A model failure is a different result from missing native text; make degraded layout visible.
   ui.warnings.textContent = page?.warnings.some(warning => warning.code === "LayoutUnavailable")
     ? "Layout inference failed on this page. A geometry-only fallback is shown."
+    : page?.warnings.some(warning => warning.code === "OcrFailed" || warning.code === "OcrUnavailable")
+      ? "OCR could not recover some text on this page. Existing native text is preserved."
     : page?.warnings.some(warning => warning.code === "TableStructureUnavailable")
       ? "Some table structures could not be recovered. Their original text is preserved."
       : page?.warnings.length ? `${page.warnings.length} parser warnings on this page. Some regions may have no native text.` : "";
@@ -310,6 +314,12 @@ function showTimings(): void {
   ui.timingDialog.showModal();
 }
 
+/** Uses the same local immutable artifact layout for each independently verified OCR model. */
+function ocrModelSource(name: string): import("../../dist/index.js").ModelSource {
+  const base = new URL(`../models/${name}/`, location.href);
+  return { kind: "urls", model: new URL("inference.onnx", base).href, config: new URL("inference.yml", base).href, manifest: new URL("model-manifest.json", base).href };
+}
+
 /** Runs one cancellable operation while keeping stale callbacks from replacing a newer document. */
 async function parse(): Promise<void> {
   if (!selectedFile || busy) return;
@@ -326,10 +336,14 @@ async function parse(): Promise<void> {
       current = await createParser({
         artifacts: { kind: "urls", model: new URL("../models/inference.onnx", location.href).href, config: new URL("../models/inference.yml", location.href).href, manifest: new URL("../models/model-manifest.json", location.href).href },
         tsrArtifacts: { kind: "urls", model: new URL("../models/slanet-plus/inference.onnx", location.href).href, config: new URL("../models/slanet-plus/inference.yml", location.href).href, manifest: new URL("../models/slanet-plus/model-manifest.json", location.href).href },
+        ocrArtifacts: ui.ocrPolicy.value === "disabled" ? undefined : {
+          detection: ocrModelSource("pp-ocrv6-medium-det"), recognition: ocrModelSource("pp-ocrv6-medium-rec"),
+          orientation: ocrModelSource("pp-lcnet-textline-ori"),
+        },
         // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
         executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
         allowCpuFallback: true,
-        config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode } },
+        config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" } },
         signal, onProgress: event => { if (run === generation) progress(event); },
         onTiming: event => { if (run === generation) recordTiming("Initialization", event); },
       });
@@ -461,7 +475,7 @@ ui.provider.addEventListener("change", () => {
   generation++; void parser?.close(); parser = undefined;
   clearDocument(); delete ui.engine.dataset.provider;
   ui.engine.textContent = ui.provider.value === "webgpu" ? "GPU preferred · CPU fallback if unavailable" : "CPU selected";
-  status("Layout engine selected", "Start parsing to initialize the selected engine.");
+  status("Inference engine selected", "Start parsing to initialize the selected engine.");
   controls();
 });
 /** Reinitializes only when the table model policy changes, keeping its default visible. */
@@ -470,6 +484,14 @@ ui.tableMode.addEventListener("change", () => {
   generation++; void parser?.close(); parser = undefined;
   clearDocument(); delete ui.engine.dataset.provider;
   status("Table recovery selected", "Start parsing to use the selected table recovery mode.");
+  controls();
+});
+/** Releases OCR sessions when the user changes visual recovery policy. */
+ui.ocrPolicy.addEventListener("change", () => {
+  if (busy) return;
+  generation++; void parser?.close(); parser = undefined;
+  clearDocument(); delete ui.engine.dataset.provider;
+  status("OCR selected", "Start parsing to use the selected text recovery mode.");
   controls();
 });
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));

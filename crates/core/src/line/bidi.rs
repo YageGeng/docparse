@@ -1,7 +1,8 @@
 use crate::{TextItem, WritingDirection};
 
 /// Snaps near-cardinal rotations with LiteParse's circular two-degree tolerance.
-fn canonical_rotation(rotation: f64) -> i32 {
+/// Shared by line ordering so detector angle jitter cannot take precedence over position.
+pub(crate) fn canonical_rotation(rotation: f64) -> i32 {
     let rotation = rotation.rem_euclid(360.0);
     [0.0_f64, 90.0, 180.0, 270.0]
         .into_iter()
@@ -47,9 +48,13 @@ pub(crate) fn detect_direction<'a>(
 
 /// Orders text item containers without mutating text within an item.
 pub(crate) fn order_items(items: &mut [TextItem], direction: WritingDirection) {
+    let rotation = items
+        .first()
+        .map_or(0, |item| canonical_rotation(item.rotation));
     let axes =
         super::TextAxes::from(items.first().map_or(0.0, |item| item.rotation));
-    if axes.is_oblique() {
+    // Half-turn OCR crops read along decreasing page x, including RTL's additional reversal.
+    if axes.is_oblique() || rotation == 180 {
         items.sort_by(|left, right| {
             let ordering = axes
                 .project(left.bbox.center())
@@ -64,9 +69,6 @@ pub(crate) fn order_items(items: &mut [TextItem], direction: WritingDirection) {
         });
         return;
     }
-    let rotation = items
-        .first()
-        .map_or(0, |item| canonical_rotation(item.rotation));
     match direction {
         WritingDirection::LeftToRight => items.sort_by(|left, right| {
             left.bbox

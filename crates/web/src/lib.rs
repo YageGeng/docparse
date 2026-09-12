@@ -38,21 +38,47 @@ impl WebError {
     }
 }
 
-/// Owned bytes for the independently configured table model.
+/// Owned model bytes shared by table and OCR artifact boundaries.
 #[derive(Deserialize)]
-struct TableArtifacts {
+struct ArtifactBytes {
     model: Vec<u8>,
     config: Vec<u8>,
     manifest: Vec<u8>,
 }
 
-impl From<TableArtifacts> for ModelArtifacts {
+impl From<ArtifactBytes> for ModelArtifacts {
     /// Transfers deserialized model buffers into the shared immutable artifact container.
-    fn from(value: TableArtifacts) -> Self {
+    fn from(value: ArtifactBytes) -> Self {
         Self {
             model: Arc::from(value.model),
             config: Arc::from(value.config),
             manifest: Arc::from(value.manifest),
+        }
+    }
+}
+
+/// Optional model families share one ABI argument without exposing filesystem paths.
+#[derive(Deserialize)]
+struct AuxiliaryArtifacts {
+    tsr: Option<ArtifactBytes>,
+    ocr: Option<OcrArtifactBytes>,
+}
+
+/// The three independently verified PaddleOCR networks supplied by the Worker.
+#[derive(Deserialize)]
+struct OcrArtifactBytes {
+    detection: ArtifactBytes,
+    recognition: ArtifactBytes,
+    orientation: Option<ArtifactBytes>,
+}
+
+impl From<OcrArtifactBytes> for docparse_core::OcrArtifacts {
+    /// Moves buffers into the native/browser-neutral OCR artifact contract.
+    fn from(value: OcrArtifactBytes) -> Self {
+        Self {
+            detection: value.detection.into(),
+            recognition: value.recognition.into(),
+            orientation: value.orientation.map(Into::into),
         }
     }
 }
@@ -74,7 +100,7 @@ impl WebParser {
         options: JsValue,
         runtime_base: String,
         webgpu: bool,
-        tsr_artifacts: JsValue,
+        auxiliary_artifacts: JsValue,
     ) -> Result<WebParser, JsValue> {
         logging::init();
         let mut raw: RawConfig = serde_wasm_bindgen::from_value(options)
@@ -85,21 +111,27 @@ impl WebParser {
             ExecutionProviderConfig::Cpu
         };
         raw.tsr.execution_provider = raw.layout.execution_provider;
+        // All model families use the selected Worker backend and shared GPU serialization.
+        raw.ocr.execution_provider = raw.layout.execution_provider;
         let output = raw.output.clone();
         let validated = ValidatedConfig::try_from(raw)
             .map_err(|error| WebError::value("InvalidConfig", error))?;
-        let table_artifacts = if validated.tsr().mode
-            == docparse_core::TableMode::RulesOnly
-        {
-            None
-        } else {
-            Some(ModelArtifacts::from(
-                serde_wasm_bindgen::from_value::<TableArtifacts>(tsr_artifacts)
-                    .map_err(|error| {
-                        WebError::value("TableArtifactsRequired", error)
-                    })?,
-            ))
-        };
+        let auxiliary: AuxiliaryArtifacts = serde_wasm_bindgen::from_value(
+            auxiliary_artifacts,
+        )
+        .map_err(|error| WebError::value("InvalidModelArtifacts", error))?;
+        let table_artifacts =
+            if validated.tsr().mode == docparse_core::TableMode::RulesOnly {
+                None
+            } else {
+                auxiliary.tsr.map(ModelArtifacts::from)
+            };
+        let ocr_artifacts =
+            if validated.ocr().policy == docparse_config::OcrPolicy::Disabled {
+                None
+            } else {
+                auxiliary.ocr.map(docparse_core::OcrArtifacts::from)
+            };
         let script = if webgpu {
             "ort.webgpu.min.mjs"
         } else {
@@ -130,12 +162,14 @@ impl WebParser {
             docparse_core::ParserArtifacts {
                 layout: artifacts,
                 tsr: table_artifacts,
+                ocr: ocr_artifacts,
             },
         )
         .await
         .map_err(|error| {
             use docparse_core::DocParseError;
             use docparse_layout::LayoutError;
+            use docparse_ocr::OcrError;
             use docparse_tsr::TsrError;
             let code = match &error {
                 DocParseError::Layout(
@@ -143,14 +177,23 @@ impl WebParser {
                 )
                 | DocParseError::Tsr(TsrError::Backend(
                     LayoutError::ExecutionProviderUnavailable { .. },
+                ))
+                | DocParseError::BuiltinOcr(OcrError::Backend(
+                    LayoutError::ExecutionProviderUnavailable { .. },
                 )) => "ExecutionProviderUnavailable",
                 DocParseError::Layout(LayoutError::Ort { .. })
                 | DocParseError::Tsr(
                     TsrError::Backend(LayoutError::Ort { .. })
                     | TsrError::Ort(_),
+                )
+                | DocParseError::BuiltinOcr(
+                    OcrError::Backend(LayoutError::Ort { .. })
+                    | OcrError::Runtime(_),
                 ) if webgpu => "ExecutionProviderInitializationFailed",
                 DocParseError::Tsr(_) => "TableModelInitializationFailed",
                 DocParseError::MissingTsrArtifacts => "TableArtifactsRequired",
+                DocParseError::MissingOcrArtifacts => "OcrArtifactsRequired",
+                DocParseError::BuiltinOcr(_) => "OcrModelInitializationFailed",
                 _ => "ModelInitializationFailed",
             };
             WebError::value(code, error)

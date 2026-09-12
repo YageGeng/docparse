@@ -1,6 +1,6 @@
 # DocParse Web
 
-Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3 / SLANet_plus models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
+Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3, SLANet_plus and PaddleOCR models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
 
 ## Build
 
@@ -11,6 +11,9 @@ rtk rustup target add wasm32-unknown-unknown
 rtk cargo install wasm-bindgen-cli --version 0.2.125 --locked
 rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
 rtk uv run scripts/download_models.py --model slanet-plus
+rtk uv run scripts/download_models.py --model pp-ocrv6-medium-det
+rtk uv run scripts/download_models.py --model pp-ocrv6-medium-rec
+rtk uv run scripts/download_models.py --model pp-lcnet-textline-ori
 ```
 
 Run these commands in `packages/web`:
@@ -66,7 +69,7 @@ uses the same selected backend as layout; both default to WebGPU.
 
 Here, `file` is a caller-selected File. To manage authentication or caching, obtain the model yourself and pass `{kind: "bytes", model, config, manifest}` with three Uint8Array values. The library does not detach caller-owned PDF or model buffers.
 
-`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout/tsr.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
+`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout/tsr/ocr.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
@@ -104,7 +107,7 @@ Observations describe elapsed attempts, not success. Error/cancellation can leav
 
 ## Interactive example
 
-The example selects WebGPU with rules-first TSR fallback by default. Its table selector also provides TSR-only and rules-only modes. The example explicitly allows CPU fallback for both models on unsupported devices. Its engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
+The example selects WebGPU, automatic OCR, and rules-first TSR fallback by default. The OCR selector offers automatic missing-region recovery, all pages, and off. Its table selector also provides TSR-only and rules-only modes. The example explicitly allows CPU fallback for all enabled models on unsupported devices. Its engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
 
 After preparing the model and building the package, run this command in `packages/web`:
 
@@ -200,9 +203,9 @@ text remains inspectable and retained in text/Markdown output.
 - Fatal Worker/WASM failures settle pending requests instead of leaving Promises suspended.
 - Errors contain a stable `code` and readable message; Worker error stacks are retained for diagnostics.
 
-Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM dependency graph enables `ort/webgpu`; the host loads the pinned WebGPU distribution and registers its execution provider. WebGPU is the SDK default for both layout and TSR; select `executionProvider: "wasm"` for CPU. PDFium rendering, text extraction, and fusion still run on CPU.
+Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM dependency graph enables `ort/webgpu`; the host loads the pinned WebGPU distribution and registers its execution provider. WebGPU is the SDK default for layout, TSR and OCR; select `executionProvider: "wasm"` for CPU. PDFium rendering, text extraction, and fusion still run on CPU.
 
-GPU-to-CPU fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. Browser layout and TSR serialize actual inference through output readback to avoid cross-session GPU buffer reuse after a caller timeout. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
+GPU-to-CPU fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. Browser layout, TSR and OCR serialize actual inference through output readback to avoid cross-session GPU buffer reuse after a caller timeout. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
 
 Run `rtk npm run test:e2e -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
 
@@ -352,3 +355,46 @@ The JSON `table.source` identifies the accepted structure: `tagged_pdf`, `ruled`
 and `text_alignment` are local reconstruction; `external_tsr` is structure supplied
 by the built-in TSR model or an external caller. The inspector labels these paths
 Rules and TSR input, independently of the layout model that detected the region.
+
+## OCR artifacts and recovery
+
+Enable OCR explicitly in SDK callers (the WebUI already enables it):
+
+```javascript
+/** Resolves one pinned, self-hosted model triple. */
+const modelSource = name => ({
+  kind: "urls",
+  model: `/models/${name}/inference.onnx`,
+  config: `/models/${name}/inference.yml`,
+  manifest: `/models/${name}/model-manifest.json`,
+});
+const parser = await createParser({
+  artifacts: modelSource("pp-doclayout-v3"),
+  tsrArtifacts: modelSource("slanet-plus"),
+  ocrArtifacts: {
+    detection: modelSource("pp-ocrv6-medium-det"),
+    recognition: modelSource("pp-ocrv6-medium-rec"),
+    orientation: modelSource("pp-lcnet-textline-ori"),
+  },
+  config: { ocr: { policy: "missing_regions" } },
+  executionProvider: "webgpu",
+});
+```
+
+Use `policy: "always"` to OCR every page or `"disabled"` to omit the OCR models.
+`classify_orientation: false` permits omitting orientation artifacts. OCR paths
+and backend overrides are rejected in Web configuration; use model sources and
+the shared `executionProvider`. Buffer sources are copied before Worker transfer.
+
+The built-in pipeline validates all three manifests, runs DB detection, rectifies
+quadrilaterals, corrects upside-down lines, and decodes recognition probabilities
+with the pinned CTC dictionary. Healthy native text is preserved. Replaced invalid
+native facts are archived in `replaced_native_text`; canonical OCR facts carry
+`source: "Ocr"`, confidence, polygon, rotation and estimated font size. OCR-only
+word gaps are resolved before table byte ranges are assigned.
+
+Additional timing stages are `ocr_detection_preprocess`, `ocr_detection_inference`,
+`ocr_detection_postprocess`, `ocr_queue`, `ocr_orientation_inference`,
+`ocr_recognition_preprocess`, `ocr_recognition_inference`, and `ocr_decode`.
+Inference timings include output readback. Failed OCR produces page warnings;
+initialization failure never masquerades as successful text recovery.

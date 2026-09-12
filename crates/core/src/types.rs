@@ -137,6 +137,15 @@ impl TextItemId {
     pub fn ocr(page_number: u32, source_result_index: u32) -> Self {
         Self(format!("p{page_number}:o{source_result_index}"))
     }
+
+    /// Retains an OCR result's identity when native overlap divides it into multiple fragments.
+    pub(crate) fn ocr_fragment(&self, index: usize) -> Self {
+        if index == 0 {
+            self.clone()
+        } else {
+            Self(format!("{}:s{index}", self.0))
+        }
+    }
 }
 
 impl ModelRegionId {
@@ -276,6 +285,10 @@ pub enum RepairAction {
     LigatureExpansion,
     /// Typographic punctuation was folded to the extraction policy's ASCII equivalent.
     PunctuationNormalization,
+    /// A gap between separate OCR words supplied an explicit canonical word boundary.
+    OcrSpacing,
+    /// Reliable native text replaced the matching portion of an OCR result.
+    OcrNativeOverlap,
 }
 
 /// Completeness of text located beneath one inline formula region.
@@ -428,6 +441,32 @@ pub struct TextItem {
     pub provenance: Option<PdfProvenance>,
     #[builder(default)]
     pub repair_actions: Vec<RepairAction>,
+}
+
+impl TextItem {
+    /// Requests visual recovery only for strong mapping failures, preserving unusual valid prose and code.
+    pub(crate) fn needs_ocr(&self) -> bool {
+        if self.source != TextSource::Native || self.watermark.is_some() {
+            return false;
+        }
+        let mut total = 0;
+        let mut invalid = 0;
+        for character in self.raw_text.chars().filter(|c| !c.is_whitespace()) {
+            total += 1;
+            if character == '\u{fffd}'
+                || character.is_control()
+                || matches!(character as u32, 0xe000..=0xf8ff | 0xf0000..=0xffffd | 0x100000..=0x10fffd)
+            {
+                invalid += 1;
+            }
+        }
+        // Successful glyph recovery can repair a PDF whose original ToUnicode map was missing.
+        invalid > 0 && invalid * 4 >= total
+            || total == 0
+                && self.provenance.as_ref().is_some_and(|p| {
+                    p.unicode_mapping == UnicodeMappingStatus::Missing
+                })
+    }
 }
 
 /// A non-owning inline formula annotation attached to one line.
@@ -704,6 +743,10 @@ pub struct PageResult {
     pub height: f64,
     pub rotation: i32,
     pub blocks: Vec<Block>,
+    /// Original unusable PDF facts replaced by confident OCR; excluded from reading order, retained for audit.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaced_native_text: Vec<TextItem>,
     #[builder(default)]
     pub warnings: Vec<PageWarning>,
     #[builder(default)]

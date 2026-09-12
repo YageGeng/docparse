@@ -8,7 +8,11 @@ readme = "README.md"
 description = "Native PDF extraction and layout-text fusion for docparse"
 
 [features]
-wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
+ocr-coreml = ["docparse-ocr/coreml"]
+ocr-cuda = ["docparse-ocr/cuda"]
+ocr-metal = ["docparse-ocr/metal"]
+ocr-openvino = ["docparse-ocr/openvino"]
 default = []
 layout-metal = ["docparse-layout/metal"]
 tsr-coreml = ["docparse-tsr/coreml"]
@@ -23,6 +27,7 @@ layout-openvino = ["docparse-layout/openvino"]
 # workspace crates
 docparse-config.workspace = true
 docparse-layout.workspace = true
+docparse-ocr.workspace = true
 docparse-tsr.workspace = true
 pdfium.workspace = true
 
