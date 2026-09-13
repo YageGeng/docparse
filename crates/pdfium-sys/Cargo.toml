@@ -2,7 +2,8 @@
 # Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
 [package]
 name = "docparse-pdfium-sys"
-version = "1.9.0"
+# This fork follows the DocParse workspace version.
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 readme.workspace = true

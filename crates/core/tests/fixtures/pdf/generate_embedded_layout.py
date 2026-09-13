@@ -1,6 +1,7 @@
 """Generate an embedded-font fixture without relying on host font substitution."""
-from pathlib import Path
 import argparse
+from pathlib import Path
+
 import reportlab
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont

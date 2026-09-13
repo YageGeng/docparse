@@ -1,5 +1,6 @@
 """Exercise the cfg boundary checker on real temporary Rust source trees."""
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,8 +18,9 @@ class CompatibilityBoundaryTest(unittest.TestCase):
             target.parent.mkdir(parents=True)
             target.write_text(source)
             return subprocess.run(
-                ["python3", str(ROOT / "scripts/check_wasm_compat.py"), "--root", directory],
-                capture_output=True, text=True,
+                # Reuse the interpreter selected by uv instead of resolving an unrelated system Python.
+                [sys.executable, str(ROOT / "scripts/check_wasm_compat.py"), "--root", directory],
+                check=False, capture_output=True, text=True,
             )
 
     def test_multiline_platform_attribute_is_rejected(self):
@@ -68,6 +70,11 @@ class CompatibilityBoundaryTest(unittest.TestCase):
             with self.subTest(path=path):
                 result = self.check_source(path, source)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
+    def test_uv_environment_is_not_workspace_source(self):
+        """Third-party Rust sources inside uv's environment must not enter the workspace policy check."""
+        result = self.check_source(".venv/lib/dependency/source.rs", '#[cfg(target_arch = "wasm32")]\nfn run() {}')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

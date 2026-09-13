@@ -110,6 +110,83 @@ class DownloadModelsTest(unittest.TestCase):
             ):
                 self.module.verify_installation(output)
 
+    def test_default_command_selects_all_models(self):
+        """The ordinary provisioning command must include layout, TSR and all three OCR models."""
+        with mock.patch.object(sys, "argv", ["download_models.py"]):
+            self.assertEqual(self.module.parse_args().model, "all")
+
+    def test_default_command_checks_every_model_and_reports_partial_failure(self):
+        """All models are attempted under the chosen root, while a single failure keeps the exit status nonzero."""
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(sys, "argv", ["download_models.py", "--models-dir", directory]),
+                mock.patch.object(sys, "stdout", io.StringIO()),
+                mock.patch.object(sys, "stderr", io.StringIO()),
+                mock.patch.object(self.module, "install_model", side_effect=[
+                    self.module.ModelDownloadError("download failed"), False, False, False, False,
+                ]) as installer,
+            ):
+                self.assertEqual(self.module.main(), 1)
+            self.assertEqual([call.args[0] for call in installer.call_args_list], [
+                Path(directory) / name for name in self.module.MODEL_NAMES
+            ])
+            self.assertEqual([call.kwargs["model"].name for call in installer.call_args_list], list(self.module.MODEL_NAMES))
+
+    def test_manifest_and_corrupt_yaml_are_repaired_without_refetching_weights(self):
+        """Metadata-only damage needs no network, and a corrupt YAML downloads only that artifact."""
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(self.module, "ARTIFACTS", self.artifacts),
+            mock.patch.object(self.module, "urlopen", side_effect=self.fake_urlopen) as opener,
+        ):
+            output = Path(directory) / "model"
+            self.module.install_model(output, force=False)
+            weights = output / "inference.onnx"
+            original = weights.stat().st_mtime_ns
+            for content in ["{broken", "[]"]:
+                (output / "model-manifest.json").write_text(content)
+                opener.reset_mock()
+                self.assertTrue(self.module.install_model(output, force=False))
+                opener.assert_not_called()
+                self.module.verify_installation(output)
+            (output / "inference.yml").write_bytes(b"corrupt")
+            opener.reset_mock()
+            self.assertTrue(self.module.install_model(output, force=False))
+            self.assertEqual(opener.call_count, 1)
+            self.assertEqual((output / "inference.yml").read_bytes(), self.config_bytes)
+            self.assertEqual(weights.stat().st_mtime_ns, original)
+
+    def test_force_downloads_even_valid_artifacts(self):
+        """Explicit force bypasses the local-validity shortcut for the selected model."""
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(self.module, "ARTIFACTS", self.artifacts),
+            mock.patch.object(self.module, "urlopen", side_effect=self.fake_urlopen) as opener,
+        ):
+            output = Path(directory) / "model"
+            self.module.install_model(output, force=False)
+            opener.reset_mock()
+            self.assertTrue(self.module.install_model(output, force=True))
+            self.assertEqual(opener.call_count, 2)
+            self.module.verify_installation(output)
+
+    def test_partial_install_downloads_only_the_missing_file(self):
+        """Existing verified weights survive a missing YAML file without another weight download."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "model"
+            output.mkdir()
+            weights = output / "inference.onnx"
+            weights.write_bytes(self.model_bytes)
+            original = weights.stat().st_mtime_ns
+            with (
+                mock.patch.object(self.module, "ARTIFACTS", self.artifacts),
+                mock.patch.object(self.module, "urlopen", side_effect=self.fake_urlopen) as opener,
+            ):
+                self.assertTrue(self.module.install_model(output, force=False))
+                self.module.verify_installation(output)
+            self.assertEqual(opener.call_count, 1)
+            self.assertEqual(weights.stat().st_mtime_ns, original)
+
 
 if __name__ == "__main__":
     unittest.main()

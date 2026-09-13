@@ -26,7 +26,7 @@ ort-web = {{ path = "{root / 'vendor/ort-web'}" }}
         ("native with wasm feature", ["--features", "wasm"], False),
         ("browser", ["--features", "wasm", "--target", "wasm32-unknown-unknown"], True),
     ]:
-        result = subprocess.run(base + arguments, capture_output=True, text=True)
+        result = subprocess.run(base + arguments, check=False, capture_output=True, text=True)
         if (result.returncode == 0) != succeeds or (not succeeds and ("Rc" not in result.stderr or "Send" not in result.stderr)):
             raise SystemExit(f"{name} type contract failed unexpectedly\n{result.stdout}\n{result.stderr}")
         print(f"PASS: {name} {'accepts' if succeeds else 'rejects'} the non-Send engine")

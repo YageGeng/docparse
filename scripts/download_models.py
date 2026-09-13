@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
 """Download and verify pinned layout, table and PaddleOCR ONNX artifacts."""
 
 from __future__ import annotations
@@ -13,7 +9,7 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -22,6 +18,13 @@ MODEL_REVISION = "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6"
 MODEL_LICENSE = "Apache-2.0"
 MODEL_BASE_URL = (
     f"https://huggingface.co/{MODEL_REPOSITORY}/resolve/{MODEL_REVISION}"
+)
+MODEL_NAMES = (
+    "pp-doclayout-v3",
+    "slanet-plus",
+    "pp-ocrv6-medium-det",
+    "pp-ocrv6-medium-rec",
+    "pp-lcnet-textline-ori",
 )
 
 
@@ -59,7 +62,7 @@ class Model:
 
     @classmethod
     def from_name(cls, name: str) -> Model:
-        """Selects a compiled contract, preserving the legacy layout default."""
+        """Selects a pinned contract for either complete or targeted provisioning."""
         if name == "pp-doclayout-v3":
             return cls(name, MODEL_REPOSITORY, MODEL_REVISION, ARTIFACTS)
         # OCR model/config pairs carry their dictionaries and preprocessing contract together.
@@ -131,6 +134,8 @@ def verify_installation(output: Path, model: Model | None = None) -> dict:
         raise ModelDownloadError(
             f"failed to read model manifest {manifest_path}: {error}"
         ) from error
+    if not isinstance(manifest, dict):
+        raise ModelDownloadError(f"model manifest must be an object: {manifest_path}")
 
     expected_files = {artifact.filename: artifact.sha256 for artifact in model.artifacts}
     expected_identity = {
@@ -179,7 +184,7 @@ def write_manifest(directory: Path, model: Model | None = None) -> None:
         "repository": model.repository,
         "revision": model.revision,
         "license": MODEL_LICENSE,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "files": {artifact.filename: artifact.sha256 for artifact in model.artifacts},
     }
     payload = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
@@ -187,7 +192,7 @@ def write_manifest(directory: Path, model: Model | None = None) -> None:
 
 
 def install_model(output: Path, force: bool, model: Model | None = None) -> bool:
-    """Installs verified artifacts atomically and returns whether files changed."""
+    """Repairs missing or invalid files while preserving valid local files and returns whether the install changed."""
     model = model or Model.from_name("pp-doclayout-v3")
     if not force:
         try:
@@ -202,7 +207,12 @@ def install_model(output: Path, force: bool, model: Model | None = None) -> bool
         prefix=".docparse-model-", dir=output_parent
     ) as temporary:
         temporary_path = Path(temporary)
+        downloaded = []
         for artifact in model.artifacts:
+            existing = output / artifact.filename
+            # A missing manifest or sibling artifact must not cause intact weights to be downloaded or rewritten.
+            if not force and existing.is_file() and sha256_file(existing) == artifact.sha256:
+                continue
             destination = temporary_path / artifact.filename
             download_artifact(artifact, destination)
             actual_hash = sha256_file(destination)
@@ -211,16 +221,18 @@ def install_model(output: Path, force: bool, model: Model | None = None) -> bool
                     f"downloaded hash mismatch for {artifact.filename}: "
                     f"expected {artifact.sha256}, got {actual_hash}"
                 )
+            downloaded.append(artifact)
         write_manifest(temporary_path, model)
-        verify_installation(temporary_path, model)
 
         output.mkdir(parents=True, exist_ok=True)
-        for artifact in model.artifacts:
+        # Every pending download is verified before replacing files; publish the manifest last.
+        for artifact in downloaded:
             os.replace(temporary_path / artifact.filename, output / artifact.filename)
         os.replace(
             temporary_path / "model-manifest.json",
             output / "model-manifest.json",
         )
+    verify_installation(output, model)
     return True
 
 
@@ -229,12 +241,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download pinned layout, table and PaddleOCR ONNX artifacts."
     )
-    parser.add_argument("--model", choices=["pp-doclayout-v3", "slanet-plus", "pp-ocrv6-medium-det", "pp-ocrv6-medium-rec", "pp-lcnet-textline-ori"], default="pp-doclayout-v3")
-    parser.add_argument(
+    parser.add_argument("--model", choices=("all", *MODEL_NAMES), default="all", help="model to provision (default: all five models)")
+    location = parser.add_mutually_exclusive_group()
+    location.add_argument(
+        "--models-dir",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent / "models",
+        help="model root directory (default: the repository's models directory)",
+    )
+    location.add_argument(
         "--output",
         type=Path,
         default=None,
-        help="installation directory",
+        help="exact installation directory for one explicitly selected model",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--force", action="store_true", help="download even if valid")
@@ -243,26 +262,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="verify existing files without downloading",
     )
-    return parser.parse_args()
+    arguments = parser.parse_args()
+    if arguments.output is not None and arguments.model == "all":
+        parser.error("--output requires a single --model; use --models-dir for all models")
+    return arguments
 
 
 def main() -> int:
     """Runs model installation or verification and returns a process exit code."""
     arguments = parse_args()
-    model = Model.from_name(arguments.model)
-    output = arguments.output or Path("models") / model.name
-    try:
-        if arguments.verify_only:
-            verify_installation(output, model)
-            print(f"verified {model.name} at {output}")
-        else:
-            changed = install_model(output, force=arguments.force, model=model)
-            action = "installed" if changed else "already verified"
-            print(f"{action} {model.name} at {output}")
-    except ModelDownloadError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
-    return 0
+    names = MODEL_NAMES if arguments.model == "all" else (arguments.model,)
+    failed = False
+    for name in names:
+        model = Model.from_name(name)
+        output = arguments.output or arguments.models_dir / name
+        try:
+            if arguments.verify_only:
+                verify_installation(output, model)
+                print(f"verified {name} at {output}")
+            else:
+                changed = install_model(output, force=arguments.force, model=model)
+                action = "installed" if changed else "skipped (already verified)"
+                print(f"{action} {name} at {output}")
+        except (ModelDownloadError, OSError) as error:
+            # Other missing models can still be provisioned, but the command must report partial failure.
+            print(f"error: {name}: {error}", file=sys.stderr)
+            failed = True
+    return int(failed)
 
 
 if __name__ == "__main__":

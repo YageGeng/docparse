@@ -1,0 +1,26 @@
+[project]
+name = "docparse-tools"
+version = "0.1.0"
+description = "Development and model provisioning tools for the DocParse Rust workspace"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pillow>=11,<13",
+    "pre-commit==4.6.2",
+    "psutil==7.0.0",
+    "pypdf==6.0.0",
+    "reportlab>=4.4,<5",
+]
+reference = [
+    "numpy==2.3.5",
+    "onnxruntime==1.29.0",
+    "opencv-contrib-python==4.10.0.84",
+    "paddleocr==3.6.0",
+]
+
+[tool.uv]
+package = false
+# Model downloads and compatibility checks use only the standard library.
+default-groups = []

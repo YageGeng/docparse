@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: wasm-compat-boundary
         name: "Rust platform compatibility boundary"
-        entry: python3 scripts/check_wasm_compat.py
+        entry: uv run --locked scripts/check_wasm_compat.py
         language: system
         pass_filenames: false
         types: [rust]

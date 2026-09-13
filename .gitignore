@@ -29,6 +29,7 @@
 
 # Python cache
 /**/__pycache__
+/.venv/
 
 # Misc
 output.json

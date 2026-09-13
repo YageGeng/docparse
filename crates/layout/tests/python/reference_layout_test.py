@@ -1,13 +1,4 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "numpy==2.3.5",
-#   "onnxruntime==1.29.0",
-#   "opencv-contrib-python==4.10.0.84",
-#   "paddleocr==3.6.0",
-# ]
-# ///
+#!/usr/bin/env -S uv run --locked --group reference
 """Contract tests for the fixed Python layout oracle."""
 
 from __future__ import annotations
@@ -17,6 +8,8 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 def load_script_module():
@@ -90,6 +83,23 @@ class ReferenceLayoutTest(unittest.TestCase):
         second = json.dumps(self.second, indent=2, sort_keys=True) + "\n"
         self.assertEqual(first, second)
         self.assertNotIn(str(self.input_path.parent), first)
+
+    def test_onnx_outputs_are_dense_arrays_without_copying(self):
+        """Generic ORT sequences become a dense-array list, while unsupported output types fail explicitly."""
+        session = mock.Mock()
+        session.get_inputs.return_value = [SimpleNamespace(name=name) for name in ("im_shape", "image", "scale_factor")]
+        session.get_outputs.return_value = [SimpleNamespace(name=name) for name in ("fetch_name_0", "fetch_name_1", "fetch_name_2")]
+        arrays = tuple(self.module.np.zeros((1,)) for _ in range(3))
+        session.run.return_value = arrays
+        with mock.patch.object(self.module.ort, "InferenceSession", return_value=session):
+            returned_session, outputs = self.module.run_onnx(Path("unused.onnx"), list(arrays))
+            self.assertIs(returned_session, session)
+            self.assertIsInstance(outputs, list)
+            for expected, actual in zip(arrays, outputs, strict=True):
+                self.assertIs(actual, expected)
+            session.run.return_value = (arrays[0], {"unexpected": "map"}, arrays[2])
+            with self.assertRaisesRegex(self.module.OracleError, "output 1.*dict"):
+                self.module.run_onnx(Path("unused.onnx"), list(arrays))
 
 
 if __name__ == "__main__":

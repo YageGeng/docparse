@@ -13,7 +13,7 @@ models. Unsupported operators may still execute on CPU inside an accelerated
 session; unavailable requested providers fail explicitly.
 
 ```sh
-rtk uv run scripts/download_models.py --model slanet-plus
+rtk uv run --locked scripts/download_models.py --model slanet-plus
 rtk cargo test -p docparse-tsr -- --include-ignored
 rtk cargo test -p docparse-tsr --features metal --test inference -- --include-ignored
 ```

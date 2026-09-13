@@ -13,7 +13,7 @@ def main() -> None:
     writer = PdfWriter()
     writer.append(reader)
     for page in writer.pages:
-        for reference in page["/Resources"]["/Font"].values():
+        for reference in page["/Resources"]["/Font"].values():  # pyright: ignore[reportIndexIssue]
             font = reference.get_object()
             if font.get("/Subtype") != "/TrueType":
                 continue

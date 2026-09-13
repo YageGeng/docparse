@@ -1,13 +1,20 @@
 """Generate deterministic embedded-font table fixtures with explicit and inferred structure."""
+import argparse
 from io import BytesIO
 from pathlib import Path
-import argparse
+
 import reportlab
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import (
+    ArrayObject,
+    BooleanObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+)
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ArrayObject, BooleanObject, DictionaryObject, NameObject, NumberObject
 
 
 def generate(path: Path) -> None:
@@ -53,11 +60,11 @@ def generate(path: Path) -> None:
                     continue
                 if page == 2:
                     ids.append(mcid)
-                    pdf._code.append(f"/Span <</MCID {mcid}>> BDC")
+                    pdf._code.append(f"/Span <</MCID {mcid}>> BDC")  # pyright: ignore[reportAttributeAccessIssue]
                     mcid += 1
                 pdf.drawString(x, ys[row] - 20 - offset * 12, line)
                 if page == 2:
-                    pdf._code.append("EMC")
+                    pdf._code.append("EMC")  # pyright: ignore[reportAttributeAccessIssue]
             if page == 2:
                 tagged_cells.append((row, col, row_span, col_span, header, ids))
         pdf.setFont("TableVera", 10)
@@ -73,7 +80,7 @@ def generate(path: Path) -> None:
     table = DictionaryObject({NameObject("/Type"): NameObject("/StructElem"), NameObject("/S"): NameObject("/Table"), NameObject("/P"): tree_ref, NameObject("/Pg"): page_ref})
     table_ref = writer._add_object(table)
     row_refs = []
-    parents = [None] * mcid
+    parents = [None] * mcid  # pyright: ignore[reportPossiblyUnboundVariable]
     for row in range(8):
         tr = DictionaryObject({NameObject("/Type"): NameObject("/StructElem"), NameObject("/S"): NameObject("/TR"), NameObject("/P"): table_ref, NameObject("/Pg"): page_ref})
         tr_ref = writer._add_object(tr)

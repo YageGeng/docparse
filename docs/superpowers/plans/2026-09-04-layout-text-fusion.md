@@ -116,8 +116,8 @@ docparse/
 docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
-pdfium = { package = "docparse-pdfium", version = "1.9.0", path = "crates/pdfium" }
-pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }
+pdfium = { package = "docparse-pdfium", version = "0.1.0", path = "crates/pdfium" }
+pdfium-sys = { package = "docparse-pdfium-sys", version = "0.1.0", path = "crates/pdfium-sys" }
 
 # error
 thiserror = "2"

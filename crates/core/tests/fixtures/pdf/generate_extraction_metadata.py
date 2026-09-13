@@ -63,14 +63,14 @@ def draw_fixture(output: Path) -> None:
     pdf.restoreState()
 
     # The marked-content sequence gives PDFium a stable MCID-bearing text object.
-    pdf._code.append("/P <</MCID 7>> BDC")
+    pdf._code.append("/P <</MCID 7>> BDC")  # pyright: ignore[reportAttributeAccessIssue]
     pdf.setFillColor(Color(0.2, 0.5, 0.2, alpha=1.0))
     text = pdf.beginText(54, 500)
     text.setFont("Helvetica", 11)
     text.setTextRenderMode(2)
     text.textOut("Marked fill and stroke")
     pdf.drawText(text)
-    pdf._code.append("EMC")
+    pdf._code.append("EMC")  # pyright: ignore[reportAttributeAccessIssue]
 
     pdf.setFillColor(black)
     pdf.setFont("Helvetica", 11)

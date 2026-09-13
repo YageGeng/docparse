@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Generate deterministic synthetic RGB PNGs for layout parity tests."""
+#!/usr/bin/env -S uv run --locked
+"""Regenerate the deterministic RGB fixtures beside the layout parity oracle."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --locked
 """Reject conditional compilation outside the explicit platform boundaries."""
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ ALLOWED.update({
     "crates/layout/src/wasm_compat/session_pool.rs",
     "crates/layout/src/wasm_compat/backend.rs",
 })
-EXCLUDED = {".git", "target", "node_modules"}
+# uv's environment contains third-party packages rather than workspace Rust sources.
+EXCLUDED = {".git", ".venv", "target", "node_modules"}
 
 
 def code_only(source: str) -> str:

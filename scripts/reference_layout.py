@@ -1,12 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "numpy==2.3.5",
-#   "onnxruntime==1.29.0",
-#   "opencv-contrib-python==4.10.0.84",
-#   "paddleocr==3.6.0",
-# ]
-# ///
 """Generate a deterministic PP-DocLayoutV3 preprocessing and output oracle."""
 
 from __future__ import annotations
@@ -112,14 +103,17 @@ def official_preprocess(input_path: Path) -> tuple[list[dict], list[np.ndarray]]
         keep_ratio=False,
         interp="BICUBIC",
     )(data)
+    # PaddleX broadcasts scalar mean/std to all three channels; scalars also match its inferred parameter types.
     data = Normalize(
         scale=1.0 / 255.0,
-        mean=[0.0, 0.0, 0.0],
-        std=[1.0, 1.0, 1.0],
+        mean=0.0,
+        std=1.0,
     )(data)
     data = ToCHWImage()(data)
-    batch = ToBatch(("img_size", "img", "scale_factors"))(data)
-    return data, list(batch)
+    # PaddleX annotates ordered_required_keys as a one-element tuple; apply each key explicitly in model input order.
+    to_batch = ToBatch()
+    batch = [to_batch.apply(data, key) for key in ("img_size", "img", "scale_factors")]
+    return data, batch
 
 
 def run_onnx(
@@ -146,7 +140,13 @@ def run_onnx(
             "scale_factor": scale_factor,
         },
     )
-    return session, outputs
+    # ORT's generic API also permits sparse tensors and containers; this oracle requires dense tensors without copying them.
+    dense_outputs: list[np.ndarray] = []
+    for index, output in enumerate(outputs):
+        if not isinstance(output, np.ndarray):
+            raise OracleError(f"ONNX output {index} must be a dense ndarray, got {type(output).__name__}")
+        dense_outputs.append(output)
+    return session, dense_outputs
 
 
 def lossless_detections(

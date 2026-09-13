@@ -1,14 +1,14 @@
 """Create raster-only and mixed PDFs for acceptance against the real browser OCR pipeline.
 
-Run with: uv run --with reportlab --with pillow <this-file> <output-directory>
+Run with: uv run --locked --group dev <this-file> <output-directory>
 The inputs reuse the existing redistributable embedded-font extraction fixtures.
 """
 import argparse
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
 import reportlab
+from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont

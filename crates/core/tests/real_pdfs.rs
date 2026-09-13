@@ -89,7 +89,7 @@ async fn real_pdf_corpus() -> Result<(), Box<dyn Error>> {
     let manifest = load_manifest(&manifest_path)?;
     let verified = verify_pdf_directory(&manifest, &pdf_dir)?;
     let raw_config = ConfigLoader::new(&config_path).load_raw()?;
-    let config_identity = serde_json::json!({
+    let mut config_identity = serde_json::json!({
         "layout": {
             "score_threshold": raw_config.layout.score_threshold,
             // Keep corpus fingerprints sensitive to the actual compiled inference backend.
@@ -97,9 +97,17 @@ async fn real_pdf_corpus() -> Result<(), Box<dyn Error>> {
         },
         "render": raw_config.render,
         "fusion": raw_config.fusion,
+        "tsr": { "mode": raw_config.tsr.mode },
         "ocr": raw_config.ocr,
         "output": raw_config.output,
     });
+    // Artifact locations vary per temporary run and host; pinned model contracts already verify their contents.
+    if let Some(serde_json::Value::Object(ocr)) = config_identity.get_mut("ocr")
+    {
+        for group in ["detection", "recognition", "orientation"] {
+            ocr.remove(group);
+        }
+    }
     let config_fingerprint =
         sha256_bytes(&serde_json::to_vec(&config_identity)?);
     let model_manifest: serde_json::Value = serde_json::from_slice(
@@ -294,7 +302,7 @@ async fn real_pdf_corpus() -> Result<(), Box<dyn Error>> {
 fn required_env_path(name: &str) -> Result<PathBuf, std::io::Error> {
     std::env::var_os(name).map(PathBuf::from).ok_or_else(|| {
         std::io::Error::other(format!(
-            "missing {name}; run `uv run scripts/run_real_pdf_e2e.py --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3`"
+            "missing {name}; run `uv run --locked --group dev scripts/run_real_pdf_e2e.py --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3`"
         ))
     })
 }

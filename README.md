@@ -17,13 +17,19 @@ Model regions are candidates rather than a one-to-one final block contract. Owne
 Models are distributed separately from the repository and crates. Download and verify the pinned revision using the dependency-locked uv script:
 
 ```bash
-rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
-rtk uv run scripts/download_models.py --output models/pp-doclayout-v3 --verify-only
-rtk uv run scripts/download_models.py --model slanet-plus
-rtk uv run scripts/download_models.py --model slanet-plus --verify-only
+rtk uv run --locked scripts/download_models.py
+rtk uv run --locked scripts/download_models.py --verify-only
 ```
 
 The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
+
+The default command provisions layout, SLANet_plus, OCR detection, OCR recognition,
+and text-line orientation in the repository's `models/` directory. Verified local
+files are skipped; missing or corrupt files are downloaded and verified before
+publication. Use `--model slanet-plus` for one model, `--models-dir /path/to/models`
+for another root, or `--model pp-doclayout-v3 --output /path/to/layout` for an exact
+single-model directory. All Python tools use the root `pyproject.toml`, `.python-version`
+and `uv.lock`; see [scripts/README.md](scripts/README.md) for retained tools and dependency groups.
 
 ## Configuration
 
@@ -98,7 +104,7 @@ impl LayoutEngine for MyEngine {
 
 `ValidatedConfig::try_from` checks shared parameters. ConfigLoader and native model entry points handle paths; explicit artifacts and injected engines need no placeholder absolute paths. Browser hosts inject both layout and table engines from artifacts, or select `rules_only` to omit the table model. Native async APIs require Tokio. Direct browser hosts must initialize ort-web and WASI in the same Worker; the Web SDK handles this setup.
 
-Platform conditions are restricted to `wasm_compat.rs` and explicitly listed compatibility submodules. The browser-only `docparse-web` crate exports its API directly. Run `rtk proxy python3 scripts/check_wasm_compat.py` to check the boundary.
+Platform conditions are restricted to `wasm_compat.rs` and explicitly listed compatibility submodules. The browser-only `docparse-web` crate exports its API directly. Run `rtk uv run --locked scripts/check_wasm_compat.py` to check the boundary.
 
 ## CLI
 
@@ -135,7 +141,7 @@ visually affected by a watermark even though its recognized text is isolated fro
 
 ## Tests
 
-The workspace uses `members = ["crates/*"]`; `default-members` selects eight native crates. Default checks use local fixtures without model downloads:
+The workspace uses `members = ["crates/*"]`; `default-members` selects the native crates. Default checks use local fixtures without model downloads:
 
 ```bash
 rtk cargo fmt --all -- --check
@@ -152,7 +158,7 @@ rtk cargo build -p docparse-web --target wasm32-unknown-unknown --release --lock
 Model parity:
 
 ```bash
-rtk uv run scripts/reference_layout.py \
+rtk uv run --locked --group reference scripts/reference_layout.py \
   --model-dir models/pp-doclayout-v3 \
   --input-dir crates/layout/tests/fixtures/model \
   --output crates/layout/tests/fixtures/model/python_outputs.json
@@ -162,27 +168,26 @@ rtk cargo test -p docparse-layout --test python_parity -- --ignored --nocapture
 Real-PDF E2E preflight scans regular, case-insensitive PDF files at the top level of `~/Downloads`. The discovered basenames, sizes, SHA-256 values, and page counts must exactly match `tests/e2e-corpus.toml`. Adding, removing, or replacing a PDF fails preflight until the manifest is explicitly reviewed and updated. Full acceptance prohibits `--only`; that option is for smoke runs.
 
 ```bash
-rtk uv run scripts/run_real_pdf_e2e.py \
+rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
   --execution-provider cuda --page-concurrency 1 --run-id serial
-rtk uv run scripts/run_real_pdf_e2e.py \
+rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
   --execution-provider cuda --page-concurrency 4 --run-id parallel \
   --write-overlays
-rtk proxy python3 scripts/compare_e2e_runs.py \
+rtk uv run --locked scripts/compare_e2e_runs.py \
   target/docparse-e2e/serial/canonical-hashes.json \
   target/docparse-e2e/parallel/canonical-hashes.json
-rtk uv run scripts/build_visual_review.py \
-  --run-dir target/docparse-e2e/parallel
 ```
 
 E2E builds release tests before timing their binaries directly. Use `--cargo-profile dev` only when diagnosing debug behavior. Performance and Cargo profile are recorded in `summary.json`, not used as cross-machine thresholds. Canonical hashes exclude timings, absolute paths, and host details.
 
+Use the [production WebUI](packages/web/README.md) to inspect real PDFs, page images,
+regions, OCR text and recovered tables. The older static visual-review generator has been removed.
+
 ## Initial scope
 
 - Formula regions preserve location and content status without LaTeX recognition.
-- Tables expose visual reading order without reconstructing complete cell structures.
-- OCR requires a caller-provided implementation.
 - User PDFs, models, rendered images, and generated E2E reports are excluded from Git and crate packages. Small generated regression PDFs and their font licenses are maintained as source fixtures.
 
 ## Provenance and licensing
@@ -196,9 +201,7 @@ orientation, recognition and CTC decoding without an OAR dependency. Native and
 Web use the same algorithms and pinned PP-OCRv6 medium models. Download all three:
 
 ```sh
-rtk uv run scripts/download_models.py --model pp-ocrv6-medium-det
-rtk uv run scripts/download_models.py --model pp-ocrv6-medium-rec
-rtk uv run scripts/download_models.py --model pp-lcnet-textline-ori
+rtk uv run --locked scripts/download_models.py
 ```
 
 Enable native OCR in your TOML configuration:

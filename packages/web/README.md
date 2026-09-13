@@ -9,11 +9,7 @@ Prepare the pinned model and tools from the repository root:
 ```sh
 rtk rustup target add wasm32-unknown-unknown
 rtk cargo install wasm-bindgen-cli --version 0.2.125 --locked
-rtk uv run scripts/download_models.py --output models/pp-doclayout-v3
-rtk uv run scripts/download_models.py --model slanet-plus
-rtk uv run scripts/download_models.py --model pp-ocrv6-medium-det
-rtk uv run scripts/download_models.py --model pp-ocrv6-medium-rec
-rtk uv run scripts/download_models.py --model pp-lcnet-textline-ori
+rtk uv run --locked scripts/download_models.py
 ```
 
 Run these commands in `packages/web`:
@@ -290,7 +286,7 @@ From the repository root, generate native references and start the static/report
 
 ```sh
 rtk proxy env DOCPARSE_WEB_REFERENCE_DIR=packages/web/test-results/native rtk cargo test -p docparse-core --test web_reference -- --ignored --nocapture
-rtk proxy python3 packages/web/tests/serve.py --port 8767
+rtk uv run --locked packages/web/tests/serve.py --port 8767
 ```
 
 Open `/packages/web/tests/browser.html?cycles=20&relocated=1&run=cpu-stress`. The page uses the production build, real model, and PDF fixtures. `relocated=1` checks deployment under a renamed directory. Reports are saved to `packages/web/test-results/cpu-stress-<run-id>.json`, including parity, actual fetches, live tensors, WASM capacities, and cancellation/close results.

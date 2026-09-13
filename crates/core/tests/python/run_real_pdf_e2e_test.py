@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["psutil==7.0.0", "pypdf==6.0.0"]
-# ///
 """Behavior tests for strict real-PDF E2E preflight."""
 
 from __future__ import annotations
@@ -10,6 +6,7 @@ import hashlib
 import importlib.util
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from pypdf import PdfWriter
@@ -86,16 +83,24 @@ def main() -> None:
         documents = runner.load_manifest(manifest_path)
         verified = runner.verify_pdf_corpus(documents, pdf_dir)
         assert verified[0][1] == pdf_path
+        # A temporary E2E configuration must reference the downloaded TSR beside the selected layout model.
+        model_dir = root / "models/pp-doclayout-v3"
+        config_path = root / "run.toml"
+        runner.write_config(config_path, model_dir, 4, "cpu")
+        config = tomllib.loads(config_path.read_text())
+        assert config["tsr"]["model_path"] == str(model_dir.parent / "slanet-plus/inference.onnx")
+        assert config["tsr"]["mode"] == "fallback"
+        assert "execution_provider" not in config["layout"]
         build_command = runner.cargo_build_command("cuda", "release")
         assert isinstance(build_command, list)
         assert "layout-cuda" in build_command
         assert "--release" in build_command
         assert "--no-run" in build_command
-        assert "--message-format=json" in build_command
+        assert "--message-format=json-render-diagnostics" in build_command
         executable = runner.parse_harness_executable(
             [
-                '{"reason":"compiler-artifact","target":{"name":"real_pdfs"},'
-                '"profile":{"test":true},"executable":"/tmp/real_pdfs-test"}'
+                ('{"reason":"compiler-artifact","target":{"name":"real_pdfs"},'
+                '"profile":{"test":true},"executable":"/tmp/real_pdfs-test"}')
             ]
         )
         assert executable == Path("/tmp/real_pdfs-test")

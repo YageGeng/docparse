@@ -55,7 +55,8 @@ export async function prepareE2E() {
   };
   try {
     const exampleOrigin = await startServer(process.execPath, [join(packageRoot, "scripts/serve-example.mjs")], { ...process.env, PORT: "0" }, children);
-    const sdkOrigin = await startServer("python3", [join(packageRoot, "tests/serve.py"), "--port", "0"], process.env, children);
+    // The Python acceptance server shares the workspace's locked uv interpreter and environment.
+    const sdkOrigin = await startServer("uv", ["run", "--locked", join(packageRoot, "tests/serve.py"), "--port", "0"], process.env, children);
     const pdf = join(root, "crates/core/tests/fixtures/pdf/multipage_layout.pdf");
     return { exampleUrl: `${exampleOrigin}/example/`, sdkOrigin, pdf, invalidPdf, cancellationPdf: pdf, reportDirectory, close };
   } catch (error) { await close(); throw error; }

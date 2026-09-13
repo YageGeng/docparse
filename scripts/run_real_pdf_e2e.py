@@ -1,10 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "psutil==7.0.0",
-#   "pypdf==6.0.0",
-# ]
-# ///
 """Run strict production-model E2E tests against an exact local PDF corpus."""
 
 from __future__ import annotations
@@ -169,18 +162,17 @@ def verify_pdf_corpus(
 
 
 def verify_model(workspace: Path, model_dir: Path) -> None:
-    """Invoke the fixed downloader's offline verification mode without a shell."""
-    subprocess.run(
-        [
-            sys.executable,
-            str(workspace / "scripts/download_models.py"),
-            "--output",
-            str(model_dir),
-            "--verify-only",
-        ],
-        cwd=workspace,
-        check=True,
-    )
+    """Verify both enabled model families using the current uv-managed interpreter."""
+    for name, directory in [
+        ("pp-doclayout-v3", model_dir),
+        ("slanet-plus", model_dir.parent / "slanet-plus"),
+    ]:
+        subprocess.run(
+            [sys.executable, str(workspace / "scripts/download_models.py"),
+             "--model", name, "--output", str(directory), "--verify-only"],
+            cwd=workspace,
+            check=True,
+        )
 
 
 def write_config(
@@ -193,12 +185,20 @@ def write_config(
     queue_capacity = max(1, min(2, page_concurrency))
     # This 124 MB model reserves roughly 4.2 GB per CUDA session on an 8 GB GPU.
     session_pool_size = 1 if execution_provider == "cuda" else page_concurrency
+    # The current parser enables TSR by default; temporary run directories cannot supply its code-default relative paths.
+    table_dir = model_dir.parent / "slanet-plus"
     payload = f'''[layout]
 model_path = "{(model_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(model_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(model_dir / 'model-manifest.json').as_posix()}"
 score_threshold = 0.5
 session_pool_size = {session_pool_size}
+
+[tsr]
+model_path = "{(table_dir / 'inference.onnx').as_posix()}"
+model_config_path = "{(table_dir / 'inference.yml').as_posix()}"
+model_manifest_path = "{(table_dir / 'model-manifest.json').as_posix()}"
+mode = "fallback"
 
 [runtime]
 page_concurrency = {page_concurrency}
@@ -248,7 +248,8 @@ def cargo_build_command(execution_provider: str, cargo_profile: str) -> list[str
         "--test",
         "real_pdfs",
         "--no-run",
-        "--message-format=json",
+        # Keep artifact discovery machine-readable without swallowing compiler errors from stderr.
+        "--message-format=json-render-diagnostics",
     ])
     if cargo_profile == "release":
         command.append("--release")

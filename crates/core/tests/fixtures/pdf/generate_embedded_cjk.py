@@ -2,6 +2,7 @@
 import argparse
 import io
 from pathlib import Path
+
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, FloatObject, NameObject, NumberObject
 from reportlab.pdfbase import pdfmetrics

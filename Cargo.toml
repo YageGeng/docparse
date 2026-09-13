@@ -75,8 +75,8 @@ docparse-migration = { version = "0.1.0", path = "crates/migration" }
 docparse-ocr = { version = "0.1.0", path = "crates/ocr" }
 docparse-tsr = { version = "0.1.0", path = "crates/tsr" }
 docparse-web = { version = "0.1.0", path = "crates/web" }
-pdfium = { package = "docparse-pdfium", version = "1.9.0", path = "crates/pdfium" }
-pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crates/pdfium-sys" }
+pdfium = { package = "docparse-pdfium", version = "0.1.0", path = "crates/pdfium" }
+pdfium-sys = { package = "docparse-pdfium-sys", version = "0.1.0", path = "crates/pdfium-sys" }
 
 # error
 anyhow = "1"
