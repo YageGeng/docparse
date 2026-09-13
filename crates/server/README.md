@@ -203,13 +203,20 @@ the task. Defaults are two concurrent documents per worker, three attempts, and 
 one-hour deadline per attempt; tune `--worker-concurrency`, `--lease-seconds`,
 `--max-attempts`, and `--job-timeout-seconds` for your documents and hardware.
 
-SIGTERM stops new claims, causes `/api/ready` to return 503, closes SSE subscriptions,
+SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/ready` to return 503, close SSE subscriptions,
 and drains active parses. Configure the deployment's termination grace period to
 allow normal work to finish. If a process is forcibly stopped, another worker
 reclaims the task after lease expiry. Recovery re-parses the document from the
 beginning, retaining its job ID. It is at-least-once execution, not page-level
 checkpoint resumption. Retries use the receiving worker's model/configuration;
 keep them compatible during a rolling release.
+
+After draining, dropping the parser closes its model queues and joins the dedicated
+native threads, including ONNX destruction and thread-local cleanup. Idle sessions
+use no Tokio blocking capacity and can outlive their construction runtime. Finite
+initialization and inference waits retain ownership through caller cancellation;
+runtime shutdown waits for that outstanding work. This prevents CUDA cleanup from
+racing process-wide library teardown without reserving blocking workers for idle models.
 
 Inputs are content-addressed. Duplicate publication compares existing bytes and
 rejects conflicting or corrupt objects instead of acknowledging the filename alone. Results use per-attempt names and are synchronized

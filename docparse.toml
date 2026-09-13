@@ -1,5 +1,5 @@
 [log]
-directives = "info,ort=warn,sqlx=warn"
+directives = "info,ort=info,sqlx=warn"
 
 [server]
 host = "127.0.0.1"
