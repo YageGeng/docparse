@@ -1,15 +1,19 @@
 use crate::{
-    ConfigError, FusionConfig, LayoutConfig, OcrConfig, OutputConfig,
-    RawConfig, RenderConfig, RuntimeConfig, TsrConfig,
+    ConfigError, DatabaseConfig, FusionConfig, LayoutConfig, OcrConfig,
+    OutputConfig, RawConfig, RenderConfig, RuntimeConfig, ServerConfig,
+    TsrConfig,
 };
 use typed_builder::TypedBuilder;
 
 const ASSIGNMENT_WEIGHT_TOLERANCE: f64 = 1.0e-6;
 const MINIMUM_MODEL_INPUT_EDGE: u32 = 800;
 
-/// Configuration whose paths and numeric invariants have been validated once.
+/// Validated parser settings; native deployment configuration is checked separately by its consumers.
 #[derive(Debug, Clone, PartialEq, TypedBuilder)]
 pub struct ValidatedConfig {
+    // Platform-only state has no serialized configuration key or public builder override.
+    #[builder(default, setter(skip))]
+    pub(crate) platform: crate::wasm_compat::PlatformOptions,
     layout: LayoutConfig,
     tsr: TsrConfig,
     runtime: RuntimeConfig,
@@ -107,6 +111,13 @@ impl TryFrom<RawConfig> for ValidatedConfig {
     /// Validates all lexical and numeric invariants without reading model artifacts.
     fn try_from(config: RawConfig) -> Result<Self, Self::Error> {
         Self::validate_platform(&config)?;
+        // Bound page-level overlap even though each OCR model retains its own session lock.
+        if !(1..=32).contains(&config.ocr.max_in_flight) {
+            return Err(ConfigError::InvalidValue {
+                field: "ocr.max_in_flight",
+                reason: "must be between one and 32",
+            });
+        }
         // Bound OCR tensors, candidate work and deadlines before any model or image is loaded.
         for (value, field) in [
             (config.ocr.detection_threshold, "ocr.detection_threshold"),
@@ -262,6 +273,8 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             fusion,
             ocr,
             output,
+            // Keep native connection settings and credentials out of parser instances and browser validation.
+            ..
         } = config;
         Ok(Self::builder()
             .layout(layout)
@@ -272,5 +285,72 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             .ocr(ocr)
             .output(output)
             .build())
+    }
+}
+
+impl ServerConfig {
+    /// Validates the listener and a literal route prefix before Axum builds its route tree.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.host.is_empty() || self.host.chars().any(char::is_whitespace) {
+            return Err(ConfigError::InvalidValue {
+                field: "server.host",
+                reason: "must be a non-empty host name or IP address without whitespace",
+            });
+        }
+        // A prefix is a fixed path, never an Axum capture pattern or a URL containing query/fragment data.
+        if !matches!(self.api_prefix.as_str(), "" | "/")
+            && (!self.api_prefix.starts_with('/')
+                || self.api_prefix.split('/').skip(1).any(|segment| {
+                    segment.is_empty()
+                        || matches!(segment, "." | "..")
+                        || !segment.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric()
+                                || matches!(byte, b'-' | b'_' | b'.' | b'~')
+                        })
+                }))
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "server.api_prefix",
+                reason: "must be empty, /, or an absolute path of literal ASCII segments without a trailing slash",
+            });
+        }
+        Ok(())
+    }
+}
+
+impl DatabaseConfig {
+    /// Validates a PostgreSQL target and finite pool budgets before allocating connections.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if !["postgresql://", "postgres://"].into_iter().any(|scheme| {
+            self.url
+                .strip_prefix(scheme)
+                .is_some_and(|target| !target.is_empty())
+        }) {
+            return Err(ConfigError::InvalidValue {
+                field: "database.url",
+                reason: "must be a non-empty PostgreSQL connection URL",
+            });
+        }
+        if self.max_connections == 0
+            || self.min_connections > self.max_connections
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "database.max_connections",
+                reason: "must be positive and at least min_connections",
+            });
+        }
+        for (field, value) in [
+            ("database.timeout_ms", self.timeout_ms),
+            ("database.acquire_timeout_ms", self.acquire_timeout_ms),
+            ("database.idle_timeout_ms", self.idle_timeout_ms),
+        ] {
+            if !(1..=86_400_000).contains(&value) {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "must be between one and 86400000 milliseconds",
+                });
+            }
+        }
+        Ok(())
     }
 }

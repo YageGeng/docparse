@@ -189,7 +189,7 @@ def write_config(
     page_concurrency: int,
     execution_provider: str,
 ) -> None:
-    """Write a complete temporary config whose only variable policy is concurrency."""
+    """Write model paths and concurrency limits; the provider is selected by the Cargo build."""
     queue_capacity = max(1, min(2, page_concurrency))
     # This 124 MB model reserves roughly 4.2 GB per CUDA session on an 8 GB GPU.
     session_pool_size = 1 if execution_provider == "cuda" else page_concurrency
@@ -198,7 +198,6 @@ model_path = "{(model_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(model_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(model_dir / 'model-manifest.json').as_posix()}"
 score_threshold = 0.5
-execution_provider = "{execution_provider}"
 session_pool_size = {session_pool_size}
 
 [runtime]

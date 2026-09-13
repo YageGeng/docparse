@@ -1,0 +1,40 @@
+[package]
+name = "docparse-database"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# workspace crates
+docparse-config.workspace = true
+
+# error
+thiserror.workspace = true
+
+# api documentation
+utoipa.workspace = true
+
+# storage
+sea-orm.workspace = true
+
+# identity
+uuid.workspace = true
+
+# config and serialization
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# builder
+typed-builder.workspace = true
+
+[dev-dependencies]
+# workspace crates
+docparse-migration.workspace = true
+
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

@@ -6,14 +6,14 @@ use super::{
 impl TableStructureEngine for docparse_tsr::SlanetPlusEngine {
     /// Identifies the pinned model and selected backend in table evidence and logs.
     fn name(&self) -> &str {
-        use docparse_config::ExecutionProviderConfig;
+        use docparse_layout::ExecutionProvider;
         match self.execution_provider() {
-            ExecutionProviderConfig::Cpu => "slanet-plus-onnx-cpu",
-            ExecutionProviderConfig::Cuda => "slanet-plus-onnx-cuda",
-            ExecutionProviderConfig::CoreMl => "slanet-plus-onnx-coreml",
-            ExecutionProviderConfig::Metal => "slanet-plus-onnx-metal",
-            ExecutionProviderConfig::Openvino => "slanet-plus-onnx-openvino",
-            ExecutionProviderConfig::WebGpu => "slanet-plus-onnx-webgpu",
+            ExecutionProvider::Cpu => "slanet-plus-onnx-cpu",
+            ExecutionProvider::Cuda => "slanet-plus-onnx-cuda",
+            ExecutionProvider::CoreMl => "slanet-plus-onnx-coreml",
+            ExecutionProvider::Metal => "slanet-plus-onnx-metal",
+            ExecutionProvider::Openvino => "slanet-plus-onnx-openvino",
+            ExecutionProvider::WebGpu => "slanet-plus-onnx-webgpu",
         }
     }
 

@@ -115,10 +115,10 @@ pub enum LayoutError {
     #[error("layout session pool failed: {message}")]
     SessionPool { message: String },
 
-    /// A blocking inference task panicked or was cancelled.
+    /// Native task failures convert directly into the single-layer session initialization result.
     #[error("layout blocking task failed: {source}")]
     TaskJoin {
-        #[source]
+        #[from]
         source: crate::wasm_compat::TaskError,
     },
 

@@ -110,6 +110,91 @@ page_concurrency = 3
     );
 }
 
+/// Model backends cannot be overridden through any serialized model configuration group.
+#[test]
+fn execution_provider_configuration_is_rejected() {
+    let directory = tempfile::tempdir().expect("directory");
+    for group in ["layout", "tsr", "ocr"] {
+        let path = write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[{group}]\nexecution_provider = \"cuda\"\n"),
+        );
+        let error = ConfigLoader::new(path)
+            .load_raw()
+            .expect_err("backend is selected at compile time");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("{group}.execution_provider"))
+        );
+        // An environment override must not revive a field removed from TOML.
+        let path = write_config(directory.path(), "docparse.toml", "");
+        let error = ConfigLoader::new(path)
+            .with_env_provider(environment_provider(
+                json!({group: {"execution_provider": "cuda"}}),
+            ))
+            .load_raw()
+            .expect_err("environment cannot select a backend");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("{group}.execution_provider"))
+        );
+    }
+}
+
+/// OCR paths are independent files, including filenames that differ from the conventional model directory layout.
+#[test]
+fn nested_ocr_files_merge_and_resolve_against_the_main_config() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        r#"
+[ocr.detection]
+model_path = "custom/detect.onnx"
+model_config_path = "custom/detect.yml"
+model_manifest_path = "custom/detect.json"
+[ocr.recognition]
+model_path = "custom/recognize.onnx"
+"#,
+    );
+    let raw = ConfigLoader::new(path)
+        .load_raw()
+        .expect("nested OCR files");
+    let value = serde_json::to_value(raw).expect("configuration");
+    let base = directory.path().canonicalize().expect("base");
+    for (key, relative) in [
+        ("/ocr/detection/model_path", "custom/detect.onnx"),
+        ("/ocr/detection/model_config_path", "custom/detect.yml"),
+        ("/ocr/detection/model_manifest_path", "custom/detect.json"),
+        ("/ocr/recognition/model_path", "custom/recognize.onnx"),
+        (
+            "/ocr/recognition/model_config_path",
+            "models/pp-ocrv6-medium-rec/inference.yml",
+        ),
+        (
+            "/ocr/recognition/model_manifest_path",
+            "models/pp-ocrv6-medium-rec/model-manifest.json",
+        ),
+        (
+            "/ocr/orientation/model_path",
+            "models/pp-lcnet-textline-ori/inference.onnx",
+        ),
+        (
+            "/ocr/orientation/model_config_path",
+            "models/pp-lcnet-textline-ori/inference.yml",
+        ),
+        (
+            "/ocr/orientation/model_manifest_path",
+            "models/pp-lcnet-textline-ori/model-manifest.json",
+        ),
+    ] {
+        assert_eq!(value.pointer(key), Some(&json!(base.join(relative))));
+    }
+}
+
 /// Verifies that an unselected profile file is never loaded.
 #[test]
 fn absent_profile_does_not_load_profile_file() {
@@ -293,31 +378,109 @@ fn repository_default_config_matches_documented_defaults() {
     );
 }
 
-/// Older configurations retain native CPU defaults, while explicit TSR providers round-trip independently.
+/// Serialized configuration contains only model settings and cannot reintroduce per-model backend selection.
 #[test]
-fn table_and_layout_backends_share_names_and_native_defaults() {
-    let defaults = RawConfig::default();
-    assert_eq!(
-        defaults.layout.execution_provider,
-        docparse_config::ExecutionProviderConfig::Cpu
-    );
-    assert_eq!(
-        defaults.tsr.execution_provider,
-        defaults.layout.execution_provider
-    );
-    for provider in ["cpu", "cuda", "coreml", "metal", "openvino", "webgpu"] {
-        let mut value =
-            serde_json::to_value(&defaults).expect("serialized defaults");
-        *value
-            .get_mut("tsr")
-            .and_then(|tsr| tsr.get_mut("execution_provider"))
-            .expect("serialized backend field") = json!(provider);
-        let raw: RawConfig =
-            serde_json::from_value(value).expect("provider config");
-        assert_eq!(raw.tsr.execution_provider.to_string(), provider);
-        assert_eq!(
-            raw.layout.execution_provider,
-            defaults.layout.execution_provider
+fn serialized_defaults_have_no_execution_provider() {
+    let value = serde_json::to_value(RawConfig::default()).expect("defaults");
+    for group in ["layout", "tsr", "ocr"] {
+        assert!(
+            value
+                .get(group)
+                .expect("model group")
+                .get("execution_provider")
+                .is_none()
         );
+    }
+}
+
+/// Log filters retain code defaults and support the shared file and environment override layers.
+#[test]
+fn log_directives_follow_configuration_precedence() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[log]\ndirectives = \"debug,ort=error\"\n",
+    );
+    let configured = ConfigLoader::new(&path)
+        .load_raw()
+        .expect("log configuration");
+    assert_eq!(configured.log.directives, "debug,ort=error");
+    let overridden = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(
+            json!({"log": {"directives": "warn,docparse_server=debug"}}),
+        ))
+        .load_raw()
+        .expect("environment override");
+    assert_eq!(overridden.log.directives, "warn,docparse_server=debug");
+    write_config(directory.path(), "docparse.toml", "");
+    let defaults = ConfigLoader::new(path)
+        .load_raw()
+        .expect("older configuration");
+    assert_eq!(defaults.log.directives, "info,ort=warn,sqlx=warn");
+}
+
+/// API prefixes follow the same file and environment precedence as other server settings.
+#[test]
+fn server_api_prefix_uses_shared_configuration_layers() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[server]\napi_prefix = \"/api/v2\"\n",
+    );
+    let configured = ConfigLoader::new(&path)
+        .load_raw()
+        .expect("prefix configuration");
+    assert_eq!(configured.server.api_prefix, "/api/v2");
+    let overridden = ConfigLoader::new(path)
+        .with_env_provider(environment_provider(
+            json!({"server": {"api_prefix": "/gateway/v3"}}),
+        ))
+        .load_raw()
+        .expect("environment override");
+    assert_eq!(overridden.server.api_prefix, "/gateway/v3");
+}
+
+/// Native deployment sections participate in the existing file, environment, and explicit override precedence.
+#[test]
+fn server_and_database_use_the_shared_configuration_layers() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        r#"
+[server]
+host = "0.0.0.0"
+port = 9090
+[database]
+url = "postgresql://localhost/docparse"
+max_connections = 4
+idle_timeout_ms = 12000
+"#,
+    );
+    let environment = environment_provider(json!({
+        "server": {"port":9091}, "database":{"max_connections":7}
+    }));
+    let overrides = environment_provider(json!({"server":{"port":9092}}))
+        .extract()
+        .expect("overrides");
+    let raw = ConfigLoader::new(path)
+        .with_env_provider(environment)
+        .with_overrides(overrides)
+        .load_raw()
+        .expect("service configuration");
+    let values = serde_json::to_value(raw).expect("configuration values");
+    for (path, expected) in [
+        ("/server/host", json!("0.0.0.0")),
+        ("/server/port", json!(9092)),
+        ("/database/url", json!("postgresql://localhost/docparse")),
+        ("/database/max_connections", json!(7)),
+        ("/database/min_connections", json!(1)),
+        ("/database/timeout_ms", json!(5000)),
+        ("/database/acquire_timeout_ms", json!(5000)),
+        ("/database/idle_timeout_ms", json!(12000)),
+    ] {
+        assert_eq!(values.pointer(path), Some(&expected), "{path}");
     }
 }

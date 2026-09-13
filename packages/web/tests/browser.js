@@ -196,7 +196,10 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   settled = true;
   const pageStages = ["text_extract", "pdf_render", "layout_preprocess", "layout_queue", "layout_inference", "layout_readback", "layout_postprocess", "text_prepare", "text_finish", "preview_encode"];
   for (const page of [1, 2, 3]) for (const stage of pageStages) {
-    assert(timingEvents.filter(event => event.stage === stage && event.page_number === page).length === 1, `Missing or duplicate page ${page} timing: ${stage}`);
+    // The staged pipeline composes text before TSR and completes the page afterward, each measured as text_finish.
+    const expectedRuns = stage === "text_finish" ? 2 : 1;
+    const runs = timingEvents.filter(event => event.stage === stage && event.page_number === page).length;
+    assert(runs === expectedRuns, `Page ${page} timing ${stage}: expected ${expectedRuns}, received ${runs}`);
   }
   for (const stage of ["pdf_open", "document_context", "link_validate", "parse_total", "result_serialize", "worker_total"]) {
     assert(timingEvents.filter(event => event.stage === stage && event.page_number === null).length === 1, `Missing or duplicate document timing: ${stage}`);

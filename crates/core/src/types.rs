@@ -1,3 +1,4 @@
+//! Canonical Serde types also define API schemas, avoiding a second copy of the document contract.
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -81,7 +82,7 @@ impl<'de> Deserialize<'de> for SchemaVersion {
 macro_rules! stable_id {
     ($(#[$metadata:meta])* $name:ident) => {
         $(#[$metadata])*
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, utoipa::ToSchema)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -157,7 +158,16 @@ impl ModelRegionId {
 
 /// Stable recursive XY-cut path independent of temporary vector positions.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(transparent)]
 pub struct RegionPath(String);
@@ -236,7 +246,9 @@ impl LineId {
 }
 
 /// Origin of one final block's primary semantic label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum LabelSource {
     Model,
     Pdf,
@@ -245,14 +257,18 @@ pub enum LabelSource {
 }
 
 /// Origin of one text fact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum TextSource {
     Native,
     Ocr,
 }
 
 /// Positive watermark evidence; absence leaves an ordinary text fact eligible for fusion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WatermarkSource {
     PdfMarkedContent,
@@ -260,7 +276,9 @@ pub enum WatermarkSource {
 }
 
 /// Final inline ordering direction for a line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum WritingDirection {
     LeftToRight,
     RightToLeft,
@@ -268,7 +286,9 @@ pub enum WritingDirection {
 }
 
 /// Explicit text repair evidence retained beside the original text fact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum RepairAction {
     RemovedControl,
     EncodedHyphen,
@@ -292,7 +312,9 @@ pub enum RepairAction {
 }
 
 /// Completeness of text located beneath one inline formula region.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum InlineContentStatus {
     Complete,
     Partial,
@@ -300,7 +322,9 @@ pub enum InlineContentStatus {
 }
 
 /// Half-open text-item ordinal range inside one final line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub struct TextItemRange {
     pub start: usize,
     pub end: usize,
@@ -314,14 +338,24 @@ impl TextItemRange {
 }
 
 /// A baseline segment in canonical viewport coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub struct Baseline {
     pub start: Point,
     pub end: Point,
 }
 
 /// Generic deterministic evidence attached to a result decision.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct Evidence {
     pub kind: String,
     #[builder(default)]
@@ -331,7 +365,15 @@ pub struct Evidence {
 }
 
 /// Original model or fallback region geometry retained beside final content bounds.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct SourceRegionEvidence {
     /// Original semantic label, including alternate labels retained during a merge.
     #[builder(default, setter(strip_option))]
@@ -352,7 +394,15 @@ pub struct SourceRegionEvidence {
 }
 
 /// Rich font and paint facts aggregated over one text item.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct TextStyle {
     #[builder(default)]
     pub font_name: Option<String>,
@@ -385,7 +435,9 @@ pub struct TextStyle {
 }
 
 /// Whether PDFium could map source character codes to Unicode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum UnicodeMappingStatus {
     Complete,
     Partial,
@@ -393,7 +445,15 @@ pub enum UnicodeMappingStatus {
 }
 
 /// Stable PDF provenance that excludes temporary handles and pointer values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct PdfProvenance {
     #[builder(default)]
     pub char_codes: Vec<u32>,
@@ -411,7 +471,15 @@ pub struct PdfProvenance {
 }
 
 /// One continuous native or OCR text fact.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct TextItem {
     pub id: TextItemId,
     pub raw_text: String,
@@ -470,7 +538,15 @@ impl TextItem {
 }
 
 /// A non-owning inline formula annotation attached to one line.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct InlineSpan {
     pub label: LayoutLabel,
     #[builder(default)]
@@ -485,7 +561,15 @@ pub struct InlineSpan {
 }
 
 /// One final line that exclusively owns its text items.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct Line {
     pub id: LineId,
     pub text: String,
@@ -531,7 +615,15 @@ impl Line {
 }
 
 /// One final semantic block that exclusively owns its lines.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct Block {
     pub id: BlockId,
     pub label: LayoutLabel,
@@ -719,7 +811,9 @@ impl Block {
 }
 
 /// Stable warning emitted for one page without discarding available content.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub struct PageWarning {
     pub code: String,
     pub stage: String,
@@ -727,7 +821,16 @@ pub struct PageWarning {
 }
 
 /// Stable page failure that never embeds local paths or source bytes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct PageError {
     pub page_number: u32,
     pub stage: String,
@@ -736,7 +839,15 @@ pub struct PageError {
 }
 
 /// One page's canonical nested result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct PageResult {
     pub page_number: u32,
     pub width: f64,
@@ -766,7 +877,15 @@ impl PageResult {
 }
 
 /// Immutable document-level facts shared by page analysis.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 #[builder(builder_type(name = DocumentContextDataBuilder))]
 pub struct DocumentContext {
     pub page_count: u32,
@@ -787,7 +906,16 @@ pub struct DocumentContext {
 }
 
 /// Non-owning reference used by document-level relations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct NodeRef {
     pub page_number: u32,
     pub block_id: BlockId,
@@ -797,7 +925,16 @@ pub struct NodeRef {
 
 /// Supported document-level relation categories.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
 )]
 pub enum RelationKind {
     RepeatedChrome,
@@ -807,7 +944,15 @@ pub enum RelationKind {
 }
 
 /// One deterministic non-owning document relation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct DocumentRelation {
     pub kind: RelationKind,
     pub source: NodeRef,
@@ -819,14 +964,26 @@ pub struct DocumentRelation {
 }
 
 /// Sidecar relations that never modify page ownership or reading order.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub struct DocumentRelations {
     pub relations: Vec<DocumentRelation>,
 }
 
 /// Canonical complete document aggregate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
 pub struct DocumentResult {
+    // SchemaVersion has a custom string serializer rather than exposing its private numeric fields.
+    #[schema(value_type = String, pattern = r"^2\.[0-9]+$", example = "2.0")]
     pub schema_version: SchemaVersion,
     pub context: DocumentContext,
     pub pages: Vec<PageResult>,

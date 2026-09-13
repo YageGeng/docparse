@@ -4,7 +4,6 @@ use crate::{
     model::{ModelKind, ModelOutput},
     preprocess::ImageTensor,
 };
-use docparse_config::ExecutionProviderConfig;
 use docparse_layout::{
     timing::{TimingStage, Timings},
     wasm_compat::OnnxBackend,
@@ -12,79 +11,76 @@ use docparse_layout::{
 use ort::{session::builder::SessionBuilder, value::TensorRef};
 use std::sync::Arc;
 
+// Native stages can overlap across pages; browser tensor execution remains single-page bounded.
+#[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+pub(crate) const MAX_PAGE_CONCURRENCY: usize = 32;
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub(crate) const MAX_PAGE_CONCURRENCY: usize = 1;
+
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
+    use docparse_layout::wasm_compat::SessionWorker;
     use ort::session::Session;
-    use tokio::sync::Mutex;
 
     /// A single native OCR stage, serialized independently of other model sessions.
     pub(crate) struct SessionRunner {
-        session: Arc<Mutex<Session>>,
+        session: SessionWorker<Session>,
         kind: ModelKind,
     }
 
     impl SessionRunner {
-        /// Loads immutable model bytes on the blocking executor using the shared strict backend selector.
+        /// Loads immutable model bytes on the same dedicated thread that will run inference.
         pub async fn load(
             bytes: Arc<[u8]>,
-            provider: ExecutionProviderConfig,
+            backend: OnnxBackend,
             kind: ModelKind,
         ) -> Result<Arc<Self>, OcrError> {
-            let session = docparse_layout::wasm_compat::run_cpu(move || {
-                let session = SessionBuilder::try_from(OnnxBackend(provider))?
+            let session = SessionWorker::new(move || {
+                let session = SessionBuilder::try_from(backend)?
                     .with_intra_threads(1)
                     .map_err(ort::Error::from)?
                     .commit_from_memory(&bytes)?;
                 kind.validate_session(&session)?;
                 Ok::<_, OcrError>(session)
             })
-            .await??;
-            Ok(Arc::new(Self {
-                session: Arc::new(Mutex::new(session)),
-                kind,
-            }))
+            .await?;
+            Ok(Arc::new(Self { session, kind }))
         }
 
-        /// Moves the owned guard into the blocking call so cancellation cannot free an in-flight tensor.
+        /// Keeps owned tensors on the session thread through inference, including after caller cancellation.
         pub async fn run(
             self: Arc<Self>,
             input: ImageTensor,
             timings: Timings,
         ) -> Result<ModelOutput, OcrError> {
             let queued = timings.start(TimingStage::OcrQueue);
-            let mut session = Arc::clone(&self.session).lock_owned().await;
-            docparse_layout::wasm_compat::run_cpu(move || {
-                drop(queued);
-                let _timer = timings.start(self.kind.timing());
-                let outputs = session.run(
+            let kind = self.kind;
+            self.session
+                .run(move |session| {
+                    drop(queued);
+                    let _timer = timings.start(kind.timing());
+                    let outputs = session.run(
                     ort::inputs! {"x"=>TensorRef::from_array_view(&input.0)?},
                 )?;
-                self.kind.read(&outputs)
-            })
-            .await?
+                    kind.read(&outputs)
+                })
+                .await?
         }
     }
 
     impl crate::OcrArtifacts {
-        /// Reads the three configured artifact directories without introducing filesystem access into shared inference.
+        /// Reads each configured model file set without introducing filesystem access into shared inference.
         pub async fn from_config(
             config: &docparse_config::OcrConfig,
         ) -> Result<Self, OcrError> {
             let config = config.clone();
             docparse_layout::wasm_compat::run_cpu(move || {
-                let load = |path: &std::path::Path| {
-                    docparse_layout::ModelArtifacts::from_paths(
-                        &path.join("inference.onnx"),
-                        &path.join("inference.yml"),
-                        &path.join("model-manifest.json"),
-                    )
-                };
                 Ok::<_, OcrError>(Self {
-                    detection: load(&config.detection_model_dir)?,
-                    recognition: load(&config.recognition_model_dir)?,
+                    detection: (&config.detection).try_into()?,
+                    recognition: (&config.recognition).try_into()?,
                     orientation: if config.classify_orientation {
-                        Some(load(&config.orientation_model_dir)?)
+                        Some((&config.orientation).try_into()?)
                     } else {
                         None
                     },
@@ -117,10 +113,10 @@ mod platform {
         /// Starts a Worker-local actor on the already initialized ORT Web backend.
         pub async fn load(
             bytes: Arc<[u8]>,
-            provider: ExecutionProviderConfig,
+            backend: OnnxBackend,
             kind: ModelKind,
         ) -> Result<Arc<Self>, OcrError> {
-            let mut session = SessionBuilder::try_from(OnnxBackend(provider))?
+            let mut session = SessionBuilder::try_from(backend)?
                 .commit_from_memory(&bytes)
                 .await?;
             kind.validate_session(&session)?;

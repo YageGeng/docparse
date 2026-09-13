@@ -2,20 +2,20 @@
 
 Independent Paddle SLANet_plus ONNX inference for layout-owned table crops.
 Models stay external. Layout and TSR reuse the same ONNX execution-provider
-registration: CPU, CUDA, CoreML, OpenVINO, and browser WebGPU. Native
-`tsr.execution_provider` is independent of `layout.execution_provider`; both
-code defaults are CPU. Enable the matching `cuda`, `coreml`, or `openvino` crate
-feature. `metal` uses CoreML with `CPUAndGPU` compute units (no separate Metal EP).
+registration: CPU, CUDA, CoreML, OpenVINO, and browser WebGPU. Native layout, OCR
+and TSR share the backend selected by Cargo features, defaulting to CPU. Enable
+one of `cuda`, `coreml`, `metal`, or `openvino`; no runtime provider configuration
+is accepted. `metal` uses CoreML with `CPUAndGPU` compute units (no separate Metal EP).
 Native sessions specialize the pinned model to the preprocessing contract
 `[1, 3, 488, 488]` before graph initialization, including CoreML shape inference.
-WASM defaults to WebGPU, and the Web SDK applies its selected backend to both
+WASM defaults to WebGPU, and the Web SDK applies its selected backend to all
 models. Unsupported operators may still execute on CPU inside an accelerated
 session; unavailable requested providers fail explicitly.
 
 ```sh
 rtk uv run scripts/download_models.py --model slanet-plus
 rtk cargo test -p docparse-tsr -- --include-ignored
-rtk proxy env TSR_TEST_PROVIDER=metal cargo test -p docparse-tsr --features metal --test inference -- --include-ignored
+rtk cargo test -p docparse-tsr --features metal --test inference -- --include-ignored
 ```
 
 `SlanetPlusEngine::from_artifacts(Arc<ValidatedConfig>, ModelArtifacts)` validates the pinned model,

@@ -2,7 +2,6 @@
 use crate::{
     SlanetPlusEngine, TsrError, model::ModelOutputs, preprocess::SlanetInput,
 };
-use docparse_config::ExecutionProviderConfig;
 use docparse_layout::wasm_compat::OnnxBackend;
 use docparse_layout::{
     ModelArtifacts,
@@ -14,24 +13,24 @@ use std::sync::Arc;
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
+    use docparse_layout::wasm_compat::SessionWorker;
     use ort::session::Session;
-    use tokio::sync::Mutex;
 
     /// Serializes only the TSR session, leaving layout inference independent.
     pub(crate) struct SessionRunner {
-        session: Arc<Mutex<Session>>,
+        session: SessionWorker<Session>,
     }
     impl SessionRunner {
-        /// Initializes the configured graph on the blocking executor.
+        /// Initializes the configured graph on its dedicated inference thread.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
-            provider: ExecutionProviderConfig,
+            backend: OnnxBackend,
         ) -> Result<Arc<Self>, TsrError> {
-            let session = docparse_layout::wasm_compat::run_cpu(move || {
+            let session = SessionWorker::new(move || {
                 // Preprocessing always produces [1, 3, 488, 488]. Specialize the pinned
                 // model's free dimensions so accelerator shape inference sees that contract.
                 Ok::<_, TsrError>(
-                    SessionBuilder::try_from(OnnxBackend(provider))?
+                    SessionBuilder::try_from(backend)?
                         .with_dimension_override("DynamicDimension.0", 1)
                         .map_err(ort::Error::from)?
                         .with_dimension_override("DynamicDimension.1", 488)
@@ -43,22 +42,19 @@ mod platform {
                         .commit_from_memory(&artifacts.model)?,
                 )
             })
-            .await??;
+            .await?;
             // ponytail: one session serializes TSR crops; add a pool only if measured throughput needs it.
-            Ok(Arc::new(Self {
-                session: Arc::new(Mutex::new(session)),
-            }))
+            Ok(Arc::new(Self { session }))
         }
 
-        /// Holds the session guard inside the blocking closure until actual inference finishes, even on cancellation.
+        /// Runs on the same thread for every crop while retaining tensors through actual completion.
         pub(crate) async fn run(
             self: Arc<Self>,
             input: SlanetInput,
             timings: Timings,
         ) -> Result<ModelOutputs, TsrError> {
             let queued = timings.start(TimingStage::TsrQueue);
-            let mut session = Arc::clone(&self.session).lock_owned().await;
-            docparse_layout::wasm_compat::run_cpu(move || {
+            self.session.run(move |session| {
                 drop(queued);
                 let _timer = timings.start(TimingStage::TsrInference);
                 let outputs = session.run(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? })?;
@@ -107,9 +103,9 @@ mod platform {
         /// Creates the selected browser session after the host initializes ort-web.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
-            provider: ExecutionProviderConfig,
+            backend: OnnxBackend,
         ) -> Result<Arc<Self>, TsrError> {
-            let mut session = SessionBuilder::try_from(OnnxBackend(provider))?
+            let mut session = SessionBuilder::try_from(backend)?
                 .commit_from_memory(&artifacts.model)
                 .await?;
             let options = RunOptions::new()?;

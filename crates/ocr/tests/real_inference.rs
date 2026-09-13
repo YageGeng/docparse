@@ -1,4 +1,4 @@
-use docparse_config::{ExecutionProviderConfig, RawConfig, ValidatedConfig};
+use docparse_config::{RawConfig, ValidatedConfig};
 use docparse_layout::{
     PageImage, PageImageInput, PixelFormat, timing::Timings,
 };
@@ -7,23 +7,23 @@ use std::{path::PathBuf, sync::Arc};
 
 /// Runs pinned detector, classifier and recognizer models against a rendered document, never mocked outputs.
 #[tokio::test]
-#[ignore = "requires downloaded PaddleOCR artifacts; set DOCPARSE_OCR_TEST_PROVIDER=cuda for CUDA"]
+#[ignore = "requires downloaded PaddleOCR artifacts; use --features cuda for CUDA"]
 async fn printed_document_runs_complete_ocr() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .expect("workspace");
     let mut raw = RawConfig::default();
-    raw.ocr.detection_model_dir = root.join("models/pp-ocrv6-medium-det");
-    raw.ocr.recognition_model_dir = root.join("models/pp-ocrv6-medium-rec");
-    raw.ocr.orientation_model_dir = root.join("models/pp-lcnet-textline-ori");
-    raw.ocr.execution_provider =
-        if std::env::var("DOCPARSE_OCR_TEST_PROVIDER").as_deref() == Ok("cuda")
-        {
-            ExecutionProviderConfig::Cuda
-        } else {
-            ExecutionProviderConfig::Cpu
-        };
+    // Resolve code-default files independently of the user's deployment configuration.
+    for files in [
+        &mut raw.ocr.detection,
+        &mut raw.ocr.recognition,
+        &mut raw.ocr.orientation,
+    ] {
+        files.model_path = root.join(&files.model_path);
+        files.model_config_path = root.join(&files.model_config_path);
+        files.model_manifest_path = root.join(&files.model_manifest_path);
+    }
     let engine = PaddleOcrEngine::from_config(Arc::new(
         ValidatedConfig::try_from(raw).expect("config"),
     ))

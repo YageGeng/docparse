@@ -48,9 +48,98 @@ where
     F: FnOnce() -> T + WasmCompatSend + 'static,
     T: WasmCompatSend + 'static,
 {
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(TaskError::from)
+    // A span enters its own subscriber but does not make that subscriber the thread's default dispatcher.
+    let span = tracing::Span::current();
+    let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+    tokio::task::spawn_blocking(move || {
+        tracing::dispatcher::with_default(&dispatcher, || {
+            span.in_scope(operation)
+        })
+    })
+    .await
+    .map_err(TaskError::from)
+}
+
+type SessionOperation<S> = Box<dyn FnOnce(&mut S) + Send>;
+
+/// Keeps model initialization, execution, and destruction on one bounded native thread.
+pub struct SessionWorker<S> {
+    sender: tokio::sync::mpsc::Sender<SessionOperation<S>>,
+}
+
+impl<S: 'static> SessionWorker<S> {
+    /// Initializes a session on its owning thread so CUDA per-thread handles are reused across every request.
+    pub async fn new<F, E>(initialize: F) -> Result<Self, E>
+    where
+        F: FnOnce() -> Result<S, E> + Send + 'static,
+        E: From<TaskError> + Send + 'static,
+    {
+        let (sender, mut requests) =
+            tokio::sync::mpsc::channel::<SessionOperation<S>>(1);
+        let (ready, initialized) = tokio::sync::oneshot::channel();
+        // Initialization may use a local subscriber, but its context must end before this shared actor starts serving calls.
+        let span = tracing::Span::current();
+        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+        let initialize = move || {
+            tracing::dispatcher::with_default(&dispatcher, || {
+                span.in_scope(initialize)
+            })
+        };
+        std::thread::Builder::new()
+            .name("docparse-onnx".into())
+            .spawn(move || {
+                let mut session = match initialize() {
+                    Ok(session) => session,
+                    Err(error) => {
+                        let _ = ready.send(Err(error));
+                        return;
+                    }
+                };
+                if ready.send(Ok(())).is_err() {
+                    return;
+                }
+                while let Some(operation) = requests.blocking_recv() {
+                    operation(&mut session);
+                }
+            })
+            .map_err(|error| TaskError::from_message(error.to_string()))?;
+        // Transport and initialization failures converge through the caller's existing error conversion.
+        initialized.await.map_err(|_closed| {
+            TaskError::from_message("model initialization thread stopped")
+        })??;
+        Ok(Self { sender })
+    }
+
+    /// Owns each input closure through actual execution, skipping queued work whose caller has already cancelled.
+    pub async fn run<F, R>(&self, operation: F) -> Result<R, TaskError>
+    where
+        F: FnOnce(&mut S) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (response, result) = tokio::sync::oneshot::channel();
+        // Capture each invocation separately because the same session thread serves different PDFs.
+        let span = tracing::Span::current();
+        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+        self.sender
+            .send(Box::new(move |session| {
+                tracing::dispatcher::with_default(&dispatcher, || {
+                    span.in_scope(|| {
+                        if response.is_closed() {
+                            return;
+                        }
+                        let value = operation(session);
+                        let _ = response.send(value);
+                    })
+                })
+            }))
+            .await
+            .map_err(|_closed| {
+                TaskError::from_message("model execution thread stopped")
+            })?;
+        result.await.map_err(|_closed| {
+            TaskError::from_message("model execution response lost")
+        })
+    }
 }
 
 impl ModelArtifacts {
@@ -89,6 +178,21 @@ impl ModelArtifacts {
             config: config?,
             manifest: manifest?,
         })
+    }
+}
+
+impl TryFrom<&docparse_config::ModelFiles> for ModelArtifacts {
+    type Error = ModelManifestError;
+
+    /// Loads explicit model/config/manifest paths without reconstructing filenames from a directory.
+    fn try_from(
+        files: &docparse_config::ModelFiles,
+    ) -> Result<Self, Self::Error> {
+        Self::from_paths(
+            &files.model_path,
+            &files.model_config_path,
+            &files.model_manifest_path,
+        )
     }
 }
 impl ModelManifest {
@@ -243,4 +347,125 @@ pub fn model_metadata(
         .version(metadata.version())
         .custom(custom)
         .build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionWorker, TaskError};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    /// Flattening initialization errors must retain the concrete model failure rather than reclassifying it as a thread failure.
+    #[tokio::test]
+    async fn session_initialization_preserves_model_error() {
+        let result = SessionWorker::<()>::new(|| {
+            Err(crate::LayoutError::Engine {
+                message: "model initialization rejected".into(),
+            })
+        })
+        .await;
+        assert!(
+            matches!(result, Err(crate::LayoutError::Engine { message }) if message == "model initialization rejected")
+        );
+    }
+
+    /// Multiple async callers must execute on the same thread that initialized the session.
+    #[tokio::test]
+    async fn session_worker_preserves_thread_affinity() {
+        let worker = Arc::new(
+            SessionWorker::new(|| {
+                Ok::<_, TaskError>(std::thread::current().id())
+            })
+            .await
+            .expect("session"),
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..32 {
+            let worker = Arc::clone(&worker);
+            tasks.spawn(async move {
+                worker
+                    .run(|owner| (*owner, std::thread::current().id()))
+                    .await
+            });
+        }
+        while let Some(result) = tasks.join_next().await {
+            let (initialized, executing) =
+                result.expect("join").expect("execution");
+            assert_eq!(initialized, executing);
+        }
+    }
+
+    /// Tracks real actor-state destruction without adding any test-only production fields.
+    struct Lifetime {
+        alive: Arc<AtomicBool>,
+        dropped: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+    impl Drop for Lifetime {
+        /// Signals only after the in-flight operation and its session have actually finished.
+        fn drop(&mut self) {
+            self.alive.store(false, Ordering::SeqCst);
+            if let Some(dropped) = self.dropped.take() {
+                let _ = dropped.send(());
+            }
+        }
+    }
+
+    /// Cancelling a caller must not destroy a session while native inference is still using it.
+    #[tokio::test]
+    async fn cancellation_retains_running_session_until_completion() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let state_alive = Arc::clone(&alive);
+        let (dropped, destroyed) = tokio::sync::oneshot::channel();
+        let worker = Arc::new(
+            SessionWorker::new(move || {
+                Ok::<_, TaskError>(Lifetime {
+                    alive: state_alive,
+                    dropped: Some(dropped),
+                })
+            })
+            .await
+            .expect("session"),
+        );
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let caller = Arc::clone(&worker);
+        let task = tokio::spawn(async move {
+            caller
+                .run(move |_state| {
+                    let _ = started.send(());
+                    blocked.recv().expect("release native operation");
+                })
+                .await
+        });
+        entered.await.expect("operation started");
+        // A queued cancelled request must be discarded before invoking its captured input closure.
+        let queued_ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&queued_ran);
+        let queued_worker = Arc::clone(&worker);
+        let queued = tokio::spawn(async move {
+            queued_worker
+                .run(move |_state| flag.store(true, Ordering::SeqCst))
+                .await
+        });
+        while worker.sender.capacity() != 0 {
+            tokio::task::yield_now().await;
+        }
+        queued.abort();
+        assert!(
+            queued
+                .await
+                .expect_err("queued caller cancelled")
+                .is_cancelled()
+        );
+        task.abort();
+        assert!(task.await.expect_err("caller cancelled").is_cancelled());
+        drop(worker);
+        assert!(alive.load(Ordering::SeqCst));
+        release.send(()).expect("unblock native operation");
+        destroyed.await.expect("session eventually dropped");
+        assert!(!alive.load(Ordering::SeqCst));
+        assert!(!queued_ran.load(Ordering::SeqCst));
+    }
 }

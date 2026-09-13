@@ -1,6 +1,9 @@
 use std::fs;
 
-use docparse_config::{ConfigError, ConfigLoader, RawConfig, ValidatedConfig};
+use docparse_config::{
+    ConfigError, ConfigLoader, DatabaseConfig, RawConfig, ServerConfig,
+    ValidatedConfig,
+};
 
 /// Loads code defaults through the real loader so model paths become absolute.
 fn loaded_defaults() -> RawConfig {
@@ -131,4 +134,127 @@ fn parameter_validation_does_not_require_model_paths() {
     let raw = RawConfig::default();
     ValidatedConfig::try_from(raw)
         .expect("model paths belong to native artifact loading, not parameter validation");
+}
+
+/// OCR page overlap must retain a finite positive memory budget.
+#[test]
+fn ocr_in_flight_limit_is_validated() {
+    for limit in [0, 33] {
+        let mut raw = RawConfig::default();
+        raw.ocr.max_in_flight = limit;
+        assert_invalid_value(raw, "ocr.max_in_flight");
+    }
+    assert_eq!(RawConfig::default().ocr.max_in_flight, 2);
+}
+
+/// A configurable prefix cannot introduce captures, malformed URLs, or ambiguous route separators.
+#[test]
+fn server_api_prefix_is_a_literal_absolute_path() {
+    assert_eq!(ServerConfig::default().api_prefix, "/api");
+    for prefix in ["", "/", "/api", "/gateway/api-v2", "/v1.0/~jobs"] {
+        ServerConfig::builder()
+            .api_prefix(prefix)
+            .build()
+            .validate()
+            .expect("literal prefix");
+    }
+    for prefix in [
+        "api",
+        "/api/",
+        "//",
+        "/api//v1",
+        "/{id}",
+        "/api/*path",
+        "/:id",
+        "/../api",
+        "/api?x=1",
+        "/api#v1",
+        "/api%2Fv1",
+        "/api v1",
+        "/api\r\n",
+    ] {
+        assert!(
+            matches!(
+                ServerConfig::builder()
+                    .api_prefix(prefix)
+                    .build()
+                    .validate(),
+                Err(ConfigError::InvalidValue {
+                    field: "server.api_prefix",
+                    ..
+                })
+            ),
+            "accepted invalid prefix {prefix:?}"
+        );
+    }
+}
+
+/// Service consumers reject invalid pool budgets while parser-only callers remain independent of database settings.
+#[test]
+fn native_deployment_settings_are_validated_separately() {
+    for host in ["", " ", "127.0.0.1 "] {
+        assert!(matches!(
+            ServerConfig::builder().host(host).build().validate(),
+            Err(ConfigError::InvalidValue {
+                field: "server.host",
+                ..
+            })
+        ));
+    }
+    ServerConfig::builder()
+        .host("localhost")
+        .port(0)
+        .build()
+        .validate()
+        .expect("DNS and ephemeral port");
+    ServerConfig::builder()
+        .host("::1")
+        .build()
+        .validate()
+        .expect("IPv6");
+    let defaults = DatabaseConfig::builder()
+        .url("postgresql://user:private-password@localhost/docparse")
+        .build();
+    defaults.validate().expect("database defaults");
+    assert!(!format!("{defaults:?}").contains("private-password"));
+    for (field, value, expected) in [
+        ("url", serde_json::json!(""), "database.url"),
+        (
+            "url",
+            serde_json::json!("mysql://localhost/docparse"),
+            "database.url",
+        ),
+        (
+            "max_connections",
+            serde_json::json!(0),
+            "database.max_connections",
+        ),
+        (
+            "min_connections",
+            serde_json::json!(11),
+            "database.max_connections",
+        ),
+        ("timeout_ms", serde_json::json!(0), "database.timeout_ms"),
+        (
+            "acquire_timeout_ms",
+            serde_json::json!(0),
+            "database.acquire_timeout_ms",
+        ),
+        (
+            "idle_timeout_ms",
+            serde_json::json!(86_400_001),
+            "database.idle_timeout_ms",
+        ),
+    ] {
+        let mut json = serde_json::to_value(&defaults).expect("defaults");
+        *json.get_mut(field).expect("configuration field") = value;
+        let config: DatabaseConfig =
+            serde_json::from_value(json).expect("configuration");
+        assert!(
+            matches!(config.validate(), Err(ConfigError::InvalidValue { field, .. }) if field == expected)
+        );
+    }
+    let mut parser = RawConfig::default();
+    parser.database.max_connections = 0;
+    ValidatedConfig::try_from(parser).expect("parser does not open a database");
 }

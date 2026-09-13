@@ -35,7 +35,8 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
   for (const [group, values] of Object.entries(overrides ?? {})) {
     if (!Object.hasOwn(raw, group) || !values || typeof values !== "object" || Array.isArray(values)) throw Object.assign(new Error(`Unknown or invalid configuration group ${group}`), { code: "InvalidConfig" });
     for (const key of Object.keys(values)) {
-      if (["layout", "tsr", "ocr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider", "detection_model_dir", "recognition_model_dir", "orientation_model_dir"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
+      // OCR's nested file groups are native-only; browser models arrive through the artifact API.
+      if (["layout", "tsr", "ocr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     raw[group] = { ...raw[group], ...values };
   }

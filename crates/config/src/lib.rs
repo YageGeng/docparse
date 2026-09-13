@@ -1,15 +1,16 @@
 //! Instance-scoped configuration loading and validation for docparse.
 
+mod config;
 mod error;
-mod types;
 mod validate;
 mod wasm_compat;
 
-pub use error::ConfigError;
-pub use types::{
-    ExecutionProviderConfig, FusionConfig, LayoutConfig, OcrConfig, OcrPolicy,
-    OutputConfig, RawConfig, RenderConfig, RuntimeConfig, TableMode, TsrConfig,
+pub use config::{
+    DatabaseConfig, FusionConfig, LayoutConfig, LogConfig, ModelFiles,
+    OcrConfig, OcrPolicy, OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
+    ServerConfig, TableMode, TsrConfig,
 };
+pub use error::ConfigError;
 
 pub use validate::ValidatedConfig;
 #[allow(unused_imports)]

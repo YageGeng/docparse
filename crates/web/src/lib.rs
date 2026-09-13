@@ -8,9 +8,7 @@ mod table;
 
 use js::{FunctionExt, ValueExt};
 
-use docparse_config::{
-    ExecutionProviderConfig, OutputConfig, RawConfig, ValidatedConfig,
-};
+use docparse_config::{OutputConfig, RawConfig, ValidatedConfig};
 use docparse_core::{
     DocParser, DocumentResult, JsonRenderer, MarkdownRenderer, ParseObserver,
     ParseProgress, TextRenderer,
@@ -103,19 +101,13 @@ impl WebParser {
         auxiliary_artifacts: JsValue,
     ) -> Result<WebParser, JsValue> {
         logging::init();
-        let mut raw: RawConfig = serde_wasm_bindgen::from_value(options)
+        let raw: RawConfig = serde_wasm_bindgen::from_value(options)
             .map_err(|error| WebError::value("InvalidConfig", error))?;
-        raw.layout.execution_provider = if webgpu {
-            ExecutionProviderConfig::WebGpu
-        } else {
-            ExecutionProviderConfig::Cpu
-        };
-        raw.tsr.execution_provider = raw.layout.execution_provider;
-        // All model families use the selected Worker backend and shared GPU serialization.
-        raw.ocr.execution_provider = raw.layout.execution_provider;
         let output = raw.output.clone();
+        // The Worker capability selects one backend for every model without serialized provider fields.
         let validated = ValidatedConfig::try_from(raw)
-            .map_err(|error| WebError::value("InvalidConfig", error))?;
+            .map_err(|error| WebError::value("InvalidConfig", error))?
+            .with_webgpu(webgpu);
         let auxiliary: AuxiliaryArtifacts = serde_wasm_bindgen::from_value(
             auxiliary_artifacts,
         )

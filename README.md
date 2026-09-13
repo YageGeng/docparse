@@ -2,6 +2,12 @@
 
 DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and page rendering, the pinned PP-DocLayoutV3 ONNX model detects layout regions, SLANet_plus predicts table structures, PaddleOCR recovers scanned text, and `docparse-core` fuses both into a stable, validated `DocumentResult`. Residual XY-cut preserves text when the model misses regions or page-level layout inference fails.
 
+The native [HTTP server](crates/server/README.md) accepts durable PDF jobs and
+provides JSON results and reconnectable SSE progress. It uses SeaORM 2.0,
+PostgreSQL, and a shared file directory, with separate migration, database, and
+server crates. Layout, OCR, and TSR have independent bounded page stages; native
+OCR can overlap two pages by default through `ocr.max_in_flight`.
+
 Model regions are candidates rather than a one-to-one final block contract. Ownership is assigned at the `TextItem` boundary, with short, unambiguous superscripts/subscripts attached to their parent before model assignment; residual XY-cut preserves column gutters before line assembly. Page-wide normalization merges content only when one bbox fully contains the other, including identical boxes, then computes reading order. Every native text fact remains owned exactly once.
 
 `reference` is an empty visual annotation: it never owns text, obstructs XY-cut, merges with content, or enters body reading order. Bibliography text uses `reference_content`, including recovered fragments. Partial content intersections remain separate regardless of IoU and produce a `ContentLayoutOverlap` page warning with per-pair `content.overlap.*` diagnostics. Reference outlines and detached watermarks are exempt. Merged layouts retain their primary `source_region` plus all contributing `source_regions`, whose optional `label` preserves original model semantics.
@@ -21,7 +27,7 @@ The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08ae
 
 ## Configuration
 
-The root `docparse.toml` is an example configuration. Select an execution provider available on your machine. Relative model paths resolve against the primary configuration directory. Precedence is: code defaults, primary TOML, explicit/`DOCPARSE_PROFILE` profile file, `DOCPARSE_...` environment variables, then explicit caller overrides.
+The root `docparse.toml` is an example configuration. Native inference backends are selected by Cargo features, with CPU as the default. Relative model paths resolve against the primary configuration directory. Precedence is: code defaults, primary TOML, explicit/`DOCPARSE_PROFILE` profile file, `DOCPARSE_...` environment variables, then explicit caller overrides.
 
 Without `--config`, the CLI reads only `./docparse.toml` in the current directory and does not search parents. Library APIs do not load configuration files implicitly.
 
@@ -29,8 +35,8 @@ Table recovery defaults to `tsr.mode = "fallback"`: local rules run first and
 unresolved tables use the pinned
 `PaddlePaddle/SLANet_plus_onnx` revision `7dbe640e127602bf506815e822c09758de73c482`.
 Set `tsr.mode = "external_only"` to send every table to the model,
-or `"rules_only"` to retain local behavior without loading TSR artifacts. The TSR
-model uses `tsr.execution_provider`, with the same backend choices as layout. Structured
+or `"rules_only"` to retain local behavior without loading TSR artifacts. Layout,
+OCR and TSR share the compiled native backend. Structured
 output keeps the existing `external_tsr` source value and records the engine in
 evidence; a model prediction is accepted only after topology and source validation.
 `table.source` distinguishes local `tagged_pdf`, `ruled`, and `text_alignment`
@@ -49,10 +55,10 @@ NVIDIA CUDA:
 
 ```bash
 rtk cargo build -p docparse-cli --features layout-cuda,tsr-cuda
-rtk docparse parse input.pdf --config docparse.cuda.toml --format json
+rtk docparse parse input.pdf --config docparse.toml --format json
 ```
 
-CUDA configurations use `execution_provider = "cuda"` in both `[layout]` and `[tsr]`. CPU builds require `"cpu"` in both sections. `tsr-coreml`, `tsr-cuda`, and `tsr-openvino` enable the corresponding TSR backend; `layout-metal` and `tsr-metal` use CoreML with CPU/GPU compute units, without ANE. A requested accelerator that cannot initialize fails explicitly. `layout-cuda`, `layout-coreml`, and `layout-openvino` are mutually exclusive; do not use `--all-features` for the provider matrix. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
+All native model families use one backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Model-prefixed CLI features forward to the shared backend, so enabling `layout-cuda` also selects CUDA for OCR and TSR. Server builds expose `cuda`, `coreml`, `metal`, and `openvino`; omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
 ## Rust API
 
@@ -200,17 +206,28 @@ Enable native OCR in your TOML configuration:
 ```toml
 [ocr]
 policy = "missing_regions" # disabled (library default), missing_regions, or always
-execution_provider = "cpu"
-detection_model_dir = "models/pp-ocrv6-medium-det"
-recognition_model_dir = "models/pp-ocrv6-medium-rec"
-orientation_model_dir = "models/pp-lcnet-textline-ori"
 classify_orientation = true
 recognition_threshold = 0.5
 timeout_ms = 120000
+
+[ocr.detection]
+model_path = "models/pp-ocrv6-medium-det/inference.onnx"
+model_config_path = "models/pp-ocrv6-medium-det/inference.yml"
+model_manifest_path = "models/pp-ocrv6-medium-det/model-manifest.json"
+
+[ocr.recognition]
+model_path = "models/pp-ocrv6-medium-rec/inference.onnx"
+model_config_path = "models/pp-ocrv6-medium-rec/inference.yml"
+model_manifest_path = "models/pp-ocrv6-medium-rec/model-manifest.json"
+
+[ocr.orientation]
+model_path = "models/pp-lcnet-textline-ori/inference.onnx"
+model_config_path = "models/pp-lcnet-textline-ori/inference.yml"
+model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 ```
 
 The CLI exposes `ocr-cuda`, `ocr-coreml`, `ocr-metal`, and `ocr-openvino`
-features. Select one optional native provider per build; CPU remains available.
+features. Select one optional native provider per build, or omit them for CPU.
 CoreML requires a compatible macOS runtime; `metal` selects CoreML's CPU/GPU
 compute units. Browser WebGPU/CPU is selected through `executionProvider` for
 all model families. Model contracts reject unknown weights or dictionaries.

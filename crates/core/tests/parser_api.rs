@@ -53,6 +53,70 @@ fn config() -> ValidatedConfig {
     ValidatedConfig::try_from(raw).expect("test config must validate")
 }
 
+/// Refactoring the document driver must preserve observer ordering and the canonical result.
+#[tokio::test]
+async fn document_stages_preserve_observer_contract() {
+    use docparse_core::{ParseObserver, ParseProgress};
+    use std::sync::Mutex;
+    struct Observations {
+        progress: Mutex<Vec<ParseProgress>>,
+        images: Mutex<Vec<u32>>,
+    }
+    impl ParseObserver for Observations {
+        /// Records the caller-visible order of pipeline boundaries.
+        fn on_progress(&self, progress: ParseProgress) {
+            self.progress.lock().expect("progress lock").push(progress);
+        }
+        /// Records the existing one-based image callback identity.
+        fn on_page_image(&self, page_number: u32, _image: &PageImage) {
+            self.images.lock().expect("image lock").push(page_number);
+        }
+    }
+    let parser = DocParser::builder()
+        .config(Arc::new(config()))
+        .layout_engine(Arc::new(EmptyLayoutEngine))
+        .build()
+        .await
+        .expect("parser");
+    let observations = Observations {
+        progress: Mutex::new(Vec::new()),
+        images: Mutex::new(Vec::new()),
+    };
+    let bytes: Arc<[u8]> =
+        std::fs::read(fixture_path()).expect("fixture").into();
+    let observed = parser
+        .parse_bytes_with_observer(Arc::clone(&bytes), &observations)
+        .await
+        .expect("observed parse");
+    let plain = parser.parse_bytes(bytes).await.expect("plain parse");
+    assert_eq!(observed, plain);
+    assert_eq!(*observations.images.lock().expect("images"), vec![1]);
+    assert_eq!(
+        *observations.progress.lock().expect("progress"),
+        vec![
+            ParseProgress::Opening,
+            ParseProgress::Scanning {
+                completed: 0,
+                total: 1
+            },
+            ParseProgress::Scanning {
+                completed: 1,
+                total: 1
+            },
+            ParseProgress::Analyzing {
+                completed: 0,
+                total: 1
+            },
+            ParseProgress::Analyzing {
+                completed: 1,
+                total: 1
+            },
+            ParseProgress::Linking { total: 1 },
+            ParseProgress::Complete { total: 1 },
+        ]
+    );
+}
+
 /// Verifies an injected engine avoids all default model artifact validation.
 #[tokio::test]
 async fn injected_layout_engine_parses_path_and_bytes() {

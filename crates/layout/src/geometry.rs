@@ -71,7 +71,14 @@ impl From<Quad> for Polygon {
 
 /// A point in one explicitly documented two-dimensional coordinate space.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TypedBuilder,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
 )]
 pub struct Point {
     pub x: f64,
@@ -92,7 +99,14 @@ impl Point {
 
 /// A finite axis-aligned box using left, top, right, and bottom coordinates.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TypedBuilder,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
 )]
 pub struct Bbox {
     pub left: f64,
@@ -655,6 +669,15 @@ impl TryFrom<Vec<Point>> for Polygon {
         Ok(polygon)
     }
 }
+
+impl utoipa::PartialSchema for Polygon {
+    /// Mirrors the custom Serde vertex array instead of exposing the private points field as an object.
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::schema!(#[inline] Vec<Point>).into()
+    }
+}
+
+impl utoipa::ToSchema for Polygon {}
 
 impl Serialize for Polygon {
     /// Serializes only public vertices and omits the private closing coordinate.

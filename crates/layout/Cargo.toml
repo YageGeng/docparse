@@ -8,8 +8,8 @@ readme = "README.md"
 description = "Layout detection interfaces and PP-DocLayoutV3 inference for docparse"
 
 [features]
-wasm = ["docparse-config/wasm"]
 default = []
+wasm = ["docparse-config/wasm"]
 metal = ["coreml"]
 coreml = ["ort/coreml"]
 cuda = ["ort/cuda"]
@@ -24,6 +24,9 @@ thiserror.workspace = true
 
 # async
 tokio.workspace = true
+
+# api documentation
+utoipa.workspace = true
 
 # config and serialization
 serde.workspace = true

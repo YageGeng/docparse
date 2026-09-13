@@ -1,3 +1,4 @@
+//! Shared layout labels expose their existing Serde representation to API schema generation.
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -102,7 +103,9 @@ impl TryFrom<PageImageInput> for PageImage {
 }
 
 /// Fixed model labels, parser-derived semantics, and forward-compatible unknown labels.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutLabel {
     Abstract,
@@ -268,7 +271,9 @@ impl From<String> for LayoutLabel {
 }
 
 /// Records whether polygon geometry is factual or derived from a bounding box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
 pub enum GeometrySource {
     ModelPolygon,
     DerivedFromBbox,

@@ -1,6 +1,8 @@
 # Rust build output
 /target
 /models/
+# Uploaded PDFs and durable results from the server's default local storage path.
+/data/docparse/
 *.tsbuildinfo
 
 # Editor settings

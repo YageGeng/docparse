@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
+    use tracing::{Instrument, instrument::WithSubscriber};
 
     /// A dedicated thread that owns the complete PDFium document lifetime.
     pub(crate) struct PdfiumWorker {
@@ -25,10 +26,17 @@ mod platform {
                 .map_err(|error| {
                     PdfiumRuntimeError::ThreadSpawn(error.to_string())
                 })?;
+            // Capture both contexts before crossing threads, then restore them for each actor poll.
+            let span = tracing::Span::current();
+            let dispatcher = tracing::dispatcher::get_default(Clone::clone);
             let thread = std::thread::Builder::new()
                 .name("docparse-pdfium".into())
                 .spawn(move || {
-                    runtime.block_on(worker_main(input, receiver, ready))
+                    runtime.block_on(
+                        worker_main(input, receiver, ready)
+                            .instrument(span)
+                            .with_subscriber(dispatcher),
+                    )
                 })
                 .map_err(|error| {
                     PdfiumRuntimeError::ThreadSpawn(error.to_string())

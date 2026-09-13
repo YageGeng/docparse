@@ -9,7 +9,7 @@ description = "Paddle SLANet_plus table structure recognition through ONNX Runti
 
 [features]
 default = []
-metal = ["coreml"]
+metal = ["docparse-layout/metal"]
 coreml = ["docparse-layout/coreml"]
 cuda = ["docparse-layout/cuda"]
 openvino = ["docparse-layout/openvino"]

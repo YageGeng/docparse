@@ -304,6 +304,15 @@ fn json_renderer_applies_evidence_and_diagnostics_visibility() {
     assert!(block.evidence.is_empty());
     assert!(relation.evidence.is_empty());
     assert_eq!(document, before);
+    // Outer envelopes must retain the same filtering when serializing the borrowed view directly.
+    let borrowed: DocumentResult = serde_json::from_value(
+        serde_json::to_value(JsonRenderer::view_with_config(
+            &document, &options,
+        ))
+        .expect("borrowed view"),
+    )
+    .expect("configured schema");
+    assert_eq!(borrowed, view);
 }
 
 /// Verifies writer-based JSON preserves every canonical field when visibility is enabled.

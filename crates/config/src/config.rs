@@ -1,3 +1,4 @@
+//! Configuration definitions and defaults shared by parser and server consumers.
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,93 @@ pub struct RawConfig {
     pub fusion: FusionConfig,
     pub ocr: OcrConfig,
     pub output: OutputConfig,
+    /// Server logging is configured before connections and model initialization.
+    #[builder(default)]
+    #[serde(default)]
+    pub log: LogConfig,
+    /// Native HTTP settings share the loader but are not part of parser validation.
+    #[builder(default)]
+    #[serde(default)]
+    pub server: ServerConfig,
+    /// Native database consumers validate these settings before opening a connection pool.
+    #[builder(default)]
+    #[serde(default)]
+    pub database: DatabaseConfig,
+}
+
+/// Server event-filter defaults; native logging setup parses the tracing directive syntax.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct LogConfig {
+    #[builder(default = "info,ort=warn,sqlx=warn".to_owned(), setter(into))]
+    pub directives: String,
+}
+
+impl Default for LogConfig {
+    /// Preserves the existing server filter for configurations that omit the log section.
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Native listener settings; host names and IPv4/IPv6 addresses are resolved by Tokio at bind time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct ServerConfig {
+    #[builder(default = "127.0.0.1".to_owned(), setter(into))]
+    pub host: String,
+    #[builder(default = 8080)]
+    pub port: u16,
+    /// Prefix shared by all HTTP endpoints and their generated OpenAPI paths.
+    #[builder(default = "/api".to_owned(), setter(into))]
+    pub api_prefix: String,
+}
+
+impl Default for ServerConfig {
+    /// Retains the existing loopback listener while allowing a zero port for OS-assigned test listeners.
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// PostgreSQL pool settings use the same field names and millisecond units as WisLand.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct DatabaseConfig {
+    #[builder(default, setter(into))]
+    pub url: String,
+    #[builder(default = 5000)]
+    pub timeout_ms: u64,
+    #[builder(default = 5000)]
+    pub acquire_timeout_ms: u64,
+    #[builder(default = 600_000)]
+    pub idle_timeout_ms: u64,
+    #[builder(default = 10)]
+    pub max_connections: u32,
+    #[builder(default = 1)]
+    pub min_connections: u32,
+}
+
+impl Default for DatabaseConfig {
+    /// Leaves credentials unconfigured so standalone parsing never requires a database URL.
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+impl std::fmt::Debug for DatabaseConfig {
+    /// Keeps connection credentials out of parent configuration diagnostics.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DatabaseConfig")
+            .field("url", &"<redacted>")
+            .field("timeout_ms", &self.timeout_ms)
+            .field("acquire_timeout_ms", &self.acquire_timeout_ms)
+            .field("idle_timeout_ms", &self.idle_timeout_ms)
+            .field("max_connections", &self.max_connections)
+            .field("min_connections", &self.min_connections)
+            .finish()
+    }
 }
 
 impl Default for RawConfig {
@@ -41,7 +129,6 @@ pub struct LayoutConfig {
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub score_threshold: f64,
-    pub execution_provider: ExecutionProviderConfig,
     pub session_pool_size: usize,
 }
 
@@ -57,44 +144,8 @@ impl Default for LayoutConfig {
                 "models/pp-doclayout-v3/model-manifest.json",
             ))
             .score_threshold(0.5)
-            .execution_provider(ExecutionProviderConfig::default())
             .session_pool_size(1)
             .build()
-    }
-}
-
-/// ONNX Runtime execution provider requested by configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecutionProviderConfig {
-    Cpu,
-    Cuda,
-    #[serde(rename = "coreml")]
-    CoreMl,
-    /// Apple GPU through CoreML with CPUAndGPU compute units.
-    Metal,
-    Openvino,
-    /// Browser WebGPU execution, validated at the platform boundary.
-    WebGpu,
-}
-
-impl ExecutionProviderConfig {
-    /// Returns the stable configuration and diagnostic name of a backend.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Cpu => "cpu",
-            Self::Cuda => "cuda",
-            Self::CoreMl => "coreml",
-            Self::Metal => "metal",
-            Self::Openvino => "openvino",
-            Self::WebGpu => "webgpu",
-        }
-    }
-}
-impl std::fmt::Display for ExecutionProviderConfig {
-    /// Formats backend names consistently across model initialization and inference logs.
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
     }
 }
 
@@ -102,6 +153,7 @@ impl std::fmt::Display for ExecutionProviderConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
+    /// Bounds owned pages per analysis stage so slow downstream inference cannot occupy every upstream slot.
     pub page_concurrency: usize,
     pub render_queue_capacity: usize,
     pub blocking_task_limit: usize,
@@ -188,15 +240,39 @@ impl Default for OcrPolicy {
     }
 }
 
+/// Independently configurable files for one verified ONNX model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(deny_unknown_fields)]
+pub struct ModelFiles {
+    pub model_path: PathBuf,
+    pub model_config_path: PathBuf,
+    pub model_manifest_path: PathBuf,
+}
+
+impl ModelFiles {
+    /// Supplies conventional default filenames while allowing each path to be overridden independently.
+    fn in_directory(directory: &str) -> Self {
+        let directory = PathBuf::from(directory);
+        Self::builder()
+            .model_path(directory.join("inference.onnx"))
+            .model_config_path(directory.join("inference.yml"))
+            .model_manifest_path(directory.join("model-manifest.json"))
+            .build()
+    }
+}
+
 /// Built-in PaddleOCR artifacts, inference limits and native-text enrichment policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct OcrConfig {
     pub policy: OcrPolicy,
-    pub execution_provider: ExecutionProviderConfig,
-    pub detection_model_dir: PathBuf,
-    pub recognition_model_dir: PathBuf,
-    pub orientation_model_dir: PathBuf,
+    /// Bounds overlapping page pipelines independently of individual model-session locks.
+    #[builder(default = Self::default_max_in_flight())]
+    #[serde(default = "OcrConfig::default_max_in_flight")]
+    pub max_in_flight: usize,
+    pub detection: ModelFiles,
+    pub recognition: ModelFiles,
+    pub orientation: ModelFiles,
     pub detection_max_side: u32,
     pub detection_threshold: f64,
     pub box_threshold: f64,
@@ -209,15 +285,21 @@ pub struct OcrConfig {
     pub timeout_ms: u64,
 }
 
+impl OcrConfig {
+    /// Allows detection for one page to overlap recognition for another on native backends.
+    const fn default_max_in_flight() -> usize {
+        2
+    }
+}
+
 impl Default for OcrConfig {
     /// Builds the default disabled OCR policy.
     fn default() -> Self {
         Self::builder()
             .policy(OcrPolicy::default())
-            .execution_provider(ExecutionProviderConfig::default())
-            .detection_model_dir(PathBuf::from("models/pp-ocrv6-medium-det"))
-            .recognition_model_dir(PathBuf::from("models/pp-ocrv6-medium-rec"))
-            .orientation_model_dir(PathBuf::from(
+            .detection(ModelFiles::in_directory("models/pp-ocrv6-medium-det"))
+            .recognition(ModelFiles::in_directory("models/pp-ocrv6-medium-rec"))
+            .orientation(ModelFiles::in_directory(
                 "models/pp-lcnet-textline-ori",
             ))
             .detection_max_side(2048)
@@ -266,13 +348,10 @@ pub enum TableMode {
     ExternalOnly,
 }
 
-/// Independent SLANet_plus artifacts, execution backend, and per-document table policy.
+/// SLANet_plus artifacts and per-document table policy; backend selection belongs to the build.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct TsrConfig {
-    #[builder(default)]
-    #[serde(default)]
-    pub execution_provider: ExecutionProviderConfig,
     pub model_path: PathBuf,
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,

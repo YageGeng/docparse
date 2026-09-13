@@ -14,6 +14,14 @@ use crate::{
 pub struct JsonRenderer;
 
 impl JsonRenderer {
+    /// Exposes the existing borrowed visibility view so outer response types can stream it through Serde.
+    pub fn view_with_config<'a>(
+        document: &'a DocumentResult,
+        config: &'a OutputConfig,
+    ) -> impl Serialize + 'a {
+        ConfiguredDocument { document, config }
+    }
+
     /// Serializes the complete deterministic schema without mutating it.
     pub fn render(document: &DocumentResult) -> Result<String, RenderError> {
         serde_json::to_string_pretty(document).map_err(RenderError::from)
@@ -24,7 +32,8 @@ impl JsonRenderer {
         document: &DocumentResult,
         config: &OutputConfig,
     ) -> Result<String, RenderError> {
-        serde_json::to_string_pretty(&ConfiguredDocument { document, config })
+        // Keep direct rendering and externally wrapped responses on the same visibility implementation.
+        serde_json::to_string_pretty(&Self::view_with_config(document, config))
             .map_err(RenderError::from)
     }
 
@@ -36,7 +45,7 @@ impl JsonRenderer {
     ) -> Result<(), RenderError> {
         serde_json::to_writer_pretty(
             writer,
-            &ConfiguredDocument { document, config },
+            &Self::view_with_config(document, config),
         )
         .map_err(RenderError::from)
     }

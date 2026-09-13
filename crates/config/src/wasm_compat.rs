@@ -6,12 +6,9 @@ compile_error!("docparse supports wasm32-unknown-unknown browser builds only");
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
-    impl Default for crate::ExecutionProviderConfig {
-        /// Selects the platform default shared by layout and TSR.
-        fn default() -> Self {
-            Self::Cpu
-        }
-    }
+    /// Native backend selection has no runtime state; it is fixed by the inference crate's build features.
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub(crate) struct PlatformOptions;
 
     use std::env;
     use std::path::{Path, PathBuf};
@@ -200,10 +197,16 @@ mod platform {
                 &mut self.tsr.model_path,
                 &mut self.tsr.model_config_path,
                 &mut self.tsr.model_manifest_path,
-                // OCR directories follow the same config-file-relative policy as other model artifacts.
-                &mut self.ocr.detection_model_dir,
-                &mut self.ocr.recognition_model_dir,
-                &mut self.ocr.orientation_model_dir,
+                // OCR file overrides follow the same config-relative policy as layout and TSR.
+                &mut self.ocr.detection.model_path,
+                &mut self.ocr.detection.model_config_path,
+                &mut self.ocr.detection.model_manifest_path,
+                &mut self.ocr.recognition.model_path,
+                &mut self.ocr.recognition.model_config_path,
+                &mut self.ocr.recognition.model_manifest_path,
+                &mut self.ocr.orientation.model_path,
+                &mut self.ocr.orientation.model_config_path,
+                &mut self.ocr.orientation.model_manifest_path,
             ] {
                 if path.is_relative() {
                     *path = base_directory.join(&*path);
@@ -224,10 +227,29 @@ mod platform {
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod platform {
-    impl Default for crate::ExecutionProviderConfig {
-        /// Selects the platform default shared by layout and TSR.
+    /// Browser capabilities are supplied by the Worker API rather than by serialized model settings.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct PlatformOptions {
+        webgpu: bool,
+    }
+
+    impl Default for PlatformOptions {
+        /// Retains WebGPU as the browser default without introducing a native runtime override.
         fn default() -> Self {
-            Self::WebGpu
+            Self { webgpu: true }
+        }
+    }
+
+    impl crate::ValidatedConfig {
+        /// Applies the host Worker's selected backend to all browser models together.
+        pub fn with_webgpu(mut self, enabled: bool) -> Self {
+            self.platform.webgpu = enabled;
+            self
+        }
+
+        /// Reports the browser host capability used when constructing byte-backed sessions.
+        pub fn webgpu_enabled(&self) -> bool {
+            self.platform.webgpu
         }
     }
 

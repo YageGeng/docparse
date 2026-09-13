@@ -26,14 +26,14 @@ await page.addInitScript(() => {
 const report = { status: 'running', startedAt: new Date().toISOString(), runs: [] };
 try {
   await page.goto('http://127.0.0.1:8768/example/');
-  // Check Rust defaults separately: SDK initialization also applies its selected provider.
+  // Backend selection belongs to the Worker API; serialized defaults contain no provider fields.
   const defaults = await page.evaluate(async () => {
     const { default: initialize, default_config } = await import('/dist/pkg/docparse_web.js');
     await initialize();
     const raw = default_config();
-    return [raw.layout.execution_provider, raw.tsr.execution_provider, raw.tsr.mode];
+    return { hasProvider: [raw.layout, raw.tsr, raw.ocr].some(group => 'execution_provider' in group), mode: raw.tsr.mode };
   });
-  assert.deepEqual(defaults, ['webgpu', 'webgpu', 'fallback']);
+  assert.deepEqual(defaults, { hasProvider: false, mode: 'fallback' });
   report.rustDefaults = defaults;
   for (const scenario of [
     { name: 'default-webgpu', expected: 'webgpu' },

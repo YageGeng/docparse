@@ -17,6 +17,10 @@
 13. Add logs only at meaningful lifecycle boundaries, retries, state transitions, and error paths. Logs must provide enough context to debug failures without recording every token, tight-loop iteration, complete prompt or response bodies, credentials, authentication headers, or other sensitive data. The only prompt-body exception is ACP request/notification parameter logging at `DEBUG`: it may preserve complete prompt, shell command, resource, and extension parameter content, but it must recursively redact credential-like fields including API keys, tokens, authorization values, cookies, passwords, and secrets. ACP `INFO` logs must not include parameters.
 14. Invoke tracing event macros through their fully qualified paths, such as `tracing::info!()` and `tracing::warn!()`. Do not import tracing event macros directly or through wildcard imports. Write readable event messages with normal formatting arguments, such as `tracing::info!("completed Turn {}", turn_id)`, instead of structured event-field syntax such as `tracing::info!(turn = %turn_id, "completed Turn")`. Tracing spans may use the minimum structured fields required for inherited correlation context, including `trace_id`.
 
+15. `ApiError` stage values must be short, static, lowercase words joined by single hyphens, such as `upload-write-pdf` or `task-renew-lease`. Use them only to identify the current operation; do not use spaces, underscores, sentences, paths, or dynamic identifiers.
+16. Snafu may be added as a crate dependency and used only in `crates/server`. Declare its version in the root workspace dependency table and inherit it only in the server crate. Other crates must not import, derive, or re-export Snafu.
+17. All database queries, migrations, tables, and indexes must use SeaORM, SeaORM Migration, and SeaQuery builders. Handwritten/raw SQL, including SQL strings passed through raw-statement APIs or custom SQL expression fragments, is prohibited. Generate new migration files with `sea-orm-cli` before editing their generated contents; do not create migration files by hand.
+
 @RTK.md
 
 <!-- rtk-instructions v2 -->

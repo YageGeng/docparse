@@ -172,9 +172,11 @@ fn inspect_model_command(
     )?;
     let schema = inspect_model(&layout.model_path)?;
     schema.validate_pp_doclayout_v3()?;
+    // Diagnostics report the compiled backend, which no longer has a configuration field.
+    let backend = docparse_layout::OnnxBackend::compiled();
     serde_json::to_string_pretty(&serde_json::json!({
         "model_path": layout.model_path,
-        "execution_provider": format!("{:?}", layout.execution_provider).to_lowercase(),
+        "execution_provider": backend.execution_provider(),
         "manifest": manifest,
         "schema": schema,
     }))

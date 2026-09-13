@@ -231,7 +231,7 @@ struct PostprocessConfig {
 pub struct SlanetPlusEngine {
     runner: Arc<SessionRunner>,
     dictionary: Vec<String>,
-    provider: docparse_config::ExecutionProviderConfig,
+    provider: docparse_layout::ExecutionProvider,
 }
 
 impl SlanetPlusEngine {
@@ -261,21 +261,24 @@ impl SlanetPlusEngine {
             if dictionary.len() != 50 { return Err(TsrError::InvalidModel { reason: "SLANet_plus needs 50 token classes".to_owned() }); }
             Ok::<_, TsrError>((artifacts, dictionary))
         }).await??;
-        let provider = config.tsr().execution_provider;
+        let backend =
+            docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
+        let provider = backend.execution_provider();
         tracing::info!(
             "initializing SLANet_plus ONNX with provider {}",
             provider
         );
-        let runner = SessionRunner::load(artifacts, provider).await.map_err(
-            |error| {
-                tracing::error!(
-                    "SLANet_plus provider {} initialization failed: {}",
-                    provider,
+        let runner =
+            SessionRunner::load(artifacts, backend)
+                .await
+                .map_err(|error| {
+                    tracing::error!(
+                        "SLANet_plus provider {} initialization failed: {}",
+                        provider,
+                        error
+                    );
                     error
-                );
-                error
-            },
-        )?;
+                })?;
         tracing::info!("loaded SLANet_plus ONNX with provider {}", provider);
         Ok(Self {
             runner,
@@ -285,9 +288,7 @@ impl SlanetPlusEngine {
     }
 
     /// Reports the registered provider; unsupported graph operators may still execute on CPU.
-    pub fn execution_provider(
-        &self,
-    ) -> docparse_config::ExecutionProviderConfig {
+    pub fn execution_provider(&self) -> docparse_layout::ExecutionProvider {
         self.provider
     }
 

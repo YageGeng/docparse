@@ -11,7 +11,7 @@ description = "Independent PaddleOCR ONNX detection, orientation and recognition
 default = []
 coreml = ["docparse-layout/coreml"]
 cuda = ["docparse-layout/cuda"]
-metal = ["coreml"]
+metal = ["docparse-layout/metal"]
 openvino = ["docparse-layout/openvino"]
 wasm = ["docparse-config/wasm", "docparse-layout/wasm"]
 
@@ -50,6 +50,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 # browser
 ort-web.workspace = true
 wasm-bindgen-futures.workspace = true
+
+[dev-dependencies]
+# testing
+tempfile.workspace = true
 
 [lints]
 workspace = true

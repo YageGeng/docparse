@@ -185,7 +185,7 @@ rtk cargo check --workspace
 
 **文件：**
 - 新建：crates/config/src/error.rs
-- 新建：crates/config/src/types.rs
+- 新建：crates/config/src/config.rs
 - 新建：crates/config/src/loader.rs
 - 新建：crates/config/src/validate.rs
 - 修改：crates/config/src/lib.rs

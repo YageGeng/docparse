@@ -6,9 +6,12 @@ members = [
 default-members = [
   "crates/cli",
   "crates/config",
+  "crates/database",
+  "crates/migration",
   "crates/core",
   "crates/layout",
   "crates/ocr",
+  "crates/server",
   "crates/tsr",
   "crates/pdfium",
   "crates/pdfium-sys",
@@ -66,7 +69,9 @@ mem_forget = "warn"
 # workspace crates
 docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
+docparse-database = { version = "0.1.0", path = "crates/database" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
+docparse-migration = { version = "0.1.0", path = "crates/migration" }
 docparse-ocr = { version = "0.1.0", path = "crates/ocr" }
 docparse-tsr = { version = "0.1.0", path = "crates/tsr" }
 docparse-web = { version = "0.1.0", path = "crates/web" }
@@ -75,14 +80,35 @@ pdfium-sys = { package = "docparse-pdfium-sys", version = "1.9.0", path = "crate
 
 # error
 anyhow = "1"
+snafu = "0.9"
 thiserror = "2"
 
 # async
 async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await", "std"] }
 tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
+
+# http
+axum = { version = "0.8", features = ["multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["catch-panic"] } # CORS is handled at ingress.
+
+# api documentation
+utoipa = { version = "5", features = ["uuid"] }
+utoipa-axum = "0.2"
+utoipa-scalar = "0.3"
+
+# storage
+sea-orm = { version = "2", default-features = false, features = ["macros", "sqlx-postgres", "runtime-tokio-rustls", "with-chrono", "with-json", "with-uuid"] }
+sea-orm-migration = { version = "2", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres"] }
+tempfile = "3"
+
+# identity
+uuid = { version = "1", features = ["v4", "serde"] }
 
 # config and serialization
+chrono = { version = "0.4", features = ["serde"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 rmp = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -124,7 +150,6 @@ libloading = "0.9"
 assert_cmd = "2"
 predicates = "3"
 proptest = "1"
-tempfile = "3"
 
 # browser
 js-sys = "=0.3.102"

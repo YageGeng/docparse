@@ -89,7 +89,7 @@ initialized, even if sources are supplied. Preparation accepts `signal`,
 `onProgress`, and `onTiming` for cancellation and observation. First inference
 can still include provider-specific lazy kernel compilation.
 
-`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths, profiles, environment variables, and layout/tsr/ocr.execution_provider are excluded. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
+`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths (including the nested `ocr.detection`, `ocr.recognition`, and `ocr.orientation` groups), profiles, environment variables, and per-model `execution_provider` fields are excluded. Use the Worker's `executionProvider` option for all browser models together. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 

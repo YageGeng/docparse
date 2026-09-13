@@ -103,20 +103,23 @@ impl PaddleOcrEngine {
                 Ok::<_, OcrError>((artifacts, Dictionary(dictionary)))
             })
             .await??;
+        // All three sessions use the shared compiled backend, or the browser Worker's selected capability.
+        let backend =
+            docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
         tracing::info!(
             "initializing PaddleOCR ONNX with provider {} and {} recognition classes",
-            options.execution_provider,
+            backend.execution_provider(),
             dictionary.0.len()
         );
         let detector = SessionRunner::load(
             artifacts.detection.model,
-            options.execution_provider,
+            backend,
             ModelKind::Detection,
         )
         .await?;
         let recognizer = SessionRunner::load(
             artifacts.recognition.model,
-            options.execution_provider,
+            backend,
             ModelKind::Recognition,
         )
         .await?;
@@ -127,7 +130,7 @@ impl PaddleOcrEngine {
             Some(
                 SessionRunner::load(
                     model.model,
-                    options.execution_provider,
+                    backend,
                     ModelKind::Orientation,
                 )
                 .await?,
@@ -136,12 +139,17 @@ impl PaddleOcrEngine {
             None
         };
         Ok(Self::builder()
+            // Let different model stages overlap across bounded native pages without duplicating sessions.
+            .permit(tokio::sync::Semaphore::new(
+                options
+                    .max_in_flight
+                    .min(crate::wasm_compat::MAX_PAGE_CONCURRENCY),
+            ))
             .config(options)
             .detector(detector)
             .recognizer(recognizer)
             .classifier(classifier)
             .dictionary(dictionary)
-            .permit(tokio::sync::Semaphore::new(1))
             .build())
     }
 
@@ -160,10 +168,12 @@ impl PaddleOcrEngine {
         regions: Vec<Bbox>,
         timings: Timings,
     ) -> Result<Vec<RecognizedText>, OcrError> {
-        // ponytail: one page at a time bounds temporary OCR memory; batch only after measuring a real throughput need.
+        // Limit page tensors while independent detector/recognizer sessions overlap across pages.
+        let queued = timings.start(TimingStage::OcrQueue);
         let _permit = self.permit.acquire().await.map_err(|_closed| {
             OcrError::InvalidData("OCR engine is closed".into())
         })?;
+        drop(queued);
         let source = Arc::clone(&image);
         let limit = self.config.detection_max_side;
         let timer = timings.clone();

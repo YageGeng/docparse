@@ -20,14 +20,10 @@ async fn pinned_model_recognizes_a_real_table() {
         &root.join("models/slanet-plus/model-manifest.json"),
     )
     .expect("artifacts");
-    let mut raw = docparse_config::RawConfig::default();
-    // The same real crop exercises an explicitly requested native backend.
-    if let Ok(provider) = std::env::var("TSR_TEST_PROVIDER") {
-        raw.tsr.execution_provider =
-            serde_json::from_value(serde_json::json!(provider))
-                .expect("provider");
-    }
-    let provider = raw.tsr.execution_provider;
+    let raw = docparse_config::RawConfig::default();
+    // The real crop exercises the same compile-time backend used by all model families.
+    let provider =
+        docparse_layout::OnnxBackend::compiled().execution_provider();
     let config = Arc::new(
         docparse_config::ValidatedConfig::try_from(raw).expect("config"),
     );

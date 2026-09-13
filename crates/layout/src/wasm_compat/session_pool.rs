@@ -10,7 +10,7 @@ use std::sync::Arc;
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
-    use crate::wasm_compat::run_cpu;
+    use crate::wasm_compat::SessionWorker;
     use ort::session::{HasSelectedOutputs, Session};
     use std::sync::Mutex;
     use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -25,11 +25,10 @@ mod platform {
         /// Creates one native session from the same bytes that passed artifact verification.
         fn load(
             bytes: &[u8],
-            provider: docparse_config::ExecutionProviderConfig,
+            backend: crate::wasm_compat::OnnxBackend,
         ) -> Result<Self, LayoutError> {
-            let mut builder = ort::session::builder::SessionBuilder::try_from(
-                crate::wasm_compat::OnnxBackend(provider),
-            )?;
+            let mut builder =
+                ort::session::builder::SessionBuilder::try_from(backend)?;
             let session = builder.commit_from_memory(bytes)?;
             ModelSchema::from_session(&session)?.validate_pp_doclayout_v3()?;
             let options = RunOptions::new()?.with_outputs(
@@ -60,7 +59,7 @@ mod platform {
 
     /// Bounded native sessions with permits held until actual blocking work completes.
     pub(crate) struct LayoutSessionPool {
-        sessions: Vec<Mutex<LayoutSession>>,
+        sessions: Vec<Arc<SessionWorker<LayoutSession>>>,
         available: Mutex<Vec<usize>>,
         semaphore: Arc<Semaphore>,
     }
@@ -71,25 +70,24 @@ mod platform {
             artifacts: ModelArtifacts,
             config: Arc<ValidatedConfig>,
         ) -> Result<Arc<Self>, LayoutError> {
-            run_cpu(move || {
-                let size = config.layout().session_pool_size;
-                let sessions = (0..size)
-                    .map(|_| {
-                        LayoutSession::load(
-                            &artifacts.model,
-                            config.layout().execution_provider,
-                        )
-                        .map(Mutex::new)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Arc::new(Self {
-                    sessions,
-                    available: Mutex::new((0..size).rev().collect()),
-                    semaphore: Arc::new(Semaphore::new(size)),
-                }))
-            })
-            .await
-            .map_err(|source| LayoutError::TaskJoin { source })?
+            let size = config.layout().session_pool_size;
+            let backend =
+                crate::wasm_compat::OnnxBackend::from(config.as_ref());
+            let mut sessions = Vec::with_capacity(size);
+            // Each pool slot owns a thread so cuBLAS/cuDNN thread-local resources cannot multiply across Tokio workers.
+            for _ in 0..size {
+                let model = Arc::clone(&artifacts.model);
+                let session = SessionWorker::new(move || {
+                    LayoutSession::load(&model, backend)
+                })
+                .await?;
+                sessions.push(Arc::new(session));
+            }
+            Ok(Arc::new(Self {
+                sessions,
+                available: Mutex::new((0..size).rev().collect()),
+                semaphore: Arc::new(Semaphore::new(size)),
+            }))
         }
 
         /// Leases one session without holding a synchronous lock while waiting.
@@ -127,13 +125,21 @@ mod platform {
         ) -> Result<ModelOutputs, LayoutError> {
             let queued = timings.start(TimingStage::LayoutQueue);
             let lease = self.acquire().await?;
-            run_cpu(move || {
-                // Include semaphore and blocking-executor wait, but not model execution.
-                drop(queued);
-                lease.run(&inputs, &timings)
-            })
-            .await
-            .map_err(|source| LayoutError::TaskJoin { source })?
+            let worker =
+                Arc::clone(lease.pool.sessions.get(lease.index).ok_or_else(
+                    || LayoutError::SessionPool {
+                        message: "invalid session slot".into(),
+                    },
+                )?);
+            worker
+                .run(move |session| {
+                    // Keep the pool permit on the owning session thread until actual inference/readback finishes.
+                    let _lease = lease;
+                    drop(queued);
+                    session.run(&inputs, &timings)
+                })
+                .await
+                .map_err(|source| LayoutError::TaskJoin { source })?
         }
     }
 
@@ -142,26 +148,6 @@ mod platform {
         pool: Arc<LayoutSessionPool>,
         index: usize,
         _permit: OwnedSemaphorePermit,
-    }
-
-    impl LayoutSessionLease {
-        /// Keeps the whole lease captured by its blocking task, including the permit.
-        fn run(
-            &self,
-            inputs: &ModelInputs,
-            timings: &Timings,
-        ) -> Result<ModelOutputs, LayoutError> {
-            let slot = self.pool.sessions.get(self.index).ok_or(
-                LayoutError::SessionPool {
-                    message: "invalid session slot".into(),
-                },
-            )?;
-            let mut session =
-                slot.lock().map_err(|error| LayoutError::SessionPool {
-                    message: error.to_string(),
-                })?;
-            session.run(inputs, timings)
-        }
     }
 
     impl Drop for LayoutSessionLease {
@@ -276,9 +262,7 @@ mod platform {
             config: Arc<ValidatedConfig>,
         ) -> Result<Arc<Self>, LayoutError> {
             let mut builder = ort::session::builder::SessionBuilder::try_from(
-                crate::wasm_compat::OnnxBackend(
-                    config.layout().execution_provider,
-                ),
+                crate::wasm_compat::OnnxBackend::from(config.as_ref()),
             )?;
             let mut session =
                 builder.commit_from_memory(&artifacts.model).await?;

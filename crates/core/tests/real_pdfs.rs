@@ -92,7 +92,8 @@ async fn real_pdf_corpus() -> Result<(), Box<dyn Error>> {
     let config_identity = serde_json::json!({
         "layout": {
             "score_threshold": raw_config.layout.score_threshold,
-            "execution_provider": raw_config.layout.execution_provider,
+            // Keep corpus fingerprints sensitive to the actual compiled inference backend.
+            "execution_provider": docparse_layout::OnnxBackend::compiled().execution_provider(),
         },
         "render": raw_config.render,
         "fusion": raw_config.fusion,

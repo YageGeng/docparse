@@ -1,22 +1,20 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::TableRuntime;
+use super::stages::{PageAnalysisInput, PageStage};
 use crate::wasm_compat::{TaskError, TaskSet};
-use docparse_config::{OcrPolicy, ValidatedConfig};
+use docparse_config::ValidatedConfig;
+use docparse_layout::LayoutEngine;
 use docparse_layout::timing::{TimingStage, Timings};
-use docparse_layout::{LayoutEngine, LayoutRequest};
 use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
-use super::{
-    PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage, RenderedPage,
-};
+use super::{PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage};
 use crate::page::{OcrCompletion, PageAnalyzer};
 use crate::{
     DocumentContext, DocumentContextBuilder, DocumentLinker, DocumentResult,
-    ExtractedPage, OcrEngine, OcrRequest, PageAnalysisError, PageError,
-    PageResult, PageWarning, ResultValidator, SchemaVersion, ValidationError,
+    ExtractedPage, OcrEngine, PageAnalysisError, PageError, PageResult,
+    PageWarning, ResultValidator, SchemaVersion, ValidationError,
 };
 
 /// Failures that cannot be represented as a safe degraded document result.
@@ -48,6 +46,65 @@ pub(crate) enum ParseRuntimeError {
     Validation(#[from] ValidationError),
 }
 
+/// Owned scan results shared by page scheduling and deterministic document finalization.
+#[derive(TypedBuilder)]
+struct ScannedDocument {
+    context: Arc<DocumentContext>,
+    extracted_pages: BTreeMap<u32, ExtractedPage>,
+    pre_scan_warnings: BTreeMap<u32, PageWarning>,
+    page_errors: Vec<PageError>,
+}
+
+impl ScannedDocument {
+    /// Orders completed pages, merges scan diagnostics, and links and validates the final document.
+    fn finish(
+        self,
+        mut pages: Vec<PageResult>,
+        timings: &Timings,
+        observer: Option<&dyn crate::ParseObserver>,
+    ) -> Result<DocumentResult, ParseRuntimeError> {
+        let Self {
+            context,
+            mut pre_scan_warnings,
+            mut page_errors,
+            ..
+        } = self;
+        let page_count = context.page_count;
+        pages.sort_by_key(|page| page.page_number);
+        for page in &mut pages {
+            if let Some(warning) = pre_scan_warnings.remove(&page.page_number) {
+                page.warnings.push(warning);
+                page.warnings.sort_by(|left, right| {
+                    left.stage
+                        .cmp(&right.stage)
+                        .then_with(|| left.code.cmp(&right.code))
+                        .then_with(|| left.message.cmp(&right.message))
+                });
+            }
+        }
+        page_errors.sort_by_key(|error| error.page_number);
+
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Linking {
+                total: page_count,
+            });
+        }
+
+        let linking = timings.start(TimingStage::LinkValidate);
+        let relations = DocumentLinker::new().link(&context, &pages)?;
+        let result = DocumentResult::builder()
+            .schema_version(SchemaVersion::V2_0)
+            .context((*context).clone())
+            .pages(pages)
+            .relations(relations)
+            .errors(page_errors)
+            .build();
+        ResultValidator::validate(&result)?;
+        drop(linking);
+        Ok(result)
+    }
+}
+
 /// Document pipeline with immutable injected engines and bounded runtime settings.
 #[derive(Clone, TypedBuilder)]
 pub(crate) struct ParseRuntime {
@@ -62,7 +119,7 @@ pub(crate) struct ParseRuntime {
 }
 
 impl ParseRuntime {
-    /// Keeps external table state confined to one document invocation.
+    /// Orchestrates scanning, bounded page analysis, and finalization with one per-call table runtime.
     pub(crate) async fn parse_document_with_options(
         &self,
         input: PdfInput,
@@ -89,6 +146,58 @@ impl ParseRuntime {
         let executor =
             PdfiumExecutor::open(input, self.config.runtime()).await?;
         drop(opening);
+        let page_count = executor.page_count();
+        // Scan errors share one shutdown boundary; the page driver takes ownership only after scanning succeeds.
+        let mut scanned = match self
+            .scan_document(&executor, &timings, &mut timing_receiver, observer)
+            .await
+        {
+            Ok(scanned) => scanned,
+            Err(error) => {
+                let _ = executor.close().await;
+                return Err(error);
+            }
+        };
+        let pages = self
+            .analyze_pages(
+                executor,
+                &mut scanned,
+                tables,
+                &timings,
+                &mut timing_receiver,
+                observer,
+            )
+            .await?;
+        let result = scanned.finish(pages, &timings, observer)?;
+        drop(total_timer);
+        while let Ok(timing) = timing_receiver.try_recv() {
+            if let Some(observer) = observer {
+                observer.on_timing(timing);
+            }
+        }
+
+        if let Some(observer) = observer {
+            observer.on_progress(crate::ParseProgress::Complete {
+                total: page_count,
+            });
+        }
+
+        tracing::info!(
+            "completed document parse with {} pages and {} page errors",
+            result.pages.len(),
+            result.errors.len()
+        );
+        Ok(result)
+    }
+
+    /// Extracts page facts and freezes document-wide statistics without owning the executor's shutdown policy.
+    async fn scan_document(
+        &self,
+        executor: &PdfiumExecutor,
+        timings: &Timings,
+        timing_receiver: &mut mpsc::UnboundedReceiver<crate::Timing>,
+        observer: Option<&dyn crate::ParseObserver>,
+    ) -> Result<ScannedDocument, ParseRuntimeError> {
         let page_count = executor.page_count();
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Scanning {
@@ -141,7 +250,6 @@ impl ParseRuntime {
                                     page_number,
                                     error
                                 );
-                                let _ = executor.close().await;
                                 return Err(ParseRuntimeError::Pdfium(error));
                             }
                         };
@@ -165,7 +273,6 @@ impl ParseRuntime {
                         page_number,
                         error
                     );
-                    let _ = executor.close().await;
                     return Err(ParseRuntimeError::Pdfium(error));
                 }
             }
@@ -177,7 +284,6 @@ impl ParseRuntime {
             self.config.fusion(),
         ) {
             tracing::error!("watermark classification failed: {}", error);
-            let _ = executor.close().await;
             return Err(PageAnalysisError::Line(error).into());
         }
         for extracted in extracted_pages.values() {
@@ -189,7 +295,6 @@ impl ParseRuntime {
                     extracted.page_number,
                     error
                 );
-                let _ = executor.close().await;
                 return Err(error.into());
             }
         }
@@ -200,7 +305,6 @@ impl ParseRuntime {
                     "document context construction failed: {}",
                     error
                 );
-                let _ = executor.close().await;
                 return Err(error.into());
             }
         };
@@ -211,6 +315,25 @@ impl ParseRuntime {
             });
         }
         drop(context_timer);
+        Ok(ScannedDocument::builder()
+            .context(context)
+            .extracted_pages(extracted_pages)
+            .pre_scan_warnings(pre_scan_warnings)
+            .page_errors(page_errors)
+            .build())
+    }
+
+    /// Drives bounded page stages and owns render-producer shutdown and fatal-task cancellation.
+    async fn analyze_pages(
+        &self,
+        executor: PdfiumExecutor,
+        scanned: &mut ScannedDocument,
+        tables: Arc<super::TableRuntime>,
+        timings: &Timings,
+        timing_receiver: &mut mpsc::UnboundedReceiver<crate::Timing>,
+        observer: Option<&dyn crate::ParseObserver>,
+    ) -> Result<Vec<PageResult>, ParseRuntimeError> {
+        let page_count = executor.page_count();
         let (render_sender, mut render_receiver) =
             mpsc::channel(self.config.runtime().render_queue_capacity);
         let render_config = self.config.render().clone();
@@ -227,66 +350,68 @@ impl ParseRuntime {
                     break;
                 }
             }
-            executor
+            // Release the process-global PDFium lock as soon as the last raster is delivered.
+            executor.close().await
         });
 
+        // Independent bounded task sets prevent slow enrichment from taking every layout slot.
+        // Completed upstream tasks retain their pixels until downstream capacity becomes available.
+        let limit = self.config.runtime().page_concurrency;
+        let mut layout_tasks: TaskSet<
+            Result<
+                PageStage<crate::page::PageAnalysisDraft>,
+                ParseRuntimeError,
+            >,
+        > = TaskSet::new();
+        let mut ocr_tasks: TaskSet<
+            Result<PageStage<crate::page::PageTableDraft>, ParseRuntimeError>,
+        > = TaskSet::new();
         let mut page_tasks = TaskSet::new();
         let mut pages = Vec::with_capacity(page_count as usize);
         let mut fatal_error = None;
         let mut receiver_open = true;
-        'processing: while receiver_open || !page_tasks.is_empty() {
-            // Deliver observations on this future, never from native tasks or the ORT actor.
-            while let Ok(timing) = timing_receiver.try_recv() {
-                if let Some(observer) = observer {
-                    observer.on_timing(timing);
-                }
-            }
-            if page_tasks.len() >= self.config.runtime().page_concurrency {
-                if let Some(result) = page_tasks.join_next().await {
-                    match Self::collect_page_task(result) {
-                        Ok(page) => {
-                            pages.push(page);
-                            if let Some(observer) = observer {
-                                observer.on_progress(
-                                    crate::ParseProgress::Analyzing {
-                                        completed: pages.len() as u32,
-                                        total: page_count,
-                                    },
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            fatal_error = Some(error);
-                            break 'processing;
-                        }
-                    }
-                }
-                continue;
-            }
+        'processing: while receiver_open
+            || !layout_tasks.is_empty()
+            || !ocr_tasks.is_empty()
+            || !page_tasks.is_empty()
+        {
             tokio::select! {
                 Some(timing) = timing_receiver.recv(), if observer.is_some() => {
                     if let Some(observer) = observer { observer.on_timing(timing); }
                 }
+                result = layout_tasks.join_next(), if !layout_tasks.is_empty() && ocr_tasks.len() < limit => {
+                    if let Some(result) = result {
+                        match Self::collect_task(result) {
+                            Ok(stage) => ocr_tasks.spawn(async move { stage.recognize().await }),
+                            Err(error) => { fatal_error = Some(error); break 'processing; }
+                        }
+                    }
+                }
+                result = ocr_tasks.join_next(), if !ocr_tasks.is_empty() && page_tasks.len() < limit => {
+                    if let Some(result) = result {
+                        match Self::collect_task(result) {
+                            Ok(stage) => page_tasks.spawn(async move { stage.finish().await }),
+                            Err(error) => { fatal_error = Some(error); break 'processing; }
+                        }
+                    }
+                }
                 result = page_tasks.join_next(), if !page_tasks.is_empty() => {
                     if let Some(result) = result {
-                        match Self::collect_page_task(result) {
+                        match Self::collect_task(result) {
                             Ok(page) => {
                                 pages.push(page);
                                 if let Some(observer) = observer {
                                     observer.on_progress(crate::ParseProgress::Analyzing { completed: pages.len() as u32, total: page_count });
                                 }
                             },
-                            Err(error) => {
-                                fatal_error = Some(error);
-                                break 'processing;
-                            }
+                            Err(error) => { fatal_error = Some(error); break 'processing; }
                         }
                     }
                 }
-                rendered = render_receiver.recv(), if receiver_open => {
+                rendered = render_receiver.recv(), if receiver_open && layout_tasks.len() < limit => {
                     match rendered {
                         Some((page_number, result)) => {
-                            let Some(extracted) = extracted_pages.remove(&page_number) else {
+                            let Some(extracted) = scanned.extracted_pages.remove(&page_number) else {
                                 fatal_error = Some(
                                     ParseRuntimeError::MissingExtractedPage { page_number },
                                 );
@@ -297,7 +422,7 @@ impl ParseRuntime {
                             let layout_engine = Arc::clone(&self.layout_engine);
                             let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
                             let tables = Arc::clone(&tables);
-                            let context = Arc::clone(&context);
+                            let context = Arc::clone(&scanned.context);
                             match result {
                                 Ok(rendered) => {
                                     // Observers see the owned raster before it moves into analysis.
@@ -305,10 +430,10 @@ impl ParseRuntime {
                                     if let Some(observer) = observer {
                                         observer.on_page_image(page_number, rendered.image.as_ref());
                                     }
-                                    page_tasks.spawn(async move {
-                                        analyze_rendered_page(PageAnalysisInput::builder()
+                                    layout_tasks.spawn(async move {
+                                        (PageAnalysisInput::builder()
                                             .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine)
-                                            .context(context).extracted(extracted).rendered(rendered).timings(page_timings).tables(tables).build())
+                                            .context(context).extracted(extracted).rendered(rendered).timings(page_timings).tables(tables).build()).prepare()
                                         .await
                                     });
                                 }
@@ -318,9 +443,19 @@ impl ParseRuntime {
                                         page_number,
                                         error
                                     );
-                                    page_tasks.spawn(async move {
+                                    // Render failures have no inference dependency; finish this bounded fallback off-runtime.
+                                    let fallback = docparse_layout::wasm_compat::run_cpu(move || {
                                         analyze_without_render(config, context, extracted, error, page_timings)
-                                    });
+                                    }).await;
+                                    match Self::collect_task(fallback) {
+                                        Ok(page) => {
+                                            pages.push(page);
+                                            if let Some(observer) = observer {
+                                                observer.on_progress(crate::ParseProgress::Analyzing { completed: pages.len() as u32, total: page_count });
+                                            }
+                                        }
+                                        Err(error) => { fatal_error = Some(error); break 'processing; }
+                                    }
                                 }
                                 Err(error) => {
                                     tracing::error!(
@@ -342,11 +477,15 @@ impl ParseRuntime {
             // Closing the receiver stops the serial PDFium producer after at most its current
             // render, while aborting the JoinSet prevents queued page analyses from starting.
             render_receiver.close();
+            layout_tasks.abort_all();
+            ocr_tasks.abort_all();
             page_tasks.abort_all();
+            while layout_tasks.join_next().await.is_some() {}
+            while ocr_tasks.join_next().await.is_some() {}
             while page_tasks.join_next().await.is_some() {}
         }
-        let executor = match producer.await {
-            Ok(executor) => executor,
+        let close_result = match producer.await {
+            Ok(result) => result,
             Err(error) => {
                 if let Some(fatal_error) = fatal_error {
                     tracing::warn!(
@@ -358,7 +497,6 @@ impl ParseRuntime {
                 return Err(ParseRuntimeError::Task(error.to_string()));
             }
         };
-        let close_result = executor.close().await;
         if let Some(error) = fatal_error {
             if let Err(close_error) = close_result {
                 tracing::warn!(
@@ -370,56 +508,7 @@ impl ParseRuntime {
         }
         close_result?;
 
-        pages.sort_by_key(|page| page.page_number);
-        for page in &mut pages {
-            if let Some(warning) = pre_scan_warnings.remove(&page.page_number) {
-                page.warnings.push(warning);
-                page.warnings.sort_by(|left, right| {
-                    left.stage
-                        .cmp(&right.stage)
-                        .then_with(|| left.code.cmp(&right.code))
-                        .then_with(|| left.message.cmp(&right.message))
-                });
-            }
-        }
-        page_errors.sort_by_key(|error| error.page_number);
-
-        if let Some(observer) = observer {
-            observer.on_progress(crate::ParseProgress::Linking {
-                total: page_count,
-            });
-        }
-
-        let linking = timings.start(TimingStage::LinkValidate);
-        let relations = DocumentLinker::new().link(&context, &pages)?;
-        let result = DocumentResult::builder()
-            .schema_version(SchemaVersion::V2_0)
-            .context((*context).clone())
-            .pages(pages)
-            .relations(relations)
-            .errors(page_errors)
-            .build();
-        ResultValidator::validate(&result)?;
-        drop(linking);
-        drop(total_timer);
-        while let Ok(timing) = timing_receiver.try_recv() {
-            if let Some(observer) = observer {
-                observer.on_timing(timing);
-            }
-        }
-
-        if let Some(observer) = observer {
-            observer.on_progress(crate::ParseProgress::Complete {
-                total: page_count,
-            });
-        }
-
-        tracing::info!(
-            "completed document parse with {} pages and {} page errors",
-            result.pages.len(),
-            result.errors.len()
-        );
-        Ok(result)
+        Ok(pages)
     }
 
     /// Applies configured page-error continuation to one page-shell outcome.
@@ -455,10 +544,10 @@ impl ParseRuntime {
         Ok((extracted, Some(warning), Some(page_error)))
     }
 
-    /// Converts one joined page outcome into either a completed page or a fatal error.
-    fn collect_page_task(
-        result: Result<Result<PageResult, ParseRuntimeError>, TaskError>,
-    ) -> Result<PageResult, ParseRuntimeError> {
+    /// Converts any joined stage outcome while preserving fatal errors across stage boundaries.
+    fn collect_task<T>(
+        result: Result<Result<T, ParseRuntimeError>, TaskError>,
+    ) -> Result<T, ParseRuntimeError> {
         match result {
             Ok(Ok(page)) => Ok(page),
             Ok(Err(error)) => {
@@ -471,139 +560,6 @@ impl ParseRuntime {
             }
         }
     }
-}
-
-/// Runs layout and optional OCR against one rendered page before pure fusion.
-#[derive(TypedBuilder)]
-pub(crate) struct PageAnalysisInput {
-    config: Arc<ValidatedConfig>,
-    layout_engine: Arc<dyn LayoutEngine>,
-    #[builder(default)]
-    ocr_engine: Option<Arc<dyn OcrEngine>>,
-    context: Arc<DocumentContext>,
-    extracted: ExtractedPage,
-    rendered: RenderedPage,
-    timings: Timings,
-    tables: Arc<TableRuntime>,
-}
-
-/// Runs layout, OCR, table resolution, and final page validation over owned page inputs.
-pub(crate) async fn analyze_rendered_page(
-    input: PageAnalysisInput,
-) -> Result<PageResult, ParseRuntimeError> {
-    let PageAnalysisInput {
-        config,
-        layout_engine,
-        ocr_engine,
-        context,
-        extracted,
-        rendered,
-        timings,
-        tables,
-    } = input;
-    let page_number = extracted.page_number;
-    if rendered.page_number != page_number {
-        return Err(ParseRuntimeError::RenderedPageMismatch {
-            expected: page_number,
-            actual: rendered.page_number,
-        });
-    }
-    tracing::debug!("starting layout detection for page {}", page_number);
-    let (detections, layout_warning) = match layout_engine
-        .detect(
-            LayoutRequest::builder()
-                .page_number(page_number)
-                .image(Arc::clone(&rendered.image))
-                .transform(rendered.transform.clone())
-                .timings(timings.clone())
-                .build(),
-        )
-        .await
-    {
-        Ok(detections) => (detections, None),
-        Err(error) => {
-            tracing::warn!(
-                "layout detection failed for page {}, using geometry fallback: {}",
-                page_number,
-                error
-            );
-            (
-                Vec::new(),
-                Some(PageWarning {
-                    code: "LayoutUnavailable".to_owned(),
-                    stage: "layout".to_owned(),
-                    message: error.to_string(),
-                }),
-            )
-        }
-    };
-    let analyzer =
-        PageAnalyzer::new(Arc::clone(&config)).with_timings(timings.clone());
-    let preparation = timings.start(TimingStage::TextPrepare);
-    let draft = analyzer.prepare(extracted, detections, context)?;
-    drop(preparation);
-    let completion = if config.ocr().policy == OcrPolicy::Disabled
-        || draft.missing_regions.is_empty()
-    {
-        OcrCompletion::NotRequested
-    } else if let Some(engine) = ocr_engine {
-        tracing::debug!(
-            "starting OCR engine {} for page {}",
-            engine.name(),
-            page_number
-        );
-        let request = OcrRequest::builder()
-            .page_number(page_number)
-            .image(Arc::clone(&rendered.image))
-            .transform(rendered.transform.clone())
-            .dpi(config.render().dpi)
-            .missing_regions(draft.missing_regions.clone())
-            .native_text_coverage(draft.native_text_coverage)
-            .timings(timings.clone())
-            .build();
-        let _ocr = timings.start(TimingStage::Ocr);
-        // Bound optional enrichment without losing native facts when an engine stalls.
-        match crate::wasm_compat::timeout(
-            std::time::Duration::from_millis(config.ocr().timeout_ms),
-            engine.recognize(request),
-        )
-        .await
-        {
-            Ok(Ok(result)) => OcrCompletion::Succeeded(result),
-            Ok(Err(error)) => OcrCompletion::Failed(error.to_string()),
-            Err(_) => OcrCompletion::Failed(format!(
-                "OCR exceeded {} ms",
-                config.ocr().timeout_ms
-            )),
-        }
-    } else {
-        OcrCompletion::Unavailable
-    };
-    let finishing = timings.start(TimingStage::TextFinish);
-    let mut table_draft = analyzer.compose(draft, completion)?;
-    drop(finishing);
-    tables
-        .resolve(
-            &mut table_draft,
-            &rendered.image,
-            &rendered.transform,
-            config.fusion(),
-            &timings,
-        )
-        .await;
-    let finishing = timings.start(TimingStage::TextFinish);
-    let mut page = analyzer.complete(table_draft)?;
-    drop(finishing);
-    if let Some(warning) = layout_warning {
-        page.warnings.push(warning);
-        page.warnings.sort_by(|left, right| {
-            left.stage
-                .cmp(&right.stage)
-                .then_with(|| left.code.cmp(&right.code))
-                .then_with(|| left.message.cmp(&right.message))
-        });
-    }
-    Ok(page)
 }
 
 /// Produces a native-only page when rendering fails but continuation is enabled.

@@ -1,7 +1,7 @@
 //! Platform-specific execution and thread bounds with explicitly scoped compatibility submodules.
 mod backend;
 mod session_pool;
-pub use backend::OnnxBackend;
+pub use backend::{ExecutionProvider, OnnxBackend};
 
 pub(crate) use session_pool::LayoutSessionPool;
 
@@ -73,6 +73,6 @@ mod native;
 mod web;
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
-pub use native::{inspect_model, model_metadata, run_cpu};
+pub use native::{SessionWorker, inspect_model, model_metadata, run_cpu};
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub use web::{model_metadata, run_cpu};

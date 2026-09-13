@@ -6,6 +6,7 @@ use std::future::Future;
 mod platform {
     use super::*;
     use crate::wasm_compat::{WasmBoxedFuture, WasmCompatSend};
+    use tracing::{Instrument, instrument::WithSubscriber};
 
     /// Native task collection retaining Tokio scheduling and cancellation semantics.
     pub(crate) struct TaskSet<T: WasmCompatSend + 'static> {
@@ -34,7 +35,9 @@ mod platform {
             &mut self,
             future: F,
         ) {
-            self.tasks.spawn(future);
+            // Span identity and the caller's dispatcher must both survive a scheduler hop.
+            self.tasks
+                .spawn(future.in_current_span().with_current_subscriber());
         }
         /// Collects one completion with a platform-neutral failure.
         pub(crate) async fn join_next(
@@ -59,7 +62,9 @@ mod platform {
         F: Future + WasmCompatSend + 'static,
         F::Output: WasmCompatSend + 'static,
     {
-        let handle = tokio::spawn(future);
+        // The render producer must retain local subscribers as well as the current document span.
+        let handle =
+            tokio::spawn(future.in_current_span().with_current_subscriber());
         Box::pin(async move { handle.await.map_err(TaskError::from) })
     }
 }
