@@ -1,6 +1,9 @@
 //! Aggregates the jobs endpoints while each leaf module owns one documented route.
+mod delete;
 mod events;
+mod list;
 mod result;
+mod source;
 mod status;
 mod upload;
 
@@ -17,4 +20,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(status::status))
         .routes(routes!(events::events))
         .routes(routes!(result::result))
+        .routes(routes!(list::list))
+        .routes(routes!(source::source))
+        .routes(routes!(delete::delete))
 }

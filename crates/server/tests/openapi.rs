@@ -43,6 +43,9 @@ async fn documentation_covers_routes_and_wire_schemas() {
         ("/api/jobs/status", "get"),
         ("/api/jobs/events", "get"),
         ("/api/jobs/result", "get"),
+        ("/api/jobs/list", "get"),
+        ("/api/jobs/source", "get"),
+        ("/api/jobs/delete", "post"),
         ("/api/health", "get"),
         ("/api/ready", "get"),
         ("/api/openapi.json", "get"),
@@ -58,9 +61,16 @@ async fn documentation_covers_routes_and_wire_schemas() {
     }
     check_references(&spec, &spec);
     // All job identifiers are required query parameters; the deployed spec must not expose capture paths.
-    for endpoint in ["status", "events", "result"] {
+    // The PDF source shares the same durable identifier and prefix as status and result queries.
+    for (endpoint, method) in [
+        ("status", "get"),
+        ("events", "get"),
+        ("result", "get"),
+        ("source", "get"),
+        ("delete", "post"),
+    ] {
         let operation = spec
-            .pointer(&format!("/paths/~1api~1jobs~1{endpoint}/get"))
+            .pointer(&format!("/paths/~1api~1jobs~1{endpoint}/{method}"))
             .expect("job operation");
         assert_eq!(operation.get("tags"), Some(&serde_json::json!(["JOBS"])));
         let parameters = operation
@@ -91,7 +101,7 @@ async fn documentation_covers_routes_and_wire_schemas() {
             .and_then(Value::as_object)
             .expect("paths")
             .len(),
-        8
+        11
     );
     let schemas = spec.pointer("/components/schemas").expect("schemas");
     assert!(

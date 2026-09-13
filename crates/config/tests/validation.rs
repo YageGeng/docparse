@@ -245,6 +245,16 @@ fn native_deployment_settings_are_validated_separately() {
             serde_json::json!(86_400_001),
             "database.idle_timeout_ms",
         ),
+        (
+            "sqlx_slow_statements_threshold_ms",
+            serde_json::json!(0),
+            "database.sqlx_slow_statements_threshold_ms",
+        ),
+        (
+            "sqlx_slow_statements_threshold_ms",
+            serde_json::json!(86_400_001),
+            "database.sqlx_slow_statements_threshold_ms",
+        ),
     ] {
         let mut json = serde_json::to_value(&defaults).expect("defaults");
         *json.get_mut(field).expect("configuration field") = value;

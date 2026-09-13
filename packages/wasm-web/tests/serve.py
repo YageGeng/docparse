@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[3]
-DIST = ROOT / "packages/web/dist"
-REPORTS = ROOT / "packages/web/test-results"
+# Match the renamed WASM package used by browser acceptance URLs and reports.
+DIST = ROOT / "packages/wasm-web/dist"
+REPORTS = ROOT / "packages/wasm-web/test-results"
 LOCK = threading.Lock()
 
 

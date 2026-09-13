@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
-import { chromium } from '../../../packages/web/node_modules/playwright/index.mjs';
+import { chromium } from '../../../packages/wasm-web/node_modules/playwright/index.mjs';
 
 const bytes = [...await readFile(process.argv[2])];
-const output = process.argv[3] ?? 'packages/web/test-results/paddle-tsr/lifecycle.json';
+const output = process.argv[3] ?? 'packages/wasm-web/test-results/paddle-tsr/lifecycle.json';
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage();
 let canceled = false;

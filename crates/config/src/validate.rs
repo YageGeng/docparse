@@ -319,7 +319,7 @@ impl ServerConfig {
 }
 
 impl DatabaseConfig {
-    /// Validates a PostgreSQL target and finite pool budgets before allocating connections.
+    /// Validates a PostgreSQL target, pool budgets, and slow query threshold before allocating connections.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !["postgresql://", "postgres://"].into_iter().any(|scheme| {
             self.url
@@ -343,6 +343,10 @@ impl DatabaseConfig {
             ("database.timeout_ms", self.timeout_ms),
             ("database.acquire_timeout_ms", self.acquire_timeout_ms),
             ("database.idle_timeout_ms", self.idle_timeout_ms),
+            (
+                "database.sqlx_slow_statements_threshold_ms",
+                self.sqlx_slow_statements_threshold_ms,
+            ),
         ] {
             if !(1..=86_400_000).contains(&value) {
                 return Err(ConfigError::InvalidValue {

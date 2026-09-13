@@ -12,7 +12,6 @@ use docparse_layout::{
     LayoutDetection, LayoutEngine, LayoutError, LayoutRequest,
     wasm_compat::WasmBoxedFuture,
 };
-use docparse_migration::{Migrator, MigratorTrait};
 use docparse_server::{
     app::router,
     code::ApiCode,
@@ -87,6 +86,271 @@ fn get(path: &str) -> Request<Body> {
     Request::get(path).body(Body::empty()).expect("GET")
 }
 
+/// Malformed workbench queries must fail at the HTTP boundary without reaching the database driver.
+#[tokio::test]
+async fn workbench_queries_reject_invalid_input() {
+    let directory = tempfile::tempdir().expect("storage");
+    let app = router(
+        AppState::new(
+            Default::default(),
+            SharedStorage::new(directory.path()).await.expect("storage"),
+            HttpOptions::builder().build(),
+            CancellationToken::new(),
+        )
+        .expect("state"),
+        &docparse_config::ServerConfig::default(),
+    )
+    .expect("router");
+    for path in [
+        "/api/jobs/list?limit=0",
+        "/api/jobs/list?limit=101",
+        "/api/jobs/list?cursor=bad",
+        "/api/jobs/list?status=other",
+        "/api/jobs/list?unknown=true",
+        "/api/jobs/source?id=bad",
+    ] {
+        let (status, error) = json(app.clone(), get(path)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(
+            error.pointer("/error/code").and_then(Value::as_u64),
+            Some(4001002),
+            "{path}"
+        );
+    }
+}
+
+/// Deletion cleans only one result, rejects live work, preserves cursors and shared PDFs, and can be retried after storage errors.
+#[tokio::test]
+#[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+async fn completed_results_can_be_deleted_safely() {
+    use docparse_database::{
+        entities::parse_jobs,
+        seaorm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr},
+    };
+    let db = connection::connect(
+        &DatabaseConfig::builder()
+            .url(std::env::var("DOCPARSE_TEST_DATABASE_URL").expect("URL"))
+            .build(),
+    )
+    .await
+    .expect("database");
+    let directory = tempfile::tempdir().expect("storage");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let app = router(
+        AppState::new(
+            db.clone(),
+            storage.clone(),
+            HttpOptions::builder().build(),
+            CancellationToken::new(),
+        )
+        .expect("state"),
+        &docparse_config::ServerConfig::default(),
+    )
+    .expect("router");
+    let id = Uuid::new_v4();
+    let hash = "e".repeat(64);
+    let source_path =
+        storage.path(&format!("{hash}.pdf")).expect("source path");
+    tokio::fs::write(&source_path, b"%PDF-shared")
+        .await
+        .expect("source");
+    Jobs::submit(&db, id, &hash, Some("delete.pdf"), Some(11))
+        .await
+        .expect("submit");
+    let lease = Jobs::claim(&db, 60, 3).await.expect("claim").expect("job");
+    assert_eq!(lease.job.id, id);
+    let result_name = format!("{id}-{}.json", lease.token);
+    let result_path = storage.path(&result_name).expect("result path");
+    Jobs::finish(
+        &db,
+        &lease,
+        Ok(&result_name),
+        None,
+        Duration::from_millis(100),
+    )
+    .await
+    .expect("finish");
+    let sibling = Uuid::new_v4();
+    Jobs::submit(&db, sibling, &hash, Some("same.pdf"), Some(11))
+        .await
+        .expect("shared source job");
+
+    for (query, expected) in [
+        ("bad".to_owned(), StatusCode::BAD_REQUEST),
+        (Uuid::new_v4().to_string(), StatusCode::NOT_FOUND),
+        (sibling.to_string(), StatusCode::CONFLICT),
+    ] {
+        assert_eq!(
+            json(
+                app.clone(),
+                Request::post(format!("/api/jobs/delete?id={query}"))
+                    .body(Body::empty())
+                    .expect("delete request")
+            )
+            .await
+            .0,
+            expected
+        );
+    }
+    // A directory in place of the result reliably causes an unlink failure, even when tests run as root.
+    tokio::fs::create_dir(&result_path)
+        .await
+        .expect("blocked result");
+    let path = format!("/api/jobs/delete?id={id}");
+    assert_eq!(
+        json(
+            app.clone(),
+            Request::post(&path).body(Body::empty()).expect("delete")
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    assert!(
+        Jobs::find_by_id(&db, id)
+            .await
+            .expect("read after failed deletion")
+            .is_none(),
+        "file cleanup failures must not roll back the durable deletion"
+    );
+    tokio::fs::remove_dir(&result_path)
+        .await
+        .expect("remove obstruction");
+    tokio::fs::write(&result_path, b"{}").await.expect("result");
+    let pending = parse_jobs::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .expect("pending read")
+        .expect("tombstone");
+    assert!(pending.deleted_at.is_some());
+    assert_eq!(pending.result_path.as_deref(), Some(result_name.as_str()));
+    // A fresh connection and cleaner recover committed intent without the original HTTP request or process-local state.
+    let recovered_state = AppState::new(
+        connection::connect(
+            &DatabaseConfig::builder()
+                .url(std::env::var("DOCPARSE_TEST_DATABASE_URL").expect("URL"))
+                .build(),
+        )
+        .await
+        .expect("replacement connection"),
+        storage.clone(),
+        HttpOptions::builder().build(),
+        CancellationToken::new(),
+    )
+    .expect("replacement state");
+    let cleanup_stop = CancellationToken::new();
+    let cleaning = tokio::spawn(
+        docparse_server::cleanup::DeletedResults::from(&recovered_state)
+            .run(cleanup_stop.clone()),
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if parse_jobs::Entity::find_by_id(id)
+                .one(&db)
+                .await
+                .expect("cleanup status")
+                .expect("tombstone")
+                .result_path
+                .is_none()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("startup cleanup completes");
+    cleanup_stop.cancel();
+    cleaning.await.expect("cleanup stops");
+    assert!(!result_path.exists());
+    // Recreate a process interrupted after unlink but before its database acknowledgement committed.
+    parse_jobs::Entity::update_many()
+        .col_expr(
+            parse_jobs::Column::ResultPath,
+            Expr::val(result_name.clone()),
+        )
+        .filter(parse_jobs::Column::Id.eq(id))
+        .exec(&db)
+        .await
+        .expect("pending acknowledgement");
+    docparse_server::cleanup::DeletedResults::from(&recovered_state)
+        .clean(&pending)
+        .await
+        .expect("interrupted cleanup retry");
+    assert!(
+        parse_jobs::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .expect("acknowledgement")
+            .expect("tombstone")
+            .result_path
+            .is_none()
+    );
+    recovered_state
+        .db
+        .close()
+        .await
+        .expect("close replacement pool");
+    let (first, repeated) = tokio::join!(
+        json(
+            app.clone(),
+            Request::post(&path).body(Body::empty()).expect("delete")
+        ),
+        json(
+            app.clone(),
+            Request::post(&path)
+                .body(Body::empty())
+                .expect("repeat delete")
+        )
+    );
+    assert_eq!(first.0, StatusCode::OK);
+    assert_eq!(repeated.0, StatusCode::OK);
+    assert!(!result_path.exists());
+    assert_eq!(
+        tokio::fs::read(&source_path).await.expect("shared PDF"),
+        b"%PDF-shared"
+    );
+    assert!(
+        Jobs::find_by_id(&db, sibling)
+            .await
+            .expect("sibling")
+            .is_some()
+    );
+    assert!(
+        Jobs::list(&db, Some(id), 20, None, None).await.is_ok(),
+        "deleted cursor remains usable"
+    );
+    assert!(matches!(
+        Jobs::submit(&db, id, &hash, None, None).await,
+        Err(docparse_database::error::DatabaseError::IdempotencyConflict)
+    ));
+    for endpoint in ["status", "result", "source", "events"] {
+        assert_eq!(
+            json(app.clone(), get(&format!("/api/jobs/{endpoint}?id={id}")))
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    let (_, history) = json(app, get("/api/jobs/list")).await;
+    assert!(
+        !history
+            .pointer("/data/items")
+            .and_then(Value::as_array)
+            .expect("history")
+            .iter()
+            .any(|job| job.get("id").and_then(Value::as_str)
+                == Some(&id.to_string()))
+    );
+    for id in [id, sibling] {
+        parse_jobs::Entity::delete_by_id(id)
+            .exec(&db)
+            .await
+            .expect("test cleanup");
+    }
+    db.close().await.expect("close database");
+}
+
 /// Upload, worker execution, cross-replica reads, SSE reconnect, and error envelopes use real PostgreSQL and PDFium.
 #[tokio::test]
 #[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
@@ -98,7 +362,6 @@ async fn durable_http_survives_disconnected_clients() {
     )
     .await
     .expect("database");
-    Migrator::up(&db, None).await.expect("migration");
     let directory = tempfile::tempdir().expect("shared directory");
     let storage = SharedStorage::new(directory.path()).await.expect("storage");
     let shutdown = CancellationToken::new();
@@ -137,6 +400,99 @@ async fn durable_http_survives_disconnected_clients() {
             .expect("submission body"),
     )
     .expect("submission JSON");
+    // The workbench restores metadata and original bytes from the server after a browser refresh.
+    assert_eq!(
+        submitted.pointer("/data/filename").and_then(Value::as_str),
+        Some("untrusted.pdf")
+    );
+    assert_eq!(
+        submitted
+            .pointer("/data/size_bytes")
+            .and_then(Value::as_u64),
+        Some(u64::try_from(pdf.len()).expect("PDF size"))
+    );
+    let history = json(
+        app.clone(),
+        get("/api/jobs/list?search=untrusted.pdf&limit=100"),
+    )
+    .await;
+    assert_eq!(history.0, StatusCode::OK);
+    assert!(
+        history
+            .1
+            .pointer("/data/items")
+            .and_then(Value::as_array)
+            .expect("items")
+            .iter()
+            .any(|job| job.get("id").and_then(Value::as_str)
+                == Some(id.to_string().as_str()))
+    );
+    let ranged = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/jobs/source?id={id}"))
+                .header("range", "bytes=0-4")
+                .body(Body::empty())
+                .expect("range request"),
+        )
+        .await
+        .expect("source range");
+    assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        ranged.headers().get("content-type").expect("content type"),
+        "application/pdf"
+    );
+    assert_eq!(
+        ranged
+            .headers()
+            .get("content-range")
+            .expect("content range")
+            .to_str()
+            .expect("range text"),
+        format!("bytes 0-4/{}", pdf.len())
+    );
+    assert_eq!(
+        to_bytes(ranged.into_body(), 16)
+            .await
+            .expect("range bytes")
+            .as_ref(),
+        b"%PDF-"
+    );
+    let head = app
+        .clone()
+        .oneshot(
+            Request::head(format!("/api/jobs/source?id={id}"))
+                .body(Body::empty())
+                .expect("HEAD request"),
+        )
+        .await
+        .expect("source HEAD");
+    assert_eq!(head.status(), StatusCode::OK);
+    assert_eq!(
+        head.headers()
+            .get("content-length")
+            .expect("content length")
+            .to_str()
+            .expect("length text"),
+        pdf.len().to_string()
+    );
+    assert!(
+        to_bytes(head.into_body(), 16)
+            .await
+            .expect("HEAD body")
+            .is_empty()
+    );
+    let invalid_range = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/jobs/source?id={id}"))
+                .header("range", "bytes=999999999-")
+                .body(Body::empty())
+                .expect("range request"),
+        )
+        .await
+        .expect("range response");
+    assert_eq!(invalid_range.status(), StatusCode::RANGE_NOT_SATISFIABLE);
     assert_eq!(json(app.clone(), get(&location)).await.0, StatusCode::OK);
     // A replica mounted elsewhere must return its own usable Location, including on an idempotent retry.
     let custom = docparse_config::ServerConfig::builder()
@@ -284,6 +640,12 @@ async fn durable_http_survives_disconnected_clients() {
         Some("complete"),
         "terminal state and progress must be published together"
     );
+    // The persisted duration must include the deliberate layout delay and survive reading from another API replica.
+    let duration_ms = completed
+        .pointer("/data/duration_ms")
+        .and_then(Value::as_u64)
+        .expect("persisted parse duration");
+    assert!(duration_ms >= 3300, "duration excludes parser work");
     let (status, result) =
         json(other.clone(), get(&format!("/api/jobs/result?id={id}"))).await;
     assert_eq!(status, StatusCode::OK);
@@ -308,6 +670,34 @@ async fn durable_http_survives_disconnected_clients() {
         .await
         .expect("terminal closes");
     assert!(String::from_utf8_lossy(&terminal).contains("succeeded"));
+    let terminal_text = String::from_utf8_lossy(&terminal);
+    let snapshot: Value = serde_json::from_str(
+        terminal_text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("terminal SSE data"),
+    )
+    .expect("SSE snapshot");
+    assert_eq!(
+        snapshot
+            .pointer("/data/duration_ms")
+            .and_then(Value::as_u64),
+        Some(duration_ms)
+    );
+    let (_, history) = json(other.clone(), get("/api/jobs/list")).await;
+    let entry = history
+        .pointer("/data/items")
+        .and_then(Value::as_array)
+        .expect("history")
+        .iter()
+        .find(|entry| {
+            entry.get("id").and_then(Value::as_str) == Some(&id.to_string())
+        })
+        .expect("completed history entry");
+    assert_eq!(
+        entry.get("duration_ms").and_then(Value::as_u64),
+        Some(duration_ms)
+    );
     assert_eq!(
         json(other.clone(), upload(id, pdf))
             .await
@@ -465,6 +855,13 @@ async fn durable_http_survives_disconnected_clients() {
     );
     assert!(
         failed
+            .pointer("/data/duration_ms")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "failed attempts retain their duration"
+    );
+    assert!(
+        failed
             .pointer("/data/error")
             .and_then(Value::as_str)
             .expect("persisted message")
@@ -484,7 +881,6 @@ async fn sse_failure_uses_the_error_code_trait() {
     )
     .await
     .expect("database");
-    Migrator::up(&db, None).await.expect("migration");
     let directory = tempfile::tempdir().expect("storage");
     let app = router(
         AppState::new(
@@ -500,7 +896,7 @@ async fn sse_failure_uses_the_error_code_trait() {
     )
     .expect("router");
     let id = Uuid::new_v4();
-    Jobs::submit(&db, id, &"a".repeat(64))
+    Jobs::submit(&db, id, &"a".repeat(64), None, None)
         .await
         .expect("submit");
     let response = app
@@ -816,7 +1212,6 @@ async fn worker_renews_during_synchronous_parser_work() {
     )
     .await
     .expect("db");
-    Migrator::up(&db, None).await.expect("migration");
     let directory = tempfile::tempdir().expect("directory");
     let storage = SharedStorage::new(directory.path()).await.expect("storage");
     let pdf =
@@ -826,7 +1221,9 @@ async fn worker_renews_during_synchronous_parser_work() {
         .await
         .expect("PDF");
     let id = Uuid::new_v4();
-    Jobs::submit(&db, id, &hash).await.expect("submit");
+    Jobs::submit(&db, id, &hash, None, None)
+        .await
+        .expect("submit");
     let lease = Jobs::claim(&db, 3, 3).await.expect("claim").expect("job");
     assert_eq!(lease.job.id, id);
     let (entered, mut receiver) = mpsc::unbounded_channel();

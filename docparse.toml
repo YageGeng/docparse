@@ -4,7 +4,7 @@ directives = "info,ort=info,sqlx=warn"
 [server]
 host = "127.0.0.1"
 port = 8080
-api_prefix = "/api"
+api_prefix = "/api/v1/docparse"
 
 [database]
 url = "postgresql://postgres:testpassword@127.0.0.1:5432/docparse"
@@ -13,6 +13,10 @@ acquire_timeout_ms = 5000
 idle_timeout_ms = 600000
 max_connections = 20
 min_connections = 5
+# SQL events also obey log.directives (or RUST_LOG); use sqlx=debug to see ordinary queries.
+sqlx_logging_level = "debug"
+sqlx_slow_statements_logging_level = "warn"
+sqlx_slow_statements_threshold_ms = 1000
 
 [layout]
 model_path = "models/pp-doclayout-v3/inference.onnx"
@@ -30,7 +34,7 @@ max_in_flight = 2
 timeout_ms = 60000
 
 [ocr]
-policy = "disabled"
+policy = "missing_regions"
 # Native pages may overlap detector and recognizer work; browser execution remains single-page.
 max_in_flight = 2
 

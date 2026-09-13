@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { chromium } from '../../../packages/web/node_modules/playwright/index.mjs';
+import { chromium } from '../../../packages/wasm-web/node_modules/playwright/index.mjs';
 
 // Use a real single-page table PDF so GPU submissions during TSR cannot include another page's layout run.
 const bytes = [...await readFile(process.argv[2])];
-const output = resolve(process.argv[3] ?? 'packages/web/test-results/paddle-tsr/backends.json');
+const output = resolve(process.argv[3] ?? 'packages/wasm-web/test-results/paddle-tsr/backends.json');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage();
-const recorder = await readFile(new URL('../../../packages/web/tests/instrumented-worker.js', import.meta.url), 'utf8');
+const recorder = await readFile(new URL('../../../packages/wasm-web/tests/instrumented-worker.js', import.meta.url), 'utf8');
 await page.route('**/__tsr-observe.js?*', route => route.fulfill({ contentType: 'text/javascript', body: recorder }));
 await page.addInitScript(() => {
   const NativeWorker = Worker;

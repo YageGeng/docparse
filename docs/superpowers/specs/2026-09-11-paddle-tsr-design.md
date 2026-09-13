@@ -78,16 +78,16 @@ Web 增加显式 tsrArtifacts，与现有 layout 的 URLs/bytes 模型输入一�
 ```sh
 rtk uv run scripts/download_models.py --model slanet-plus
 rtk cargo test -p docparse-tsr -- --include-ignored
-rtk npm run build --prefix packages/web
-rtk npm run build:example --prefix packages/web
-rtk proxy node packages/web/scripts/serve-example.mjs
+rtk npm run build --prefix packages/wasm-web
+rtk npm run build:example --prefix packages/wasm-web
+rtk proxy node packages/wasm-web/scripts/serve-example.mjs
 rtk proxy node crates/web/tests/paddle_tsr.mjs /absolute/path/to/document.pdf
-rtk proxy node crates/web/tests/paddle_tsr.mjs --mode fallback --output packages/web/test-results/paddle-tsr/browser-fallback.json /absolute/path/to/document.pdf
+rtk proxy node crates/web/tests/paddle_tsr.mjs --mode fallback --output packages/wasm-web/test-results/paddle-tsr/browser-fallback.json /absolute/path/to/document.pdf
 ```
 
 原生完整验收使用 `crates/core/tests/paddle_tsr_e2e.rs`：以 `TSR_E2E_PDFS` 提供 JSON 路径数组，使用 `cargo test -p docparse-core --features layout-coreml --test paddle_tsr_e2e --release -- --ignored --nocapture`。设置 `TSR_E2E_MODE=fallback` 可复测规则优先流程。
 
-本地明细保存在 `packages/web/test-results/paddle-tsr/acceptance-summary.json`、`native-aligned/`、`native-fallback/`、`browser-default/`、`rules-regression.json` 和 `lifecycle.json`。这些运行产物未纳入版本控制。
+本地明细保存在 `packages/wasm-web/test-results/paddle-tsr/acceptance-summary.json`、`native-aligned/`、`native-fallback/`、`browser-default/`、`rules-regression.json` 和 `lifecycle.json`。这些运行产物未纳入版本控制。
 
 默认配置按用户要求保持 `external_only`。对于当前四份文档，实测 `fallback` 的结构化覆盖率更高；提供该选项供实际使用选择。
 

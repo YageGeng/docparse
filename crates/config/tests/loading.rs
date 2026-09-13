@@ -480,7 +480,66 @@ idle_timeout_ms = 12000
         ("/database/timeout_ms", json!(5000)),
         ("/database/acquire_timeout_ms", json!(5000)),
         ("/database/idle_timeout_ms", json!(12000)),
+        ("/database/sqlx_logging_level", json!("DEBUG")),
+        (
+            "/database/sqlx_slow_statements_logging_level",
+            json!("WARN"),
+        ),
+        ("/database/sqlx_slow_statements_threshold_ms", json!(1000)),
     ] {
         assert_eq!(values.pointer(path), Some(&expected), "{path}");
+    }
+}
+
+/// SQL logging accepts typed levels from files and environment overrides, rejecting misspelled levels.
+#[test]
+fn database_sql_logging_uses_shared_configuration_layers() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        r#"
+[database]
+sqlx_logging_level = "info"
+sqlx_slow_statements_logging_level = "error"
+sqlx_slow_statements_threshold_ms = 250
+"#,
+    );
+    let configured = ConfigLoader::new(&path).load_raw().expect("SQL logging");
+    assert_eq!(
+        configured.database.sqlx_logging_level,
+        log::LevelFilter::Info
+    );
+    assert_eq!(
+        configured.database.sqlx_slow_statements_logging_level,
+        log::LevelFilter::Error
+    );
+    assert_eq!(configured.database.sqlx_slow_statements_threshold_ms, 250);
+
+    let overridden = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({"database": {
+            "sqlx_logging_level": "off",
+            "sqlx_slow_statements_logging_level": "debug",
+            "sqlx_slow_statements_threshold_ms": 500
+        }})))
+        .load_raw()
+        .expect("environment override");
+    assert_eq!(
+        overridden.database.sqlx_logging_level,
+        log::LevelFilter::Off
+    );
+    assert_eq!(
+        overridden.database.sqlx_slow_statements_logging_level,
+        log::LevelFilter::Debug
+    );
+    assert_eq!(overridden.database.sqlx_slow_statements_threshold_ms, 500);
+
+    for field in ["sqlx_logging_level", "sqlx_slow_statements_logging_level"] {
+        write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[database]\n{field} = \"verbose\"\n"),
+        );
+        assert!(ConfigLoader::new(&path).load_raw().is_err(), "{field}");
     }
 }

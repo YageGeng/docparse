@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 # workspace crates
 docparse-config.workspace = true
+docparse-migration.workspace = true
 
 # error
 thiserror.workspace = true
@@ -30,9 +31,6 @@ serde_json.workspace = true
 typed-builder.workspace = true
 
 [dev-dependencies]
-# workspace crates
-docparse-migration.workspace = true
-
 # async
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 

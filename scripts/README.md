@@ -59,7 +59,7 @@ rtk uv run --locked --group dev pre-commit run --all-files
 Regression PDF/OCR generators remain beside their fixtures under `crates/*/tests/`;
 run them with `uv run --locked --group dev <generator.py>`. The layout RGB generator
 now lives at `crates/layout/tests/fixtures/model/generate.py` and needs only the standard
-library. `packages/web/tests/serve.py` remains the real browser-acceptance server;
+library. `packages/wasm-web/tests/serve.py` remains the real browser-acceptance server;
 the JavaScript E2E launcher starts it through uv.
 
 The old static visual-review generator and its test were removed in favor of the

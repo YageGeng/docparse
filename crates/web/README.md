@@ -8,9 +8,9 @@ The workspace includes this crate through `members = ["crates/*"]`, but `default
 rtk cargo build -p docparse-web --target wasm32-unknown-unknown --release --locked
 ```
 
-Use `createParser` from `packages/web` to manage the Worker, pinned runtime assets, models, cancellation, and shutdown. Direct wasm-bindgen exports do not provide the main-thread lifecycle protections.
+Use `createParser` from `packages/wasm-web` to manage the Worker, pinned runtime assets, models, cancellation, and shutdown. Direct wasm-bindgen exports do not provide the main-thread lifecycle protections.
 
-See the [Web package guide](../../packages/web/README.md) for build, deployment, configuration, and real-browser acceptance instructions. Models are not included in the crate.
+See the [Web package guide](../../packages/wasm-web/README.md) for build, deployment, configuration, and real-browser acceptance instructions. Models are not included in the crate.
 
 JavaScript calls are centralized in `src/js.rs`. The pinned js-sys property and
 callback APIs are safe Rust APIs with caught JS exceptions; business code does

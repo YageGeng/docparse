@@ -41,7 +41,7 @@
 - `[tsr]`、默认模型与 per-call 覆盖已贯通；Web model artifacts、真实 Worker 模型和 UI 模式选择已实现，第一次浏览器真模型检查完成 2 次模型调用。
 - 首轮原生全量 223 页、69 个 table 均调用了模型；28 个通过完整源文字校验。多数失败是位置框与原文不完全对齐，不是推理加载失败。
 - 正在验证有幅度限制的源文字边界对齐：不放宽最终覆盖阈值，不改写模型拓扑，不静默使用本地规则。
-- 初始报告：packages/web/test-results/paddle-tsr/native/report.json。后续报告使用 native-aligned 与 browser-default 独立路径，避免混淆运行版本。
+- 初始报告：packages/wasm-web/test-results/paddle-tsr/native/report.json。后续报告使用 native-aligned 与 browser-default 独立路径，避免混淆运行版本。
 
 ## 完成记录
 

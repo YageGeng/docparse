@@ -50,7 +50,7 @@
 
 ## 任务 4：Web/WASM 桥接与文档
 
-修改 crates/web/src、packages/web/src/{types,protocol,index,worker}.ts、公开 README 和设计状态。
+修改 crates/web/src、packages/wasm-web/src/{types,protocol,index,worker}.ts、公开 README 和设计状态。
 
 接口：parse options.table 与 onTableStructure(request, signal)；Worker 的结构请求、响应及取消控制消息。
 
@@ -80,9 +80,9 @@
 
 本地详细产物（未纳入版本控制）：
 
-- `packages/web/test-results/cell-grid-tsr/browser-verification.json` 与各 PDF 的 `browser-*.json`。
-- `packages/web/test-results/cell-grid-tsr/table-input-report.json`。
-- `packages/web/test-results/cell-grid-tsr/final-build.log`。
+- `packages/wasm-web/test-results/cell-grid-tsr/browser-verification.json` 与各 PDF 的 `browser-*.json`。
+- `packages/wasm-web/test-results/cell-grid-tsr/table-input-report.json`。
+- `packages/wasm-web/test-results/cell-grid-tsr/final-build.log`。
 
 可复跑输入检查：先构建并启动 example 服务，再运行
 `rtk proxy node crates/web/tests/table_input.mjs <实际表格PDF>`。
@@ -107,5 +107,5 @@
 - 生产浏览器包构建及 example TypeScript 检查通过；WASM 优化后 6,938,128 字节，145 个导入校验通过。
 - 6 项调用方输入检查通过，包括固定布局边界、文字父级归属、部分失败、超时和取消。
 - 四份 PDF 全量 WebGPU 共 223 页与既有默认表格基线精确一致；加上 CPU 重复解析及符号用例，9 轮浏览器回归全部通过。
-- 新结果保存在 `packages/web/test-results/cell-grid-tsr/boundary-fix-{browser-verification,input-report}.json`，构建日志为 `boundary-fix-build.log`。
+- 新结果保存在 `packages/wasm-web/test-results/cell-grid-tsr/boundary-fix-{browser-verification,input-report}.json`，构建日志为 `boundary-fix-build.log`。
 - 本修复未改变全局包含关系校验或本地表格启发式规则，未创建 commit。

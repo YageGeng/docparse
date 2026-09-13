@@ -13,8 +13,8 @@ Date: 2026-09-13. Final acceptance ran in the user's existing, visible Chrome br
 
 | Backend | Result | Evidence |
 | --- | --- | --- |
-| CPU WebAssembly | Passed all 14 checks | [CPU report](../../packages/web/test-results/headed-wasm-2026-09-13-d9cf1e77.json) |
-| WebGPU | Passed suite: 13 checks passed, one diagnostic comparison recorded differences | [GPU report](../../packages/web/test-results/headed-webgpu-2026-09-13-c5d02962.json) |
+| CPU WebAssembly | Passed all 14 checks | [CPU report](../../packages/wasm-web/test-results/headed-wasm-2026-09-13-d9cf1e77.json) |
+| WebGPU | Passed suite: 13 checks passed, one diagnostic comparison recorded differences | [GPU report](../../packages/wasm-web/test-results/headed-webgpu-2026-09-13-c5d02962.json) |
 
 Both runs exercised real PDF bytes, offset views, Busy handling, three repeat parses, malformed-PDF recovery, active cancellation, parser recreation, idempotent close, native/Web text parity, embedded fonts, rotated Chinese text, CropBox/UserUnit geometry, table spans and empty cells, renderers, per-page timings, progress, and PNG page images. Forced WASM memory growth preserved borrowed inference inputs without intermediate copies. Completed repeated parses retained zero live runtime tensors. The WebGPU test also observed actual GPU command submissions.
 
@@ -50,6 +50,6 @@ Seven pages retained 19 visible parser warnings: page 1 had 2; page 23 had 12; p
 
 ## Test correction
 
-Updated `packages/web/tests/browser.js` to expect two `text_finish` observations per successfully analyzed page. The current pipeline calls `PageAnalyzer::compose` before table inference and `PageAnalyzer::complete` afterward, with each section measured separately. The old test still required one observation. The corrected assertion remains exact and reports expected/actual counts; production timing and parser behavior were not changed.
+Updated `packages/wasm-web/tests/browser.js` to expect two `text_finish` observations per successfully analyzed page. The current pipeline calls `PageAnalyzer::compose` before table inference and `PageAnalyzer::complete` afterward, with each section measured separately. The old test still required one observation. The corrected assertion remains exact and reports expected/actual counts; production timing and parser behavior were not changed.
 
 The corrected test passed in both headed backends. JavaScript syntax and `git diff --check` passed.

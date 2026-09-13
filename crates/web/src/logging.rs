@@ -11,6 +11,7 @@ pub(crate) fn init() {
 
 /// Minimal subscriber that records meaningful event messages in the browser console.
 struct BrowserLog;
+
 impl tracing::Subscriber for BrowserLog {
     /// Limits release browser logging to lifecycle and error events.
     fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
@@ -55,6 +56,7 @@ impl tracing::Subscriber for BrowserLog {
 
 /// Captures only tracing's readable event message.
 struct Message(String);
+
 impl tracing::field::Visit for Message {
     /// Ignores non-message fields to avoid logging arbitrary payloads.
     fn record_debug(

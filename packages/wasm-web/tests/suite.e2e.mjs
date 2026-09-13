@@ -3,7 +3,7 @@ import { runExportRaceE2E } from "./export-race.e2e.mjs";
 
 /** One suite shared by the command-line browser and Codex Browser Use; no parsing backend is replaced. */
 export async function* runE2E({ page, navigate, cdp }, environment, { cycles = 3, provider = "wasm" } = {}) {
-  const sdk = new URL("/packages/web/tests/browser.html", environment.sdkOrigin);
+  const sdk = new URL("/packages/wasm-web/tests/browser.html", environment.sdkOrigin);
   sdk.searchParams.set("cycles", String(cycles)); sdk.searchParams.set("run", "organized-e2e");
   sdk.searchParams.set("provider", provider);
   sdk.searchParams.set("growMemory", "1");

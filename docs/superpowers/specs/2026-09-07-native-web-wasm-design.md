@@ -71,7 +71,7 @@ Temporary Canvas preprocessing, registry edits, and permissive WASI probes are n
 | config/wasm_compat.rs | Native configuration loading and Web concurrency limits |
 | pdfium and pdfium-sys compatibility modules | Locks, target/OS selection, optional symbols, and FFI dispatch |
 | crates/web | Browser-only ABI and final WASM linkage |
-| packages/web | TypeScript facade, Worker, deployment, and browser acceptance |
+| packages/wasm-web | TypeScript facade, Worker, deployment, and browser acceptance |
 
 The former layout pool.rs forwarding file is removed. Its lease-return test remains beside the native pool implementation.
 
@@ -247,7 +247,7 @@ Reject unknown imports and unsupported required WASM features at packaging time.
 
 ## 12. Browser ABI, facade, and lifecycle
 
-crates/web directly exposes browser exports, serialization, logging, and PDFium libc support from lib.rs. build.rs rejects targets other than wasm32-unknown-unknown and configures final linkage. packages/web contains the main-thread facade, Worker, WASI adapter, build scripts, and browser acceptance tests.
+crates/web directly exposes browser exports, serialization, logging, and PDFium libc support from lib.rs. build.rs rejects targets other than wasm32-unknown-unknown and configures final linkage. packages/wasm-web contains the main-thread facade, Worker, WASI adapter, build scripts, and browser acceptance tests.
 
 Workspace members = ["crates/*"] includes the Web crate. default-members selects cli/config/core/layout/pdfium/pdfium-sys. Root default build/check/test/clippy commands omit Web; explicit --workspace needs --exclude docparse-web on native. The Web crate has no platform feature switch and directly enables its shared dependencies' wasm features.
 
@@ -396,7 +396,7 @@ Keep one root THIRD_PARTY_NOTICES.md. Crate NOTICE files refer to that root docu
 - [ort Web backend documentation](https://ort.pyke.io/backends/web)
 - [Pinned ort-web patch provenance](../../../vendor/ort-web/UPSTREAM.md)
 - [ONNX Runtime Web environment/session options](https://onnxruntime.ai/docs/tutorials/web/env-flags-and-session-options.html)
-- [Web package usage and reproduction](../../../packages/web/README.md)
+- [Web package usage and reproduction](../../../packages/wasm-web/README.md)
 - [Implementation and validation record](../reports/2026-09-07-native-web-wasm-validation.md)
 
 Published examples and runtime behavior can differ. Version changes require fresh validation of the affected integration contracts.

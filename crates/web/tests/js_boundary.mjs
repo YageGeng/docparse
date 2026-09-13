@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { chromium } from '../../../packages/web/node_modules/playwright/index.mjs';
+import { chromium } from '../../../packages/wasm-web/node_modules/playwright/index.mjs';
 
-const output = resolve(process.argv[3] ?? 'packages/web/test-results/js-boundary/report.json');
+const output = resolve(process.argv[3] ?? 'packages/wasm-web/test-results/js-boundary/report.json');
 const bytes = [...await readFile(process.argv[2])];
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage();
-const recorder = await readFile(new URL('../../../packages/web/tests/instrumented-worker.js', import.meta.url), 'utf8');
+const recorder = await readFile(new URL('../../../packages/wasm-web/tests/instrumented-worker.js', import.meta.url), 'utf8');
 // Inject only JS property behavior. Successful parsing still uses the production Worker and real models.
 let script = recorder.replace('runtime = value;', `runtime = value;
     const fault = new URL(location.href).searchParams.get('fault');

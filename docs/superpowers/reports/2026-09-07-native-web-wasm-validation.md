@@ -45,7 +45,7 @@ The browser environment was Chromium 152 on macOS. Firefox and Safari remain unv
 - Fallback: only GPU capability was disabled in the test Worker; the real model and CPU parser remained in use.
 - Build manifest: pinned versions, seven PDFium library checksums, Rust WASM and ten ORT runtime asset hashes, and 134 final WASM imports.
 
-The test server writes raw reports to `packages/web/test-results/<runId>.json`. The build writes `packages/web/dist/build-manifest.json`. Both are ignored generated artifacts. This document retains conclusions and reproduction instructions. Reports preserve substitute-font and diagnostic-weight differences without altering production results to match the oracle.
+The test server writes raw reports to `packages/wasm-web/test-results/<runId>.json`. The build writes `packages/wasm-web/dist/build-manifest.json`. Both are ignored generated artifacts. This document retains conclusions and reproduction instructions. Reports preserve substitute-font and diagnostic-weight differences without altering production results to match the oracle.
 
 ## Memory and ownership
 
@@ -65,7 +65,7 @@ The Chinese fixture embeds Noto Sans SC and fixes Rotate=90, CropBox `[20,20,592
 
 ## Reproduction
 
-See the [Web package guide](../../../packages/web/README.md) for the full build and browser flow. Run these commands from the repository root:
+See the [Web package guide](../../../packages/wasm-web/README.md) for the full build and browser flow. Run these commands from the repository root:
 
 ```sh
 rtk proxy python3 scripts/check_wasm_compat.py
@@ -75,8 +75,8 @@ rtk cargo test --locked
 rtk cargo clippy --tests --examples -- -D warnings
 rtk cargo clippy -p docparse-web --target wasm32-unknown-unknown -- -D warnings
 rtk proxy env DOCPARSE_LAYOUT__EXECUTION_PROVIDER=cpu rtk cargo test -p docparse-layout --test python_parity -- --ignored --nocapture
-rtk proxy env DOCPARSE_WEB_REFERENCE_DIR=packages/web/test-results/native rtk cargo test -p docparse-core --test web_reference -- --ignored --nocapture
-rtk proxy python3 packages/web/tests/serve.py --port 8767
+rtk proxy env DOCPARSE_WEB_REFERENCE_DIR=packages/wasm-web/test-results/native rtk cargo test -p docparse-core --test web_reference -- --ignored --nocapture
+rtk proxy python3 packages/wasm-web/tests/serve.py --port 8767
 ```
 
-Open `/packages/web/tests/browser.html?cycles=20&relocated=1&run=cpu-verified`. Add `provider=webgpu` for GPU validation. Reports use independent run IDs so failed runs are not overwritten. The report endpoint serves files and stores observations; it performs no parsing.
+Open `/packages/wasm-web/tests/browser.html?cycles=20&relocated=1&run=cpu-verified`. Add `provider=webgpu` for GPU validation. Reports use independent run IDs so failed runs are not overwritten. The report endpoint serves files and stores observations; it performs no parsing.

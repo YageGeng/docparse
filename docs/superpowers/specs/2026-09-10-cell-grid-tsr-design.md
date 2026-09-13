@@ -223,7 +223,7 @@ await parser.parse(pdf, {
 | crates/core/src/runtime/pipeline.rs | 在原文归属后、最终收尾前调用表格协调器，并保留所需图像及 transform。 |
 | crates/core/src/wasm_compat/native.rs | 保持路径入口兼容，增加对应 options 入口。 |
 | crates/web/src/lib.rs | 外部提供器 JS/WASM 桥接和选项解码。 |
-| packages/web/src/{types,protocol,index,worker}.ts | 类型、双向请求通道、回调生命周期、取消与错误路由。 |
+| packages/wasm-web/src/{types,protocol,index,worker}.ts | 类型、双向请求通道、回调生命周期、取消与错误路由。 |
 | crates/layout/src/timing.rs | 新阶段计时；同步 Web 对应类型。 |
 
 新增类型使用英文注释；超过三个字段的结构遵循 typed-builder；本方案不增加动态规则注册框架。
@@ -257,4 +257,4 @@ await parser.parse(pdf, {
 - DocParse：table/assemble.rs 的 populate 及 table/validate.rs 的原文/占用校验。
 - DocParse：runtime/pipeline.rs 的 analyze_rendered_page 和 page.rs 的 finish。
 - DocParse：layout/geometry.rs 的实际像素变换及 runtime/pdfium_executor.rs 的 limited_dpi。
-- DocParse Web：worker.ts 的 executing 检查、protocol.ts 的操作定义和 index.ts 的解析回调生命周期。
+- DocParse WASM Web：worker.ts 的 executing 检查、protocol.ts 的操作定义和 index.ts 的解析回调生命周期。

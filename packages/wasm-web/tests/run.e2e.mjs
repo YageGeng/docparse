@@ -66,7 +66,7 @@ export async function prepareE2E() {
 async function main() {
   const { values } = parseArgs({ options: { help: { type: "boolean" }, headed: { type: "boolean" }, channel: { type: "string" }, cycles: { type: "string", default: "3" }, provider: { type: "string", default: "wasm" } } });
   if (values.help) {
-    console.log("Usage: npm run test:e2e -- [--headed] [--channel chrome] [--cycles 20] [--provider wasm|webgpu]\nBuilds SDK/example, generates native references, then runs SDK, UI and export E2E against the real model.\nInstall the pinned model and Chromium first: npx playwright install chromium\nReports: packages/web/test-results/e2e/latest.json");
+    console.log("Usage: npm run test:e2e -- [--headed] [--channel chrome] [--cycles 20] [--provider wasm|webgpu]\nBuilds SDK/example, generates native references, then runs SDK, UI and export E2E against the real model.\nInstall the pinned model and Chromium first: npx playwright install chromium\nReports: packages/wasm-web/test-results/e2e/latest.json");
     return;
   }
   const cycles = Number(values.cycles);

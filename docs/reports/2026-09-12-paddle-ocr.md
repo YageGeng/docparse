@@ -58,7 +58,7 @@ artifacts and stopped its Worker; the stable-build rerun passes. This does not
 constitute a general Worker-recovery guarantee.
 
 The browser artifact directory is
-`packages/web/test-results/paddle-ocr-2026-09-12/` (ignored by Git). It contains
+`packages/wasm-web/test-results/paddle-ocr-2026-09-12/` (ignored by Git). It contains
 raster inputs, visible extracted text, timing snapshots and a Chinese OCR screenshot.
 `crates/ocr/tests/fixtures/generate_browser_corpus.py` regenerates the inputs;
 `crates/web/tests/browser_ocr_acceptance.mjs` runs corpus checks with an already

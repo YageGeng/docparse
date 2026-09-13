@@ -37,7 +37,7 @@ Files: `crates/core/src/table/{grid/{mod,tagged,ruled,aligned,spans}.rs,assemble
 
 ## Task 3: Renderers and example
 
-Files: `crates/core/src/table/render.rs`, `render/{json.rs,markdown.rs,text.rs}`, `packages/web/src/types.ts`, `packages/web/example/{src/main.ts,index.html,style.css}`.
+Files: `crates/core/src/table/render.rs`, `render/{json.rs,markdown.rs,text.rs}`, `packages/wasm-web/src/types.ts`, `packages/wasm-web/example/{src/main.ts,index.html,style.css}`.
 
 - [x] Test escaped Markdown/HTML, span handling, numeric first rows, and canonical table text.
 - [x] Render table structure without re-running reconstruction or duplicating source content.

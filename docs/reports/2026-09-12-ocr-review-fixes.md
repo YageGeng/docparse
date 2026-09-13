@@ -47,7 +47,7 @@ the OCR fragments without changing native facts. Real CPU parsing now returns
 The final production WebGPU run returns `Total: 100`, `Pay USD 20` and
 `Hello, world` exactly, with native labels present once. It completes in 22.7 s
 including model initialization. The internal-label row owns two OCR fragments.
-Evidence is in `packages/web/test-results/ocr-review-fixes-2026-09-12/`, including
+Evidence is in `packages/wasm-web/test-results/ocr-review-fixes-2026-09-12/`, including
 `native-ocr-overlap-fixed.json` and `native-ocr-overlap-fixed.jpg`.
 
 The four-page English/Chinese rotation corpus passes on WebGPU in 3.6 s with

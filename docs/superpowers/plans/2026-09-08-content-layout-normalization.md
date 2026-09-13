@@ -136,5 +136,5 @@ for the rollback.
   detached with their original text and precise polygons.
 
 Local evidence is stored under `target/overlap-analysis/` and
-`packages/web/test-results/`. Results from the earlier unconditional-overlap merge
+`packages/wasm-web/test-results/`. Results from the earlier unconditional-overlap merge
 implementation are historical evidence and do not establish this policy's behavior.

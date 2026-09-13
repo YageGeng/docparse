@@ -28,7 +28,7 @@
 | `crates/core/src/runtime/pipeline.rs` | PDFium actor 负责文档/页面生命周期，页面分析已有 RGB 栅格 | 能复用现有截图，但图片提取必须安排在 actor 关闭之前 |
 | `crates/core/src/types.rs:484` | `Block` 有文字、模型区域、可选 table，没有图片资源 | 需要新增可选的资源字段 |
 | `crates/core/src/render/json.rs` | 配置化 JSON 使用手写的借用序列化视图 | 除 Rust 数据类型外，还必须修改此序列化入口，避免漏字段 |
-| `packages/web/src/worker.ts` | 已将页面栅格编码为 PNG Blob，用于预览 | 可以参考编码与消息传递，但页面预览 Blob 不是可持久化的 JSON 图片资源 |
+| `packages/wasm-web/src/worker.ts` | 已将页面栅格编码为 PNG Blob，用于预览 | 可以参考编码与消息传递，但页面预览 Blob 不是可持久化的 JSON 图片资源 |
 
 项目锁定 PDFium `chromium/8028`，并已有 PNG 编码依赖；`Cargo.lock` 中已有 Base64 0.23.1。正式使用 Base64 时仍须在根 `workspace.dependencies` 声明，并由子 crate 继承。
 
@@ -67,7 +67,7 @@ Poppler `pdfimages -list` 统计到：132 个图片绘制实例、27 个 soft-ma
 
 这项辅助探测使用的是 PDFium 7999，不是项目的 8028 构建；它证明需要验证的分辨率和对象层问题，不能替代正式的 native/WASM 接入验收。
 
-调研产物位于 `packages/web/test-results/region-image-research/`：`model-regions.json`、`region-summary.json`、`pdf-object-inventory.json`。它们是本地调研证据，不是正式回归夹具。
+调研产物位于 `packages/wasm-web/test-results/region-image-research/`：`model-regions.json`、`region-summary.json`、`pdf-object-inventory.json`。它们是本地调研证据，不是正式回归夹具。
 
 ## 4. 提取策略
 

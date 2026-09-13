@@ -67,7 +67,7 @@ Deliver: PdfiumWorker::spawn/join, spawn, TaskSet::spawn/join_next/abort_all, an
 
 ## Task 4: Pinned upstream runtime and WASM packaging
 
-Files: vendor/ort-web, crates/web, packages/web build scripts/WASI imports, and provenance/license documentation.
+Files: vendor/ort-web, crates/web, packages/wasm-web build scripts/WASI imports, and provenance/license documentation.
 
 Deliver: release WASM, wasm-bindgen glue, and pinned module-Worker-compatible runtime assets.
 
@@ -80,7 +80,7 @@ Deliver: release WASM, wasm-bindgen glue, and pinned module-Worker-compatible ru
 
 ## Task 5: Browser API and lifecycle
 
-Files: packages/web/src/index.ts, worker.ts, wasm_imports.ts; crates/web/src/lib.rs and build.rs; packages/web/tests.
+Files: packages/wasm-web/src/index.ts, worker.ts, wasm_imports.ts; crates/web/src/lib.rs and build.rs; packages/wasm-web/tests.
 
 Deliver: createParser(options), parse(bytes, {signal}), render(document, format), and close().
 

@@ -103,6 +103,30 @@ impl SharedStorage {
         })
     }
 
+    /// Removes an immutable object and syncs its directory before cleanup can be acknowledged in PostgreSQL.
+    pub async fn remove(&self, name: &str) -> ApiResult<()> {
+        let path = self.path(name)?;
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            // Also sync after NotFound: a previous interrupted attempt may have unlinked without syncing.
+            std::fs::File::open(root)?.sync_all()
+        })
+        .await
+        .context(TaskSnafu {
+            stage: "storage-remove-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?
+        .context(StorageSnafu {
+            stage: "storage-remove-file",
+            code: ApiCode::service_unavailable(5031003),
+        })
+    }
+
     /// Restricts database and internal object names to a flat namespace without path traversal.
     pub fn path(&self, name: &str) -> ApiResult<PathBuf> {
         if name.is_empty()

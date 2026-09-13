@@ -49,7 +49,7 @@ Generate the mixed PDF with
 `runPreparation` from `crates/web/tests/browser_prepare_acceptance.mjs` on a
 fresh example tab. The Web package README documents the runner and CPU resume
 option. Retained local artifacts are under
-`packages/web/test-results/model-prepare-2026-09-12/`: the combined matrix is
+`packages/wasm-web/test-results/model-prepare-2026-09-12/`: the combined matrix is
 `all-preparation-results.json`, additional flows are `lifecycle-results.json`,
 and screenshots are `final.jpg` and `timings.jpg`.
 

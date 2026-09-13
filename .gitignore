@@ -35,7 +35,13 @@
 output.json
 
 # Browser build artifacts
+/packages/wasm-web/node_modules/
+/packages/wasm-web/dist/
+/packages/wasm-web/example/dist/
+/packages/wasm-web/test-results/
+
+# HTTP workbench build artifacts
 /packages/web/node_modules/
 /packages/web/dist/
-/packages/web/example/dist/
 /packages/web/test-results/
+/packages/web/public/pdfjs/

@@ -7,7 +7,7 @@ the job: refreshes, SSE disconnects, and API replacement do not cancel parsing.
 ## Structure
 
 - `crates/migration`: CLI-generated SeaORM 2.0 migrations, edited with SeaQuery
-  table/index builders. Run migrations once as a deployment step.
+  table/index builders. Pending migrations run automatically when the database pool connects.
 - `crates/database`: connection setup, CLI-generated `entities`, and typed `query`
   methods. Uses SeaORM/SeaQuery and `thiserror`; no Snafu or HTTP dependencies.
 - `crates/server`: `app`, `routers`, `state`, `middlewares`, `model`, storage, and
@@ -17,11 +17,11 @@ the job: refreshes, SSE disconnects, and API replacement do not cancel parsing.
 ## Start
 
 Configure `[server]` and `[database]` in `docparse.toml`. Provision the database
-first; the separate migration CLI still reads `DATABASE_URL`. Supply credentials
+first; `connection::connect` applies pending migrations before HTTP or workers start.
+The separate administration migration CLI still reads `DATABASE_URL`. Supply credentials
 through your deployment environment rather than checked-in files or CLI arguments.
 
 ```bash
-rtk proxy sea-orm-cli migrate up -d crates/migration
 rtk cargo run -p docparse-server --release -- \
   --storage-dir /srv/docparse/shared --config docparse.toml
 ```
@@ -44,7 +44,7 @@ rtk cargo build -p docparse-server --release --features cuda
 
 Run the same binary with `--role api`, `--role worker`, or `--role all` (default).
 API-only instances do not load models. `/api/ready` checks the task schema as well as
-shared storage; a reachable database without migrations is not ready. Every API and worker must use the same
+shared storage, including detecting schema damage after startup. Every API and worker must use the same
 database and shared directory contents, even if their mount paths differ. The
 filesystem must provide coherent cross-host reads, atomic publication, and file
 and directory synchronization. An unshared container directory is insufficient.
@@ -63,7 +63,9 @@ uses WisLand's millisecond-based settings:
 
 Pool maximum must be positive and at least the minimum. Each timeout must be
 between 1 and 86400000 milliseconds. Connection setup validates these settings
-before allocating the pool; it does not apply migrations.
+before allocating the pool. Pending migrations then run in a transaction on that
+same database; a PostgreSQL transaction lock serializes concurrent application
+startup. Migration failure aborts startup before model initialization or job claims.
 
 The existing configuration precedence applies: defaults, main TOML, selected
 profile, and `DOCPARSE_` environment values. For example, use
@@ -80,6 +82,10 @@ multi-tenant authorization system. Credentials and request/response bodies are
 excluded from request logging. Responses include `x-request-id` for correlation.
 
 ## API reference
+
+The [HTTP workbench](../../packages/web/README.md) uses this API for uploads,
+durable history, progress recovery and PDF/result inspection. Starting the updated
+server automatically applies the `add_job_file_metadata` migration when pending.
 
 Open `http://127.0.0.1:8080/api/docs` for the interactive Scalar reference, or download
 `http://127.0.0.1:8080/api/openapi.json` for the OpenAPI 3.1 document. Both are available
@@ -109,6 +115,8 @@ rtk curl -i -H 'Idempotency-Key: 07bd9078-a15f-4b41-bbca-e341047db61e' \
 rtk curl 'http://127.0.0.1:8080/api/jobs/status?id=07bd9078-a15f-4b41-bbca-e341047db61e'
 rtk proxy curl -N 'http://127.0.0.1:8080/api/jobs/events?id=07bd9078-a15f-4b41-bbca-e341047db61e'
 rtk curl 'http://127.0.0.1:8080/api/jobs/result?id=07bd9078-a15f-4b41-bbca-e341047db61e'
+rtk curl 'http://127.0.0.1:8080/api/jobs/list?limit=20&status=succeeded'
+rtk curl -H 'Range: bytes=0-65535' 'http://127.0.0.1:8080/api/jobs/source?id=07bd9078-a15f-4b41-bbca-e341047db61e'
 ```
 
 The multipart body must contain exactly one `file` field starting with `%PDF-`.
@@ -117,10 +125,27 @@ a 300-second upload deadline. Files are streamed to disk. File names supplied by
 clients do not affect storage paths. Uploading the same bytes with the same key
 returns the existing task; different bytes with that key return `4091001`.
 
+Snapshots additionally expose `filename`, `size_bytes`, `created_at`, and
+`updated_at`. The display filename is bounded to 255 characters, stripped of
+directory components/control characters, and never used as a filesystem path.
+Metadata is inserted with the task and is not changed by an idempotent replay.
+Jobs created before the metadata migration have null filename and size fields.
+
+`GET /api/jobs/list` accepts an optional status, literal case-insensitive filename
+search, limit (1–100; default 20), and UUID cursor. Its envelope contains `items`
+and `next_cursor`; keep filters unchanged when following that cursor. History is
+ordered by descending creation time and UUID. Invalid/missing cursor anchors are
+reported as `4001002`.
+
+`GET /api/jobs/source?id=<uuid>` streams the immutable input independently of
+parse status. HEAD, byte ranges and conditional requests use tower-http's file
+service. Unsatisfiable ranges return 416 with the file size in Content-Range.
+Successful range/file responses contain binary PDF data rather than a JSON envelope.
+
 Ordinary success responses use:
 
 ```json
-{"success":true,"message":"Success","data":{"id":"...","status":"queued","version":1,"attempts":0,"progress":null,"error":null}}
+{"success":true,"message":"Success","data":{"id":"...","filename":"document.pdf","size_bytes":1024,"created_at":"2026-09-13T00:00:00Z","updated_at":"2026-09-13T00:00:00Z","status":"queued","version":1,"attempts":0,"progress":null,"error":null}}
 ```
 
 `POST /api/jobs` returns HTTP 202 with a `Location` header pointing to
@@ -166,6 +191,17 @@ There is no middleware that reclassifies completed HTTP responses. Errors use:
 | 500000 | 500 | Internal error or caught panic |
 
 ## SSE reconnect semantics
+
+`POST /api/jobs/delete?id=<uuid>` removes a completed or failed task from all public
+reads and deletes its result JSON. The original PDF remains available to other jobs
+sharing its content hash. Repeated deletion succeeds; active tasks return `4091004`.
+Internal tombstones preserve pagination anchors and prevent reuse of deleted
+idempotency keys. Deletion intent commits before filesystem cleanup. HTTP 200 means
+cleanup completed; HTTP 202 means the task is already hidden and cleanup remains
+pending. Every server role retries pending cleanup at startup and every thirty
+seconds, independently of parser concurrency. Cleanup syncs the storage directory
+before clearing the result path, so a restart can safely retry an interrupted unlink
+or acknowledgement. No database transaction is held while accessing storage.
 
 The event name is `job`, its `id` is the durable database version, and `data` is
 the same `ApiResponse<JobSnapshot>` returned by the status endpoint. Every new
@@ -267,6 +303,23 @@ A valid `RUST_LOG` takes precedence; if it is absent or invalid, the server uses
 `log.directives`. Invalid selected configuration directives stop startup before
 database connections or models are initialized.
 
+SQLx query logging has separate database settings with these defaults:
+
+```toml
+[database]
+sqlx_logging_level = "debug"
+sqlx_slow_statements_logging_level = "warn"
+sqlx_slow_statements_threshold_ms = 1000
+```
+
+Levels accept `off`, `error`, `warn`, `info`, `debug`, and `trace` (case-insensitive).
+Queries taking at least the threshold use the slow query level; shorter queries
+use the ordinary level. Set either level to `off` to disable that category.
+The threshold accepts 1 through 86400000 milliseconds. These settings support the
+same profile and environment layers, for example `DOCPARSE_DATABASE__SQLX_LOGGING_LEVEL`.
+Events still obey `log.directives` or `RUST_LOG`: the default `sqlx=warn` shows slow
+query warnings, while `sqlx=debug` also shows ordinary queries at their default level.
+
 Use `RUST_LOG=info,docparse_core=debug,docparse_layout=debug,docparse_ocr=debug,docparse_tsr=debug`
 to include existing stage timings and page diagnostics. The reserved
 `docparse::context` target keeps HTTP and PDF correlation spans enabled even with
@@ -277,6 +330,12 @@ INFO events. Embedders configuring their own subscriber can use
 when the response is ready, not completion of an SSE or file response body.
 
 ## Parser throughput
+
+Job snapshots (`jobs/status`, `jobs/list`, and SSE) expose nullable `duration_ms`.
+It measures the latest completed attempt with a monotonic clock, including parsing
+and result publication, and excludes upload, queueing, and the final database update.
+The duration is saved atomically with the attempt outcome; the completion log uses
+the same value. Retries clear it, while historical or interrupted attempts remain null.
 
 Full-document native extraction still precedes global watermark/font statistics.
 After this pass, render, layout/preparation, OCR/composition, and TSR/completion

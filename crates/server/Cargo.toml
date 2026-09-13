@@ -62,7 +62,6 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 # workspace crates
 docparse-layout.workspace = true
-docparse-migration.workspace = true
 
 # testing
 tower.workspace = true

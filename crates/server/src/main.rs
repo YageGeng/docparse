@@ -5,7 +5,9 @@ use docparse_config::{
 use docparse_core::DocParser;
 use docparse_database::connection;
 use docparse_server::{
-    app, logging,
+    app,
+    cleanup::DeletedResults,
+    logging,
     state::{AppState, HttpOptions},
     storage::SharedStorage,
     worker::{Worker, WorkerOptions},
@@ -159,6 +161,7 @@ async fn run_services(
     worker: Option<Worker>,
 ) -> Result<(), Box<dyn Error>> {
     let shutdown = state.shutdown.clone();
+    let cleanup = DeletedResults::from(&state);
     // Register SIGTERM before accepting traffic and keep both services on the same cancellation token.
     let mut terminate = tokio::signal::unix::signal(
         tokio::signal::unix::SignalKind::terminate(),
@@ -188,7 +191,12 @@ async fn run_services(
         }
         Ok::<(), Box<dyn Error>>(())
     };
-    let outcome = tokio::try_join!(serving, working);
+    // Cleanup recovery also runs for API-only deployments and never competes for parser concurrency slots.
+    let cleaning = async {
+        cleanup.run(shutdown.clone()).await;
+        Ok::<(), Box<dyn Error>>(())
+    };
+    let outcome = tokio::try_join!(serving, working, cleaning);
     // Always release the signal task after either normal draining or a service error.
     shutdown.cancel();
     signal.abort();

@@ -5,14 +5,18 @@ use axum::{
 use docparse_config::{DatabaseConfig, RawConfig, TableMode, ValidatedConfig};
 use docparse_core::DocParser;
 use docparse_database::{
-    connection, entities::parse_jobs, query::parse_job::ParseJobQuery as Jobs,
-    seaorm::EntityTrait,
+    connection,
+    entities::parse_jobs,
+    query::parse_job::ParseJobQuery as Jobs,
+    seaorm::{
+        ConnectionTrait, EntityTrait,
+        sea_query::{Alias, Expr, Func, Query},
+    },
 };
 use docparse_layout::{
     LayoutDetection, LayoutEngine, LayoutError, LayoutRequest,
     wasm_compat::{SessionWorker, TaskError, WasmBoxedFuture, run_cpu},
 };
-use docparse_migration::{Migrator, MigratorTrait};
 use docparse_server::{
     app::router,
     state::{AppState, HttpOptions},
@@ -27,6 +31,69 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use tracing::{Instrument, instrument::WithSubscriber};
 use uuid::Uuid;
+
+/// Database logging must apply both configured levels and the threshold, including independent off switches.
+#[tokio::test]
+#[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+async fn database_sql_logging_honors_configuration() {
+    for (ordinary, slow, threshold_ms, expected_level) in [
+        ("info", "off", 60_000, Some("INFO")),
+        ("off", "warn", 1, Some("WARN")),
+        ("off", "off", 1, None),
+    ] {
+        let log = tempfile::NamedTempFile::new().expect("log");
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_env_filter("off,sqlx::query=trace")
+            .with_writer(log.reopen().expect("writer"))
+            .finish();
+        async {
+            let db = connection::connect(
+                &DatabaseConfig::builder()
+                    .url(
+                        std::env::var("DOCPARSE_TEST_DATABASE_URL")
+                            .expect("URL"),
+                    )
+                    .sqlx_logging_level(
+                        ordinary.parse().expect("ordinary level"),
+                    )
+                    .sqlx_slow_statements_logging_level(
+                        slow.parse().expect("slow level"),
+                    )
+                    .sqlx_slow_statements_threshold_ms(threshold_ms)
+                    .build(),
+            )
+            .await
+            .expect("database");
+            // A server-side delay reliably crosses the slow threshold without depending on network latency.
+            db.query_one(
+                &Query::select()
+                    .expr_as(
+                        Func::cust("pg_sleep").arg(Expr::val(0.03_f64)),
+                        Alias::new("sql_logging_probe"),
+                    )
+                    .to_owned(),
+            )
+            .await
+            .expect("query");
+            db.close().await.expect("close database");
+        }
+        .with_subscriber(subscriber)
+        .await;
+        let output = std::fs::read_to_string(log.path()).expect("logs");
+        let event = output
+            .lines()
+            .find(|line| line.contains("sql_logging_probe"));
+        if let Some(level) = expected_level {
+            let event = event.expect("SQL query event");
+            assert!(event.contains(level), "unexpected level: {event}");
+            assert_eq!(event.contains("slow statement"), threshold_ms == 1);
+        } else {
+            assert!(event.is_none(), "disabled query logging: {output}");
+        }
+    }
+}
 
 /// Startup must honor configured filters and RUST_LOG precedence before attempting any database connection.
 #[test]
@@ -252,7 +319,6 @@ async fn pdf_logs_follow_jobs_across_execution_boundaries() {
         )
         .await
         .expect("database");
-        Migrator::up(&db, None).await.expect("migration");
         let directory = tempfile::tempdir().expect("storage");
         let storage = SharedStorage::new(directory.path()).await.expect("storage");
         let app = router(
@@ -365,7 +431,7 @@ async fn pdf_logs_follow_jobs_across_execution_boundaries() {
         }
         // Trigger one failure after the HTTP handler has returned, proving the SSE body retains its own context.
         let subscription_id = Uuid::new_v4();
-        Jobs::submit(&db, subscription_id, &hash)
+        Jobs::submit(&db, subscription_id, &hash, None, None)
             .await
             .expect("subscription job");
         let response = app

@@ -92,7 +92,7 @@ tokio-util = { version = "0.7", features = ["io", "rt"] }
 # http
 axum = { version = "0.8", features = ["multipart"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["catch-panic"] } # CORS is handled at ingress.
+tower-http = { version = "0.7", features = ["catch-panic", "fs"] } # CORS is handled at ingress; fs provides standard PDF Range responses.
 
 # api documentation
 utoipa = { version = "5", features = ["uuid"] }
@@ -133,6 +133,7 @@ sha2 = "0.11"
 
 # cli and diagnostics
 clap = { version = "4", features = ["derive"] }
+log = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
 web-time = "1.1"

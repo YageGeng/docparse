@@ -15,7 +15,7 @@ rtk proxy pdftoppm -f 1 -l 1 -r 144 -singlefile -png crates/core/tests/fixtures/
 Generate image-only English/Chinese rotation pages and a mixed native/scan page:
 
 ```sh
-rtk uv run --locked --group dev crates/ocr/tests/fixtures/generate_browser_corpus.py packages/web/test-results/paddle-ocr/inputs
+rtk uv run --locked --group dev crates/ocr/tests/fixtures/generate_browser_corpus.py packages/wasm-web/test-results/paddle-ocr/inputs
 ```
 
 Upload these PDFs through the production example. Every scan must report OCR

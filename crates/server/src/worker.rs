@@ -270,11 +270,14 @@ impl Worker {
                     stage: "task-serialize-final-progress",
                     code: ApiCode::COMMON_INTERNAL_ERROR,
                 })?;
+            // Capture one monotonic measurement for both persistence and logs, before the atomic completion update.
+            let duration = started.elapsed();
             let accepted = Jobs::finish(
                 &self.db,
                 &lease,
                 outcome.as_deref().map_err(String::as_str),
                 final_progress,
+                duration,
             )
             .await
             .with_context(|source| DatabaseSnafu {
@@ -285,7 +288,7 @@ impl Worker {
                 "finished job {} attempt {} in {} ms; accepted={}, succeeded={}",
                 id,
                 lease.job.attempts,
-                started.elapsed().as_millis(),
+                duration.as_millis(),
                 accepted,
                 outcome.is_ok()
             );

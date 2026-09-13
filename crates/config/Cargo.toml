@@ -23,6 +23,9 @@ serde_path_to_error.workspace = true
 # builder
 typed-builder.workspace = true
 
+# cli and diagnostics
+log.workspace = true
+
 [dev-dependencies]
 # config and serialization
 serde_json.workspace = true

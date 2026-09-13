@@ -80,10 +80,10 @@
 rtk cargo test --locked
 rtk cargo clippy -p docparse-core -p docparse-tsr --all-targets --locked -- -D warnings
 rtk cargo clippy -p docparse-web --target wasm32-unknown-unknown --locked -- -D warnings
-rtk proxy node crates/web/tests/paddle_tsr.mjs --output packages/web/test-results/paddle-tsr/browser-repair/report.json /Volumes/Yage/Downloads/2303.18223v16.pdf
+rtk proxy node crates/web/tests/paddle_tsr.mjs --output packages/wasm-web/test-results/paddle-tsr/browser-repair/report.json /Volumes/Yage/Downloads/2303.18223v16.pdf
 ```
 
-浏览器命令需要先构建 `packages/web` 并启动真实 example。Native 使用 `crates/core/tests/paddle_tsr_e2e.rs`，通过 `TSR_E2E_PDFS` 提供 JSON 文件路径列表。
+浏览器命令需要先构建 `packages/wasm-web` 并启动真实 example。Native 使用 `crates/core/tests/paddle_tsr_e2e.rs`，通过 `TSR_E2E_PDFS` 提供 JSON 文件路径列表。
 
 本次完成标准是全表结构化、源文本完整性及指定语义回归；置信度不作为人工标注级准确率。未能确定归属的输入继续保留原文并报告失败。
 

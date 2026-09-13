@@ -84,7 +84,7 @@ let document = parser.parse_path("input.pdf").await?;
 
 ## WebAssembly and browsers
 
-The `wasm32-unknown-unknown` build runs the same PDFium, model, preprocessing, and fusion algorithms in a dedicated module Worker. See the [Web package guide](packages/web/README.md) and [native/Web specification](docs/superpowers/specs/2026-09-07-native-web-wasm-design.md).
+The `wasm32-unknown-unknown` build runs the same PDFium, model, preprocessing, and fusion algorithms in a dedicated module Worker. See the [Web package guide](packages/wasm-web/README.md) and [native/Web specification](docs/superpowers/specs/2026-09-07-native-web-wasm-design.md).
 
 The shared Rust entry points are `DocParser::from_artifacts(config, ParserArtifacts { layout, tsr: Some(tsr) })` and `parse_bytes(Arc<[u8]>)`. Both enabled models use the supplied bytes without reading configured paths. Rules-only parsers may still pass a single layout `ModelArtifacts`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
 
@@ -182,8 +182,9 @@ rtk uv run --locked scripts/compare_e2e_runs.py \
 
 E2E builds release tests before timing their binaries directly. Use `--cargo-profile dev` only when diagnosing debug behavior. Performance and Cargo profile are recorded in `summary.json`, not used as cross-machine thresholds. Canonical hashes exclude timings, absolute paths, and host details.
 
-Use the [production WebUI](packages/web/README.md) to inspect real PDFs, page images,
-regions, OCR text and recovered tables. The older static visual-review generator has been removed.
+Use the [HTTP workbench](packages/web/README.md) to upload PDFs, recover durable tasks,
+and inspect original pages alongside parsed text and tables. The
+[WASM browser example](packages/wasm-web/README.md) provides local browser inference.
 
 ## Initial scope
 

@@ -3,11 +3,11 @@ import { tableCoverage } from './coverage.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { chromium } from '../../../packages/web/node_modules/playwright/index.mjs';
+import { chromium } from '../../../packages/wasm-web/node_modules/playwright/index.mjs';
 
 const { values, positionals: files } = parseArgs({ allowPositionals: true, options: {
   mode: { type: 'string', default: 'fallback' },
-  output: { type: 'string', default: 'packages/web/test-results/paddle-tsr/browser-default.json' },
+  output: { type: 'string', default: 'packages/wasm-web/test-results/paddle-tsr/browser-default.json' },
   base: { type: 'string', default: 'http://127.0.0.1:8768' },
   'allow-unresolved': { type: 'boolean', default: false },
 } });

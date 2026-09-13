@@ -208,9 +208,10 @@ async fn real_pdfs_use_configured_table_model() {
         raw.tsr.mode = serde_json::from_value(json!(mode)).expect("table mode");
     }
     let mode = raw.tsr.mode;
+    // Keep native and browser acceptance artifacts under the renamed WASM package.
     let output =
         root.join(std::env::var("TSR_E2E_OUTPUT").unwrap_or_else(|_| {
-            "packages/web/test-results/paddle-tsr/native".to_owned()
+            "packages/wasm-web/test-results/paddle-tsr/native".to_owned()
         }));
     std::fs::create_dir_all(&output).expect("output directory");
     let initialization = Instant::now();

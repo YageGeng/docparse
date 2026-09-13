@@ -20,6 +20,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub input_hash: String,
+    /// Original display metadata is optional for jobs created before the workbench migration.
+    #[builder(default)]
+    pub filename: Option<String>,
+    #[builder(default)]
+    pub size_bytes: Option<i64>,
     /// Preserve this string-backed enum mapping when regenerating the entity; no database enum migration is needed.
     pub status: JobStatus,
     #[sea_orm(column_type = "JsonBinary", nullable)]
@@ -27,6 +32,12 @@ pub struct Model {
     pub progress: Option<Json>,
     pub version: i64,
     pub attempts: i32,
+    /// Monotonic elapsed milliseconds for the latest completed attempt; older or interrupted work has no measurement.
+    #[builder(default)]
+    pub duration_ms: Option<i64>,
+    /// Hidden tombstones keep cursor anchors and prevent deleted idempotency keys from recreating work.
+    #[builder(default)]
+    pub deleted_at: Option<DateTimeWithTimeZone>,
     #[builder(default)]
     pub lease_token: Option<Uuid>,
     #[builder(default)]

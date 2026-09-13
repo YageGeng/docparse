@@ -82,6 +82,15 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     #[builder(default = 1)]
     pub min_connections: u32,
+    /// Ordinary query events stay at debug by default; off disables them independently of slow queries.
+    #[builder(default = log::LevelFilter::Debug)]
+    pub sqlx_logging_level: log::LevelFilter,
+    /// Slow query events use a separate level and still obey the application tracing filter.
+    #[builder(default = log::LevelFilter::Warn)]
+    pub sqlx_slow_statements_logging_level: log::LevelFilter,
+    /// Queries taking at least this many milliseconds use the slow query level.
+    #[builder(default = 1000)]
+    pub sqlx_slow_statements_threshold_ms: u64,
 }
 
 impl Default for DatabaseConfig {
@@ -102,6 +111,15 @@ impl std::fmt::Debug for DatabaseConfig {
             .field("idle_timeout_ms", &self.idle_timeout_ms)
             .field("max_connections", &self.max_connections)
             .field("min_connections", &self.min_connections)
+            .field("sqlx_logging_level", &self.sqlx_logging_level)
+            .field(
+                "sqlx_slow_statements_logging_level",
+                &self.sqlx_slow_statements_logging_level,
+            )
+            .field(
+                "sqlx_slow_statements_threshold_ms",
+                &self.sqlx_slow_statements_threshold_ms,
+            )
             .finish()
     }
 }

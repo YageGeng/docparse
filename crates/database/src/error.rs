@@ -6,7 +6,7 @@ pub enum DatabaseError {
     Configuration(#[from] docparse_config::ConfigError),
     #[error(transparent)]
     SeaOrm(#[from] sea_orm::DbErr),
-    #[error("idempotency key already refers to a different PDF")]
+    #[error("idempotency key already refers to a different or deleted PDF job")]
     IdempotencyConflict,
     #[error("invalid task or lease parameters")]
     InvalidInput,

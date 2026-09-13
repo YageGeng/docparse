@@ -102,10 +102,10 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
   return report;
 }
 
-// Run from the repository root after building and serving packages/web; reuse its installed Playwright.
+// Run from the repository root after building and serving packages/wasm-web; reuse its installed Playwright.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!process.argv[2]) throw new Error('Usage: node crates/web/tests/table_input.mjs <table-containing.pdf> [base-url]');
-  const { chromium } = await import('../../../packages/web/node_modules/playwright/index.mjs');
+  const { chromium } = await import('../../../packages/wasm-web/node_modules/playwright/index.mjs');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {
     const page = await browser.newPage();

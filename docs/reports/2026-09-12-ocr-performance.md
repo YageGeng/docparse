@@ -43,7 +43,7 @@ Input cloning is included. No ONNX model initialization or inference is included
 
 These are synthetic CPU microbenchmarks, not whole-document speedup claims.
 Sub-millisecond timings vary with scheduling and CPU frequency. Logs and a machine-
-readable summary are under `packages/web/test-results/ocr-performance-2026-09-12/`.
+readable summary are under `packages/wasm-web/test-results/ocr-performance-2026-09-12/`.
 
 ## Verification
 
