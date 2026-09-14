@@ -62,11 +62,23 @@ snapshots and release the PDF/result readers, including after deletion in anothe
 - History comes from `GET /jobs/list`, ordered by creation time and UUID. Filename
   search, status filters and cursor pagination run on the server. Older jobs can
   have unknown filenames or sizes.
-- Uploads send the browser `File` as multipart data and report actual XHR upload
-  progress. A UUID is saved before sending bytes and reused when retrying the same
-  file. A lost acknowledgement can be recovered by checking that UUID first.
+- File selection and drag-and-drop accept multiple PDFs. Up to 100 files upload
+  concurrently through the existing single-file API, with independent XHR progress
+  and errors. The backend's `server.max_uploads` independently limits concurrent
+  uploads across all clients. A failed file does not cancel the remaining queue.
+  The history page stays open; each accepted row links to its own task.
+  HTTP 429 responses retain the same UUID and retry up to six times with jittered
+  exponential delays capped at 30 seconds. Cancellation interrupts the wait;
+  exhausted retries remain available for manual retry. Other errors affect only
+  their own file.
+  A UUID is saved per file before sending bytes. New selections always get new
+  identities; row-level retry and reselection reuse only that row's UUID, without
+  matching other files by name or size. Lost acknowledgements can be recovered
+  individually by checking those UUIDs.
   The upload transfer itself is not resumable: an input not yet committed must be
-  sent again. Starting a new upload discards only the local pending identity.
+  selected again after a refresh. Cancelling stops active and queued transfers;
+  already accepted tasks keep running. Removing an upload row discards only its
+  local identity, not any server task. Parsing concurrency remains server-controlled.
 - The current job uses SSE, with bounded status polling during reconnects.
   Monotonic versions prevent stale snapshots from replacing newer progress.
   Offline status is independent of a socket that has not yet reported failure.

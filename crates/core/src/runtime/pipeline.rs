@@ -9,7 +9,8 @@ use docparse_layout::timing::{TimingStage, Timings};
 use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
-use super::{PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage};
+use super::{PdfInput, PdfiumRuntimeError, PreScannedPage};
+use crate::PdfiumSession;
 use crate::page::{OcrCompletion, PageAnalyzer};
 use crate::{
     DocumentContext, DocumentContextBuilder, DocumentLinker, DocumentResult,
@@ -108,6 +109,8 @@ impl ScannedDocument {
 /// Document pipeline with immutable injected engines and bounded runtime settings.
 #[derive(Clone, TypedBuilder)]
 pub(crate) struct ParseRuntime {
+    #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
+    pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     config: Arc<ValidatedConfig>,
     layout_engine: Arc<dyn LayoutEngine>,
     #[builder(default)]
@@ -142,14 +145,19 @@ impl ParseRuntime {
             "starting document parse with layout engine {}",
             self.layout_engine.name()
         );
-        let opening = timings.start(TimingStage::PdfOpen);
-        let executor =
-            PdfiumExecutor::open(input, self.config.runtime()).await?;
-        drop(opening);
+        let executor = self
+            .pdfium_provider
+            .open(input, self.config.runtime(), timings.clone())
+            .await?;
         let page_count = executor.page_count();
         // Scan errors share one shutdown boundary; the page driver takes ownership only after scanning succeeds.
         let mut scanned = match self
-            .scan_document(&executor, &timings, &mut timing_receiver, observer)
+            .scan_document(
+                executor.as_ref(),
+                &timings,
+                &mut timing_receiver,
+                observer,
+            )
             .await
         {
             Ok(scanned) => scanned,
@@ -193,7 +201,7 @@ impl ParseRuntime {
     /// Extracts page facts and freezes document-wide statistics without owning the executor's shutdown policy.
     async fn scan_document(
         &self,
-        executor: &PdfiumExecutor,
+        executor: &dyn PdfiumSession,
         timings: &Timings,
         timing_receiver: &mut mpsc::UnboundedReceiver<crate::Timing>,
         observer: Option<&dyn crate::ParseObserver>,
@@ -326,7 +334,7 @@ impl ParseRuntime {
     /// Drives bounded page stages and owns render-producer shutdown and fatal-task cancellation.
     async fn analyze_pages(
         &self,
-        executor: PdfiumExecutor,
+        executor: Box<dyn PdfiumSession>,
         scanned: &mut ScannedDocument,
         tables: Arc<super::TableRuntime>,
         timings: &Timings,
@@ -350,7 +358,7 @@ impl ParseRuntime {
                     break;
                 }
             }
-            // Release the process-global PDFium lock as soon as the last raster is delivered.
+            // Release the document's PDFium resources and execution slot after the last raster.
             executor.close().await
         });
 
@@ -437,7 +445,7 @@ impl ParseRuntime {
                                         .await
                                     });
                                 }
-                                Err(error) if self.config.runtime().continue_on_page_error => {
+                                Err(error) if self.config.runtime().continue_on_page_error && !error.is_fatal() => {
                                     tracing::warn!(
                                         "render failed for page {}, using native fallback: {}",
                                         page_number,

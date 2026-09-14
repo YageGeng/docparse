@@ -147,6 +147,65 @@ fn ocr_in_flight_limit_is_validated() {
     assert_eq!(RawConfig::default().ocr.max_in_flight, 2);
 }
 
+/// A zero process budget must fail before any server worker is started.
+#[test]
+fn server_pdfium_process_budget_is_loaded_and_validated() {
+    let configured: ServerConfig = serde_json::from_value(serde_json::json!({
+        "pdfium_max_workers": 2
+    }))
+    .expect("server process budget must load");
+    configured.validate().expect("positive process budget");
+    let zero: ServerConfig = serde_json::from_value(serde_json::json!({
+        "pdfium_max_workers": 0
+    }))
+    .expect("numeric process budget must deserialize before validation");
+    assert!(matches!(
+        zero.validate(),
+        Err(ConfigError::InvalidValue {
+            field: "server.pdfium_max_workers",
+            ..
+        })
+    ));
+}
+
+/// Upload and document concurrency retain their existing admission ranges.
+#[test]
+fn server_concurrency_limits_are_loaded_and_validated() {
+    for (field, cases) in [
+        (
+            "worker_concurrency",
+            [(0, false), (1, true), (4, true), (128, true), (129, false)],
+        ),
+        (
+            "max_uploads",
+            [
+                (0, false),
+                (1, true),
+                (4, true),
+                (1024, true),
+                (1025, false),
+            ],
+        ),
+    ] {
+        for (limit, valid) in cases {
+            let config: ServerConfig =
+                serde_json::from_value(serde_json::json!({
+                    (field): limit
+                }))
+                .expect("concurrency must deserialize");
+            let result = config.validate();
+            if valid {
+                result.expect("valid concurrency");
+            } else {
+                assert!(
+                    matches!(result, Err(ConfigError::InvalidValue { field: actual, .. })
+                    if actual == format!("server.{field}"))
+                );
+            }
+        }
+    }
+}
+
 /// A configurable prefix cannot introduce captures, malformed URLs, or ambiguous route separators.
 #[test]
 fn server_api_prefix_is_a_literal_absolute_path() {

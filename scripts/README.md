@@ -76,13 +76,25 @@ Stage values are `(count, total_ms, max_ms)`; nested or overlapping stages must 
 be added into wall time. Failed/degraded runs are explicitly marked invalid.
 
 ```sh
-rtk cargo build -p docparse-core --example benchmark --release --features layout-cuda,ocr-cuda,tsr-cuda
+rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
+rtk cargo build -p docparse-server --example pdfium_benchmark --release --features cuda
+rtk proxy cp target/release/docparse-pdfium-worker target/release/examples/
 rtk uv run --locked --group dev scripts/benchmark.py --pdf-dir ~/Downloads/docs \
-  --output-dir /tmp/docparse-benchmark --concurrency 1 2 4 --repeats 2
+  --output-dir /tmp/docparse-benchmark --concurrency 4 --pdfium-processes 1 2 4 --repeats 3
 ```
 
 The output directory must not already exist. Use an otherwise idle GPU; process
 CPU percentages use 100% per logical CPU, and GPU samples include desktop activity.
+The process CSV includes each worker and the parent, identified by PID and parent
+PID. RSS sums include shared mappings and are not unique physical memory totals;
+the first CPU sample and unavailable platform I/O counters are left empty. GPU
+telemetry is optional on hosts without nvidia-smi; the metrics still record the
+actual compiled inference backend. Each PDFium worker is explicitly warmed.
+The companion executable is copied beside the Cargo example to exercise the same
+installation layout as the server. To retain the local provider baseline, build
+`docparse-core --example benchmark` and pass its path with `--binary`, without
+`--pdfium-processes`.
+
 Temporary serialized results use the output directory's filesystem and are removed
 after measurement. Database/HTTP submission and client download time are excluded.
 

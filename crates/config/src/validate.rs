@@ -289,8 +289,26 @@ impl TryFrom<RawConfig> for ValidatedConfig {
 }
 
 impl ServerConfig {
-    /// Validates the listener and a literal route prefix before Axum builds its route tree.
+    /// Validates process admission, the listener, and literal routes before allocating resources.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if !(1..=1024).contains(&self.max_uploads) {
+            return Err(ConfigError::InvalidValue {
+                field: "server.max_uploads",
+                reason: "must be between 1 and 1024",
+            });
+        }
+        if !(1..=128).contains(&self.worker_concurrency) {
+            return Err(ConfigError::InvalidValue {
+                field: "server.worker_concurrency",
+                reason: "must be between 1 and 128",
+            });
+        }
+        if self.pdfium_max_workers == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "server.pdfium_max_workers",
+                reason: "must be greater than zero",
+            });
+        }
         if self.host.is_empty() || self.host.chars().any(char::is_whitespace) {
             return Err(ConfigError::InvalidValue {
                 field: "server.host",

@@ -9,6 +9,7 @@ description = "Native PDF extraction and layout-text fusion for docparse"
 
 [features]
 default = []
+pdfium-ipc = ["dep:ipc-channel", "dep:tracing-subscriber"]
 wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
 ocr-coreml = ["docparse-ocr/coreml"]
 ocr-cuda = ["docparse-ocr/cuda"]
@@ -75,6 +76,7 @@ workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # async
+ipc-channel = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # config and serialization
@@ -82,6 +84,9 @@ rmp.workspace = true
 
 # hashing
 blake3.workspace = true
+
+# cli and diagnostics
+tracing-subscriber = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # async
@@ -91,3 +96,12 @@ futures-util.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
+
+[[test]]
+name = "pdfium_ipc"
+required-features = ["pdfium-ipc"]
+
+[[bin]]
+name = "docparse-pdfium-worker"
+path = "src/bin/pdfium_worker.rs"
+required-features = ["pdfium-ipc"]

@@ -64,7 +64,8 @@ fn replay_tsr_captures() {
 #[tokio::test]
 #[ignore = "requires TSR_CAPTURE_DIR and TSR_CAPTURE_PDF from a real-model acceptance run"]
 async fn capture_tsr_source_facts() {
-    use crate::runtime::{PdfInput, PdfiumExecutor};
+    use crate::PdfInput;
+    use crate::pdfium::PdfiumExecutor;
     let directory = std::path::PathBuf::from(
         std::env::var("TSR_CAPTURE_DIR").expect("capture directory"),
     );

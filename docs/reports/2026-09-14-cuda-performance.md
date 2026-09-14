@@ -59,7 +59,7 @@ Times are the median of two executions at each concurrency. OCR and TSR counts a
 
 ### 1. Document-scoped PDFium locking limits cross-document overlap
 
-[`Library`](../../crates/pdfium/src/library.rs) retains a process-wide mutex guard for its lifetime. Each [`PDFium worker`](../../crates/core/src/runtime/pdfium_executor.rs) owns that library while serving one document. The [render producer](../../crates/core/src/runtime/pipeline.rs) releases it only after the final raster is delivered. Bounded queues can therefore extend lock ownership while downstream inference is still applying backpressure. Another document waits in `PdfOpen` before it can scan or render.
+[`Library`](../../crates/pdfium/src/library.rs) retains a process-wide mutex guard for its lifetime. Each [`PDFium worker`](../../crates/core/src/pdfium/executor.rs) owns that library while serving one document. The [render producer](../../crates/core/src/runtime/pipeline.rs) releases it only after the final raster is delivered. Bounded queues can therefore extend lock ownership while downstream inference is still applying backpressure. Another document waits in `PdfOpen` before it can scan or render.
 
 | Documents in flight | Mean cumulative PdfOpen (s/batch) | Longest single PdfOpen (s) | Mean cumulative OCR queue wait (s/batch) |
 | ---: | ---: | ---: | ---: |

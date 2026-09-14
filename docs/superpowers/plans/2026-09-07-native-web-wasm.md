@@ -53,7 +53,7 @@ Deliver: WasmCompatSend, WasmCompatSync, WasmBoxedFuture, ModelOutputs, LayoutSe
 
 ## Task 3: PDFium, scheduling, and filesystem boundaries
 
-Files: core runtime/parser/render modules; wasm_compat.rs and task_set.rs/pdfium_worker.rs/pdf_input.rs/native.rs; PDFium and pdfium-sys compatibility files.
+Files: core runtime/parser/render modules; wasm_compat.rs, task_set.rs/native.rs, and pdfium/input.rs/worker.rs; PDFium and pdfium-sys compatibility files.
 
 Deliver: PdfiumWorker::spawn/join, spawn, TaskSet::spawn/join_next/abort_all, and DocParser::from_artifacts.
 

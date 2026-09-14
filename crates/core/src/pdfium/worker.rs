@@ -1,8 +1,5 @@
 //! Native thread and browser-local ownership of the PDFium actor.
-use super::PdfInput;
-use crate::runtime::pdfium_executor::{
-    PdfiumCommand, PdfiumRuntimeError, worker_main,
-};
+use super::{PdfInput, PdfiumCommand, PdfiumRuntimeError, worker_main};
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]

@@ -127,6 +127,9 @@ impl ParseOptions<'_> {
 #[derive(Clone, TypedBuilder)]
 #[builder(builder_method(name = with_engines, vis = "pub(crate)"), builder_type(name = ParserAssembly, vis = "pub(crate)"))]
 pub struct DocParser {
+    /// Shared PDFium execution boundary; library callers keep the local provider.
+    #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
+    pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     config: Arc<ValidatedConfig>,
     layout_engine: Arc<dyn LayoutEngine>,
     #[builder(default)]
@@ -176,6 +179,9 @@ impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
 /// Consuming dependency-injection builder for one reusable parser instance.
 #[derive(TypedBuilder)]
 pub struct DocParserBuilder {
+    /// Shared PDFium execution boundary; library callers keep the local provider.
+    #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
+    pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     #[builder(default)]
     artifacts: Option<ParserArtifacts>,
     #[builder(default)]
@@ -198,6 +204,15 @@ impl Default for DocParserBuilder {
 }
 
 impl DocParserBuilder {
+    /// Uses an externally owned PDFium provider without changing model ownership.
+    pub fn pdfium_provider(
+        mut self,
+        provider: Arc<dyn crate::PdfiumProvider>,
+    ) -> Self {
+        self.pdfium_provider = provider;
+        self
+    }
+
     /// Injects outline recovery for fonts without usable names or embedded Unicode mappings.
     pub fn glyph_resolver(
         mut self,
@@ -324,6 +339,7 @@ impl DocParserBuilder {
             (None, false, _) => None,
         };
         Ok(DocParser::with_engines()
+            .pdfium_provider(self.pdfium_provider)
             .config(config)
             .layout_engine(layout_engine)
             .ocr_engine(ocr_engine)
@@ -506,6 +522,7 @@ impl DocParser {
     /// Creates one short-lived runtime facade that clones only shared ownership handles.
     pub(crate) fn runtime(&self) -> ParseRuntime {
         ParseRuntime::builder()
+            .pdfium_provider(Arc::clone(&self.pdfium_provider))
             .config(Arc::clone(&self.config))
             .layout_engine(Arc::clone(&self.layout_engine))
             .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))

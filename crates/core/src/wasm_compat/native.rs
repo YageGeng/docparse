@@ -1,6 +1,10 @@
 //! Native filesystem parsing and overlay output, selected by the compatibility entry point.
 use super::PdfInput;
+use crate::pdfium::PdfiumExecutor;
 use crate::{DocParseError, DocParser, DocumentResult};
+use crate::{OverlayRenderer, RenderError};
+use docparse_config::ValidatedConfig;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 impl DocParser {
@@ -55,10 +59,6 @@ impl DocParser {
         runtime.block_on(self.parse_path(path))
     }
 }
-use crate::runtime::PdfiumExecutor;
-use crate::{OverlayRenderer, RenderError};
-use docparse_config::ValidatedConfig;
-use std::collections::BTreeSet;
 
 /// Reopens one PDF and writes per-page PNG/SVG overlays without rerunning layout inference.
 pub async fn write_pdf_overlays(

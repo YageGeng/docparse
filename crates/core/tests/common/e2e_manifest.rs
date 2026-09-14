@@ -90,7 +90,7 @@ pub(crate) enum E2eManifestError {
     Pdfium {
         basename: String,
         #[source]
-        source: pdfium::PdfiumError,
+        source: ::pdfium::PdfiumError,
     },
 }
 
@@ -229,7 +229,7 @@ pub(crate) fn verify_pdf_directory(
         });
     }
 
-    let library = pdfium::Library::init();
+    let library = ::pdfium::Library::init();
     let mut verified = Vec::with_capacity(manifest.documents.len());
     for document in &manifest.documents {
         let path = discovered.get(&document.basename).ok_or_else(|| {

@@ -88,7 +88,7 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdfium_queue" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }

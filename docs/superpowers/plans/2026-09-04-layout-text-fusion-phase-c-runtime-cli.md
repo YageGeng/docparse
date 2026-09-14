@@ -31,14 +31,14 @@
 
 **文件：**
 - 新建：crates/core/src/runtime/mod.rs
-- 新建：crates/core/src/runtime/pdfium_executor.rs
+- 新建：crates/core/src/pdfium/executor.rs
 - 修改：crates/core/src/lib.rs
 
 **接口：**
 - 产出：PdfiumExecutor、DocumentSource、PreScanOutput、RenderedPage。
 - 输入：PdfInput、docparse-pdfium、阶段 B extractor。
 
-- [ ] **步骤 1：在 pdfium_executor.rs 内写句柄生命周期 RED 测试**
+- [ ] **步骤 1：在 pdfium/executor.rs 内写句柄生命周期 RED 测试**
 
 在文件末尾声明唯一的 `#[cfg(test)] mod tests`，直接访问 crate-private actor。测试 path 与 Arc<[u8]> 输入；observer 与 fake backend 只能定义在该 tests 模块内，生产模块不得增加独立 test-only 字段、函数、impl 或 hook。记录 OpenDocument、OpenPage、ClosePage、CloseDocument，并断言：document 覆盖整个任务；每次预扫描/渲染 page 成对开关；page handle 不进入响应类型。
 
@@ -55,7 +55,7 @@
 运行：
 
 ~~~bash
-rtk cargo test -p docparse-core --lib runtime::pdfium_executor::tests
+rtk cargo test -p docparse-core --lib pdfium::executor::tests
 ~~~
 
 - [ ] **步骤 5：实现 actor 边界**
@@ -94,7 +94,7 @@ impl PdfiumExecutor {
 运行：
 
 ~~~bash
-rtk cargo test -p docparse-core --lib runtime::pdfium_executor::tests
+rtk cargo test -p docparse-core --lib pdfium::executor::tests
 ~~~
 
 ---

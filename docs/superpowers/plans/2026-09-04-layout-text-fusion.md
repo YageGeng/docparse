@@ -67,7 +67,7 @@ docparse/
 │   ├── core/
 │   │   ├── Cargo.toml
 │   │   ├── src/{lib.rs,error.rs,parser.rs,page.rs,types.rs,validate.rs,ocr.rs,diagnostics.rs}
-│   │   ├── src/runtime/{mod.rs,pdfium_executor.rs,pipeline.rs}
+│   │   ├── src/{pdfium/,runtime/{mod.rs,pipeline.rs}}
 │   │   ├── src/extract/{mod.rs,text.rs,metadata.rs}
 │   │   ├── src/context/{mod.rs,builder.rs,relations.rs}
 │   │   ├── src/line/{mod.rs,assemble.rs,bidi.rs,metrics.rs}
@@ -900,7 +900,7 @@ rtk cargo test -p docparse-core --test ocr_trait
 
 **文件：**
 - 新建：crates/core/src/runtime/mod.rs
-- 新建：crates/core/src/runtime/pdfium_executor.rs
+- 新建：crates/core/src/pdfium/executor.rs
 - 新建：crates/core/src/runtime/pipeline.rs
 - 新建：crates/core/src/parser.rs
 - 修改：crates/core/src/lib.rs

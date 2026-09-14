@@ -18,15 +18,17 @@ openvino = ["docparse-core/layout-openvino", "docparse-core/ocr-openvino", "docp
 [dependencies]
 # workspace crates
 docparse-config.workspace = true
-docparse-core.workspace = true
+docparse-core = { workspace = true, features = ["pdfium-ipc"] }
 docparse-database.workspace = true
+docparse-layout.workspace = true
 
 # error
 snafu.workspace = true
 
 # async
 futures-util.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util", "net", "rt-multi-thread", "signal", "time"] }
+ipc-channel.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "rt-multi-thread", "signal", "time"] }
 tokio-util.workspace = true
 
 # http
@@ -61,7 +63,11 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 # workspace crates
-docparse-layout.workspace = true
+docparse-ocr.workspace = true
+docparse-tsr.workspace = true
+
+# inference and image
+image.workspace = true
 
 # testing
 tower.workspace = true

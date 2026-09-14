@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import {
   onlineManager,
   type InfiniteData,
@@ -42,7 +42,6 @@ export function JobsPage() {
   const searchInput = useRef<HTMLInputElement>(null);
   const deleteTrigger = useRef<HTMLButtonElement>(null);
   const [deleting, setDeleting] = useState<Job>();
-  const navigate = useNavigate();
   const client = useQueryClient();
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 250);
@@ -94,11 +93,10 @@ export function JobsPage() {
     setDeleting(job);
   }
 
-  /** Uses the server acknowledgement immediately while refreshing the canonical history in the background. */
+  /** Refreshes each acknowledged task without navigating away and cancelling sibling uploads. */
   function uploaded(job: Job) {
     client.setQueryData(["job", job.id], job);
     void client.invalidateQueries({ queryKey: ["jobs"] });
-    navigate(`/document?job=${encodeURIComponent(job.id)}`);
   }
 
   return (

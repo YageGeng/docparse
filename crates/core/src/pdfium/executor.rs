@@ -1,13 +1,12 @@
-pub(crate) use crate::wasm_compat::PdfInput;
-use crate::wasm_compat::PdfiumWorker;
+use super::{PdfInput, PdfiumWorker};
 use std::sync::Arc;
 
+use ::pdfium::{Document, Library};
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_layout::{
     AffineTransform, Bbox, PageImage, PageImageInput, PageRotation,
     PageTransform, PageTransformInput, PixelFormat,
 };
-use pdfium::{Document, Library};
 use tokio::sync::{mpsc, oneshot};
 use typed_builder::TypedBuilder;
 
@@ -16,32 +15,38 @@ use crate::extract::text::extract_page_text_items;
 
 /// Fully owned rendered page returned across the PDFium actor boundary.
 #[derive(Debug, Clone, TypedBuilder)]
-pub(crate) struct RenderedPage {
-    pub(crate) page_number: u32,
-    pub(crate) image: Arc<PageImage>,
-    pub(crate) transform: PageTransform,
+pub struct RenderedPage {
+    pub page_number: u32,
+    pub image: Arc<PageImage>,
+    pub transform: PageTransform,
 }
 
 /// Page shell and any recoverable native-text extraction failure.
 #[derive(Debug)]
-pub(crate) struct PreScannedPage {
-    pub(crate) extracted: ExtractedPage,
-    pub(crate) extraction_error: Option<PdfiumRuntimeError>,
+pub struct PreScannedPage {
+    pub extracted: ExtractedPage,
+    pub extraction_error: Option<PdfiumRuntimeError>,
 }
 
 /// Failures at the serialized PDFium runtime boundary.
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)] // Native task failures remain part of the shared runtime error vocabulary.
-pub(crate) enum PdfiumRuntimeError {
+pub enum PdfiumRuntimeError {
+    /// An IPC connection, worker lifecycle, or protocol invariant failed.
+    #[error("PDFium worker transport failed: {0}")]
+    Transport(String),
+    /// A remote page operation preserved its original diagnostic message.
+    #[error("{0}")]
+    RemotePage(String),
     /// The operating-system path cannot be represented by the current PDFium wrapper.
     #[error("PDF path is not valid UTF-8")]
     NonUtf8Path,
     /// PDFium rejected the input document.
     #[error("failed to open PDF document: {0}")]
-    OpenDocument(pdfium::PdfiumError),
+    OpenDocument(::pdfium::PdfiumError),
     /// The process could not load or initialize the PDFium shared library.
     #[error("failed to initialize PDFium: {0}")]
-    Initialize(pdfium::PdfiumError),
+    Initialize(::pdfium::PdfiumError),
     /// A public one-based page request lies outside the document.
     #[error("page {page_number} is outside document range 1..={page_count}")]
     InvalidPage { page_number: u32, page_count: u32 },
@@ -51,7 +56,7 @@ pub(crate) enum PdfiumRuntimeError {
         page_number: u32,
         stage: &'static str,
         #[source]
-        source: pdfium::PdfiumError,
+        source: ::pdfium::PdfiumError,
     },
     /// Native extraction rejected one character or geometry fact.
     #[error("native extraction failed on page {page_number}: {source}")]
@@ -83,6 +88,19 @@ pub(crate) enum PdfiumRuntimeError {
     /// The worker panicked while owning PDFium resources.
     #[error("PDFium worker panicked")]
     WorkerPanicked,
+}
+
+impl PdfiumRuntimeError {
+    /// Transport failures cannot be downgraded to page-level native fallback.
+    pub fn is_fatal(&self) -> bool {
+        matches!(
+            self,
+            Self::Transport(_)
+                | Self::WorkerStopped
+                | Self::WorkerPanicked
+                | Self::ThreadSpawn(_)
+        )
+    }
 }
 
 /// Commands whose payloads contain only owned values and never PDFium handles.
@@ -242,7 +260,7 @@ pub(crate) async fn worker_main(
         Ok(page_count) if page_count > 0 => page_count,
         _ => {
             let _ = ready.send(Err(PdfiumRuntimeError::OpenDocument(
-                pdfium::PdfiumError::InvalidFormat,
+                ::pdfium::PdfiumError::InvalidFormat,
             )));
             return;
         }
@@ -284,7 +302,7 @@ pub(crate) async fn worker_main(
 }
 
 /// Extracts one page while every borrowed PDFium handle stays on the worker stack.
-fn pre_scan_document_page(
+pub(crate) fn pre_scan_document_page(
     document: &Document<'_>,
     page_number: u32,
     resolver: Option<&dyn crate::GlyphResolver>,
@@ -307,7 +325,7 @@ fn pre_scan_document_page(
         page.view_box().ok_or(PdfiumRuntimeError::PageOperation {
             page_number,
             stage: "read page box",
-            source: pdfium::PdfiumError::OperationFailed,
+            source: ::pdfium::PdfiumError::OperationFailed,
         })?;
     let (width, height) = page.viewport_size(&view_box);
     let content_bounds = page
@@ -383,7 +401,7 @@ fn pre_scan_document_page(
 }
 
 /// Renders one page and derives transforms before dropping all PDFium handles.
-fn render_document_page(
+pub(crate) fn render_document_page(
     document: &Document<'_>,
     page_number: u32,
     config: &RenderConfig,
@@ -406,7 +424,7 @@ fn render_document_page(
         page.view_box().ok_or(PdfiumRuntimeError::PageOperation {
             page_number,
             stage: "read page box",
-            source: pdfium::PdfiumError::OperationFailed,
+            source: ::pdfium::PdfiumError::OperationFailed,
         })?;
     let (viewport_width, viewport_height) = page.viewport_size(&view_box);
     let long_edge = f64::from(viewport_width.max(viewport_height));
@@ -428,7 +446,7 @@ fn render_document_page(
             PdfiumRuntimeError::PageOperation {
                 page_number,
                 stage: "read rendered width",
-                source: pdfium::PdfiumError::OperationFailed,
+                source: ::pdfium::PdfiumError::OperationFailed,
             }
         })?;
     let render_height =
@@ -436,7 +454,7 @@ fn render_document_page(
             PdfiumRuntimeError::PageOperation {
                 page_number,
                 stage: "read rendered height",
-                source: pdfium::PdfiumError::OperationFailed,
+                source: ::pdfium::PdfiumError::OperationFailed,
             }
         })?;
     let rgb = Arc::<[u8]>::from(bitmap.to_rgb().map_err(|source| {

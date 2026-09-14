@@ -10,6 +10,7 @@ the job: refreshes, SSE disconnects, and API replacement do not cancel parsing.
   table/index builders. Pending migrations run automatically when the database pool connects.
 - `crates/database`: connection setup, CLI-generated `entities`, and typed `query`
   methods. Uses SeaORM/SeaQuery and `thiserror`; no Snafu or HTTP dependencies.
+- `crates/core/src/bin/pdfium_worker.rs`: feature-gated PDFium executable, built and installed beside the server. Its implementation lives in `core/src/pdfium/`.
 - `crates/server`: `app`, `routers`, `state`, `middlewares`, `model`, storage, and
   worker lifecycle. Snafu is confined to this crate. Success/error envelopes follow
   WisLand's `ApiResponse` and APICODE conventions.
@@ -22,6 +23,7 @@ The separate administration migration CLI still reads `DATABASE_URL`. Supply cre
 through your deployment environment rather than checked-in files or CLI arguments.
 
 ```bash
+rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
 rtk cargo run -p docparse-server --release -- \
   --storage-dir /srv/docparse/shared --config docparse.toml
 ```
@@ -39,11 +41,64 @@ The server exposes four backend features: `coreml`, `cuda`, `metal`, and
 one accelerator feature for a build, or none for CPU. CUDA builds use:
 
 ```bash
+rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
 rtk cargo build -p docparse-server --release --features cuda
 ```
 
+`server.pdfium_max_workers` defaults to 1 and bounds all PDFium children,
+including startup and cleanup. For example:
+
+```toml
+[server]
+max_uploads = 4
+worker_concurrency = 2
+pdfium_max_workers = 2
+```
+
+The equivalent environment override is `DOCPARSE_SERVER__PDFIUM_MAX_WORKERS`.
+`server.worker_concurrency` limits whole document jobs, defaults to 2, and accepts
+values from 1 through 128. `DOCPARSE_SERVER__WORKER_CONCURRENCY` overrides the file;
+an explicitly supplied `--worker-concurrency` overrides both. Omitting the flag
+keeps the configured value. Changes take effect after restarting the server.
+`server.max_uploads` caps upload requests across the entire instance, defaults to
+4, and accepts values from 1 through 1024. `DOCPARSE_SERVER__MAX_UPLOADS` overrides
+the file, and an explicit `--max-uploads` overrides both. This does not change
+the browser's per-page upload queue or the document parsing concurrency.
+The PDFium limit is independent of `server.worker_concurrency` and
+`runtime.page_concurrency` (pages per analysis stage). Layout/OCR/TSR sessions
+remain shared in the server; workers initialize only PDFium. `PdfiumQueue`
+measures waiting for a process slot separately from `PdfOpen`.
+
+Install matching `docparse-server` and `docparse-pdfium-worker` executables in the
+same directory. Worker startup fails on missing or incompatible artifacts; there
+is no configurable worker path or silent in-process fallback. For a local install:
+
+```bash
+rtk cargo install --path crates/core --features pdfium-ipc --bin docparse-pdfium-worker --locked
+rtk cargo install --path crates/server --locked --features cuda
+```
+
+Cancellation aborts the owned render producer and retires uncertain document
+sessions. Replacements start only after the old PID and bridge are reaped. Repeated
+crashes before a replacement completes one document stop the pool and server
+admission. Invalid/empty PDFs reuse the healthy worker, and intentional cancellation
+neither consumes nor resets the crash budget. Normal service shutdown drains jobs
+and explicitly closes the pool. Both cancellation and pool shutdown request
+worker shutdown through IPC, including when a document is open. The worker finishes
+its active operation, releases the document and input mapping, acknowledges shutdown,
+and exits normally. If acknowledgement or process exit takes more than five seconds,
+the supervisor kills and reaps the child before replacement. Broken transports and
+crashed workers bypass the graceful request. Install both binaries together: IPC
+protocol version 2 requires this shutdown behavior. Synchronous custom glyph
+resolvers must return; an indefinitely blocked callback cannot be safely terminated as a Rust
+thread and makes pool cleanup report failure.
+
+Workers use separate process groups so terminal Ctrl-C reaches the supervising
+server without interrupting PDFium directly. The server handles the signal, drains
+accepted jobs, and closes its workers through the same IPC shutdown sequence.
+
 Run the same binary with `--role api`, `--role worker`, or `--role all` (default).
-API-only instances do not load models. `/api/ready` checks the task schema as well as
+API-only instances do not load models or start PDFium children, and do not require the worker executable. `/api/ready` checks the task schema as well as
 shared storage, including detecting schema damage after startup. Every API and worker must use the same
 database and shared directory contents, even if their mount paths differ. The
 filesystem must provide coherent cross-host reads, atomic publication, and file
@@ -74,7 +129,7 @@ profile, and `DOCPARSE_` environment values. For example, use
 `--database-url`/`DATABASE_URL` remain optional overrides of the merged configuration;
 explicit CLI arguments take priority over their legacy environment equivalents.
 `SERVER_ROLE` and `SERVER_STORAGE_DIR` continue to control process role and storage.
-Run `rtk cargo run -p docparse-server -- --help` for all process limits.
+Run `rtk cargo run -p docparse-server -- --help` for CLI process limits; the PDFium ceiling is configured in `[server]`.
 
 The API assumes a trusted deployment boundary. Put authentication, authorization,
 and any browser CORS policy at your ingress. UUID job IDs are identifiers, not a
@@ -236,7 +291,7 @@ attempt progress. PostgreSQL's clock controls all lease checks and deadlines.
 The default lease is 60 seconds, renewed at least every 20 seconds. Old workers
 cannot publish progress or success once the lease expires or another worker owns
 the task. Defaults are two concurrent documents per worker, three attempts, and a
-one-hour deadline per attempt; tune `--worker-concurrency`, `--lease-seconds`,
+one-hour deadline per attempt; tune `server.worker_concurrency`, `--lease-seconds`,
 `--max-attempts`, and `--job-timeout-seconds` for your documents and hardware.
 
 SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/ready` to return 503, close SSE subscriptions,
@@ -357,6 +412,7 @@ than increase throughput; place workers according to GPU and memory budgets.
 ## Validation
 
 ```bash
+rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker
 rtk cargo test -p docparse-server
 # Use a disposable database shared by these serial acceptance runs.
 rtk cargo test -p docparse-database --test jobs -- --ignored --test-threads=1

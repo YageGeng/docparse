@@ -46,10 +46,19 @@ impl Default for LogConfig {
     }
 }
 
-/// Native listener settings; host names and IPv4/IPv6 addresses are resolved by Tokio at bind time.
+/// Native listener and admission limits; host names and IP addresses are resolved by Tokio at bind time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
+    /// Maximum concurrent upload requests accepted by one server.
+    #[builder(default = 4)]
+    pub max_uploads: usize,
+    /// Maximum document jobs processed concurrently by one server.
+    #[builder(default = 2)]
+    pub worker_concurrency: usize,
+    /// Hard limit on live PDFium worker processes owned by one server.
+    #[builder(default = 1)]
+    pub pdfium_max_workers: usize,
     #[builder(default = "127.0.0.1".to_owned(), setter(into))]
     pub host: String,
     #[builder(default = 8080)]

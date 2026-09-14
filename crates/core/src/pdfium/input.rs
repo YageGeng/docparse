@@ -1,5 +1,5 @@
 //! Platform-specific PDF sources that retain storage for borrowed PDFium handles.
-use crate::runtime::pdfium_executor::PdfiumRuntimeError;
+use super::PdfiumRuntimeError;
 use std::sync::Arc;
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
@@ -9,7 +9,7 @@ mod platform {
 
     /// Native PDF input whose storage outlives all borrowed PDFium handles.
     #[derive(Debug, Clone)]
-    pub(crate) enum PdfInput {
+    pub enum PdfInput {
         Path(PathBuf),
         Bytes(Arc<[u8]>),
     }
@@ -17,8 +17,8 @@ mod platform {
         /// Opens a native source without losing the original input lifetime.
         pub(crate) fn open<'a>(
             &'a self,
-            library: &'a pdfium::Library,
-        ) -> Result<pdfium::Document<'a>, PdfiumRuntimeError> {
+            library: &'a ::pdfium::Library,
+        ) -> Result<::pdfium::Document<'a>, PdfiumRuntimeError> {
             match self {
                 Self::Path(path) => library.load_document(
                     path.to_str().ok_or(PdfiumRuntimeError::NonUtf8Path)?,
@@ -39,15 +39,15 @@ mod platform {
 
     /// Browser PDFs always enter as owned bytes.
     #[derive(Debug, Clone)]
-    pub(crate) enum PdfInput {
+    pub enum PdfInput {
         Bytes(Arc<[u8]>),
     }
     impl PdfInput {
         /// Opens a borrowed PDF whose owning bytes remain on the actor stack.
         pub(crate) fn open<'a>(
             &'a self,
-            library: &'a pdfium::Library,
-        ) -> Result<pdfium::Document<'a>, PdfiumRuntimeError> {
+            library: &'a ::pdfium::Library,
+        ) -> Result<::pdfium::Document<'a>, PdfiumRuntimeError> {
             let Self::Bytes(bytes) = self;
             library
                 .load_document_from_bytes(bytes, None)
@@ -56,4 +56,4 @@ mod platform {
     }
 }
 
-pub(crate) use platform::PdfInput;
+pub use platform::PdfInput;

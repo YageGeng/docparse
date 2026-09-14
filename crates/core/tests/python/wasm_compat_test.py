@@ -57,14 +57,20 @@ class CompatibilityBoundaryTest(unittest.TestCase):
         source = '#[cfg(target_arch = "wasm32")]\nfn run() {}'
         for path, expected in (
             ("crates/core/src/wasm_compat/task_set.rs", 0),
-            ("crates/core/src/wasm_compat/pdfium_worker.rs", 0),
-            ("crates/core/src/wasm_compat/pdf_input.rs", 0),
+            ("crates/core/src/pdfium/mod.rs", 0),
+            ("crates/core/src/pdfium/worker.rs", 0),
+            ("crates/core/src/pdfium/input.rs", 0),
             ("crates/layout/src/wasm_compat/session_pool.rs", 0),
             ("crates/core/src/wasm_compat/extra.rs", 1),
             ("crates/core/src/wasm_compat/session_pool.rs", 1),
             ("crates/layout/src/wasm_compat/extra.rs", 1),
             ("crates/core/src/runtime/task_set.rs", 1),
             ("crates/core/src/runtime/pdf_input.rs", 1),
+            ("crates/core/src/runtime/pdfium/mod.rs", 1),
+            ("crates/core/src/wasm_compat/pdfium_worker.rs", 1),
+            ("crates/core/src/wasm_compat/pdf_input.rs", 1),
+            ("crates/core/src/pdfium/executor.rs", 1),
+            ("crates/core/src/pdfium/extra.rs", 1),
             ("crates/layout/src/wasm_compat/task_set.rs", 1),
         ):
             with self.subTest(path=path):

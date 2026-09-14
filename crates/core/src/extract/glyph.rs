@@ -5,8 +5,8 @@
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
+use ::pdfium::{Font, FontType, TextChar, TextPage};
 use docparse_layout::Bbox;
-use pdfium::{Font, FontType, TextChar, TextPage};
 use typed_builder::TypedBuilder;
 
 use super::{font_cmap::reverse_cmap, glyph_names::resolve_glyph_name};
@@ -456,7 +456,7 @@ mod tests {
                 (!segments.is_empty()).then(|| "✓".to_owned())
             }
         }
-        let library = pdfium::Library::try_init().expect("PDFium");
+        let library = ::pdfium::Library::try_init().expect("PDFium");
         let cases = [
             (
                 vec!["Aacute", "uni03A9", "f_f_i", "u1F600", "unknown"],
@@ -526,7 +526,7 @@ mod tests {
     /// Recovered ligatures record expansion while PDFium's existing expansion keeps its original source records.
     #[test]
     fn normalization_records_expansion_for_every_source() {
-        let library = pdfium::Library::try_init().expect("PDFium");
+        let library = ::pdfium::Library::try_init().expect("PDFium");
         for mapping in ["0000", "FB01"] {
             let bytes = named_pdf(&["uniFB01"], Some(&[mapping]));
             let document =
@@ -618,7 +618,7 @@ mod tests {
     /// A valid and a suspicious Unicode record sharing one source code cannot poison each other's cache decisions.
     #[test]
     fn font_cache_does_not_cache_occurrence_policy() {
-        let library = pdfium::Library::try_init().expect("PDFium");
+        let library = ::pdfium::Library::try_init().expect("PDFium");
         let bytes = named_pdf(&["fi"], Some(&["0066FFFD"]));
         let document =
             library.load_document_from_bytes(&bytes, None).expect("PDF");
@@ -662,7 +662,7 @@ mod tests {
                 (!segments.is_empty()).then(|| "✓".to_owned())
             }
         }
-        let library = pdfium::Library::try_init().expect("PDFium");
+        let library = ::pdfium::Library::try_init().expect("PDFium");
         let bytes =
             include_bytes!("../../tests/fixtures/pdf/embedded_layout.pdf");
         let document =
@@ -697,7 +697,7 @@ mod tests {
     /// Restores named visible glyphs and composes only coincident semicircle/outline pairs.
     #[test]
     fn symbol_glyph_names_preserve_visible_spaces_and_overlays() {
-        let library = pdfium::Library::try_init().expect("PDFium");
+        let library = ::pdfium::Library::try_init().expect("PDFium");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/pdf/symbol_glyph_names.pdf");
         let document = library

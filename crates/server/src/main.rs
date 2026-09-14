@@ -2,12 +2,13 @@ use clap::{Parser, ValueEnum};
 use docparse_config::{
     ConfigError, ConfigLoader, RawConfig, ServerConfig, ValidatedConfig,
 };
-use docparse_core::DocParser;
+use docparse_core::{DocParser, PdfiumProvider};
 use docparse_database::connection;
 use docparse_server::{
     app,
     cleanup::DeletedResults,
     logging,
+    pdfium_pool::PdfiumPool,
     state::{AppState, HttpOptions},
     storage::SharedStorage,
     worker::{Worker, WorkerOptions},
@@ -26,6 +27,12 @@ enum Role {
     All,
 }
 
+/// Keeps the shared process pool alive through durable-worker draining and explicit shutdown.
+struct ActiveWorker {
+    worker: Worker,
+    pool: Arc<PdfiumPool>,
+}
+
 /// Process controls and explicit overrides complement the shared server and database configuration.
 #[derive(Parser, TypedBuilder)]
 #[command(about = "Durable PDF jobs with PostgreSQL, shared storage, and SSE")]
@@ -42,12 +49,16 @@ struct Arguments {
     storage_dir: PathBuf,
     #[arg(long, default_value = "docparse.toml")]
     config: PathBuf,
-    #[arg(long, default_value_t = 2)]
-    worker_concurrency: usize,
+    /// Overrides server.worker_concurrency from the shared configuration.
+    #[builder(default)]
+    #[arg(long)]
+    worker_concurrency: Option<usize>,
     #[arg(long, default_value_t = 536870912)]
     max_upload_bytes: usize,
-    #[arg(long, default_value_t = 4)]
-    max_uploads: usize,
+    /// Overrides server.max_uploads from the shared configuration.
+    #[builder(default)]
+    #[arg(long)]
+    max_uploads: Option<usize>,
     #[arg(long, default_value_t = 300)]
     upload_timeout_seconds: u64,
     #[arg(long, default_value_t = 60)]
@@ -77,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let state = AppState::new(
         connection::connect(&raw.database).await?,
         SharedStorage::new(&arguments.storage_dir).await?,
-        HttpOptions::from(&arguments),
+        arguments.http_options(&server),
         CancellationToken::new(),
     )?;
     let worker = arguments.build_worker(raw, &state).await?;
@@ -85,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 impl Arguments {
-    /// Applies legacy CLI/environment overrides after the shared configuration layers, then validates the listener.
+    /// Applies explicit CLI/environment overrides before validating listener, upload, and worker limits.
     fn load_config(&self) -> Result<RawConfig, ConfigError> {
         let mut raw = ConfigLoader::new(&self.config).load_raw()?;
         if let Some(bind) = self.bind {
@@ -95,8 +106,33 @@ impl Arguments {
         if let Some(url) = &self.database_url {
             raw.database.url = url.clone();
         }
+        if let Some(concurrency) = self.worker_concurrency {
+            raw.server.worker_concurrency = concurrency;
+        }
+        if let Some(max_uploads) = self.max_uploads {
+            raw.server.max_uploads = max_uploads;
+        }
         raw.server.validate()?;
         Ok(raw)
+    }
+
+    /// Uses resolved upload admission alongside the existing CLI size and timeout limits.
+    fn http_options(&self, server: &ServerConfig) -> HttpOptions {
+        HttpOptions::builder()
+            .max_upload_bytes(self.max_upload_bytes)
+            .max_uploads(server.max_uploads)
+            .upload_timeout(Duration::from_secs(self.upload_timeout_seconds))
+            .build()
+    }
+
+    /// Uses resolved document concurrency alongside the existing CLI lease and timeout policy.
+    fn worker_options(&self, server: &ServerConfig) -> WorkerOptions {
+        WorkerOptions::builder()
+            .concurrency(server.worker_concurrency)
+            .lease_seconds(self.lease_seconds)
+            .max_attempts(self.max_attempts)
+            .job_timeout(Duration::from_secs(self.job_timeout_seconds))
+            .build()
     }
 
     /// Creates one reusable parser and worker only for roles that consume jobs.
@@ -104,52 +140,52 @@ impl Arguments {
         &self,
         raw: RawConfig,
         state: &AppState,
-    ) -> Result<Option<Worker>, Box<dyn Error>> {
+    ) -> Result<Option<ActiveWorker>, Box<dyn Error>> {
         // Keep the API-only path independent of parser validation and model initialization.
         if matches!(self.role, Role::Api) {
             return Ok(None);
         }
-        let config = Arc::new(ValidatedConfig::try_from(raw)?);
-        let parser = Arc::new(
-            DocParser::builder()
-                .config(Arc::clone(&config))
-                .build()
-                .await?,
+        let max_processes = raw.server.pdfium_max_workers;
+        let options = self.worker_options(&raw.server);
+        tracing::info!(
+            "starting parser with document concurrency {} and at most {} PDFium workers",
+            options.concurrency,
+            max_processes
         );
-        Ok(Some(
-            Worker::builder()
+        let config = Arc::new(ValidatedConfig::try_from(raw)?);
+        let pool =
+            PdfiumPool::start(max_processes, &std::env::current_exe()?).await?;
+        let parser = match DocParser::builder()
+            .config(Arc::clone(&config))
+            .pdfium_provider(Arc::clone(&pool) as Arc<dyn PdfiumProvider>)
+            .build()
+            .await
+        {
+            Ok(parser) => Arc::new(parser),
+            Err(error) => {
+                tracing::error!(
+                    "parser initialization failed; stopping PDFium workers: {}",
+                    error
+                );
+                if let Err(cleanup) = pool.shutdown().await {
+                    tracing::error!(
+                        "PDFium cleanup after parser initialization failed: {}",
+                        cleanup
+                    );
+                }
+                return Err(error.into());
+            }
+        };
+        Ok(Some(ActiveWorker {
+            worker: Worker::builder()
                 .db(state.db.clone())
                 .storage(state.storage.clone())
                 .parser(parser)
                 .output(config.output().clone())
-                .options(WorkerOptions::from(self))
+                .options(options)
                 .build(),
-        ))
-    }
-}
-
-impl From<&Arguments> for HttpOptions {
-    /// Converts CLI upload limits into the existing HTTP options.
-    fn from(arguments: &Arguments) -> Self {
-        Self::builder()
-            .max_upload_bytes(arguments.max_upload_bytes)
-            .max_uploads(arguments.max_uploads)
-            .upload_timeout(Duration::from_secs(
-                arguments.upload_timeout_seconds,
-            ))
-            .build()
-    }
-}
-
-impl From<&Arguments> for WorkerOptions {
-    /// Maps process limits to the worker's existing lease and timeout policy.
-    fn from(arguments: &Arguments) -> Self {
-        Self::builder()
-            .concurrency(arguments.worker_concurrency)
-            .lease_seconds(arguments.lease_seconds)
-            .max_attempts(arguments.max_attempts)
-            .job_timeout(Duration::from_secs(arguments.job_timeout_seconds))
-            .build()
+            pool,
+        }))
     }
 }
 
@@ -158,14 +194,33 @@ async fn run_services(
     role: Role,
     server: ServerConfig,
     state: AppState,
-    worker: Option<Worker>,
+    worker: Option<ActiveWorker>,
 ) -> Result<(), Box<dyn Error>> {
+    let (worker, pool): (Option<Worker>, Option<Arc<PdfiumPool>>) =
+        worker.map(|active| (active.worker, active.pool)).unzip();
     let shutdown = state.shutdown.clone();
     let cleanup = DeletedResults::from(&state);
     // Register SIGTERM before accepting traffic and keep both services on the same cancellation token.
-    let mut terminate = tokio::signal::unix::signal(
+    let mut terminate = match tokio::signal::unix::signal(
         tokio::signal::unix::SignalKind::terminate(),
-    )?;
+    ) {
+        Ok(signal) => signal,
+        Err(error) => {
+            tracing::error!(
+                "failed to register server shutdown signal: {}",
+                error
+            );
+            if let Some(pool) = &pool
+                && let Err(cleanup) = pool.shutdown().await
+            {
+                tracing::error!(
+                    "PDFium cleanup after signal setup failed: {}",
+                    cleanup
+                );
+            }
+            return Err(error.into());
+        }
+    };
     let stopping = shutdown.clone();
     let signal = tokio::spawn(async move {
         tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
@@ -178,7 +233,11 @@ async fn run_services(
         let listener =
             tokio::net::TcpListener::bind((server.host.as_str(), server.port))
                 .await?;
-        tracing::info!("HTTP server listening on {}", listener.local_addr()?);
+        tracing::info!(
+            "HTTP server listening on {} with at most {} concurrent uploads",
+            listener.local_addr()?,
+            state.options.max_uploads
+        );
         // The same configuration drives binding and the final documented route prefix.
         axum::serve(listener, app::router(state, &server)?)
             .with_graceful_shutdown(shutdown.clone().cancelled_owned())
@@ -196,9 +255,110 @@ async fn run_services(
         cleanup.run(shutdown.clone()).await;
         Ok::<(), Box<dyn Error>>(())
     };
-    let outcome = tokio::try_join!(serving, working, cleaning);
+    let monitoring = async {
+        if let Some(pool) = &pool {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => {}
+                _ = pool.stopped() => return Err::<(), Box<dyn Error>>(
+                    std::io::Error::other("PDFium pool became unavailable").into()),
+            }
+        } else {
+            shutdown.cancelled().await;
+        }
+        Ok::<(), Box<dyn Error>>(())
+    };
+    let outcome = tokio::try_join!(serving, working, cleaning, monitoring);
     // Always release the signal task after either normal draining or a service error.
     shutdown.cancel();
     signal.abort();
+    if let Some(pool) = pool
+        && let Err(error) = pool.shutdown().await
+    {
+        tracing::error!("PDFium pool shutdown failed: {}", error);
+        if outcome.is_ok() {
+            return Err(error.into());
+        }
+    }
     outcome.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Omitted CLI flags retain configuration, while explicit flags override it before validation.
+    #[test]
+    fn concurrency_uses_configuration_unless_cli_overrides_it() {
+        let directory = tempfile::tempdir().expect("configuration directory");
+        let path = directory.path().join("docparse.toml");
+        for (field, flag, default) in [
+            ("worker_concurrency", "--worker-concurrency", 2),
+            ("max_uploads", "--max-uploads", 4),
+        ] {
+            for (configured, override_value, expected) in [
+                (None, None, default),
+                (Some(8), None, 8),
+                (Some(8), Some(3), 3),
+                (Some(0), Some(3), 3),
+            ] {
+                let content = configured
+                    .map(|value| format!("[server]\n{field} = {value}\n"))
+                    .unwrap_or_default();
+                std::fs::write(&path, content).expect("configuration file");
+                let mut argv = vec![
+                    std::ffi::OsString::from("docparse-server"),
+                    "--config".into(),
+                    path.as_os_str().to_owned(),
+                ];
+                if let Some(value) = override_value {
+                    argv.extend([flag.into(), value.to_string().into()]);
+                }
+                let arguments =
+                    Arguments::try_parse_from(argv).expect("CLI arguments");
+                let raw =
+                    arguments.load_config().expect("effective configuration");
+                let server = serde_json::to_value(&raw.server)
+                    .expect("server configuration");
+                assert_eq!(
+                    server.get(field),
+                    Some(&serde_json::json!(expected))
+                );
+                let applied = if field == "max_uploads" {
+                    arguments.http_options(&raw.server).max_uploads
+                } else {
+                    arguments.worker_options(&raw.server).concurrency
+                };
+                assert_eq!(applied, expected);
+            }
+        }
+    }
+
+    /// Invalid explicit overrides must fail before database connections or model initialization.
+    #[test]
+    fn concurrency_rejects_invalid_cli_overrides() {
+        let directory = tempfile::tempdir().expect("configuration directory");
+        let path = directory.path().join("docparse.toml");
+        std::fs::write(&path, "").expect("configuration file");
+        for (field, flag, limits) in [
+            ("worker_concurrency", "--worker-concurrency", [0, 129]),
+            ("max_uploads", "--max-uploads", [0, 1025]),
+        ] {
+            for limit in limits {
+                let arguments = Arguments::try_parse_from([
+                    std::ffi::OsString::from("docparse-server"),
+                    "--config".into(),
+                    path.as_os_str().to_owned(),
+                    flag.into(),
+                    limit.to_string().into(),
+                ])
+                .expect("numeric CLI value");
+                assert!(
+                    matches!(arguments.load_config(), Err(ConfigError::InvalidValue { field: actual, .. })
+                    if actual == format!("server.{field}")),
+                    "invalid CLI concurrency must be rejected during configuration loading"
+                );
+            }
+        }
+    }
 }

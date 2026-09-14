@@ -256,5 +256,5 @@ await parser.parse(pdf, {
 - pdf-inspector：src/lib.rs，TsrTableInput 与 extract_tables_with_structure_cells_mem。
 - DocParse：table/assemble.rs 的 populate 及 table/validate.rs 的原文/占用校验。
 - DocParse：runtime/pipeline.rs 的 analyze_rendered_page 和 page.rs 的 finish。
-- DocParse：layout/geometry.rs 的实际像素变换及 runtime/pdfium_executor.rs 的 limited_dpi。
+- DocParse：layout/geometry.rs 的实际像素变换及 pdfium/executor.rs 的 limited_dpi。
 - DocParse WASM Web：worker.ts 的 executing 检查、protocol.ts 的操作定义和 index.ts 的解析回调生命周期。

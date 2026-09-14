@@ -19,7 +19,7 @@
 
 ## Task 1: Source evidence and result contract
 
-Files: `crates/core/src/table/{mod.rs,evidence.rs}`, `extract/{mod.rs,text.rs}`, `runtime/pdfium_executor.rs`, `types.rs`, `lib.rs`.
+Files: `crates/core/src/table/{mod.rs,evidence.rs}`, `extract/{mod.rs,text.rs}`, `pdfium/executor.rs`, `types.rs`, `lib.rs`.
 
 - [x] Add regression cases for a source run crossing narrow table columns and source byte-range preservation.
 - [x] Add `Table`, `TableCell`, `TableCellLine`, `TableTextSpan`, `TableStructureSource`, and transient `TableEvidence` types. Use `Range<usize>` for byte references instead of the existing item-ordinal `TextItemRange`.

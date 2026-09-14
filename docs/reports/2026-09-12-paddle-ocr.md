@@ -121,4 +121,4 @@ hardware and has not been run on this Linux host. Additional model families must
 have an explicit verified preprocessing/dictionary contract before use.
 
 Follow-up correctness fixes and targeted browser verification are recorded in
-[OCR review fixes](2026-09-12-ocr-review-fixes.md).
+[OCR review fixes](./2026-09-12-ocr-review-fixes.md).

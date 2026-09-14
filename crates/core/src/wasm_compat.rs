@@ -1,12 +1,9 @@
 //! Native and browser runtime boundaries with explicitly scoped compatibility submodules.
-mod pdf_input;
-mod pdfium_worker;
 mod task_set;
 mod timeout;
 pub(crate) use timeout::timeout;
 
-pub(crate) use pdf_input::PdfInput;
-pub(crate) use pdfium_worker::PdfiumWorker;
+pub use crate::pdfium::PdfInput;
 pub(crate) use task_set::{TaskSet, spawn};
 
 pub use docparse_layout::wasm_compat::{
@@ -45,3 +42,6 @@ pub(crate) fn default_glyph_resolver()
 -> Option<std::sync::Arc<dyn crate::GlyphResolver>> {
     None
 }
+
+#[cfg(all(feature = "pdfium-ipc", not(target_arch = "wasm32")))]
+pub use crate::pdfium::ipc as pdfium_ipc;

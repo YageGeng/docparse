@@ -13,6 +13,7 @@ mod line;
 mod ocr;
 mod page;
 mod parser;
+mod pdfium;
 mod progress;
 mod render;
 mod runtime;
@@ -52,3 +53,8 @@ pub use table::{
 };
 pub use types::*;
 pub use validate::ResultValidator;
+
+pub use crate::pdfium::{
+    LocalPdfiumProvider, PdfInput, PdfiumProvider, PdfiumRuntimeError,
+    PdfiumSession, PreScannedPage, RenderedPage,
+};

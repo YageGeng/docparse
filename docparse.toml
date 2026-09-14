@@ -2,6 +2,9 @@
 directives = "info,ort=info,sqlx=warn"
 
 [server]
+max_uploads = 100
+worker_concurrency = 5
+pdfium_max_workers = 5
 host = "127.0.0.1"
 port = 8080
 api_prefix = "/api/v1/docparse"
@@ -13,7 +16,6 @@ acquire_timeout_ms = 5000
 idle_timeout_ms = 600000
 max_connections = 20
 min_connections = 5
-# SQL events also obey log.directives (or RUST_LOG); use sqlx=debug to see ordinary queries.
 sqlx_logging_level = "debug"
 sqlx_slow_statements_logging_level = "warn"
 sqlx_slow_statements_threshold_ms = 1000
@@ -30,12 +32,11 @@ mode = "fallback"
 model_path = "models/slanet-plus/inference.onnx"
 model_config_path = "models/slanet-plus/inference.yml"
 model_manifest_path = "models/slanet-plus/model-manifest.json"
-max_in_flight = 2
+max_in_flight = 8
 timeout_ms = 60000
 
 [ocr]
-policy = "missing_regions"
-# Native pages may overlap detector and recognizer work; browser execution remains single-page.
+policy = "disabled"
 max_in_flight = 2
 
 [ocr.detection]

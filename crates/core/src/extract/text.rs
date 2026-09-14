@@ -2,8 +2,8 @@
 // Segmentation behavior is derived from LiteParse revision
 // b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and adapted to DocParse facts.
 
+use ::pdfium::{Page, RectF, TextPage};
 use docparse_layout::{Bbox, Point};
-use pdfium::{Page, RectF, TextPage};
 use typed_builder::TypedBuilder;
 
 use super::glyph::GlyphNormalizer;
@@ -904,8 +904,8 @@ mod tests {
     }
     use std::path::{Path, PathBuf};
 
+    use ::pdfium::Library;
     use docparse_layout::Bbox;
-    use pdfium::Library;
 
     use super::{SegmentBuilder, TextCharFact, extract_page_text_items};
     use crate::UnicodeMappingStatus;

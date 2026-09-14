@@ -1,0 +1,40 @@
+{
+  "backend": "cpu",
+  "build_profile": "debug",
+  "document_concurrency": 4,
+  "ocr_policy": "disabled",
+  "tsr_mode": "rules_only",
+  "purpose": "functional smoke; not a controlled throughput comparison",
+  "cases": [
+    {
+      "pdfium_processes": 1,
+      "observed_workers": 1,
+      "repeats": 3,
+      "documents": 9,
+      "pages": 18,
+      "failed_documents": 0,
+      "degraded_documents": 0,
+      "all_workers_warmed": true
+    },
+    {
+      "pdfium_processes": 2,
+      "observed_workers": 2,
+      "repeats": 3,
+      "documents": 9,
+      "pages": 18,
+      "failed_documents": 0,
+      "degraded_documents": 0,
+      "all_workers_warmed": true
+    },
+    {
+      "pdfium_processes": 4,
+      "observed_workers": 4,
+      "repeats": 3,
+      "documents": 9,
+      "pages": 18,
+      "failed_documents": 0,
+      "degraded_documents": 0,
+      "all_workers_warmed": true
+    }
+  ]
+}

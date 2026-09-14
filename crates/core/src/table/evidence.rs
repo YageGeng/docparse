@@ -1,17 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use docparse_layout::Bbox;
-use pdfium::{
+use ::pdfium::{
     Page, RectF, SegmentKind, StructureAttributeValue, StructureElement,
 };
+use docparse_layout::Bbox;
 use typed_builder::TypedBuilder;
 
 use super::{MAX_TABLE_CELLS, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS};
 use crate::{Baseline, TextItemId};
 
 /// Compact measured word geometry retained only until the page's tables are assembled.
-#[derive(Debug, Clone, PartialEq, TypedBuilder)]
+#[derive(
+    Debug, Clone, PartialEq, TypedBuilder, serde::Serialize, serde::Deserialize,
+)]
 pub struct TableWord {
     pub byte_range: Range<usize>,
     pub bbox: Bbox,
@@ -22,7 +24,9 @@ pub struct TableWord {
 }
 
 /// A visible axis-aligned separator in canonical viewport points.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub enum TableRule {
     Horizontal { y: f64, left: f64, right: f64 },
     Vertical { x: f64, top: f64, bottom: f64 },
@@ -53,7 +57,9 @@ impl TableRule {
 }
 
 /// One explicitly tagged cell; marked-content IDs refer to the source page's text objects.
-#[derive(Debug, Clone, PartialEq, TypedBuilder)]
+#[derive(
+    Debug, Clone, PartialEq, TypedBuilder, serde::Serialize, serde::Deserialize,
+)]
 pub struct TaggedTableCell {
     pub row: usize,
     pub column: usize,
@@ -64,7 +70,7 @@ pub struct TaggedTableCell {
 }
 
 /// A complete, bounded tagged grid before MCIDs are matched to a detected layout.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaggedTable {
     pub row_count: usize,
     pub column_count: usize,
@@ -165,7 +171,9 @@ impl TaggedTable {
 }
 
 /// Transient evidence shared with pure table reconstruction; no live PDFium handles escape.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(
+    Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub struct TableEvidence {
     pub words: BTreeMap<TextItemId, Vec<TableWord>>,
     pub rules: Vec<TableRule>,

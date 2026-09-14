@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pdfium::Library;
+use ::pdfium::Library;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use typed_builder::TypedBuilder;

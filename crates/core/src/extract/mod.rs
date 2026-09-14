@@ -10,7 +10,9 @@ use typed_builder::TypedBuilder;
 use crate::TextItem;
 
 /// Native text facts and lightweight page geometry extracted before layout inference.
-#[derive(Debug, Clone, PartialEq, TypedBuilder)]
+#[derive(
+    Debug, Clone, PartialEq, TypedBuilder, serde::Serialize, serde::Deserialize,
+)]
 pub struct ExtractedPage {
     pub page_number: u32,
     pub width: f64,

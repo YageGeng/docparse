@@ -325,7 +325,7 @@ pub enum PageRotation {
 }
 
 /// Unvalidated inputs needed to derive all page coordinate transforms.
-#[derive(Debug, Clone, PartialEq, TypedBuilder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 pub struct PageTransformInput {
     pub page_to_viewport: AffineTransform,
     pub viewport_width: f64,
@@ -338,7 +338,8 @@ pub struct PageTransformInput {
 }
 
 /// Validated page, viewport, rendered-pixel, and model-input transforms.
-#[derive(Debug, Clone, PartialEq, TypedBuilder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[serde(try_from = "PageTransformInput", into = "PageTransformInput")]
 pub struct PageTransform {
     page_to_viewport: AffineTransform,
     viewport_to_page: AffineTransform,
@@ -416,6 +417,22 @@ impl PageTransform {
     /// Returns model input dimensions in pixels.
     pub fn model_size(&self) -> (u32, u32) {
         (self.model_width, self.model_height)
+    }
+}
+
+impl From<PageTransform> for PageTransformInput {
+    /// Serializes source geometry so deserialization re-runs all transform validation.
+    fn from(value: PageTransform) -> Self {
+        Self::builder()
+            .page_to_viewport(value.page_to_viewport)
+            .viewport_width(value.viewport_width)
+            .viewport_height(value.viewport_height)
+            .render_width(value.render_width)
+            .render_height(value.render_height)
+            .model_width(value.model_width)
+            .model_height(value.model_height)
+            .rotation(value.rotation)
+            .build()
     }
 }
 

@@ -54,7 +54,7 @@ mod platform {
         }
     }
 
-    /// Starts a native task and retains a joinable completion future.
+    /// Starts an owned native task; dropping its completion future aborts pending work.
     pub(crate) fn spawn<F>(
         future: F,
     ) -> WasmBoxedFuture<'static, Result<F::Output, TaskError>>
@@ -62,10 +62,12 @@ mod platform {
         F: Future + WasmCompatSend + 'static,
         F::Output: WasmCompatSend + 'static,
     {
-        // The render producer must retain local subscribers as well as the current document span.
-        let handle =
-            tokio::spawn(future.in_current_span().with_current_subscriber());
-        Box::pin(async move { handle.await.map_err(TaskError::from) })
+        // Own the task before the completion future is polled so cancellation cannot detach it.
+        let mut task = TaskSet::new();
+        task.spawn(future);
+        Box::pin(async move {
+            task.join_next().await.expect("the owned task was spawned")
+        })
     }
 }
 

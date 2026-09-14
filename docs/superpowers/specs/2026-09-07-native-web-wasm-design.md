@@ -57,12 +57,12 @@ Temporary Canvas preprocessing, registry edits, and permissive WASI probes are n
 
 | Location | Responsibility |
 |---|---|
-| core/runtime/pdfium_executor.rs | Shared commands and serialized extraction/rendering |
+| core/pdfium/executor.rs | Shared commands and serialized extraction/rendering |
 | core/runtime/pipeline.rs | Shared scheduling policy, context, failure handling, and fusion |
 | core/parser.rs | Shared bytes/page APIs and engine injection |
-| core/wasm_compat/pdfium_worker.rs | Native thread or browser-local PDFium actor lifetime |
+| core/pdfium/worker.rs | Native thread or browser-local PDFium actor lifetime |
 | core/wasm_compat/task_set.rs | Native Tokio/local browser task scheduling |
-| core/wasm_compat/pdf_input.rs | Native path/bytes sources and browser byte sources |
+| core/pdfium/input.rs | Native path/bytes sources and browser byte sources |
 | core/wasm_compat/native.rs | Native path/blocking parsing and overlay file output |
 | layout/pp_doclayout_v3/mod.rs | Shared preprocessing, execution call, and postprocessing |
 | layout/pp_doclayout_v3/session.rs | Owned, validated output conversion |
@@ -92,8 +92,8 @@ First-party source cfgs are allowed only in:
 - crates/config/src/wasm_compat.rs
 - crates/core/src/wasm_compat.rs
 - crates/core/src/wasm_compat/task_set.rs
-- crates/core/src/wasm_compat/pdfium_worker.rs
-- crates/core/src/wasm_compat/pdf_input.rs
+- crates/core/src/pdfium/worker.rs
+- crates/core/src/pdfium/input.rs
 - crates/layout/src/wasm_compat.rs
 - crates/layout/src/wasm_compat/session_pool.rs
 - crates/pdfium/src/wasm_compat.rs
