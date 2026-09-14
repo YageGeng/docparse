@@ -110,7 +110,15 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
             ExecutionProvider::Cuda => {
                 #[cfg(all(not(target_arch = "wasm32"), feature = "cuda"))]
                 {
-                    Some(ort::ep::CUDA::default().build())
+                    // OCR widths and partial batches keep changing after warmup; select
+                    // convolution kernels heuristically instead of benchmarking every new shape.
+                    Some(
+                        ort::ep::CUDA::default()
+                            .with_conv_algorithm_search(
+                                ort::ep::cuda::ConvAlgorithmSearch::Heuristic,
+                            )
+                            .build(),
+                    )
                 }
                 #[cfg(not(all(
                     not(target_arch = "wasm32"),

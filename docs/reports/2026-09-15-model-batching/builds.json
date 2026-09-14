@@ -1,0 +1,18 @@
+{
+  "head": "22293695c550ec69accf4b1f37e3b03bde1f0538",
+  "branch": "benchmark",
+  "binaries": {
+    "before": {
+      "path": "target/release/examples/pdfium_benchmark-before-model-batching",
+      "sha256": "27e91122ef0cda0b04ab8a46d24003e1d53fbe1c5081283fff1733e8a9f068bb"
+    },
+    "experiment": {
+      "path": "target/release/examples/pdfium_benchmark-model-batch-experiment",
+      "sha256": "6533ac773a66fc6195aaf9cbd1a594bc081f6a65e936233587d3c91c0f10980f"
+    },
+    "final": {
+      "path": "target/release/examples/pdfium_benchmark",
+      "sha256": "2c32930c1a09cf68cb1a8546cfee1e14b9db05b5330ae739924c8fa07cf91e83"
+    }
+  }
+}

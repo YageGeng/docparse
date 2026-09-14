@@ -1,0 +1,47 @@
+{
+  "counts": {
+    "blocks": 5903,
+    "documents": 12,
+    "errors": 0,
+    "fallback_blocks": 240,
+    "heuristic_blocks": 5,
+    "lines": 41444,
+    "model_blocks": 5658,
+    "pages": 368,
+    "removed_order_edges": 453,
+    "text_items": 191439
+  },
+  "invariant_failures": 0,
+  "labels": {
+    "abstract": 14,
+    "algorithm": 51,
+    "aside_text": 16,
+    "chart": 117,
+    "content": 1,
+    "display_formula": 88,
+    "doc_title": 13,
+    "figure_title": 299,
+    "footer": 8,
+    "footer_image": 1,
+    "footnote": 70,
+    "formula_number": 45,
+    "header": 55,
+    "header_image": 2,
+    "image": 69,
+    "number": 324,
+    "paragraph_title": 431,
+    "reference": 138,
+    "reference_content": 1658,
+    "table": 121,
+    "text": 2370,
+    "vision_footnote": 12
+  },
+  "schema_version": 1,
+  "warnings": {
+    "ContentLayoutOverlap": 32,
+    "EmptyModelRegion": 7,
+    "OcrPartialOverlap": 183,
+    "TableStructureUnavailable": 2,
+    "TableTextAssignmentFailed": 2
+  }
+}

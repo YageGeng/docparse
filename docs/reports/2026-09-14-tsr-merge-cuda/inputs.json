@@ -1,0 +1,86 @@
+[
+  {
+    "file": "2303.18223v16.pdf",
+    "bytes": 8577429,
+    "pages": 144,
+    "sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7",
+    "matches_previous": true
+  },
+  {
+    "file": "2403.01632v4.pdf",
+    "bytes": 3111797,
+    "pages": 47,
+    "sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431",
+    "matches_previous": true
+  },
+  {
+    "file": "2410.05779v3.pdf",
+    "bytes": 1123301,
+    "pages": 16,
+    "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a",
+    "matches_previous": true
+  },
+  {
+    "file": "2412.05210v1.pdf",
+    "bytes": 2792697,
+    "pages": 12,
+    "sha256": "b10bfd72684d588666635c853ba5dffbcc1e145a4486ced67baa55b0ac3f37b6",
+    "matches_previous": true
+  },
+  {
+    "file": "2603.01919v2.pdf",
+    "bytes": 10513591,
+    "pages": 23,
+    "sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15",
+    "matches_previous": true
+  },
+  {
+    "file": "2604.18583v1.pdf",
+    "bytes": 26668188,
+    "pages": 15,
+    "sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83",
+    "matches_previous": true
+  },
+  {
+    "file": "2604.18584v1.pdf",
+    "bytes": 9437000,
+    "pages": 32,
+    "sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728",
+    "matches_previous": true
+  },
+  {
+    "file": "2604.21959v1.pdf",
+    "bytes": 122969,
+    "pages": 3,
+    "sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2",
+    "matches_previous": true
+  },
+  {
+    "file": "2606.17056v1.pdf",
+    "bytes": 992264,
+    "pages": 25,
+    "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf",
+    "matches_previous": true
+  },
+  {
+    "file": "2609.04180v1.pdf",
+    "bytes": 1218716,
+    "pages": 23,
+    "sha256": "1e7121f407cfa6a1a2793ffd5762fbc858a984cb6d626482f38738d354d55eb7",
+    "matches_previous": true
+  },
+  {
+    "file": "2609.04184v1.pdf",
+    "bytes": 867625,
+    "pages": 8,
+    "sha256": "7c5ebfb41043bb9755cdf616700a44bd9f55e4fd04fff74a69ad7bc1876b6728",
+    "matches_previous": true
+  },
+  {
+    "file": "2609.04203v1.pdf",
+    "bytes": 15514420,
+    "pages": 20,
+    "sha256": "f7fc412ae9d7ae792981505f22f7de0d2e32efd742ebba305bccc394ec0ba7c5",
+    "matches_previous": true
+  }
+]

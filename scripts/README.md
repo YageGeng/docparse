@@ -102,6 +102,7 @@ after measurement. Database/HTTP submission and client download time are exclude
 ```sh
 rtk uv run --locked crates/layout/tests/python/download_models_test.py
 rtk uv run --locked crates/core/tests/python/wasm_compat_test.py
+rtk uv run --locked --group dev crates/core/tests/python/benchmark_test.py
 rtk uv run --locked crates/core/tests/python/compare_e2e_runs_test.py
 rtk uv run --locked --group dev crates/core/tests/python/run_real_pdf_e2e_test.py
 rtk uv run --locked --group reference crates/layout/tests/python/reference_layout_test.py
@@ -110,3 +111,9 @@ rtk uv run --locked crates/core/tests/python/wasm_types.py
 
 The last two checks use the real pinned model or compile both Rust targets. Ordinary
 fixture-based Rust tests do not regenerate PDFs, download models, or run the oracle.
+
+Run the discoverable Python checks, including the POSIX benchmark interruption regression, with:
+
+```sh
+rtk uv run --locked --group dev python -m unittest discover -s crates/core/tests/python -p '*test.py'
+```

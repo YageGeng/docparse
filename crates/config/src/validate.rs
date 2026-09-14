@@ -112,6 +112,13 @@ impl TryFrom<RawConfig> for ValidatedConfig {
     fn try_from(config: RawConfig) -> Result<Self, Self::Error> {
         Self::validate_platform(&config)?;
         // Bound page-level overlap even though each OCR model retains its own session lock.
+        // Keep line tensors bounded independently of overlapping page admission.
+        if !(1..=32).contains(&config.ocr.batch_size) {
+            return Err(ConfigError::InvalidValue {
+                field: "ocr.batch_size",
+                reason: "must be between 1 and 32",
+            });
+        }
         if !(1..=32).contains(&config.ocr.max_in_flight) {
             return Err(ConfigError::InvalidValue {
                 field: "ocr.max_in_flight",

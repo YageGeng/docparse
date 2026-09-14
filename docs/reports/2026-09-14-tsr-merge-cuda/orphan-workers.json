@@ -1,0 +1,42 @@
+[
+  {
+    "pid": 1300921,
+    "ppid": 1421,
+    "exe": "/home/isbest/Documents/WorkSpace/docparse/target/release/examples/docparse-pdfium-worker",
+    "created": 1789388458.56,
+    "ocr_policy": "missing_regions",
+    "ocr_batch_size": "4",
+    "log_filter": "warn,ort=error",
+    "cleaned_up": true
+  },
+  {
+    "pid": 1337555,
+    "ppid": 1421,
+    "exe": "/home/isbest/Documents/WorkSpace/docparse/target/release/examples/docparse-pdfium-worker",
+    "created": 1789389999.65,
+    "ocr_policy": "missing_regions",
+    "ocr_batch_size": "1",
+    "log_filter": "warn,ort=error",
+    "cleaned_up": true
+  },
+  {
+    "pid": 1337556,
+    "ppid": 1421,
+    "exe": "/home/isbest/Documents/WorkSpace/docparse/target/release/examples/docparse-pdfium-worker",
+    "created": 1789389999.65,
+    "ocr_policy": "missing_regions",
+    "ocr_batch_size": "1",
+    "log_filter": "warn,ort=error",
+    "cleaned_up": true
+  },
+  {
+    "pid": 1337559,
+    "ppid": 1421,
+    "exe": "/home/isbest/Documents/WorkSpace/docparse/target/release/examples/docparse-pdfium-worker",
+    "created": 1789389999.65,
+    "ocr_policy": "missing_regions",
+    "ocr_batch_size": "1",
+    "log_filter": "warn,ort=error",
+    "cleaned_up": true
+  }
+]

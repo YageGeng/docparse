@@ -1,0 +1,41 @@
+{
+  "status": 200,
+  "ready": {
+    "data": "ready",
+    "success": true,
+    "message": "Success"
+  },
+  "processes": [
+    {
+      "name": "docparse-server",
+      "ppid": 1540357,
+      "pid": 1540358
+    },
+    {
+      "name": "docparse-pdfium-worker",
+      "ppid": 1540358,
+      "pid": 1540399
+    },
+    {
+      "name": "docparse-pdfium-worker",
+      "ppid": 1540358,
+      "pid": 1540401
+    },
+    {
+      "name": "docparse-pdfium-worker",
+      "ppid": 1540358,
+      "pid": 1540403
+    },
+    {
+      "name": "docparse-pdfium-worker",
+      "ppid": 1540358,
+      "pid": 1540405
+    },
+    {
+      "name": "docparse-pdfium-worker",
+      "ppid": 1540358,
+      "pid": 1540407
+    }
+  ],
+  "environment": "PATH and LD_LIBRARY_PATH only; application settings from docparse.toml"
+}

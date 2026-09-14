@@ -297,6 +297,10 @@ pub struct OcrConfig {
     #[builder(default = Self::default_max_in_flight())]
     #[serde(default = "OcrConfig::default_max_in_flight")]
     pub max_in_flight: usize,
+    /// Bounds text lines per model call; exact-width groups retain single-line padding semantics.
+    #[builder(default = Self::default_batch_size())]
+    #[serde(default = "OcrConfig::default_batch_size")]
+    pub batch_size: usize,
     pub detection: ModelFiles,
     pub recognition: ModelFiles,
     pub orientation: ModelFiles,
@@ -313,6 +317,11 @@ pub struct OcrConfig {
 }
 
 impl OcrConfig {
+    /// Amortizes native inference calls without duplicating model sessions.
+    const fn default_batch_size() -> usize {
+        16
+    }
+
     /// Allows detection for one page to overlap recognition for another on native backends.
     const fn default_max_in_flight() -> usize {
         2

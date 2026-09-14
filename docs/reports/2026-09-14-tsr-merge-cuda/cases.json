@@ -1,0 +1,98 @@
+[
+  {
+    "case": "before-ocr-off-c2",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "fallback",
+    "concurrency": 2,
+    "before_merge": true
+  },
+  {
+    "case": "before-ocr-on-c2",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "fallback",
+    "concurrency": 2,
+    "before_merge": true
+  },
+  {
+    "case": "after-ocr-off-c2",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "fallback",
+    "concurrency": 2,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-off-c3",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "fallback",
+    "concurrency": 3,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-off-c4",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "fallback",
+    "concurrency": 4,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-off-c5",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "fallback",
+    "concurrency": 5,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-on-c2",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "fallback",
+    "concurrency": 2,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-on-c3",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "fallback",
+    "concurrency": 3,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-on-c4",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "fallback",
+    "concurrency": 4,
+    "before_merge": false
+  },
+  {
+    "case": "after-ocr-on-c5",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "fallback",
+    "concurrency": 5,
+    "before_merge": false
+  },
+  {
+    "case": "tsr-only-ocr-off-c2",
+    "exit_code": 0,
+    "ocr_policy": "disabled",
+    "tsr_mode": "tsr_only",
+    "concurrency": 2,
+    "before_merge": false
+  },
+  {
+    "case": "tsr-only-ocr-on-c2",
+    "exit_code": 0,
+    "ocr_policy": "missing_regions",
+    "tsr_mode": "tsr_only",
+    "concurrency": 2,
+    "before_merge": false
+  }
+]

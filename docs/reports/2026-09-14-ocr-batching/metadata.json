@@ -1,0 +1,83 @@
+{
+  "base_commit": "0decb48d47c8d299ed02ffdf87d752b417edd8f0",
+  "reference_oar_commit": "7feb044",
+  "strategy": "Page-local exact-width line batches; bounded crop ownership; original result order",
+  "batch_sizes": [
+    1,
+    4,
+    8,
+    16
+  ],
+  "document_concurrency": 2,
+  "pdfium_processes": 5,
+  "repeats": 1,
+  "corpus_documents": 12,
+  "corpus_pages": 368,
+  "ocr_policy": "missing_regions",
+  "tsr_mode": "fallback",
+  "warmup_model_rounds": 2,
+  "wasm_effective_batch_size": 1,
+  "benchmark_binary_sha256": "27c1dc9b28adee1617998f52f8449a61cc9428bc39412adb9795f2ebda5e6c3f",
+  "initial_measurements": {
+    "batch-1": "Completed but excluded from performance claims: concurrent Vintagestory GPU workload",
+    "batch-4": "Interrupted after external GPU contention was identified",
+    "batch-8": "Not started",
+    "batch-16": "Not started"
+  },
+  "external_gpu_sample": {
+    "process": "Vintagestory",
+    "pid": 1277031,
+    "sm_percent_samples": [
+      65,
+      49,
+      33
+    ]
+  },
+  "game_closed_by_user": true,
+  "before_binary_sha256": "1e26b4c484f17302c1dca8ae909f14a7310472d8e7ae854c8462b4a183c27354",
+  "clean_sweep": {
+    "cases": [
+      "before",
+      "batch-1",
+      "batch-4",
+      "batch-8",
+      "batch-16"
+    ],
+    "note": "Game process remained resident after the user ended the active game; its final preflight SM samples were 3%, 2%. Per-process GPU monitoring was added.",
+    "cuda_conv_algorithm": "Exhaustive"
+  },
+  "fixed_algorithm_binary_sha256": "7822091dcbc4e282a0fcc9bc55cd381b2cca81cfba7940aa7b7df062fe8db878",
+  "fixed_algorithm_rejected": {
+    "reason": "First two PDFs still unfinished at 122.85s with no competing GPU workload; abort the regression instead of completing all cases",
+    "batch-1": "interrupted",
+    "batch-4": "not started",
+    "batch-8": "not started",
+    "batch-16": "not started"
+  },
+  "final_config": {
+    "ocr_batch_size": 16,
+    "cuda_conv_algorithm": "Heuristic",
+    "restored_ocr_policy": "disabled",
+    "server_worker_concurrency": 5,
+    "pdfium_processes": 5
+  },
+  "service_restored": true,
+  "final_server_binary_sha256": "531df8df33a4ccc664d7d3a9566636a1340bcb583434596eb42b5aeea8c21055",
+  "final_benchmark_binary_sha256": "ef18c5c039a477c5dfd0dc644dc336a590800f6ef67065d2b9ecf262928b417c",
+  "fixed_algorithm_experiment": {
+    "cuda_conv_algorithm": "Default",
+    "note": "Fixed cuDNN convolution algorithm, matching oar-ocr. Applies to the shared CUDA session builder."
+  },
+  "verification": {
+    "config_ocr_tests": 34,
+    "real_cuda_tests": 2,
+    "full_corpus_e2e_before_after": "passed",
+    "batch_only_isolation_e2e": "passed",
+    "canonical_counts_and_warnings_match": true,
+    "text_lines_changed": 4,
+    "geometry_changes": 0,
+    "wasm_compile": "passed",
+    "typescript_check": "passed",
+    "service_ready": true
+  }
+}

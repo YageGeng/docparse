@@ -48,6 +48,8 @@ model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
 [ocr]
 policy = "disabled"
 max_in_flight = 2
+# Group equal-width lines without increasing the number of model sessions.
+batch_size = 16
 
 [ocr.detection]
 model_path = "models/pp-ocrv6-medium-det/inference.onnx"

@@ -1,0 +1,41 @@
+{
+  "commit": "0decb48d47c8d299ed02ffdf87d752b417edd8f0",
+  "os": "Linux-7.2.4-1-cachyos-x86_64-with-glibc2.44",
+  "cpu": "Intel Core i9-14900HX",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_memory_mib": 8188,
+  "driver": "615.71.09",
+  "pdfium_processes": 5,
+  "document_concurrency": [
+    2,
+    3,
+    4,
+    5
+  ],
+  "corpus_documents": 12,
+  "corpus_pages": 368,
+  "measured_batches": 8,
+  "measured_pages": 2944,
+  "service_restored": true,
+  "restored_ocr_policy": "disabled",
+  "workload_counts_stable": {
+    "ocr-off": true,
+    "ocr-on": true
+  },
+  "warning_counts_stable": {
+    "ocr-off": true,
+    "ocr-on": true
+  },
+  "json_byte_sizes_stable": {
+    "ocr-off": true,
+    "ocr-on": false
+  },
+  "maximum_document_json_byte_range": {
+    "ocr-off": 0,
+    "ocr-on": 7
+  },
+  "repeats_per_case": 1,
+  "tsr_max_in_flight": 8,
+  "previous_tsr_max_in_flight": 2,
+  "scope": "Production PdfiumPool parsing and temporary JSON persistence; excludes HTTP and database work"
+}

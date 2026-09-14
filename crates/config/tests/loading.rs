@@ -103,6 +103,47 @@ fn default_wireless_cells_can_be_disabled_by_profile() {
     assert_eq!(decoded.tsr.cell_detection, defaults.tsr.cell_detection);
 }
 
+/// Batch controls must load from old files and reject unbounded tensor allocations.
+#[test]
+fn ocr_batch_size_loads_and_validates() {
+    // Older browser/config payloads omit this field instead of going through the native loader.
+    let mut legacy =
+        serde_json::to_value(docparse_config::OcrConfig::default())
+            .expect("OCR config");
+    legacy.as_object_mut().expect("object").remove("batch_size");
+    let legacy: docparse_config::OcrConfig =
+        serde_json::from_value(legacy).expect("legacy config");
+    assert_eq!(legacy.batch_size, 16);
+    let directory = tempfile::tempdir().expect("directory");
+    for size in [1, 8, 32] {
+        let path = write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[ocr]\nbatch_size = {size}\n"),
+        );
+        ConfigLoader::new(path)
+            .load_raw()
+            .and_then(docparse_config::ValidatedConfig::try_from)
+            .expect("valid OCR batch size");
+    }
+    for size in [0, 33] {
+        let path = write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[ocr]\nbatch_size = {size}\n"),
+        );
+        assert!(matches!(
+            ConfigLoader::new(path)
+                .load_raw()
+                .and_then(docparse_config::ValidatedConfig::try_from),
+            Err(ConfigError::InvalidValue {
+                field: "ocr.batch_size",
+                ..
+            })
+        ));
+    }
+}
+
 /// Writes one configuration file and returns its path.
 fn write_config(directory: &Path, name: &str, contents: &str) -> PathBuf {
     let path = directory.join(name);

@@ -17,6 +17,12 @@ pub(crate) const MAX_PAGE_CONCURRENCY: usize = 32;
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub(crate) const MAX_PAGE_CONCURRENCY: usize = 1;
 
+// Keep browser inference within its existing single-line memory contract.
+#[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+pub(crate) const MAX_LINE_BATCH: usize = 32;
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub(crate) const MAX_LINE_BATCH: usize = 1;
+
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
@@ -56,6 +62,7 @@ mod platform {
         ) -> Result<ModelOutput, OcrError> {
             let queued = timings.start(TimingStage::OcrQueue);
             let kind = self.kind;
+            let batch_size = input.0.dim().0;
             self.session
                 .run(move |session| {
                     drop(queued);
@@ -66,7 +73,7 @@ mod platform {
                     // Dense CTC probability validation and argmax execute on the CPU and must not be reported as inference.
                     drop(inference);
                     let _readback = timings.start(TimingStage::OcrReadback);
-                    kind.read(&outputs)
+                    kind.read(&outputs, batch_size)
                 })
                 .await?
         }
@@ -153,7 +160,7 @@ mod platform {
                                 ))
                             },
                         )?;
-                        kind.read(&outputs)
+                        kind.read(&outputs, request.input.0.dim().0)
                     }
                     .await;
                     let _ = request.response.send(result);

@@ -47,82 +47,126 @@ impl ImageTensor {
         .ok_or_else(|| OcrError::InvalidData("invalid RGB buffer".into()))?;
         let resized =
             imageops::resize(&view, width, height, FilterType::Triangle);
-        Self::normalized(&resized, width, MEAN, STD, false)
+        Self::normalized(&[resized], width, MEAN, STD, false)
     }
 
-    /// Keeps text aspect ratio and pads normalized recognition data to at least 320 columns.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "resized width is clamped to validated positive bounds"
-    )]
+    /// Keeps the single-line resize contract while assembling one contiguous batch tensor.
     pub fn recognition(
-        image: &RgbImage,
+        images: &[&RgbImage],
         max_width: u32,
     ) -> Result<Self, OcrError> {
-        if image.width() == 0
-            || image.height() == 0
-            || !(320..=4096).contains(&max_width)
-        {
+        let mut resized = Vec::with_capacity(images.len());
+        let mut tensor_width = 320;
+        for image in images {
+            let width = Self::recognition_width(
+                image.width(),
+                image.height(),
+                max_width,
+            )?;
+            tensor_width = tensor_width.max(width);
+            resized.push(imageops::resize(
+                *image,
+                width,
+                48,
+                FilterType::Triangle,
+            ));
+        }
+        Self::normalized(&resized, tensor_width, [0.5; 3], [0.5; 3], false)
+    }
+
+    /// Shares exact integer width calculation between crop scheduling and tensor construction.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "width is clamped to validated positive bounds"
+    )]
+    fn recognition_width(
+        width: u32,
+        height: u32,
+        max_width: u32,
+    ) -> Result<u32, OcrError> {
+        if width == 0 || height == 0 || !(320..=4096).contains(&max_width) {
             return Err(OcrError::InvalidData(
                 "invalid recognizer image dimensions".into(),
             ));
         }
-        let width = (48.0 * f64::from(image.width())
-            / f64::from(image.height()))
-        .ceil()
-        .clamp(1.0, f64::from(max_width)) as u32;
-        let tensor_width = width.max(320);
-        let resized = imageops::resize(image, width, 48, FilterType::Triangle);
-        Self::normalized(&resized, tensor_width, [0.5; 3], [0.5; 3], false)
+        Ok((48.0 * f64::from(width) / f64::from(height))
+            .ceil()
+            .clamp(1.0, f64::from(max_width)) as u32)
     }
 
-    /// Applies the orientation classifier's fixed 160x80 RGB contract.
-    pub fn orientation(image: &RgbImage) -> Result<Self, OcrError> {
-        if image.width() == 0 || image.height() == 0 {
-            return Err(OcrError::InvalidData("empty orientation crop".into()));
+    /// Batches the orientation classifier's fixed 160x80 RGB inputs.
+    pub fn orientation(images: &[&RgbImage]) -> Result<Self, OcrError> {
+        let mut resized = Vec::with_capacity(images.len());
+        for image in images {
+            if image.width() == 0 || image.height() == 0 {
+                return Err(OcrError::InvalidData(
+                    "empty orientation crop".into(),
+                ));
+            }
+            resized.push(imageops::resize(
+                *image,
+                160,
+                80,
+                FilterType::Triangle,
+            ));
         }
-        Self::normalized(
-            &imageops::resize(image, 160, 80, FilterType::Triangle),
-            160,
-            MEAN,
-            STD,
-            true,
-        )
+        Self::normalized(&resized, 160, MEAN, STD, true)
     }
 
-    /// Writes each channel directly into its final CHW plane; untouched padding is normalized zero.
+    /// Writes every image directly into its final NCHW slice without intermediate float tensors.
     fn normalized(
-        image: &RgbImage,
+        images: &[RgbImage],
         width: u32,
         means: [f32; 3],
         deviations: [f32; 3],
         rgb: bool,
     ) -> Result<Self, OcrError> {
-        let plane = width as usize * image.height() as usize;
-        let mut data = vec![0.0; 3 * plane];
-        let channels = if rgb { [0, 1, 2] } else { [2, 1, 0] };
-        for (output, ((channel, mean), deviation)) in data
-            .chunks_exact_mut(plane)
-            .zip(channels.into_iter().zip(means).zip(deviations))
+        let height = images
+            .first()
+            .ok_or_else(|| OcrError::InvalidData("empty tensor batch".into()))?
+            .height();
+        if images.len() > 32
+            || width == 0
+            || height == 0
+            || images
+                .iter()
+                .any(|image| image.height() != height || image.width() > width)
         {
-            for (row, source) in output
-                .chunks_exact_mut(width as usize)
-                .zip(image.as_raw().chunks_exact(image.width() as usize * 3))
+            return Err(OcrError::InvalidData(
+                "invalid tensor batch dimensions".into(),
+            ));
+        }
+        let plane = width as usize * height as usize;
+        let mut data = vec![0.0; images.len() * 3 * plane];
+        let channels = if rgb { [0, 1, 2] } else { [2, 1, 0] };
+        for (tensor, image) in data.chunks_exact_mut(3 * plane).zip(images) {
+            for (output, ((channel, mean), deviation)) in tensor
+                .chunks_exact_mut(plane)
+                .zip(channels.into_iter().zip(means).zip(deviations))
             {
-                for (pixel, source) in
-                    row.iter_mut().zip(source.as_chunks::<3>().0)
+                for (row, source) in
+                    output.chunks_exact_mut(width as usize).zip(
+                        image.as_raw().chunks_exact(image.width() as usize * 3),
+                    )
                 {
-                    *pixel =
-                        (f32::from(*source.get(channel).ok_or_else(|| {
-                            OcrError::InvalidData("truncated RGB pixel".into())
-                        })?) / 255.0
+                    for (pixel, source) in
+                        row.iter_mut().zip(source.as_chunks::<3>().0)
+                    {
+                        *pixel = (f32::from(*source.get(channel).ok_or_else(
+                            || {
+                                OcrError::InvalidData(
+                                    "truncated RGB pixel".into(),
+                                )
+                            },
+                        )?) / 255.0
                             - mean)
                             / deviation;
+                    }
                 }
             }
         }
         Array4::from_shape_vec(
-            (1, 3, image.height() as usize, width as usize),
+            (images.len(), 3, height as usize, width as usize),
             data,
         )
         .map(Self)
@@ -137,6 +181,37 @@ pub(crate) struct TextCrop {
 }
 
 impl TextCrop {
+    /// Validates rectified crop sizes before scheduling or allocating their pixel buffers.
+    #[expect(clippy::cast_sign_loss, reason = "quad distances are nonnegative")]
+    fn dimensions(quad: &Quad) -> Result<(u32, u32), OcrError> {
+        let [a, b, c, d] = *quad.points();
+        let distance = |left: Point, right: Point| {
+            (left.x - right.x).hypot(left.y - right.y)
+        };
+        let width = distance(a, b).max(distance(c, d)).round() as u32;
+        let height = distance(a, d).max(distance(b, c)).round() as u32;
+        if width == 0
+            || height == 0
+            || width > 8192
+            || height > 8192
+            || u64::from(width) * u64::from(height) > 16_777_216
+        {
+            return Err(OcrError::InvalidData(
+                "empty or excessive text crop".into(),
+            ));
+        }
+        Ok((width, height))
+    }
+
+    /// Groups equal-width tensors without creating every crop or adding padding that changes recognition.
+    pub fn tensor_width(quad: &Quad, max_width: u32) -> Result<u32, OcrError> {
+        let (mut width, mut height) = Self::dimensions(quad)?;
+        if f64::from(height) / f64::from(width) >= 1.5 {
+            std::mem::swap(&mut width, &mut height);
+        }
+        Ok(ImageTensor::recognition_width(width, height, max_width)?.max(320))
+    }
+
     /// Corrects upside-down text while keeping the reading axis attached to the source quadrilateral.
     pub fn rotate_half_turn(&mut self) -> Result<(), OcrError> {
         let [a, b, c, d] = *self.quad.points();
@@ -158,19 +233,9 @@ impl TryFrom<(&PageImage, &Quad)> for TextCrop {
         (source, quad): (&PageImage, &Quad),
     ) -> Result<Self, Self::Error> {
         let [a, b, c, d] = *quad.points();
-        let distance = |left: Point, right: Point| {
-            (left.x - right.x).hypot(left.y - right.y)
-        };
-        let width = distance(a, b).max(distance(c, d)).round() as u32;
-        let height = distance(a, d).max(distance(b, c)).round() as u32;
-        if width == 0
-            || height == 0
-            || source.width() == 0
-            || source.height() == 0
-            || width > 8192
-            || height > 8192
-            || u64::from(width) * u64::from(height) > 16_777_216
-        {
+        // Scheduling and rasterization share the same dimensions, including tall-line rotation.
+        let (width, height) = Self::dimensions(quad)?;
+        if source.width() == 0 || source.height() == 0 {
             return Err(OcrError::InvalidData(
                 "empty or excessive text crop".into(),
             ));
@@ -353,6 +418,74 @@ mod tests {
     use docparse_layout::{PageImageInput, PixelFormat, Point};
     use std::sync::Arc;
 
+    /// Mixed colors and crop sizes must retain each single-line tensor exactly inside a batch.
+    #[test]
+    fn batch_members_preserve_single_line_pixels() {
+        let first = RgbImage::from_pixel(100, 20, image::Rgb([255, 17, 0]));
+        let second = RgbImage::from_pixel(80, 30, image::Rgb([0, 51, 255]));
+        let batch =
+            ImageTensor::recognition(&[&first, &second], 3200).expect("batch");
+        assert_eq!(batch.0.shape(), &[2, 3, 48, 320]);
+        let orientation =
+            ImageTensor::orientation(&[&first, &second]).expect("orientation");
+        for (index, image) in [&first, &second].into_iter().enumerate() {
+            let single =
+                ImageTensor::recognition(&[image], 3200).expect("single");
+            assert_eq!(
+                batch.0.index_axis(ndarray::Axis(0), index),
+                single.0.index_axis(ndarray::Axis(0), 0)
+            );
+            let single =
+                ImageTensor::orientation(&[image]).expect("single orientation");
+            assert_eq!(
+                orientation.0.index_axis(ndarray::Axis(0), index),
+                single.0.index_axis(ndarray::Axis(0), 0)
+            );
+        }
+        assert!(matches!(
+            ImageTensor::recognition(&[], 3200),
+            Err(OcrError::InvalidData(_))
+        ));
+        assert!(matches!(
+            ImageTensor::orientation(&[]),
+            Err(OcrError::InvalidData(_))
+        ));
+    }
+
+    /// Metadata grouping must match actual tensor widths after rounding, clipping and vertical rotation.
+    #[test]
+    fn planned_width_matches_rectified_tensor() {
+        let source = PageImage::try_from(
+            PageImageInput::builder()
+                .width(700)
+                .height(700)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(vec![255; 700 * 700 * 3]))
+                .build(),
+        )
+        .expect("page");
+        for (width, height) in [(601.3, 20.4), (20.4, 601.3), (30.2, 40.1)] {
+            let quad = Quad::try_from([
+                Point::new(1.0, 1.0),
+                Point::new(width, 1.0),
+                Point::new(width, height),
+                Point::new(1.0, height),
+            ])
+            .expect("quad");
+            let crop = TextCrop::try_from((&source, &quad)).expect("crop");
+            for max_width in [320, 3200] {
+                let tensor =
+                    ImageTensor::recognition(&[&crop.image], max_width)
+                        .expect("tensor");
+                assert_eq!(
+                    TextCrop::tensor_width(&quad, max_width).expect("planned")
+                        as usize,
+                    tensor.0.dim().3
+                );
+            }
+        }
+    }
+
     /// Red input verifies BGR channel order, normalization and zero padding independently of inference.
     #[test]
     fn tensor_contract_preserves_bgr_and_normalized_padding() {
@@ -378,8 +511,8 @@ mod tests {
                 .abs()
                 < 1e-5
         );
-        let recognition =
-            ImageTensor::recognition(&image, 3200).expect("recognizer input");
+        let recognition = ImageTensor::recognition(&[&image], 3200)
+            .expect("recognizer input");
         assert_eq!(recognition.0.shape(), &[1, 3, 48, 320]);
         assert!(
             (recognition.0.get((0, 0, 0, 0)).expect("B") + 1.0).abs() < 1e-6

@@ -66,6 +66,16 @@ def run_case(binary: Path, config: Path, pdfs: Path, output: Path, concurrency: 
                         probes.setdefault(child.pid, child)
                 except psutil.NoSuchProcess:
                     pass
+            # Stop the supervisor before its workers: killing workers first lets the live pool
+            # replace them after the descendant snapshot, leaking untracked orphan processes.
+            for child in [process, gpu]:
+                if child is not None and child.poll() is None:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait()
             descendants = [probe for pid, probe in probes.items() if process is not None and pid != process.pid]
             for child in descendants:
                 try:
@@ -79,14 +89,6 @@ def run_case(binary: Path, config: Path, pdfs: Path, output: Path, concurrency: 
                     child.wait(timeout=5)
                 except psutil.NoSuchProcess:
                     pass
-            for child in [process, gpu]:
-                if child is not None and child.poll() is None:
-                    child.terminate()
-                    try:
-                        child.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        child.kill()
-                        child.wait()
 
 
 def main() -> None:

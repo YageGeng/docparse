@@ -1,0 +1,81 @@
+[fusion]
+assignment_baseline_weight = 0.1
+assignment_center_weight = 0.2
+assignment_confidence_weight = 0.1
+assignment_coverage_weight = 0.55
+assignment_specificity_weight = 0.05
+center_minimum_line_coverage = 0.1
+estimated_font_size_tolerance_points = 1.5
+font_size_tolerance_points = 0.5
+indent_tolerance_points = 6.0
+minimum_line_coverage = 0.3
+paragraph_gap_multiplier = 1.5
+
+[layout]
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-doclayout-v3/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-doclayout-v3/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-doclayout-v3/inference.onnx"
+score_threshold = 0.5
+session_pool_size = 1
+
+[ocr]
+batch_size = 16
+box_threshold = 0.45
+classify_orientation = true
+detection_max_side = 2048
+detection_threshold = 0.2
+max_candidates = 3000
+max_in_flight = 2
+orientation_threshold = 0.9
+policy = "missing_regions"
+recognition_max_width = 3200
+recognition_threshold = 0.5
+timeout_ms = 120000
+unclip_ratio = 1.4
+
+[ocr.detection]
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/inference.onnx"
+
+[ocr.orientation]
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/inference.onnx"
+
+[ocr.recognition]
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/inference.onnx"
+
+[output]
+formula_placeholder = "[formula]"
+include_diagnostics = false
+include_evidence = true
+
+[render]
+dpi = 144
+max_long_edge_pixels = 2400
+
+[runtime]
+blocking_task_limit = 4
+continue_on_page_error = true
+page_concurrency = 4
+render_queue_capacity = 2
+
+[tsr]
+max_in_flight = 8
+mode = "tsr_only"
+model = "slanet_plus"
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/slanet-plus/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/slanet-plus/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/slanet-plus/inference.onnx"
+timeout_ms = 60000
+
+[tsr.cell_detection]
+enabled = true
+model = "wireless"
+model_config_path = "/home/isbest/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/inference.yml"
+model_manifest_path = "/home/isbest/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/model-manifest.json"
+model_path = "/home/isbest/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/inference.onnx"
+score_threshold = 0.3

@@ -42,6 +42,8 @@ export interface OcrArtifacts { detection: ModelSource; recognition: ModelSource
 export interface OcrOptions {
   policy?: "disabled" | "missing_regions" | "always";
   detection_max_side?: number; detection_threshold?: number; box_threshold?: number; unclip_ratio?: number;
+  /** Native line batch bound; browser inference currently uses one line per call. */
+  batch_size?: number;
   max_candidates?: number; recognition_max_width?: number; recognition_threshold?: number;
   classify_orientation?: boolean; orientation_threshold?: number; timeout_ms?: number;
 }

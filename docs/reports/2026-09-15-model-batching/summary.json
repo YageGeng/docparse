@@ -1,0 +1,933 @@
+[
+  {
+    "case": "before-ocr-off/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 36.467665163,
+    "pages_per_second": 10.09113137227584,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 89.56756756756756,
+    "gpu_peak_mib": 3396.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.06738971099999999
+      ],
+      "LayoutInference": [
+        368,
+        25.991305481999994
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.005678206
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.330786558000001
+      ],
+      "LayoutQueue": [
+        368,
+        86.89262251999999
+      ],
+      "LayoutReadback": [
+        368,
+        0.0018595590000000004
+      ],
+      "LinkValidate": [
+        12,
+        0.14981143100000002
+      ],
+      "ParseTotal": [
+        12,
+        69.246609217
+      ],
+      "PdfOpen": [
+        12,
+        0.006398723
+      ],
+      "PdfRender": [
+        368,
+        8.625981179999998
+      ],
+      "PdfiumQueue": [
+        12,
+        4.5070999999999996e-05
+      ],
+      "TableCellInference": [
+        121,
+        4.101967213
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.0013366380000000002
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.9684989820000001
+      ],
+      "TableExternal": [
+        121,
+        163.38164989000003
+      ],
+      "TableFill": [
+        121,
+        0.21389377599999998
+      ],
+      "TextExtract": [
+        368,
+        5.73877855
+      ],
+      "TextFinish": [
+        736,
+        9.915100500000001
+      ],
+      "TextPrepare": [
+        368,
+        0.017378726999999997
+      ],
+      "TsrInference": [
+        133,
+        32.186472813
+      ],
+      "TsrPostprocess": [
+        133,
+        0.008755874999999998
+      ],
+      "TsrPreprocess": [
+        133,
+        0.190803335
+      ],
+      "TsrQueue": [
+        254,
+        125.855143932
+      ]
+    }
+  },
+  {
+    "case": "before-ocr-on/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 121.9311306,
+    "pages_per_second": 3.0180971683698963,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 60.721311475409834,
+    "gpu_peak_mib": 7306.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.07479643699999998
+      ],
+      "LayoutInference": [
+        368,
+        33.601854547
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.005730208999999999
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.283213929999999
+      ],
+      "LayoutQueue": [
+        368,
+        55.14876054900001
+      ],
+      "LayoutReadback": [
+        368,
+        0.0016187519999999998
+      ],
+      "LinkValidate": [
+        12,
+        0.15798827699999998
+      ],
+      "Ocr": [
+        111,
+        704.769669802
+      ],
+      "OcrDecode": [
+        6146,
+        0.017596138999999997
+      ],
+      "OcrDetectionInference": [
+        111,
+        17.519383544
+      ],
+      "OcrDetectionPostprocess": [
+        111,
+        1.398245851
+      ],
+      "OcrDetectionPreprocess": [
+        111,
+        5.199424914
+      ],
+      "OcrOrientationInference": [
+        1798,
+        31.04892063200001
+      ],
+      "OcrQueue": [
+        3818,
+        532.3337582269999
+      ],
+      "OcrReadback": [
+        3707,
+        13.318025733999999
+      ],
+      "OcrRecognitionInference": [
+        1798,
+        98.73506854799996
+      ],
+      "OcrRecognitionPreprocess": [
+        3596,
+        3.9875768710000004
+      ],
+      "ParseTotal": [
+        12,
+        237.13675007500007
+      ],
+      "PdfOpen": [
+        12,
+        0.006537131000000001
+      ],
+      "PdfRender": [
+        368,
+        8.834226974999998
+      ],
+      "PdfiumQueue": [
+        12,
+        4.1160000000000006e-05
+      ],
+      "TableCellInference": [
+        121,
+        4.404861629
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.001508828
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.9786545209999999
+      ],
+      "TableExternal": [
+        121,
+        93.98994673899999
+      ],
+      "TableFill": [
+        121,
+        0.24527619099999992
+      ],
+      "TextExtract": [
+        368,
+        5.625610074999999
+      ],
+      "TextFinish": [
+        736,
+        9.782542902
+      ],
+      "TextPrepare": [
+        368,
+        0.036222750000000005
+      ],
+      "TsrInference": [
+        133,
+        36.036600745
+      ],
+      "TsrPostprocess": [
+        133,
+        0.009196228
+      ],
+      "TsrPreprocess": [
+        133,
+        0.201389447
+      ],
+      "TsrQueue": [
+        254,
+        52.29280905500001
+      ]
+    }
+  },
+  {
+    "case": "final-ocr-on/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 110.284548039,
+    "pages_per_second": 3.3368228509207283,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 62.336363636363636,
+    "gpu_peak_mib": 7255.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.069492643
+      ],
+      "LayoutInference": [
+        368,
+        34.75438343399999
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.005007854999999998
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.244092703000001
+      ],
+      "LayoutQueue": [
+        368,
+        60.40755615900001
+      ],
+      "LayoutReadback": [
+        368,
+        0.0018666989999999999
+      ],
+      "LinkValidate": [
+        12,
+        0.16278019599999996
+      ],
+      "Ocr": [
+        111,
+        637.9742534249999
+      ],
+      "OcrDecode": [
+        6146,
+        0.017351514
+      ],
+      "OcrDetectionInference": [
+        111,
+        18.474471715
+      ],
+      "OcrDetectionPostprocess": [
+        111,
+        1.3998832369999998
+      ],
+      "OcrDetectionPreprocess": [
+        111,
+        5.142141104999999
+      ],
+      "OcrOrientationInference": [
+        436,
+        14.834720162000002
+      ],
+      "OcrQueue": [
+        2471,
+        491.837179348
+      ],
+      "OcrReadback": [
+        2360,
+        2.174400848
+      ],
+      "OcrRecognitionInference": [
+        1813,
+        99.80697224
+      ],
+      "OcrRecognitionPreprocess": [
+        872,
+        3.727388107
+      ],
+      "ParseTotal": [
+        12,
+        213.89056189299998
+      ],
+      "PdfOpen": [
+        12,
+        0.006657264999999999
+      ],
+      "PdfRender": [
+        368,
+        8.585151151
+      ],
+      "PdfiumQueue": [
+        12,
+        3.8724e-05
+      ],
+      "TableCellInference": [
+        121,
+        4.618093597
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.0014209259999999999
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.9791197890000001
+      ],
+      "TableExternal": [
+        121,
+        112.24471060200003
+      ],
+      "TableFill": [
+        121,
+        0.20059618299999996
+      ],
+      "TextExtract": [
+        368,
+        5.621933622
+      ],
+      "TextFinish": [
+        736,
+        9.949945748
+      ],
+      "TextPrepare": [
+        368,
+        0.033839484999999996
+      ],
+      "TsrInference": [
+        133,
+        41.546351136
+      ],
+      "TsrPostprocess": [
+        133,
+        0.008214255
+      ],
+      "TsrPreprocess": [
+        133,
+        0.198180351
+      ],
+      "TsrQueue": [
+        254,
+        64.82724761800002
+      ]
+    }
+  },
+  {
+    "case": "final-ocr-on/c5",
+    "concurrency": 5,
+    "pages": 368,
+    "corpus_seconds": 110.491815007,
+    "pages_per_second": 3.3305634446921344,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 62.65765765765766,
+    "gpu_peak_mib": 7277.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.07092824199999999
+      ],
+      "LayoutInference": [
+        368,
+        33.56822394000001
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.005511182000000001
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.797555337000002
+      ],
+      "LayoutQueue": [
+        368,
+        96.74726840399998
+      ],
+      "LayoutReadback": [
+        368,
+        0.001540249
+      ],
+      "LinkValidate": [
+        12,
+        0.164213764
+      ],
+      "Ocr": [
+        111,
+        1714.932724856
+      ],
+      "OcrDecode": [
+        6146,
+        0.017555757
+      ],
+      "OcrDetectionInference": [
+        111,
+        20.530628847000003
+      ],
+      "OcrDetectionPostprocess": [
+        111,
+        1.5137655409999997
+      ],
+      "OcrDetectionPreprocess": [
+        111,
+        5.372369819999999
+      ],
+      "OcrOrientationInference": [
+        436,
+        14.837104092
+      ],
+      "OcrQueue": [
+        2471,
+        1564.813711969
+      ],
+      "OcrReadback": [
+        2360,
+        2.236934982
+      ],
+      "OcrRecognitionInference": [
+        1813,
+        101.23270392100001
+      ],
+      "OcrRecognitionPreprocess": [
+        872,
+        3.8134042079999997
+      ],
+      "ParseTotal": [
+        12,
+        527.5627941220001
+      ],
+      "PdfOpen": [
+        12,
+        0.006802600999999999
+      ],
+      "PdfRender": [
+        368,
+        9.272425991
+      ],
+      "PdfiumQueue": [
+        12,
+        4.7294e-05
+      ],
+      "TableCellInference": [
+        121,
+        4.384512548
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.001374646
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.996553483
+      ],
+      "TableExternal": [
+        121,
+        106.903024618
+      ],
+      "TableFill": [
+        121,
+        0.222157145
+      ],
+      "TextExtract": [
+        368,
+        6.3640804210000015
+      ],
+      "TextFinish": [
+        736,
+        10.696167833
+      ],
+      "TextPrepare": [
+        368,
+        0.034783272000000004
+      ],
+      "TsrInference": [
+        133,
+        40.657623406999996
+      ],
+      "TsrPostprocess": [
+        133,
+        0.008475738999999998
+      ],
+      "TsrPreprocess": [
+        133,
+        0.21233651199999998
+      ],
+      "TsrQueue": [
+        254,
+        60.574164018999994
+      ]
+    }
+  },
+  {
+    "case": "ocr-optimized/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 110.823368507,
+    "pages_per_second": 3.3205993010107413,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 63.4954954954955,
+    "gpu_peak_mib": 7272.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.064086479
+      ],
+      "LayoutBatchInference": [
+        368,
+        34.405951140999996
+      ],
+      "LayoutInference": [
+        368,
+        34.404461251
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.004306763999999999
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.332293958
+      ],
+      "LayoutQueue": [
+        368,
+        59.333144176999994
+      ],
+      "LayoutReadback": [
+        368,
+        0.0019333789999999998
+      ],
+      "LinkValidate": [
+        12,
+        0.164390315
+      ],
+      "Ocr": [
+        111,
+        649.128145837
+      ],
+      "OcrDecode": [
+        6146,
+        0.017250092000000005
+      ],
+      "OcrDetectionInference": [
+        111,
+        17.63962606
+      ],
+      "OcrDetectionPostprocess": [
+        111,
+        1.4520964079999998
+      ],
+      "OcrDetectionPreprocess": [
+        111,
+        5.25278012
+      ],
+      "OcrOrientationInference": [
+        436,
+        15.077274327
+      ],
+      "OcrQueue": [
+        2471,
+        501.37344185399996
+      ],
+      "OcrReadback": [
+        2360,
+        2.2112603209999997
+      ],
+      "OcrRecognitionInference": [
+        1813,
+        101.80610534300001
+      ],
+      "OcrRecognitionPreprocess": [
+        872,
+        3.7391116699999998
+      ],
+      "ParseTotal": [
+        12,
+        215.21853837999998
+      ],
+      "PdfOpen": [
+        12,
+        0.006386892
+      ],
+      "PdfRender": [
+        368,
+        8.625582254
+      ],
+      "PdfiumQueue": [
+        12,
+        4.7656e-05
+      ],
+      "TableCellBatchInference": [
+        121,
+        4.383669382000001
+      ],
+      "TableCellInference": [
+        121,
+        4.383217292
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.0012497289999999998
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.988504823
+      ],
+      "TableExternal": [
+        121,
+        113.47437423299999
+      ],
+      "TableFill": [
+        121,
+        0.218076725
+      ],
+      "TextExtract": [
+        368,
+        5.716325808000001
+      ],
+      "TextFinish": [
+        736,
+        10.217561033
+      ],
+      "TextPrepare": [
+        368,
+        0.032983441999999995
+      ],
+      "TsrBatchInference": [
+        133,
+        41.709729286999995
+      ],
+      "TsrInference": [
+        133,
+        41.709315229999994
+      ],
+      "TsrPostprocess": [
+        133,
+        0.007562662999999999
+      ],
+      "TsrPreprocess": [
+        133,
+        0.199665924
+      ],
+      "TsrQueue": [
+        254,
+        66.11383623
+      ]
+    }
+  },
+  {
+    "case": "tsr-batch2-experiment/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 36.112896373,
+    "pages_per_second": 10.190265444206718,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 90.13888888888889,
+    "gpu_peak_mib": 3623.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.063840967
+      ],
+      "LayoutBatchInference": [
+        368,
+        25.891041451
+      ],
+      "LayoutInference": [
+        368,
+        25.889649088999995
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.004296566
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.324867364999999
+      ],
+      "LayoutQueue": [
+        368,
+        85.92450960100001
+      ],
+      "LayoutReadback": [
+        368,
+        0.002262351
+      ],
+      "LinkValidate": [
+        12,
+        0.16238717600000002
+      ],
+      "ParseTotal": [
+        12,
+        68.367834482
+      ],
+      "PdfOpen": [
+        12,
+        0.005705575000000001
+      ],
+      "PdfRender": [
+        368,
+        8.381403967999999
+      ],
+      "PdfiumQueue": [
+        12,
+        4.313e-05
+      ],
+      "TableCellBatchInference": [
+        121,
+        3.485612571
+      ],
+      "TableCellInference": [
+        121,
+        3.4852487939999994
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.001165383
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.979695983
+      ],
+      "TableExternal": [
+        121,
+        164.42217935
+      ],
+      "TableFill": [
+        121,
+        0.210142129
+      ],
+      "TextExtract": [
+        368,
+        5.584676835000001
+      ],
+      "TextFinish": [
+        736,
+        10.180798358
+      ],
+      "TextPrepare": [
+        368,
+        0.016307611999999996
+      ],
+      "TsrBatchInference": [
+        73,
+        31.065618825
+      ],
+      "TsrInference": [
+        133,
+        57.576906222999995
+      ],
+      "TsrPostprocess": [
+        133,
+        0.007384877000000001
+      ],
+      "TsrPreprocess": [
+        133,
+        0.18541031600000002
+      ],
+      "TsrQueue": [
+        254,
+        102.03624574
+      ]
+    }
+  },
+  {
+    "case": "tsr4-cell2-experiment/c2",
+    "concurrency": 2,
+    "pages": 368,
+    "corpus_seconds": 36.218324616,
+    "pages_per_second": 10.160602509963434,
+    "failed_documents": 0,
+    "degraded_documents": 0,
+    "gpu_mean_percent": 85.67567567567568,
+    "gpu_peak_mib": 4464.0,
+    "stages": {
+      "DocumentContext": [
+        12,
+        0.06149220200000002
+      ],
+      "LayoutBatchInference": [
+        368,
+        26.273551186999995
+      ],
+      "LayoutInference": [
+        368,
+        26.272121633000005
+      ],
+      "LayoutPostprocess": [
+        368,
+        0.004132514999999999
+      ],
+      "LayoutPreprocess": [
+        368,
+        7.259373561000001
+      ],
+      "LayoutQueue": [
+        368,
+        87.561301088
+      ],
+      "LayoutReadback": [
+        368,
+        0.0023751059999999997
+      ],
+      "LinkValidate": [
+        12,
+        0.163028727
+      ],
+      "ParseTotal": [
+        12,
+        68.53110828799998
+      ],
+      "PdfOpen": [
+        12,
+        0.006700850999999999
+      ],
+      "PdfRender": [
+        368,
+        8.448230938
+      ],
+      "PdfiumQueue": [
+        12,
+        4.2564e-05
+      ],
+      "TableCellBatchInference": [
+        102,
+        8.409258877000001
+      ],
+      "TableCellInference": [
+        121,
+        12.062240895000002
+      ],
+      "TableCellPostprocess": [
+        121,
+        0.001395328
+      ],
+      "TableCellPreprocess": [
+        121,
+        0.971174601
+      ],
+      "TableExternal": [
+        121,
+        165.262701418
+      ],
+      "TableFill": [
+        121,
+        0.21152983800000003
+      ],
+      "TextExtract": [
+        368,
+        5.532752442999997
+      ],
+      "TextFinish": [
+        736,
+        10.166723436000002
+      ],
+      "TextPrepare": [
+        368,
+        0.015632519999999994
+      ],
+      "TsrBatchInference": [
+        60,
+        30.979252579
+      ],
+      "TsrInference": [
+        133,
+        80.03711854999999
+      ],
+      "TsrPostprocess": [
+        133,
+        0.007476673999999999
+      ],
+      "TsrPreprocess": [
+        133,
+        0.19941992999999997
+      ],
+      "TsrQueue": [
+        254,
+        71.74971139600001
+      ]
+    }
+  }
+]

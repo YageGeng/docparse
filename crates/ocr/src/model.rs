@@ -15,8 +15,14 @@ pub(crate) enum ModelKind {
 /// Compact owned output remains valid after the session or browser readback guard is released.
 pub(crate) enum ModelOutput {
     Detection(DetectionMap),
-    Recognition(CtcSteps),
-    Orientation { rotated: bool, confidence: f64 },
+    Recognition(Vec<CtcSteps>),
+    Orientation(Vec<Orientation>),
+}
+
+/// One classifier result retains its position in the submitted line batch.
+pub(crate) struct Orientation {
+    pub rotated: bool,
+    pub confidence: f64,
 }
 
 impl ModelKind {
@@ -76,15 +82,23 @@ impl ModelKind {
         }
     }
 
-    /// Copies detector maps but reduces recognition tensors to argmax while their borrowed output is still alive.
+    /// Validates batch correspondence and reduces each borrowed recognition output before releasing the session.
     pub fn read(
         self,
         outputs: &SessionOutputs<'_>,
+        batch_size: usize,
     ) -> Result<ModelOutput, OcrError> {
         let (_, output) = outputs.iter().next().ok_or_else(|| {
             OcrError::InvalidData("OCR returned no output".into())
         })?;
         let array = output.try_extract_array::<f32>()?;
+        if !(1..=32).contains(&batch_size)
+            || array.shape().first() != Some(&batch_size)
+        {
+            return Err(OcrError::InvalidData(
+                "OCR output batch does not match input".into(),
+            ));
+        }
         let shape_error = |error: ndarray::ShapeError| {
             OcrError::InvalidData(error.to_string())
         };
@@ -112,33 +126,39 @@ impl ModelKind {
                 )))
             }
             Self::Recognition => {
-                Ok(ModelOutput::Recognition(CtcSteps::try_from(
-                    array.into_dimensionality::<Ix3>().map_err(shape_error)?,
-                )?))
+                let array =
+                    array.into_dimensionality::<Ix3>().map_err(shape_error)?;
+                Ok(ModelOutput::Recognition(
+                    array
+                        .outer_iter()
+                        .map(CtcSteps::try_from)
+                        .collect::<Result<_, _>>()?,
+                ))
             }
             Self::Orientation => {
                 let array =
                     array.into_dimensionality::<Ix2>().map_err(shape_error)?;
-                if array.dim() != (1, 2)
+                if array.dim() != (batch_size, 2)
                     || array.iter().any(|score| {
                         !score.is_finite() || !(0.0..=1.0).contains(score)
                     })
                 {
                     return Err(OcrError::InvalidData(
-                        "invalid [1,2] orientation output".into(),
+                        "invalid [B,2] orientation output".into(),
                     ));
                 }
-                let mut scores = array.iter().copied();
-                let normal = scores.next().ok_or_else(|| {
-                    OcrError::InvalidData("missing orientation score".into())
-                })?;
-                let rotated = scores.next().ok_or_else(|| {
-                    OcrError::InvalidData("missing orientation score".into())
-                })?;
-                Ok(ModelOutput::Orientation {
-                    rotated: rotated > normal,
-                    confidence: f64::from(normal.max(rotated)),
-                })
+                let normal = array.column(0);
+                let rotated = array.column(1);
+                Ok(ModelOutput::Orientation(
+                    normal
+                        .iter()
+                        .zip(rotated.iter())
+                        .map(|(&normal, &rotated)| Orientation {
+                            rotated: rotated > normal,
+                            confidence: f64::from(normal.max(rotated)),
+                        })
+                        .collect(),
+                ))
             }
         }
     }

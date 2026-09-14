@@ -1,0 +1,60 @@
+{
+  "merged_commit": "22293695c550ec69accf4b1f37e3b03bde1f0538",
+  "pre_merge_commit": "0decb48d47c8d299ed02ffdf87d752b417edd8f0",
+  "merge": "fast-forward",
+  "ocr_batch_size": 16,
+  "cuda_conv_algorithm": "Heuristic",
+  "pdfium_processes": 5,
+  "document_concurrency": [
+    2,
+    3,
+    4,
+    5
+  ],
+  "main_tsr_mode": "fallback",
+  "additional_tsr_mode": "tsr_only",
+  "tsr_model": "slanet_plus",
+  "cell_model": "wireless",
+  "previous_ocr_changes_preserved": true,
+  "before_binary_sha256": "ef18c5c039a477c5dfd0dc644dc336a590800f6ef67065d2b9ecf262928b417c",
+  "after_binary_sha256": "27e91122ef0cda0b04ab8a46d24003e1d53fbe1c5081283fff1733e8a9f068bb",
+  "worker_binary_sha256": "50e818eba43cab60da59e4d0a7967dc784b6db12b17430474e16715f54b35a05",
+  "verified_models": [
+    "pp-doclayout-v3",
+    "slanet-plus",
+    "rtdetr-table-cell-wireless",
+    "pp-ocrv6-medium-det",
+    "pp-ocrv6-medium-rec",
+    "pp-lcnet-textline-ori"
+  ],
+  "cleanup_regression_fixed": true,
+  "verification": {
+    "config_ocr_tsr_tests_passed": 43,
+    "core_tests_passed": 283,
+    "model_download_tests_passed": 9,
+    "benchmark_interruption_regression": "failed before fix, passed after fix",
+    "wasm_release_build": "passed",
+    "wasm_imports_verified": 145,
+    "typescript_sdk_check": "passed",
+    "typescript_example_check": "passed after rebuilding generated declarations",
+    "clippy": "passed"
+  },
+  "review": [
+    "Fast-forward from 0decb48 to 2229369; preserved existing OCR work",
+    "Resolved one overlapping test insertion by retaining both groups",
+    "Fixed benchmark shutdown order after reproducing orphan worker replacement",
+    "Default main-file TSR mode is tsr_only; matched throughput comparison overrides it to fallback"
+  ],
+  "service_restored": true,
+  "readiness": "ready",
+  "measured_cases": 12,
+  "measured_pages": 4416,
+  "no_orphan_workers_after_run": true,
+  "final_file_configuration": {
+    "tsr_mode": "tsr_only",
+    "tsr_model": "slanet_plus",
+    "cell_detection": "wireless",
+    "ocr_policy": "disabled",
+    "ocr_batch_size": 16
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "documents": 12,
+  "pages": 368,
+  "structural_mismatches": 0,
+  "text_or_value_mismatches": 9,
+  "confidence_differences": 1290,
+  "max_confidence_delta": 0.011501952525108106,
+  "other_numeric_differences": 0,
+  "max_other_numeric_delta": 0.0,
+  "documents_detail": [
+    {
+      "file": "2303.18223v16.pdf",
+      "pages": 144,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 80,
+      "max_confidence_delta": 0.0028597116470336914,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2403.01632v4.pdf",
+      "pages": 47,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 131,
+      "max_confidence_delta": 0.002385258674621582,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2410.05779v3.pdf",
+      "pages": 16,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 90,
+      "max_confidence_delta": 0.004750138521194436,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2412.05210v1.pdf",
+      "pages": 12,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 58,
+      "max_confidence_delta": 0.0013058632612228394,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2603.01919v2.pdf",
+      "pages": 23,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 124,
+      "max_confidence_delta": 0.004753619432449341,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2604.18583v1.pdf",
+      "pages": 15,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 74,
+      "max_confidence_delta": 0.0015053153038024902,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2604.18584v1.pdf",
+      "pages": 32,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 9,
+      "confidence_differences": 403,
+      "max_confidence_delta": 0.010550312645046356,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2604.21959v1.pdf",
+      "pages": 3,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 38,
+      "max_confidence_delta": 0.0006130735079447058,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2606.17056v1.pdf",
+      "pages": 25,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 24,
+      "max_confidence_delta": 0.005381226539611816,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2609.04180v1.pdf",
+      "pages": 23,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 95,
+      "max_confidence_delta": 0.004268710811932919,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2609.04184v1.pdf",
+      "pages": 8,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 134,
+      "max_confidence_delta": 0.011501952525108106,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    },
+    {
+      "file": "2609.04203v1.pdf",
+      "pages": 20,
+      "structural_mismatches": 0,
+      "text_or_value_mismatches": 0,
+      "confidence_differences": 39,
+      "max_confidence_delta": 0.0020075440406799316,
+      "other_numeric_differences": 0,
+      "max_other_numeric_delta": 0.0
+    }
+  ],
+  "examples": [
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/text",
+      "kind": "value",
+      "before": "PDFs Examples Problem 4 (Proposed by Dr Asudero Jobbings) The equilateral triongle ABC' Aes sides of",
+      "after": "PDFs Examples Problem 4 (Proposed by Dr Asudero Jobbings) The equilateral triongle ABC' Aes sides of"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/56/text",
+      "kind": "value",
+      "before": "of the sqee. Then ACD = AFCE ad AADG = AEC, shh",
+      "after": "of the sqee. Then ACD = AFCE ad AADG = AEC, shih"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/56/text_items/0/raw_text",
+      "kind": "value",
+      "before": "of the sqee. Then ACD = AFCE ad AADG = AEC, shh",
+      "after": "of the sqee. Then ACD = AFCE ad AADG = AEC, shih"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/104/text",
+      "kind": "value",
+      "before": "the sees of tlsagle OC is the gomatse mess of thse of OAD and OCD. Prove that the",
+      "after": "the sees of tlsagle OC is the gometse mess of thse of OAD and OCD. Prove that the"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/104/text_items/0/raw_text",
+      "kind": "value",
+      "before": "the sees of tlsagle OC is the gomatse mess of thse of OAD and OCD. Prove that the",
+      "after": "the sees of tlsagle OC is the gometse mess of thse of OAD and OCD. Prove that the"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/207/text",
+      "kind": "value",
+      "before": "So theeo ae 8 ronton from A to I tlat asid istoenstion C.",
+      "after": "So theeo are 8 ronton from A to I tlat asid istoenstion C."
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/207/text_items/0/raw_text",
+      "kind": "value",
+      "before": "So theeo ae 8 ronton from A to I tlat asid istoenstion C.",
+      "after": "So theeo are 8 ronton from A to I tlat asid istoenstion C."
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/239/text",
+      "kind": "value",
+      "before": "Now, fe = fed , te t (e ) = v(e) Ror mp j \u2260 (  f(n,) = v(e, ) Ror a oi (n,)=f, f the",
+      "after": "Now, fe = fed , te t (e ) = v(e) Ror mp j \u2260 (  f(n,) = v(e, ) for a oi (n,)=f, f the"
+    },
+    {
+      "path": "2604.18584v1/pages/25/blocks/1/lines/239/text_items/0/raw_text",
+      "kind": "value",
+      "before": "Now, fe = fed , te t (e ) = v(e) Ror mp j \u2260 (  f(n,) = v(e, ) Ror a oi (n,)=f, f the",
+      "after": "Now, fe = fed , te t (e ) = v(e) Ror mp j \u2260 (  f(n,) = v(e, ) for a oi (n,)=f, f the"
+    }
+  ]
+}
