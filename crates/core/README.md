@@ -79,7 +79,7 @@ Use `ParseOptions` with `parse_bytes_with_options`, `parse_path_with_options`, o
 
 - `RulesOnly`: preserves the existing local path and does not load or call a TSR model.
 - `Fallback` (default): requests external structure only after local reconstruction or source validation fails.
-- `ExternalOnly`: every layout table uses the configured TSR engine; provider failures retain source lines without silently running local reconstruction.
+- `TsrOnly`: every layout table uses the configured TSR engine; provider failures retain source lines without silently running local reconstruction.
 
 The independent `docparse-tsr` crate supplies the default SLANet_plus ONNX engine.
 Its artifacts load once through `[tsr]` configuration. `ParseOptions.table` inherits

@@ -46,6 +46,12 @@ const parser = await prepareModels({
     config: "/models/slanet-plus/inference.yml",
     manifest: "/models/slanet-plus/model-manifest.json",
   },
+  tsrCellArtifacts: {
+    kind: "urls",
+    model: "/models/rtdetr-table-cell-wireless/inference.onnx",
+    config: "/models/rtdetr-table-cell-wireless/inference.yml",
+    manifest: "/models/rtdetr-table-cell-wireless/model-manifest.json",
+  },
 });
 
 try {
@@ -59,10 +65,12 @@ try {
 ```
 
 Table recovery defaults to `config.tsr.mode = "fallback"`: local rules run first,
-then the built-in TSR processes unresolved tables. Use `"external_only"` to send
+then the built-in TSR processes unresolved tables. Use `"tsr_only"` to send
 all tables to TSR, or `"rules_only"` to omit TSR artifacts and model loading.
-`tsrArtifacts` uses the same URLs/bytes contract as `artifacts`. The table model
-uses the same selected backend as layout; both default to WebGPU.
+The default combination is SLANet+ with wireless RT-DETR cell detection.
+`tsrArtifacts` and `tsrCellArtifacts` use the same URLs/bytes contract as `artifacts`.
+Set `config.tsr.cell_detection.enabled = false` to use SLANet+ alone and omit
+`tsrCellArtifacts`. All models use the same selected backend, defaulting to WebGPU.
 
 Here, `file` is a caller-selected File. To manage authentication or caching, obtain the model yourself and pass `{kind: "bytes", model, config, manifest}` with three Uint8Array values. The library does not detach caller-owned PDF or model buffers.
 
@@ -76,7 +84,8 @@ the execution provider change. Native callers already prepare their sessions in
 | Model | Preparation policy |
 | --- | --- |
 | Layout | Always initialized; there is no layout-disable setting. |
-| TSR | Initialized by default and for `external_only`; skipped for `config.tsr.mode = "rules_only"`. |
+| TSR | Initialized by default and for `tsr_only`; skipped for `config.tsr.mode = "rules_only"`. |
+| TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
 
@@ -310,7 +319,7 @@ Recovery is limited to already-detected table layouts. It uses existing native t
 Parsing uses the local SLANet_plus model by default. A per-call `onTableStructure`
 callback can override it for regions already identified by layout. For callback-only
 integrations, initialize with `config.tsr.mode = "rules_only"` to omit built-in
-artifacts, then select `fallback` or `external_only` on the parse call.
+artifacts, then select `fallback` or `tsr_only` on the parse call.
 
 ```javascript
 const document = await parser.parse(bytes, {
@@ -327,7 +336,7 @@ const document = await parser.parse(bytes, {
 });
 ```
 
-Use `external_only` to bypass local topology inference for all layout tables,
+Use `tsr_only` to bypass local topology inference for all layout tables,
 or `rules_only` to disable TSR. Without a callback, the built-in model handles
 TSR when initialized; a missing built-in and missing callback fail explicitly. A failed provider retains the original text and emits table warnings;
 external-only mode does not silently substitute a local structure.
@@ -396,6 +405,7 @@ const modelSource = name => ({
 const parser = await createParser({
   artifacts: modelSource("pp-doclayout-v3"),
   tsrArtifacts: modelSource("slanet-plus"),
+  tsrCellArtifacts: modelSource("rtdetr-table-cell-wireless"),
   ocrArtifacts: {
     detection: modelSource("pp-ocrv6-medium-det"),
     recognition: modelSource("pp-ocrv6-medium-rec"),

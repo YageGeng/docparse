@@ -20,7 +20,8 @@ async fn pinned_model_recognizes_a_real_table() {
         &root.join("models/slanet-plus/model-manifest.json"),
     )
     .expect("artifacts");
-    let raw = docparse_config::RawConfig::default();
+    let mut raw = docparse_config::RawConfig::default();
+    raw.tsr.cell_detection = None;
     // The real crop exercises the same compile-time backend used by all model families.
     let provider =
         docparse_layout::OnnxBackend::compiled().execution_provider();

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-description = "Paddle SLANet_plus table structure recognition through ONNX Runtime"
+description = "Paddle table structure recognition and cell detection through ONNX Runtime"
 
 [features]
 default = []

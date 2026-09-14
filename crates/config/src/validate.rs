@@ -156,6 +156,25 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             });
         }
 
+        if let Some(cells) = &config.tsr.cell_detection {
+            Self::validate_unit_interval(
+                cells.score_threshold,
+                "tsr.cell_detection.score_threshold",
+            )?;
+        }
+        if config.tsr.mode != crate::TableMode::RulesOnly
+            && config.tsr.model != crate::TsrModel::SlanetPlus
+            && !config
+                .tsr
+                .cell_detection
+                .as_ref()
+                .is_some_and(|cells| cells.enabled)
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "tsr.cell_detection",
+                reason: "SLANeXt requires independent cell detection because its position output is invalid",
+            });
+        }
         if !(1..=32).contains(&config.tsr.max_in_flight) {
             return Err(ConfigError::InvalidValue {
                 field: "tsr.max_in_flight",

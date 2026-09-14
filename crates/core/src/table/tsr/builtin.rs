@@ -6,15 +6,7 @@ use super::{
 impl TableStructureEngine for docparse_tsr::SlanetPlusEngine {
     /// Identifies the pinned model and selected backend in table evidence and logs.
     fn name(&self) -> &str {
-        use docparse_layout::ExecutionProvider;
-        match self.execution_provider() {
-            ExecutionProvider::Cpu => "slanet-plus-onnx-cpu",
-            ExecutionProvider::Cuda => "slanet-plus-onnx-cuda",
-            ExecutionProvider::CoreMl => "slanet-plus-onnx-coreml",
-            ExecutionProvider::Metal => "slanet-plus-onnx-metal",
-            ExecutionProvider::Openvino => "slanet-plus-onnx-openvino",
-            ExecutionProvider::WebGpu => "slanet-plus-onnx-webgpu",
-        }
+        docparse_tsr::PaddleTsrEngine::name(self)
     }
 
     /// Position-head boxes are approximate and may align to nearby native ink gaps.
@@ -52,6 +44,7 @@ impl From<(&TsrTableRequest, docparse_tsr::TsrPrediction)> for TsrTableInput {
             .request_id(request.request_id.clone())
             .structure_tokens(prediction.structure_tokens)
             .cell_bboxes(prediction.cell_bboxes)
+            .detected_cell_bboxes(prediction.detected_cell_bboxes)
             .build()
     }
 }
@@ -84,7 +77,7 @@ mod tests {
                 .expect("image"),
             ))
             .crop_to_viewport(AffineTransform::identity())
-            .reason(super::super::TsrRequestReason::ExternalOnly)
+            .reason(super::super::TsrRequestReason::TsrOnly)
             .build();
         let tokens = [
             "<tr>",
@@ -101,16 +94,16 @@ mod tests {
         .collect::<Vec<_>>();
         let output = TsrTableInput::from((
             &request,
-            docparse_tsr::TsrPrediction {
-                structure_tokens: tokens.clone(),
-                cell_bboxes: vec![
+            docparse_tsr::TsrPrediction::builder()
+                .structure_tokens(tokens.clone())
+                .cell_bboxes(vec![
                     vec![0.0, 0.0, 60.0, 15.0],
                     vec![45.0, 0.0, 100.0, 15.0],
                     vec![0.0, 10.0, 60.0, 30.0],
                     vec![45.0, 10.0, 100.0, 30.0],
-                ],
-                score: 0.99,
-            },
+                ])
+                .score(0.99)
+                .build(),
         ));
         let grid = crate::table::grid::CellGrid::try_from((
             &request,
@@ -136,18 +129,18 @@ mod tests {
             .collect();
         let output = TsrTableInput::from((
             &request,
-            docparse_tsr::TsrPrediction {
-                structure_tokens: tokens,
-                cell_bboxes: vec![
+            docparse_tsr::TsrPrediction::builder()
+                .structure_tokens(tokens)
+                .cell_bboxes(vec![
                     vec![0.0, 0.0, 20.0, 10.0],
                     vec![70.0, 0.0, 100.0, 10.0],
                     vec![0.0, 10.0, 60.0, 20.0],
                     vec![70.0, 10.0, 100.0, 20.0],
                     vec![0.0, 20.0, 20.0, 30.0],
                     vec![70.0, 20.0, 100.0, 30.0],
-                ],
-                score: 0.99,
-            },
+                ])
+                .score(0.99)
+                .build(),
         ));
         assert_eq!(
             output.cell_bboxes,

@@ -67,6 +67,9 @@ class WorkerParser implements DocParser {
     const tsrEnabled = options.config?.tsr?.mode !== "rules_only";
     if (tsrEnabled && !options.tsrArtifacts) throw new DocParseError("TableArtifactsRequired", "TSR requires tsrArtifacts; select rules_only to disable model loading");
     const tsrArtifacts = tsrEnabled && options.tsrArtifacts ? WorkerParser.transferSource(options.tsrArtifacts, transfers) : undefined;
+    const cellsEnabled = tsrEnabled && options.config?.tsr?.cell_detection?.enabled !== false;
+    if (cellsEnabled && !options.tsrCellArtifacts) throw new DocParseError("TableArtifactsRequired", "Cell detection requires tsrCellArtifacts; set tsr.cell_detection.enabled to false to disable it");
+    const tsrCellArtifacts = cellsEnabled && options.tsrCellArtifacts ? WorkerParser.transferSource(options.tsrCellArtifacts, transfers) : undefined;
     const ocrEnabled = options.config?.ocr?.policy !== undefined && options.config.ocr.policy !== "disabled";
     if (ocrEnabled && (!options.ocrArtifacts || (options.config?.ocr?.classify_orientation !== false && !options.ocrArtifacts.orientation)))
       throw new DocParseError("OcrArtifactsRequired", "OCR requires detection, recognition and enabled orientation artifacts");
@@ -77,7 +80,7 @@ class WorkerParser implements DocParser {
     } : undefined;
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
-    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, ocrArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
+    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
     this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress, onTiming: options.onTiming });
   }
 

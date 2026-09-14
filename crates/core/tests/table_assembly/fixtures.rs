@@ -63,7 +63,7 @@ impl CapturedTable {
                 )
                 .expect("owned pixels"),
             ))
-            .reason(crate::TsrRequestReason::ExternalOnly)
+            .reason(crate::TsrRequestReason::TsrOnly)
             .build();
         let mut evidence = TableEvidence::default();
         for word in value["words"].as_array().expect("source words") {
@@ -108,19 +108,34 @@ impl CapturedTable {
                 }
             })
             .collect();
-        let model = docparse_tsr::TsrPrediction {
-            structure_tokens: serde_json::from_value(
-                prediction["prediction"]["structure_tokens"].clone(),
+        let model = docparse_tsr::TsrPrediction::builder()
+            .structure_tokens(
+                serde_json::from_value(
+                    prediction["prediction"]["structure_tokens"].clone(),
+                )
+                .expect("model tokens"),
             )
-            .expect("model tokens"),
-            cell_bboxes: serde_json::from_value(
-                prediction["prediction"]["cell_bboxes"].clone(),
+            .cell_bboxes(
+                serde_json::from_value(
+                    prediction["prediction"]["cell_bboxes"].clone(),
+                )
+                .expect("model boxes"),
             )
-            .expect("model boxes"),
-            score: prediction["prediction"]["score"]
-                .as_f64()
-                .expect("model score"),
-        };
+            .score(
+                prediction["prediction"]["score"]
+                    .as_f64()
+                    .expect("model score"),
+            )
+            .detected_cell_bboxes(
+                serde_json::from_value(
+                    prediction["prediction"]
+                        .get("detected_cell_bboxes")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([])),
+                )
+                .expect("independent detector boxes"),
+            )
+            .build();
         let input = crate::TsrTableInput::from((&request, model));
         TableAssembler::new(&FusionConfig::default(), &evidence, &[])
             .reconstruct_external(

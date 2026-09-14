@@ -7,6 +7,102 @@ use figment::providers::Serialized;
 use figment::value::{Dict, Value};
 use serde_json::json;
 
+/// TSR-only experiments resolve independently selected structure and cell artifacts.
+#[test]
+fn tsr_only_loads_independent_cell_model_paths() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        r#"
+[tsr]
+mode = "tsr_only"
+model = "slanext_wired"
+model_path = "structure/inference.onnx"
+[tsr.cell_detection]
+model = "wired"
+score_threshold = 0.3
+model_path = "cells/inference.onnx"
+model_config_path = "cells/inference.yml"
+model_manifest_path = "cells/model-manifest.json"
+"#,
+    );
+    let raw = ConfigLoader::new(path).load_raw().expect("TSR-only config");
+    let value = serde_json::to_value(&raw.tsr).expect("config JSON");
+    assert_eq!(value.get("mode").expect("mode"), "tsr_only");
+    assert_eq!(value.get("model").expect("model"), "slanext_wired");
+    assert_eq!(
+        value
+            .get("cell_detection")
+            .expect("detector")
+            .get("model_path")
+            .expect("model path"),
+        directory
+            .path()
+            .canonicalize()
+            .expect("directory")
+            .join("cells/inference.onnx")
+            .to_str()
+            .expect("path")
+    );
+    serde_json::from_value::<docparse_config::TableMode>(json!(
+        "external_only"
+    ))
+    .expect_err("the renamed mode must reject the old spelling");
+}
+
+/// Defaults enable wireless cells while the baseline profile can disable them after merging.
+#[test]
+fn default_wireless_cells_can_be_disabled_by_profile() {
+    let defaults = RawConfig::default();
+    let cells = defaults.tsr.cell_detection.as_ref().expect("default cells");
+    assert!(cells.enabled);
+    assert_eq!(cells.model, docparse_config::TableCellModel::Wireless);
+    let config_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docparse.toml");
+    let main = ConfigLoader::new(&config_path)
+        .load_raw()
+        .expect("main config");
+    let cells = main.tsr.cell_detection.as_ref().expect("main cells");
+    assert!(cells.enabled);
+    assert_eq!(cells.model, docparse_config::TableCellModel::Wireless);
+    let baseline = ConfigLoader::new(&config_path)
+        .with_profile("tsr-baseline")
+        .load_raw()
+        .expect("baseline config");
+    assert!(
+        !baseline
+            .tsr
+            .cell_detection
+            .as_ref()
+            .expect("baseline cells")
+            .enabled
+    );
+    assert_eq!(baseline.tsr.model, docparse_config::TsrModel::SlanetPlus);
+    assert_eq!(baseline.tsr.mode, docparse_config::TableMode::TsrOnly);
+    let mut raw = defaults.clone();
+    raw.tsr.model = docparse_config::TsrModel::SlanextWireless;
+    raw.tsr
+        .cell_detection
+        .as_mut()
+        .expect("default cells")
+        .enabled = false;
+    docparse_config::ValidatedConfig::try_from(raw)
+        .expect_err("SLANeXt requires an enabled detector");
+
+    // Direct JSON callers inherit the same combination when the nested section is absent.
+    let mut value = serde_json::to_value(&defaults).expect("defaults");
+    value
+        .get_mut("tsr")
+        .expect("TSR")
+        .as_object_mut()
+        .expect("TSR object")
+        .remove("cell_detection");
+    let decoded: RawConfig =
+        serde_json::from_value(value).expect("default cells");
+    assert_eq!(decoded.tsr.cell_detection, defaults.tsr.cell_detection);
+}
+
 /// Writes one configuration file and returns its path.
 fn write_config(directory: &Path, name: &str, contents: &str) -> PathBuf {
     let path = directory.join(name);
@@ -47,7 +143,7 @@ score_threshold = 0.4
 
 [tsr]
 model_path = "tables/model.onnx"
-mode = "external_only"
+mode = "tsr_only"
 
 [runtime]
 page_concurrency = 2
@@ -367,7 +463,7 @@ fn repository_default_config_matches_documented_defaults() {
     assert_eq!(config.runtime.page_concurrency, 4);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
-    assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
+    assert_eq!(config.tsr.mode, docparse_config::TableMode::TsrOnly);
     assert_eq!(
         RawConfig::default().tsr.mode,
         docparse_config::TableMode::Fallback

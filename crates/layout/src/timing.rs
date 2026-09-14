@@ -50,6 +50,12 @@ pub enum TimingStage {
     TsrInference,
     /// Table model token and location decoding.
     TsrPostprocess,
+    /// Preparing the independent table cell detector image and scale tensors.
+    TableCellPreprocess,
+    /// Real RT-DETR table cell inference, excluding structure prediction.
+    TableCellInference,
+    /// Validating and filtering detections before core topology matching.
+    TableCellPostprocess,
     LinkValidate,
     ParseTotal,
     ResultSerialize,

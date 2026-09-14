@@ -1,24 +1,25 @@
 # docparse-tsr
 
-Independent Paddle SLANet_plus ONNX inference for layout-owned table crops.
+Paddle SLANet+ / SLANeXt structure recognition and optional RT-DETR cell detection for layout-owned table crops.
 Models stay external. Layout and TSR reuse the same ONNX execution-provider
 registration: CPU, CUDA, CoreML, OpenVINO, and browser WebGPU. Native layout, OCR
 and TSR share the backend selected by Cargo features, defaulting to CPU. Enable
 one of `cuda`, `coreml`, `metal`, or `openvino`; no runtime provider configuration
 is accepted. `metal` uses CoreML with `CPUAndGPU` compute units (no separate Metal EP).
-Native sessions specialize the pinned model to the preprocessing contract
-`[1, 3, 488, 488]` before graph initialization, including CoreML shape inference.
+Native sessions specialize each graph to its actual input contract before
+initialization: 488 pixels for SLANet+, 512 for SLANeXt, and 640 for RT-DETR,
+including CoreML shape inference.
 WASM defaults to WebGPU, and the Web SDK applies its selected backend to all
 models. Unsupported operators may still execute on CPU inside an accelerated
 session; unavailable requested providers fail explicitly.
 
 ```sh
-rtk uv run --locked scripts/download_models.py --model slanet-plus
+rtk uv run --locked scripts/download_models.py
 rtk cargo test -p docparse-tsr -- --include-ignored
 rtk cargo test -p docparse-tsr --features metal --test inference -- --include-ignored
 ```
 
-`SlanetPlusEngine::from_artifacts(Arc<ValidatedConfig>, ModelArtifacts)` validates the pinned model,
+`PaddleTsrEngine::from_artifacts(Arc<ValidatedConfig>, TsrArtifacts)` validates the pinned model,
 YAML, and manifest before creating a session. Native `from_config` reads resolved
 `TsrConfig` paths. `predict(Arc<PageImage>, Timings)` returns tokens, crop-pixel
 cell boxes, and structure confidence. The input is packed RGB; preprocessing
@@ -33,7 +34,7 @@ Artifact: [PaddlePaddle/SLANet_plus_onnx](https://huggingface.co/PaddlePaddle/SL
 Apache-2.0, revision `7dbe640e127602bf506815e822c09758de73c482`. Preprocessing and
 vocabulary follow its inference.yml and the [PaddleX reference implementation](https://github.com/PaddlePaddle/PaddleX/tree/develop/paddlex/inference/models/table_structure_recognition).
 
-Each engine owns one serialized session. Native cancellation retains the session
+Each loaded model owns one serialized session. Native cancellation retains the session
 guard until blocking inference finishes; the browser actor owns inputs until the
 ORT Promise settles. Layout and TSR share a browser inference guard through
 output readback because ORT WebGPU reuses download buffers across sessions.
@@ -43,3 +44,41 @@ reconciles inconsistent token spans, and calibrates the grid against native/OCR
 word geometry and visible separators. Word ownership remains explicit, complete,
 and source-preserving even when learned content rectangles overlap.
 A high structure confidence is not a guarantee of correct table semantics.
+
+## Structure and cell comparison
+
+The repository configuration uses `tsr_only`. The former `external_only` spelling
+is no longer accepted. Library defaults retain rules-first fallback.
+Both use SLANet+ with wireless RT-DETR cell detection by default.
+`[tsr].model` selects `slanet_plus`, `slanext_wired`, or `slanext_wireless`.
+SLANeXt uses a 512-pixel input and its invalid position head is discarded.
+Its structure tokens require an independent cell detector.
+
+`[tsr.cell_detection]` accepts `enabled` (default `true`), `model = "wired"` or `"wireless"`, a
+`score_threshold`, and independent `model_path`, `model_config_path`, and
+`model_manifest_path` values. RT-DETR reuses layout's OpenCV-compatible cubic
+RGB preprocessing at 640 pixels and returns crop-pixel boxes. The core decoder
+matches those observations to logical cells before source-text filling.
+
+The default config includes the former `tsr-cells` combination. The `tsr-baseline`
+profile disables cell detection for a pure SLANet+ comparison; `tsr-upgraded`
+selects SLANeXt wireless with the wireless detector. `SlanetPlusEngine` remains available as the
+original public name; `PaddleTsrEngine` names the expanded implementation.
+All supported models are provisioned by the existing downloader:
+
+Rust callers constructing `ParserArtifacts` directly use `TsrArtifacts` with
+both independently verified model sets by default. With cell detection disabled,
+a single-model `tsr` artifact can use `.into()`. Browser callers supply `tsrCellArtifacts`
+alongside their structure `tsrArtifacts` and select the models in `config.tsr`.
+
+```sh
+rtk uv run --locked scripts/download_models.py
+rtk cargo run -p docparse-cli -- parse input.pdf
+rtk cargo run -p docparse-cli -- parse input.pdf --profile tsr-baseline
+rtk cargo run -p docparse-cli -- parse input.pdf --profile tsr-upgraded
+```
+
+The existing benchmark warms the actual table crop twice, exercising every
+enabled table model. Detector preprocessing, inference and postprocessing have
+separate timing stages. The real-PDF comparison test records crops, raw model
+outputs, structured tables and warnings; failures remain in its report.

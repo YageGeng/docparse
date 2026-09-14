@@ -124,3 +124,18 @@ Model and configuration SHA-256 values are checked by the downloader and OCR
 runtime. Model weights are not packaged in the source or browser distribution.
 The OCR raster fixtures reuse the Bitstream Vera and Noto Sans SC test fonts
 and notices listed above; they do not introduce a production font dependency.
+
+## Table structure and cell detection
+
+The TSR extension uses the same independently downloaded Apache-2.0 PaddlePaddle
+artifacts and manifest verification pattern. Its model contracts are pinned to:
+
+- `PaddlePaddle/SLANeXt_wired_onnx`: `04356de883011f433f83e5098793f3a501a9af6e`.
+- `PaddlePaddle/SLANeXt_wireless_onnx`: `9207aaed01d1bbb0743af384bac5b0bd35869ba3`.
+- `PaddlePaddle/RT-DETR-L_wired_table_cell_det_onnx`: `b2c0720b5fe6f1c0dd40f8a7993a3f28e04252f8`.
+- `PaddlePaddle/RT-DETR-L_wireless_table_cell_det_onnx`: `94c021be206064f0136ef1383fbd4b68b168fa61`.
+
+The design of independent structure and cell geometry was informed by the OAR
+revision identified above. The integration reuses DocParse's own model/session,
+OpenCV-compatible resizing, source ownership, and table validation code. Model
+weights are not redistributed in this source repository.

@@ -38,7 +38,14 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
       // OCR's nested file groups are native-only; browser models arrive through the artifact API.
       if (["layout", "tsr", "ocr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
-    raw[group] = { ...raw[group], ...values };
+    const merged = { ...raw[group], ...values };
+    if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
+      const cells = (values as Record<string, unknown>).cell_detection;
+      if (!cells || typeof cells !== "object" || Array.isArray(cells) || Object.keys(cells).some(key => !["enabled", "model", "score_threshold"].includes(key))) throw Object.assign(new Error("Web cell detection accepts enabled, model and score_threshold only"), { code: "InvalidConfig" });
+      // Preserve nested defaults; native paths remain unused with verified Worker artifacts.
+      merged.cell_detection = { ...(raw[group].cell_detection as Record<string, unknown>), ...cells };
+    }
+    raw[group] = merged;
   }
   return raw;
 }
@@ -128,6 +135,7 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         : [source.model, source.config, source.manifest];
       if (source.kind === "urls") timing?.({ stage: "model_download", page_number: null, duration_ms: performance.now() - downloadStarted });
       const tableArtifacts = payload.tsrArtifacts ? await modelBytes(payload.tsrArtifacts, "tsr", progress) : undefined;
+      const tableCellArtifacts = payload.tsrCellArtifacts ? await modelBytes(payload.tsrCellArtifacts, "tsr_cell_detection", progress) : undefined;
       const ocrSource = payload.ocrArtifacts;
       // Load sequentially to bound transient copies of large recognition weights in a Worker.
       const ocrArtifacts = ocrSource ? {
@@ -135,7 +143,7 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         recognition: await modelBytes(ocrSource.recognition, "ocr_recognition", progress),
         orientation: ocrSource.orientation ? await modelBytes(ocrSource.orientation, "ocr_orientation", progress) : undefined,
       } : undefined;
-      const auxiliaryArtifacts = { tsr: tableArtifacts, ocr: ocrArtifacts };
+      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts };
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();

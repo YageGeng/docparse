@@ -44,7 +44,7 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
       cases.push({ name: 'fallback', requested: requested.length, tables: count, textless });
 
       requested = [];
-      const external = await parser.parse(pdf, { table: { mode: 'external_only' }, onTableStructure: async request => {
+      const external = await parser.parse(pdf, { table: { mode: 'tsr_only' }, onTableStructure: async request => {
         check(request.image.blob instanceof Blob && request.image.blob.type === 'image/png' && request.image.blob.size > 0, 'Crop must be an owned PNG');
         check(request.image.width > 0 && request.image.height > 0, 'Crop dimensions missing');
         check(Math.abs(request.crop_to_viewport.e - request.crop_bbox.left) < 1e-6 && Math.abs(request.crop_to_viewport.f - request.crop_bbox.top) < 1e-6, 'Crop transform origin mismatch');
@@ -54,9 +54,9 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
       check(tables(external).every(b => hasText(b) ? b.table?.source === 'external_tsr' && b.table.cells.length === 1 && !b.table.cells[0].is_header : !b.table), 'Local rules overwrote declared external topology or source availability');
       check(textless === 0 || external.pages.some(p => p.warnings.some(w => w.code === 'TableTextAssignmentFailed')), 'Textless regions must report unavailable source text');
       check(facts(external) === baselineFacts, 'External input changed canonical source facts');
-      cases.push({ name: 'external_only', requested: requested.length, completed: count - textless });
+      cases.push({ name: 'tsr_only', requested: requested.length, completed: count - textless });
 
-      const invalid = await parser.parse(pdf, { table: { mode: 'external_only' }, onTableStructure: async request => ({ ...supplied(request), request_id: 'wrong-request' }) });
+      const invalid = await parser.parse(pdf, { table: { mode: 'tsr_only' }, onTableStructure: async request => ({ ...supplied(request), request_id: 'wrong-request' }) });
       check(tables(invalid).every(b => !b.table), 'Invalid response silently used local topology');
       check(invalid.pages.some(p => p.warnings.some(w => w.code === 'InvalidTsrInput')), 'Invalid input diagnostic missing');
       check(facts(invalid) === baselineFacts, 'Invalid external input changed source text');
@@ -64,7 +64,7 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
 
       let ordinal = 0;
       const accepted = new Set();
-      const partial = await parser.parse(pdf, { table: { mode: 'external_only' }, onTableStructure: async request => {
+      const partial = await parser.parse(pdf, { table: { mode: 'tsr_only' }, onTableStructure: async request => {
         if (ordinal++ % 2 === 0) throw new Error('One caller-owned table failed');
         accepted.add(request.block_id);
         return supplied(request);
@@ -75,7 +75,7 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
       cases.push({ name: 'same_page_partial_success', completed: tables(partial).filter(b => b.table).length, tables: count });
 
       const signals = [];
-      const timed = await parser.parse(pdf, { table: { mode: 'external_only', timeout_ms: 500 }, onTableStructure: (_request, signal) => {
+      const timed = await parser.parse(pdf, { table: { mode: 'tsr_only', timeout_ms: 500 }, onTableStructure: (_request, signal) => {
         signals.push(signal);
         return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('provider canceled')), { once: true }));
       } });
@@ -87,7 +87,7 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
       const controller = new AbortController();
       let received, late, tableSignal;
       const entered = new Promise(resolve => { received = resolve; });
-      const active = parser.parse(pdf, { signal: controller.signal, table: { mode: 'external_only' }, onTableStructure: (request, signal) => {
+      const active = parser.parse(pdf, { signal: controller.signal, table: { mode: 'tsr_only' }, onTableStructure: (request, signal) => {
         tableSignal = signal; received(); return new Promise(resolve => { late = () => resolve(supplied(request)); });
       } });
       const settled = active.then(() => ({ code: 'unexpected-success' }), error => ({ code: error.code }));

@@ -341,6 +341,7 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
     current = await prepareModels({
       artifacts: modelSource(),
       tsrArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("slanet-plus"),
+      tsrCellArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("rtdetr-table-cell-wireless"),
       ocrArtifacts: ui.ocrPolicy.value === "disabled" ? undefined : {
         detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),
         orientation: modelSource("pp-lcnet-textline-ori"),

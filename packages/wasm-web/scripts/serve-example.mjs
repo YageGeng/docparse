@@ -10,6 +10,7 @@ const routes = new Map([
   ["/example/", resolve(packageRoot, "example")],
   ["/dist/", resolve(packageRoot, "dist")],
   ["/models/slanet-plus/", resolve(packageRoot, "../../models/slanet-plus")],
+  ["/models/rtdetr-table-cell-wireless/", resolve(packageRoot, "../../models/rtdetr-table-cell-wireless")],
   // Specific OCR routes precede the legacy layout-model prefix.
   ...["pp-ocrv6-medium-det", "pp-ocrv6-medium-rec", "pp-lcnet-textline-ori"].map(name => [`/models/${name}/`, resolve(packageRoot, "../../models", name)]),
   ["/models/", resolve(packageRoot, "../../models/pp-doclayout-v3")],

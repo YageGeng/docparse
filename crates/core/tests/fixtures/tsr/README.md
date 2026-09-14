@@ -1,5 +1,11 @@
 # Captured TSR regressions
 
+`gate-table-independent-cells.json.gz` contains the real page-6 table from
+`2609.13141v1.pdf`, with immutable PDFium words, SLANet+ structure/positions and
+RT-DETR wireless detections. Its nine headers are checked against the source
+image; dropping independent geometry reproduces the split `Gate Pos.` / `Gate Act.`
+headers. The regression retains the common source-conservation validator.
+
 `survey-model-captures.json.gz` contains all 24 table inputs from a real native SLANet_plus ONNX run on `2303.18223v16.pdf`. It retains model tokens, position-head boxes, crop transforms, measured native words, and source separators. Repeated page diagnostics and PDF character provenance are omitted; text, geometry, baselines, and font facts remain unchanged.
 
 The default unit test replays postprocessing without model files or the original PDF. Expected dimensions and selected cell assertions come from inspecting the PDF, not from accepting a successful model return. The illustrated prompt panels on page 48 have no fixed dimension assertion; source completeness and model provenance are still required.

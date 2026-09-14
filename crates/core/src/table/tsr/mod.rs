@@ -1,6 +1,7 @@
 //! Caller-supplied table topology with no detector or model implementation.
 mod builtin;
 mod decode;
+mod detection;
 
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ impl TableOptions {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TsrRequestReason {
     RulesFailed { message: String },
-    ExternalOnly,
+    TsrOnly,
 }
 
 /// Owned crop facts for exactly one layout table; external engines cannot retarget it.
@@ -92,6 +93,10 @@ pub struct TsrTableInput {
     pub structure_tokens: Vec<String>,
     /// Either [left, top, right, bottom] or four perimeter vertices (eight numbers).
     pub cell_bboxes: Vec<Vec<f64>>,
+    /// Independent crop-pixel detections; count and ordering are unrelated to structure tokens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[builder(default)]
+    pub detected_cell_bboxes: Vec<Vec<f64>>,
 }
 
 /// Stable failure categories at the external structure boundary.

@@ -90,7 +90,7 @@ impl TableRuntime {
                     }
                 }
             } else {
-                TsrRequestReason::ExternalOnly
+                TsrRequestReason::TsrOnly
             };
             let request = TsrTableRequest::try_from(
                 TableCrop::builder()
@@ -127,7 +127,7 @@ impl TableRuntime {
                                         ("engine".to_owned(), engine.name().to_owned()),
                                         ("reason".to_owned(), match reason {
                                             TsrRequestReason::RulesFailed { message } => message,
-                                            TsrRequestReason::ExternalOnly => "external_only".to_owned(),
+                                            TsrRequestReason::TsrOnly => "tsr_only".to_owned(),
                                         }),
                                     ]);
                                     block.evidence.push(
@@ -433,7 +433,7 @@ mod tests {
                     .block(&block)
                     .image(&image)
                     .transform(&transform)
-                    .reason(TsrRequestReason::ExternalOnly)
+                    .reason(TsrRequestReason::TsrOnly)
                     .build(),
             )
             .expect("crop");

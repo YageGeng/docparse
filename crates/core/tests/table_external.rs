@@ -403,9 +403,9 @@ async fn fallback_only_requests_unresolved_tables() {
 
 /// External-only mode preserves declared data cells even when local evidence looks like a bold header.
 #[tokio::test]
-async fn external_only_preserves_provider_topology_and_local_only_skips_it() {
+async fn tsr_only_preserves_provider_topology_and_local_only_skips_it() {
     let parser = Fixture::parser().await;
-    for mode in [TableMode::RulesOnly, TableMode::ExternalOnly] {
+    for mode in [TableMode::RulesOnly, TableMode::TsrOnly] {
         let engine = Arc::new(Engine::new(Reply::Grid(4, 2)));
         let page = parser
             .parse_page_with_options(
@@ -421,14 +421,14 @@ async fn external_only_preserves_provider_topology_and_local_only_skips_it() {
             .expect("parse");
         assert_eq!(
             engine.calls.load(Ordering::SeqCst),
-            usize::from(mode == TableMode::ExternalOnly)
+            usize::from(mode == TableMode::TsrOnly)
         );
         let table = page
             .blocks
             .iter()
             .find_map(|b| b.table.as_ref())
             .expect("table");
-        if mode == TableMode::ExternalOnly {
+        if mode == TableMode::TsrOnly {
             assert_eq!(table.source, TableStructureSource::ExternalTsr);
             assert!(table.cells.iter().all(|c| !c.is_header));
             // The original layout crop contains a blank bottom row beyond the source text enclosure.
@@ -466,7 +466,7 @@ async fn external_failures_are_transactional() {
                 ParseOptions::builder()
                     .table(
                         TableOptions::builder()
-                            .mode(TableMode::ExternalOnly)
+                            .mode(TableMode::TsrOnly)
                             .timeout_ms(10)
                             .build(),
                     )
@@ -502,11 +502,7 @@ async fn external_mode_requires_a_provider() {
         .parse_bytes_with_options(
             Arc::from(Vec::<u8>::new()),
             ParseOptions::builder()
-                .table(
-                    TableOptions::builder()
-                        .mode(TableMode::ExternalOnly)
-                        .build(),
-                )
+                .table(TableOptions::builder().mode(TableMode::TsrOnly).build())
                 .build(),
         )
         .await;
@@ -596,7 +592,7 @@ async fn external_budget_is_shared_across_pages() {
                 ParseOptions::builder()
                     .table(
                         TableOptions::builder()
-                            .mode(TableMode::ExternalOnly)
+                            .mode(TableMode::TsrOnly)
                             .max_in_flight(limit)
                             .build(),
                     )
@@ -719,7 +715,7 @@ async fn external_crop_rounding_preserves_layout_boundaries() {
                 .await
                 .expect("valid original layout");
             assert_eq!(baseline.blocks.len(), 2);
-            for mode in [TableMode::Fallback, TableMode::ExternalOnly] {
+            for mode in [TableMode::Fallback, TableMode::TsrOnly] {
                 let page = parser
                     .parse_page_with_options(
                         input.clone(),
@@ -790,7 +786,7 @@ async fn predicted_geometry_alignment_is_bounded_and_preserves_topology() {
                 ParseOptions::builder()
                     .table(
                         TableOptions::builder()
-                            .mode(TableMode::ExternalOnly)
+                            .mode(TableMode::TsrOnly)
                             .build(),
                     )
                     .table_engine(Some(Arc::new(Engine::new(
@@ -828,7 +824,7 @@ async fn parser_table_defaults_and_explicit_rule_override_select_the_provider()
 {
     for (mode, expected_calls) in [
         (None, 1),
-        (Some(TableMode::ExternalOnly), 2),
+        (Some(TableMode::TsrOnly), 2),
         (Some(TableMode::Fallback), 1),
     ] {
         let mut raw = RawConfig::default();
@@ -853,7 +849,7 @@ async fn parser_table_defaults_and_explicit_rule_override_select_the_provider()
                 .iter()
                 .find_map(|b| b.table.as_ref())
                 .expect("recovered table");
-            let from_model = !local || mode == Some(TableMode::ExternalOnly);
+            let from_model = !local || mode == Some(TableMode::TsrOnly);
             assert_eq!(
                 table.source == TableStructureSource::ExternalTsr,
                 from_model

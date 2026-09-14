@@ -2,6 +2,41 @@
 use super::fixtures::CapturedTable;
 use super::*;
 
+/// Real independent detections fix split gate headers while preserving every original PDF text reference.
+#[test]
+fn independent_cells_recover_real_gate_table_headers() {
+    let decoder = flate2::read::GzDecoder::new(
+        include_bytes!("../fixtures/tsr/gate-table-independent-cells.json.gz")
+            .as_slice(),
+    );
+    let case: CapturedTable =
+        serde_json::from_reader(decoder).expect("real captured table");
+    let result = case.reconstruct().expect("detected table");
+    let table = result.table.as_ref().expect("structure");
+    table.validate(&result).expect("source conservation");
+    assert_eq!((table.row_count, table.column_count), (17, 9));
+    let headers: Vec<_> = table
+        .cells
+        .iter()
+        .filter(|cell| cell.row == 0)
+        .map(|cell| cell.text.as_str())
+        .collect();
+    assert_eq!(
+        headers,
+        [
+            "Setting",
+            "Gate Pos.",
+            "Gate Act.",
+            "Rank Pres.",
+            "Train Sco.",
+            "10 step",
+            "100 step",
+            "1000 step",
+            "1 epoch"
+        ]
+    );
+}
+
 /// Every captured survey table must recover without losing source facts or accepting known row/column errors.
 #[test]
 #[allow(

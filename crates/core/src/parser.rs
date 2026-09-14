@@ -160,7 +160,7 @@ impl fmt::Debug for DocParser {
 pub struct ParserArtifacts {
     pub layout: docparse_layout::ModelArtifacts,
     /// Required when table recovery is enabled and no table engine is injected.
-    pub tsr: Option<docparse_layout::ModelArtifacts>,
+    pub tsr: Option<docparse_tsr::TsrArtifacts>,
     /// Required for enabled built-in OCR when no external engine is injected.
     pub ocr: Option<docparse_ocr::OcrArtifacts>,
 }

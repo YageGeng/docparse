@@ -27,6 +27,15 @@ def load_script_module():
 class DownloadModelsTest(unittest.TestCase):
     """Exercises downloads without accessing the network."""
 
+    def test_table_comparison_models_have_pinned_artifact_pairs(self):
+        """Every selectable table model can be provisioned with immutable model and YAML identities."""
+        for name in ("slanext-wired", "slanext-wireless", "rtdetr-table-cell-wired", "rtdetr-table-cell-wireless"):
+            model = self.module.Model.from_name(name)
+            self.assertIn(name, self.module.MODEL_NAMES)
+            self.assertEqual(len(model.revision), 40)
+            self.assertEqual([artifact.filename for artifact in model.artifacts], ["inference.onnx", "inference.yml"])
+            self.assertTrue(all(len(artifact.sha256) == 64 for artifact in model.artifacts))
+
     def setUp(self):
         """Creates deterministic artifact contracts for each test."""
         self.module = load_script_module()
@@ -123,7 +132,8 @@ class DownloadModelsTest(unittest.TestCase):
                 mock.patch.object(sys, "stdout", io.StringIO()),
                 mock.patch.object(sys, "stderr", io.StringIO()),
                 mock.patch.object(self.module, "install_model", side_effect=[
-                    self.module.ModelDownloadError("download failed"), False, False, False, False,
+                    self.module.ModelDownloadError("download failed"),
+                    *([False] * (len(self.module.MODEL_NAMES) - 1)),
                 ]) as installer,
             ):
                 self.assertEqual(self.module.main(), 1)

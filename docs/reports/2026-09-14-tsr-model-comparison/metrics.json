@@ -1,0 +1,242 @@
+{
+  "hardware": "Apple M4, 16 GiB RAM",
+  "backend": "ONNX Runtime CPU, one intra-op thread per model",
+  "method": "One instrumented release-process run per variant; two real TSR warmup rounds; OS file cache not cleared; wall time includes loading, warmup and diagnostic PNG/JSON writes; RSS samples cover the process tree every 200 ms.",
+  "semantic_method": "Manual visual review of original PDF table crops. Whitespace is ignored in text checks. These selected semantic assertions are not a full accuracy benchmark.",
+  "variants": [
+    {
+      "variant": "baseline",
+      "label": "SLANet+",
+      "engine": "slanet-plus-onnx-cpu",
+      "pages": 19,
+      "tables": 29,
+      "structured": 29,
+      "semantic": {
+        "passed": 44,
+        "total": 49,
+        "tables_passed": 6,
+        "tables_reviewed": 7
+      },
+      "initialization_ms": 326.728584,
+      "warmup_ms": 100.135417,
+      "process": {
+        "exit_code": 0,
+        "wall_seconds": 9.532538665982429,
+        "peak_process_tree_rss_bytes": 1647558656,
+        "rss_sample_interval_ms": 200,
+        "binary": "/Volumes/Yage/Documents/WorkSpace/docparse/target/release/deps/tsr_comparison-cbdf15131dac67fc"
+      },
+      "stage_ms": {
+        "layout_inference": 5167.760917,
+        "layout_postprocess": 0.09879299999999999,
+        "layout_preprocess": 220.497793,
+        "layout_queue": 0.191917,
+        "layout_readback": 0.066,
+        "table_external": 1442.258834,
+        "table_fill": 33.600626,
+        "text_finish": 373.597333,
+        "text_prepare": 0.558958,
+        "tsr_inference": 1387.516334,
+        "tsr_postprocess": 0.794084,
+        "tsr_preprocess": 17.333582,
+        "tsr_queue": 0.263038
+      }
+    },
+    {
+      "variant": "cells-wired",
+      "label": "SLANet+ + wired cells",
+      "engine": "slanet-plus-onnx-cpu+rtdetr-wired",
+      "pages": 19,
+      "tables": 29,
+      "structured": 29,
+      "semantic": {
+        "passed": 40,
+        "total": 49,
+        "tables_passed": 5,
+        "tables_reviewed": 7
+      },
+      "initialization_ms": 510.233833,
+      "warmup_ms": 536.430042,
+      "process": {
+        "exit_code": 0,
+        "wall_seconds": 15.029663875000551,
+        "peak_process_tree_rss_bytes": 2060500992,
+        "rss_sample_interval_ms": 200,
+        "binary": "/Volumes/Yage/Documents/WorkSpace/docparse/target/release/deps/tsr_comparison-cbdf15131dac67fc"
+      },
+      "stage_ms": {
+        "layout_inference": 5330.703707,
+        "layout_postprocess": 0.1325,
+        "layout_preprocess": 232.599585,
+        "layout_queue": 0.196667,
+        "layout_readback": 0.072417,
+        "table_cell_inference": 5814.291457,
+        "table_cell_postprocess": 0.168956,
+        "table_cell_preprocess": 151.722331,
+        "table_external": 7390.354915,
+        "table_fill": 35.281172,
+        "text_finish": 362.171252,
+        "text_prepare": 0.548708,
+        "tsr_inference": 1364.452251,
+        "tsr_postprocess": 0.865582,
+        "tsr_preprocess": 17.268835,
+        "tsr_queue": 0.54763
+      }
+    },
+    {
+      "variant": "cells-wireless",
+      "label": "SLANet+ + wireless cells",
+      "engine": "slanet-plus-onnx-cpu+rtdetr-wireless",
+      "pages": 19,
+      "tables": 29,
+      "structured": 29,
+      "semantic": {
+        "passed": 49,
+        "total": 49,
+        "tables_passed": 7,
+        "tables_reviewed": 7
+      },
+      "initialization_ms": 480.892,
+      "warmup_ms": 761.120417,
+      "process": {
+        "exit_code": 0,
+        "wall_seconds": 18.612892417004332,
+        "peak_process_tree_rss_bytes": 2288009216,
+        "rss_sample_interval_ms": 200,
+        "binary": "/Volumes/Yage/Documents/WorkSpace/docparse/target/release/deps/tsr_comparison-cbdf15131dac67fc"
+      },
+      "stage_ms": {
+        "layout_inference": 5184.221502,
+        "layout_postprocess": 0.099458,
+        "layout_preprocess": 219.328459,
+        "layout_queue": 0.19866699999999998,
+        "layout_readback": 0.067,
+        "table_cell_inference": 9345.250579,
+        "table_cell_postprocess": 0.180292,
+        "table_cell_preprocess": 148.524792,
+        "table_external": 10922.444581,
+        "table_fill": 35.379791,
+        "text_finish": 363.219546,
+        "text_prepare": 0.489959,
+        "tsr_inference": 1368.833625,
+        "tsr_postprocess": 0.8412499999999999,
+        "tsr_preprocess": 17.191668,
+        "tsr_queue": 0.55233
+      }
+    },
+    {
+      "variant": "upgraded-wired",
+      "label": "SLANeXt wired + cells",
+      "engine": "slanext-wired-onnx-cpu+rtdetr-wired",
+      "pages": 19,
+      "tables": 29,
+      "structured": 15,
+      "semantic": {
+        "passed": 13,
+        "total": 49,
+        "tables_passed": 1,
+        "tables_reviewed": 7
+      },
+      "initialization_ms": 948.782416,
+      "warmup_ms": 1713.9424999999999,
+      "process": {
+        "exit_code": 0,
+        "wall_seconds": 30.17253774998244,
+        "peak_process_tree_rss_bytes": 2789523456,
+        "rss_sample_interval_ms": 200,
+        "binary": "/Volumes/Yage/Documents/WorkSpace/docparse/target/release/deps/tsr_comparison-cbdf15131dac67fc"
+      },
+      "stage_ms": {
+        "layout_inference": 5287.263833,
+        "layout_postprocess": 0.107918,
+        "layout_preprocess": 224.02141799999998,
+        "layout_queue": 0.222833,
+        "layout_readback": 0.079,
+        "table_cell_inference": 5821.413001,
+        "table_cell_postprocess": 0.198042,
+        "table_cell_preprocess": 152.580749,
+        "table_external": 20791.408333,
+        "table_fill": 13.504751,
+        "text_finish": 363.425042,
+        "text_prepare": 0.536584,
+        "tsr_inference": 14755.180915,
+        "tsr_postprocess": 0.653793,
+        "tsr_preprocess": 19.271916,
+        "tsr_queue": 0.589418
+      }
+    },
+    {
+      "variant": "upgraded-wireless",
+      "label": "SLANeXt wireless + cells",
+      "engine": "slanext-wireless-onnx-cpu+rtdetr-wireless",
+      "pages": 19,
+      "tables": 29,
+      "structured": 20,
+      "semantic": {
+        "passed": 23,
+        "total": 49,
+        "tables_passed": 3,
+        "tables_reviewed": 7
+      },
+      "initialization_ms": 920.0270830000001,
+      "warmup_ms": 1898.542209,
+      "process": {
+        "exit_code": 0,
+        "wall_seconds": 33.708930458989926,
+        "peak_process_tree_rss_bytes": 2427256832,
+        "rss_sample_interval_ms": 200,
+        "binary": "/Volumes/Yage/Documents/WorkSpace/docparse/target/release/deps/tsr_comparison-cbdf15131dac67fc"
+      },
+      "stage_ms": {
+        "layout_inference": 5261.11846,
+        "layout_postprocess": 0.107501,
+        "layout_preprocess": 230.699582,
+        "layout_queue": 0.203877,
+        "layout_readback": 0.067041,
+        "table_cell_inference": 9409.014537000001,
+        "table_cell_postprocess": 0.224167,
+        "table_cell_preprocess": 149.734378,
+        "table_external": 24335.045251,
+        "table_fill": 20.513457,
+        "text_finish": 366.439294,
+        "text_prepare": 0.472957,
+        "tsr_inference": 14713.961872,
+        "tsr_postprocess": 0.650539,
+        "tsr_preprocess": 18.928792,
+        "tsr_queue": 0.564831
+      }
+    }
+  ],
+  "parity": {
+    "opencv": "4.10.0",
+    "numpy": "2.3.5",
+    "onnxruntime": "1.29.0",
+    "checks": [
+      {
+        "model": "slanet-plus",
+        "tokens": 172,
+        "exact_token_match": true
+      },
+      {
+        "model": "slanext-wired",
+        "tokens": 172,
+        "exact_token_match": true
+      },
+      {
+        "model": "slanext-wireless",
+        "tokens": 176,
+        "exact_token_match": true
+      },
+      {
+        "model": "rtdetr-table-cell-wired",
+        "cells": 169,
+        "max_coordinate_delta_pixels": 0.00146484375
+      },
+      {
+        "model": "rtdetr-table-cell-wireless",
+        "cells": 142,
+        "max_coordinate_delta_pixels": 0.0
+      }
+    ]
+  }
+}

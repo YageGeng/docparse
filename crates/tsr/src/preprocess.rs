@@ -1,7 +1,7 @@
 //! SLANet_plus BGR resize, normalization, and padding over owned PDF rasters.
 use crate::TsrError;
 use docparse_layout::PageImage;
-use ndarray::Array4;
+use ndarray::{Array2, Array4};
 
 const EDGE: usize = 488;
 const SCALE: i32 = 2048;
@@ -43,12 +43,23 @@ pub(crate) struct SlanetInput(pub Array4<f32>);
 impl TryFrom<&PageImage> for SlanetInput {
     type Error = TsrError;
 
+    /// Preserves the original SLANet+ preprocessing entry point.
+    fn try_from(image: &PageImage) -> Result<Self, Self::Error> {
+        Self::try_from((image, EDGE))
+    }
+}
+
+impl TryFrom<(&PageImage, usize)> for SlanetInput {
+    type Error = TsrError;
+
     /// Preserves aspect ratio, converts RGB to BGR, and follows the pinned PaddleX tensor contract.
     #[allow(
         clippy::cast_sign_loss,
         reason = "coordinates and interpolated pixels are clamped to nonnegative ranges"
     )]
-    fn try_from(image: &PageImage) -> Result<Self, Self::Error> {
+    fn try_from(
+        (image, edge): (&PageImage, usize),
+    ) -> Result<Self, Self::Error> {
         let width = image.width() as usize;
         let height = image.height() as usize;
         if width == 0
@@ -60,13 +71,13 @@ impl TryFrom<&PageImage> for SlanetInput {
                 reason: "TSR needs a nonempty packed RGB image".to_owned(),
             });
         }
-        let ratio = EDGE as f64 / width.max(height) as f64;
+        let ratio = edge as f64 / width.max(height) as f64;
         let resized_width = (width as f64 * ratio).round_ties_even() as usize;
         let resized_height = (height as f64 * ratio).round_ties_even() as usize;
         if resized_width == 0
             || resized_height == 0
-            || resized_width > EDGE
-            || resized_height > EDGE
+            || resized_width > edge
+            || resized_height > edge
         {
             return Err(TsrError::InvalidInput {
                 reason: "table aspect ratio produces an empty model dimension"
@@ -75,7 +86,7 @@ impl TryFrom<&PageImage> for SlanetInput {
         }
         let columns = LinearAxis::resize(width, resized_width);
         let rows = LinearAxis::resize(height, resized_height);
-        let mut tensor = Array4::<f32>::zeros((1, 3, EDGE, EDGE));
+        let mut tensor = Array4::<f32>::zeros((1, 3, edge, edge));
         let coefficients =
             [(0.485_f64, 0.229_f64), (0.456, 0.224), (0.406, 0.225)];
         for (channel, (mean, std)) in coefficients.into_iter().enumerate() {
@@ -121,11 +132,103 @@ impl TryFrom<&PageImage> for SlanetInput {
     }
 }
 
+/// Three owned RT-DETR tensors retain the original crop scale through inference.
+pub(crate) struct CellInput {
+    pub image: Array4<f32>,
+    pub image_shape: Array2<f32>,
+    pub scale_factor: Array2<f32>,
+}
+
+impl TryFrom<&PageImage> for CellInput {
+    type Error = TsrError;
+
+    /// Uses the same cubic RGB resize as layout and the pinned detector normalization.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "the verified RGB resizer returns exactly 640 by 640 packed pixels and NCHW indices have fixed bounds"
+    )]
+    fn try_from(image: &PageImage) -> Result<Self, Self::Error> {
+        let pixels = image.resize_rgb_cubic(640, 640).map_err(|error| {
+            TsrError::InvalidInput {
+                reason: error.to_string(),
+            }
+        })?;
+        let tensor =
+            Array4::from_shape_fn((1, 3, 640, 640), |(_, channel, y, x)| {
+                f32::from(pixels[(y * 640 + x) * 3 + channel]) / 255.0
+            });
+        Ok(Self {
+            image: tensor,
+            image_shape: ndarray::arr2(&[[640.0, 640.0]]),
+            scale_factor: ndarray::arr2(&[[
+                640.0 / image.height() as f32,
+                640.0 / image.width() as f32,
+            ]]),
+        })
+    }
+}
+
+/// Owns the appropriate tensor set until either native inference or the browser Promise settles.
+pub(crate) enum ModelInput {
+    Structure(SlanetInput),
+    Cells(CellInput),
+}
+
+impl ModelInput {
+    /// Borrows named tensors only for the duration of an actual session run.
+    pub(crate) fn values(
+        &self,
+    ) -> Result<Vec<(&'static str, ort::value::TensorRef<'_, f32>)>, ort::Error>
+    {
+        use ort::value::TensorRef;
+        Ok(match self {
+            Self::Structure(input) => {
+                vec![("x", TensorRef::from_array_view(&input.0)?)]
+            }
+            Self::Cells(input) => vec![
+                ("image", TensorRef::from_array_view(&input.image)?),
+                ("im_shape", TensorRef::from_array_view(&input.image_shape)?),
+                (
+                    "scale_factor",
+                    TensorRef::from_array_view(&input.scale_factor)?,
+                ),
+            ],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use docparse_layout::{PageImageInput, PixelFormat};
     use std::sync::Arc;
+
+    /// Cell detection keeps RGB channels and describes the actual stretched 640-pixel input.
+    #[test]
+    fn cell_tensor_uses_rgb_and_actual_scale_factors() {
+        let image = PageImage::try_from(
+            PageImageInput::builder()
+                .width(2)
+                .height(1)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from([255_u8, 0, 0, 255, 0, 0]))
+                .build(),
+        )
+        .expect("RGB");
+        let input = CellInput::try_from(&image).expect("cell tensor");
+        assert_eq!(input.image.shape(), [1, 3, 640, 640]);
+        assert!(
+            (input.image.get((0, 0, 0, 0)).expect("red") - 1.0).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            input.image.get((0, 2, 0, 0)).expect("blue").abs() < f32::EPSILON
+        );
+        assert_eq!(
+            input.scale_factor.as_slice().expect("scale"),
+            [640.0, 320.0]
+        );
+    }
 
     /// RGB channel order and post-normalization padding must match Paddle's BGR model input.
     #[test]

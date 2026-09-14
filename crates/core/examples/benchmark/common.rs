@@ -296,6 +296,17 @@ pub async fn run(
             .data(Arc::from(image.into_raw()))
             .build(),
     )?);
+    let table_image =
+        image::open(workspace.join("crates/tsr/tests/fixtures/table.png"))?
+            .into_rgb8();
+    let table_page = Arc::new(PageImage::try_from(
+        PageImageInput::builder()
+            .width(table_image.width())
+            .height(table_image.height())
+            .pixel_format(PixelFormat::Rgb8)
+            .data(Arc::from(table_image.into_raw()))
+            .build(),
+    )?);
     for round in 1..=2 {
         // A native-text PDF may skip OCR/TSR entirely, so warm their actual sessions explicitly as well.
         if let Some(engine) = &ocr {
@@ -308,7 +319,7 @@ pub async fn run(
         }
         if let Some(engine) = &tsr {
             engine
-                .predict(Arc::clone(&page), Timings::default())
+                .predict(Arc::clone(&table_page), Timings::default())
                 .await?;
         }
         let result = parser

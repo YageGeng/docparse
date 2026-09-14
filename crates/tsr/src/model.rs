@@ -1,10 +1,15 @@
 //! Pinned Paddle model identity, output decoding, and the public inference engine.
-use crate::{preprocess::SlanetInput, wasm_compat::SessionRunner};
+use crate::{
+    TsrArtifacts,
+    artifacts::ModelKind,
+    preprocess::{CellInput, ModelInput, SlanetInput},
+    wasm_compat::SessionRunner,
+};
 use docparse_layout::{
-    ModelArtifacts, ModelContract, PageImage,
+    PageImage,
     timing::{TimingStage, Timings},
 };
-use ndarray::{Array3, Ix3};
+use ndarray::{Array2, Array3, Ix2, Ix3};
 use ort::session::SessionOutputs;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -34,11 +39,54 @@ pub enum TsrError {
 }
 
 /// The model predicts geometry and structure; PDF text is deliberately absent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, typed_builder::TypedBuilder)]
 pub struct TsrPrediction {
     pub structure_tokens: Vec<String>,
     pub cell_bboxes: Vec<Vec<f64>>,
     pub score: f64,
+    /// Independent detections are unordered and need not match the structure cell count.
+    #[builder(default)]
+    pub detected_cell_bboxes: Vec<Vec<f64>>,
+}
+
+/// Copied outputs never retain a session-owned native or browser buffer.
+pub(crate) enum ModelResult {
+    Structure(ModelOutputs),
+    Cells(Array2<f32>),
+}
+
+impl TryFrom<(ModelKind, &SessionOutputs<'_>)> for ModelResult {
+    type Error = TsrError;
+
+    /// Validates each pinned graph's output ranks before the inference lease ends.
+    fn try_from(
+        (kind, outputs): (ModelKind, &SessionOutputs<'_>),
+    ) -> Result<Self, Self::Error> {
+        match kind {
+            ModelKind::Structure(_) => {
+                Ok(Self::Structure(ModelOutputs::try_from(outputs)?))
+            }
+            ModelKind::Cells(_) => {
+                let boxes = outputs
+                    .get("fetch_name_0")
+                    .ok_or_else(|| TsrError::InvalidInput {
+                        reason: "missing detector boxes".to_owned(),
+                    })?
+                    .try_extract_array::<f32>()?
+                    .into_dimensionality::<Ix2>()
+                    .map_err(|e| TsrError::InvalidInput {
+                        reason: e.to_string(),
+                    })?;
+                if boxes.ncols() != 6
+                    || boxes.nrows() > 300
+                    || boxes.iter().any(|v| !v.is_finite())
+                {
+                    return Err(TsrError::InvalidInput { reason: "cell detector requires finite [N,6] output with at most 300 cells".to_owned() });
+                }
+                Ok(Self::Cells(boxes.to_owned()))
+            }
+        }
+    }
 }
 
 /// Owned outputs survive the ORT session lease and browser synchronization.
@@ -102,6 +150,19 @@ impl TryFrom<(ModelOutputs, &[String], u32, u32)> for TsrPrediction {
             u32,
         ),
     ) -> Result<Self, Self::Error> {
+        Self::decode(outputs, dictionary, width, height, true)
+    }
+}
+
+impl TsrPrediction {
+    /// SLANeXt contributes topology only; its invalid position head must not enter geometry matching.
+    fn decode(
+        outputs: ModelOutputs,
+        dictionary: &[String],
+        width: u32,
+        height: u32,
+        use_positions: bool,
+    ) -> Result<Self, TsrError> {
         let invalid = |reason: &str| TsrError::InvalidInput {
             reason: reason.to_owned(),
         };
@@ -150,7 +211,7 @@ impl TryFrom<(ModelOutputs, &[String], u32, u32)> for TsrPrediction {
             let token = dictionary
                 .get(selected)
                 .ok_or_else(|| invalid("TSR class index outside dictionary"))?;
-            if matches!(token.as_str(), "<td" | "<td></td>") {
+            if use_positions && matches!(token.as_str(), "<td" | "<td></td>") {
                 if location.iter().any(|v| !v.is_finite()) {
                     return Err(invalid("non-finite cell location"));
                 }
@@ -190,7 +251,12 @@ impl TryFrom<(ModelOutputs, &[String], u32, u32)> for TsrPrediction {
             structure_tokens.push(token.clone());
             scores.push(f64::from(score));
         }
-        if !ended || scores.is_empty() || cell_bboxes.is_empty() {
+        if !ended
+            || scores.is_empty()
+            || !structure_tokens
+                .iter()
+                .any(|t| matches!(t.as_str(), "<td" | "<td></td>"))
+        {
             return Err(invalid(&format!(
                 "TSR output is incomplete: ended={ended}, steps={}, tokens={}, cells={}",
                 locations.len_of(ndarray::Axis(0)),
@@ -203,11 +269,11 @@ impl TryFrom<(ModelOutputs, &[String], u32, u32)> for TsrPrediction {
             "</body>".to_owned(),
             "</html>".to_owned(),
         ]);
-        Ok(Self {
-            structure_tokens,
-            cell_bboxes,
-            score: scores.iter().sum::<f64>() / scores.len() as f64,
-        })
+        Ok(Self::builder()
+            .structure_tokens(structure_tokens)
+            .cell_bboxes(cell_bboxes)
+            .score(scores.iter().sum::<f64>() / scores.len() as f64)
+            .build())
     }
 }
 
@@ -227,69 +293,165 @@ struct PostprocessConfig {
     character_dict: Vec<String>,
 }
 
-/// Independent, reusable SLANet_plus engine with one cancellation-safe ONNX session.
+/// Configured Paddle structure/cell pipeline; the original public type name remains compatible.
+#[derive(typed_builder::TypedBuilder)]
 pub struct SlanetPlusEngine {
     runner: Arc<SessionRunner>,
     dictionary: Vec<String>,
     provider: docparse_layout::ExecutionProvider,
+    model: docparse_config::TsrModel,
+    #[builder(default)]
+    detector: Option<(Arc<SessionRunner>, f64)>,
+    name: String,
 }
 
 impl SlanetPlusEngine {
     /// Verifies immutable artifacts and initializes the configured shared ONNX backend.
     pub async fn from_artifacts(
         config: Arc<docparse_config::ValidatedConfig>,
-        artifacts: ModelArtifacts,
+        artifacts: impl Into<TsrArtifacts>,
     ) -> Result<Self, TsrError> {
+        let artifacts = artifacts.into();
+        let model = config.tsr().model;
+        let kind = ModelKind::Structure(model);
+        let cell_config = config
+            .tsr()
+            .cell_detection
+            .as_ref()
+            .filter(|cells| cells.enabled)
+            .cloned();
+        let TsrArtifacts {
+            structure: artifacts,
+            cell_detection,
+        } = artifacts;
+        if cell_config.is_some() && cell_detection.is_none() {
+            tracing::error!(
+                "enabled table cell detection is missing its model artifacts"
+            );
+            return Err(TsrError::InvalidModel {
+                reason: "enabled cell detection requires its own artifacts"
+                    .to_owned(),
+            });
+        }
         tracing::info!(
-            "loading SLANet_plus ONNX revision {} from {} bytes",
-            SLANET_PLUS_REVISION,
+            "loading TSR {:?} from {} bytes",
+            model,
             artifacts.model.len()
         );
-        let (artifacts, dictionary) = docparse_layout::wasm_compat::run_cpu(move || {
-            let contract = ModelContract::builder()
-                .repository("PaddlePaddle/SLANet_plus_onnx".to_owned()).revision(SLANET_PLUS_REVISION.to_owned())
-                .license("Apache-2.0".to_owned())
-                .model_sha256("7790c0c13ce064782c9d22ebeb16b4da8216f83d3ba576da962c106ef58386da".to_owned())
-                .config_sha256("8a6372d3269a6f112fe13a2da7952a84da6e112c10a3146cbb43de5bd01d19fa".to_owned()).build();
-            artifacts.verify_against(&contract)?;
-            let config: InferenceConfig = serde_yml::from_slice(&artifacts.config).map_err(|error| TsrError::InvalidModel { reason: error.to_string() })?;
-            if config.global.model_name != "SLANet_plus" { return Err(TsrError::InvalidModel { reason: "model name must be SLANet_plus".to_owned() }); }
-            let mut dictionary = config.postprocess.character_dict;
-            dictionary.retain(|token| token != "<td>");
-            dictionary.insert(0, "sos".to_owned());
-            dictionary.extend(["<td></td>".to_owned(), "eos".to_owned()]);
-            if dictionary.len() != 50 { return Err(TsrError::InvalidModel { reason: "SLANet_plus needs 50 token classes".to_owned() }); }
-            Ok::<_, TsrError>((artifacts, dictionary))
-        }).await??;
+        let (artifacts, dictionary) =
+            docparse_layout::wasm_compat::run_cpu(move || {
+                let contract = kind.contract();
+                artifacts.verify_against(&contract)?;
+                let config: InferenceConfig = serde_yml::from_slice(
+                    &artifacts.config,
+                )
+                .map_err(|error| TsrError::InvalidModel {
+                    reason: error.to_string(),
+                })?;
+                if format!("PaddlePaddle/{}_onnx", config.global.model_name)
+                    != contract.repository
+                {
+                    return Err(TsrError::InvalidModel {
+                        reason: "TSR YAML does not match the selected model"
+                            .to_owned(),
+                    });
+                }
+                let mut dictionary = config.postprocess.character_dict;
+                dictionary.retain(|token| token != "<td>");
+                dictionary.insert(0, "sos".to_owned());
+                dictionary.extend(["<td></td>".to_owned(), "eos".to_owned()]);
+                if dictionary.len() != 50 {
+                    return Err(TsrError::InvalidModel {
+                        reason: "SLANet_plus needs 50 token classes".to_owned(),
+                    });
+                }
+                Ok::<_, TsrError>((artifacts, dictionary))
+            })
+            .await??;
         let backend =
             docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
         let provider = backend.execution_provider();
-        tracing::info!(
-            "initializing SLANet_plus ONNX with provider {}",
-            provider
-        );
-        let runner =
-            SessionRunner::load(artifacts, backend)
-                .await
-                .map_err(|error| {
-                    tracing::error!(
-                        "SLANet_plus provider {} initialization failed: {}",
-                        provider,
-                        error
-                    );
+        tracing::info!("initializing TSR ONNX with provider {}", provider);
+        let runner = SessionRunner::load(artifacts, backend, kind)
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    "TSR provider {} initialization failed: {}",
+                    provider,
                     error
+                );
+                error
+            })?;
+        tracing::info!("loaded TSR ONNX with provider {}", provider);
+        let model_label = match model {
+            docparse_config::TsrModel::SlanetPlus => "slanet-plus",
+            docparse_config::TsrModel::SlanextWired => "slanext-wired",
+            docparse_config::TsrModel::SlanextWireless => "slanext-wireless",
+        };
+        let name = format!(
+            "{model_label}-onnx-{provider}{}",
+            cell_config.as_ref().map_or(String::new(), |cells| format!(
+                "+rtdetr-{}",
+                match cells.model {
+                    docparse_config::TableCellModel::Wired => "wired",
+                    docparse_config::TableCellModel::Wireless => "wireless",
+                }
+            ))
+        );
+        let detector = if let Some(cells) = cell_config {
+            let artifacts =
+                cell_detection.ok_or_else(|| TsrError::InvalidModel {
+                    reason: "enabled cell detection requires its own artifacts"
+                        .to_owned(),
                 })?;
-        tracing::info!("loaded SLANet_plus ONNX with provider {}", provider);
-        Ok(Self {
-            runner,
-            dictionary,
-            provider,
-        })
+            let kind = ModelKind::Cells(cells.model);
+            let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
+                artifacts.verify_against(&kind.contract())?;
+                Ok::<_, TsrError>(artifacts)
+            })
+            .await??;
+            tracing::info!(
+                "loading table cell detector {:?} with provider {}",
+                cells.model,
+                provider
+            );
+            Some((
+                SessionRunner::load(
+                    artifacts,
+                    docparse_layout::wasm_compat::OnnxBackend::from(
+                        config.as_ref(),
+                    ),
+                    kind,
+                )
+                .await?,
+                cells.score_threshold,
+            ))
+        } else {
+            None
+        };
+        Ok(Self::builder()
+            .runner(runner)
+            .dictionary(dictionary)
+            .provider(provider)
+            .model(model)
+            .detector(detector)
+            .name(name)
+            .build())
     }
 
     /// Reports the registered provider; unsupported graph operators may still execute on CPU.
     pub fn execution_provider(&self) -> docparse_layout::ExecutionProvider {
         self.provider
+    }
+
+    /// Reports the exact structure family used for model evidence and benchmark labeling.
+    pub fn model(&self) -> docparse_config::TsrModel {
+        self.model
+    }
+
+    /// Identifies both loaded model families and the actual selected provider in logs and evidence.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Runs a real model on the supplied crop; geometry remains in that crop's original pixel frame.
@@ -298,6 +460,7 @@ impl SlanetPlusEngine {
         image: Arc<PageImage>,
         timings: Timings,
     ) -> Result<TsrPrediction, TsrError> {
+        let original = Arc::clone(&image);
         let mut pending = vec![crate::tiles::TableSlice::new(image)];
         let mut parts = Vec::new();
         while let Some(slice) = pending.pop() {
@@ -316,7 +479,7 @@ impl SlanetPlusEngine {
                 Err(error @ TsrError::InvalidInput { .. }) => {
                     let Some([top, bottom]) = slice.split() else {
                         tracing::warn!(
-                            "SLANet_plus could not recover the crop at pixel {}: {}",
+                            "TSR could not recover the crop at pixel {}: {}",
                             slice.offset,
                             error
                         );
@@ -330,12 +493,64 @@ impl SlanetPlusEngine {
                     pending.extend([bottom, top]);
                 }
                 Err(error) => {
-                    tracing::warn!("SLANet_plus inference failed: {}", error);
+                    tracing::warn!("TSR inference failed: {}", error);
                     return Err(error);
                 }
             }
         }
-        TsrPrediction::from_segments(parts)
+        let mut prediction = TsrPrediction::from_segments(parts)?;
+        if let Some((detector, threshold)) = &self.detector {
+            let timer = timings.start(TimingStage::TableCellPreprocess);
+            let crop = Arc::clone(&original);
+            let input = docparse_layout::wasm_compat::run_cpu(move || {
+                CellInput::try_from(crop.as_ref())
+            })
+            .await??;
+            drop(timer);
+            let output = Arc::clone(detector)
+                .run(ModelInput::Cells(input), timings.clone())
+                .await?;
+            let _postprocess = timings.start(TimingStage::TableCellPostprocess);
+            let ModelResult::Cells(boxes) = output else {
+                return Err(TsrError::InvalidInput {
+                    reason: "cell session returned structure outputs"
+                        .to_owned(),
+                });
+            };
+            for cell in boxes.outer_iter() {
+                let Some(&[class, score, left, top, right, bottom]) =
+                    cell.as_slice()
+                else {
+                    return Err(TsrError::InvalidInput {
+                        reason: "non-contiguous detector row".to_owned(),
+                    });
+                };
+                if f64::from(score) < *threshold || class != 0.0 {
+                    continue;
+                }
+                let bbox = [
+                    f64::from(left).max(0.0),
+                    f64::from(top).max(0.0),
+                    f64::from(right).min(f64::from(original.width())),
+                    f64::from(bottom).min(f64::from(original.height())),
+                ];
+                if docparse_layout::Bbox::try_from(bbox).is_ok() {
+                    prediction.detected_cell_bboxes.push(bbox.to_vec());
+                }
+            }
+            tracing::info!(
+                "detected {} independent table cells for {:?}",
+                prediction.detected_cell_bboxes.len(),
+                self.model
+            );
+            if prediction.detected_cell_bboxes.is_empty() {
+                return Err(TsrError::InvalidInput {
+                    reason: "cell detector returned no accepted boxes"
+                        .to_owned(),
+                });
+            }
+        }
+        Ok(prediction)
     }
 
     /// Executes exactly one bounded decoder run, retaining the actual failure for segmented retries.
@@ -346,34 +561,40 @@ impl SlanetPlusEngine {
     ) -> Result<TsrPrediction, TsrError> {
         let (width, height) = (image.width(), image.height());
         let preparing = timings.clone();
+        let edge = ModelKind::Structure(self.model).edge();
         let input = docparse_layout::wasm_compat::run_cpu(move || {
             let _timer = preparing.start(TimingStage::TsrPreprocess);
-            SlanetInput::try_from(image.as_ref())
+            SlanetInput::try_from((image.as_ref(), edge))
         })
         .await??;
-        tracing::debug!(
-            "starting SLANet_plus inference for {}x{} crop",
-            width,
-            height
-        );
-        let output = Arc::clone(&self.runner).run(input, timings.clone()).await;
+        tracing::debug!("starting TSR inference for {}x{} crop", width, height);
+        let output = Arc::clone(&self.runner)
+            .run(ModelInput::Structure(input), timings.clone())
+            .await;
         let result = output.and_then(|output| {
             let _timer = timings.start(TimingStage::TsrPostprocess);
-            TsrPrediction::try_from((
+            let ModelResult::Structure(output) = output else {
+                return Err(TsrError::InvalidInput {
+                    reason: "structure session returned detector outputs"
+                        .to_owned(),
+                });
+            };
+            TsrPrediction::decode(
                 output,
                 self.dictionary.as_slice(),
                 width,
                 height,
-            ))
+                self.model == docparse_config::TsrModel::SlanetPlus,
+            )
         });
         match &result {
             Ok(prediction) => tracing::info!(
-                "completed SLANet_plus inference with {} cells and confidence {:.4}",
+                "completed TSR inference with {} cells and confidence {:.4}",
                 prediction.cell_bboxes.len(),
                 prediction.score
             ),
             Err(error) => tracing::debug!(
-                "SLANet_plus attempt failed for {}x{} crop: {}",
+                "TSR attempt failed for {}x{} crop: {}",
                 width,
                 height,
                 error
@@ -387,26 +608,36 @@ impl TsrPrediction {
     /// Stitches completed image segments without promoting continuation rows into new column headers.
     fn from_segments(mut parts: Vec<(u32, Self)>) -> Result<Self, TsrError> {
         if parts.is_empty()
-            || parts.iter().any(|(_, part)| part.cell_bboxes.is_empty())
+            || parts.iter().any(|(_, part)| {
+                !part
+                    .structure_tokens
+                    .iter()
+                    .any(|t| matches!(t.as_str(), "<td" | "<td></td>"))
+            })
         {
             return Err(TsrError::InvalidInput {
                 reason: "empty TSR segment sequence".to_owned(),
             });
         }
         parts.sort_by_key(|(offset, _)| *offset);
-        let mut result = TsrPrediction {
-            structure_tokens: vec![
+        let mut result = TsrPrediction::builder()
+            .structure_tokens(vec![
                 "<html>".to_owned(),
                 "<body>".to_owned(),
                 "<table>".to_owned(),
-            ],
-            cell_bboxes: Vec::new(),
-            score: 0.0,
-        };
+            ])
+            .cell_bboxes(Vec::new())
+            .score(0.0)
+            .build();
         let mut weight = 0;
         for (offset, part) in parts {
-            weight += part.cell_bboxes.len();
-            result.score += part.score * part.cell_bboxes.len() as f64;
+            let cells = part
+                .structure_tokens
+                .iter()
+                .filter(|t| matches!(t.as_str(), "<td" | "<td></td>"))
+                .count();
+            weight += cells;
+            result.score += part.score * cells as f64;
             result.structure_tokens.extend(
                 part.structure_tokens
                     .into_iter()
@@ -443,6 +674,27 @@ impl TsrPrediction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Structure-only predictions must retain their independent geometry in captured JSON.
+    #[test]
+    fn serialized_prediction_preserves_independent_cells() {
+        let prediction = TsrPrediction::builder()
+            .structure_tokens(vec![
+                "<tr>".to_owned(),
+                "<td></td>".to_owned(),
+                "</tr>".to_owned(),
+            ])
+            .cell_bboxes(Vec::new())
+            .score(0.9)
+            .detected_cell_bboxes(vec![vec![1.0, 2.0, 30.0, 40.0]])
+            .build();
+        let value = serde_json::to_value(&prediction).expect("prediction JSON");
+        assert_eq!(value.get("cell_bboxes"), Some(&serde_json::json!([])));
+        assert_eq!(
+            value.get("detected_cell_bboxes"),
+            Some(&serde_json::json!([[1.0, 2.0, 30.0, 40.0]]))
+        );
+    }
 
     /// A decoder limit must not silently turn a table prefix into a complete prediction.
     #[test]
@@ -495,25 +747,27 @@ mod tests {
     /// Continuation crops retain data rows and already restored coordinates without repeating a column header.
     #[test]
     fn segment_stitching_preserves_positions_and_header_scope() {
-        let part = TsrPrediction {
-            structure_tokens: [
-                "<html>",
-                "<body>",
-                "<table>",
-                "<thead>",
-                "<tr>",
-                "<td></td>",
-                "</tr>",
-                "</thead>",
-                "</table>",
-                "</body>",
-                "</html>",
-            ]
-            .map(str::to_owned)
-            .to_vec(),
-            cell_bboxes: vec![vec![0.0, 0.0, 20.0, 10.0]],
-            score: 0.8,
-        };
+        let part = TsrPrediction::builder()
+            .structure_tokens(
+                [
+                    "<html>",
+                    "<body>",
+                    "<table>",
+                    "<thead>",
+                    "<tr>",
+                    "<td></td>",
+                    "</tr>",
+                    "</thead>",
+                    "</table>",
+                    "</body>",
+                    "</html>",
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            )
+            .cell_bboxes(vec![vec![0.0, 0.0, 20.0, 10.0]])
+            .score(0.8)
+            .build();
         let mut later = part.clone();
         later.cell_bboxes = vec![vec![0.0, 100.0, 20.0, 110.0]];
         let merged =

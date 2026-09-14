@@ -1,0 +1,61 @@
+{
+  "method": "Manual visual review of original PDF table crops. Whitespace is ignored in text checks. These selected semantic assertions are not a full accuracy benchmark.",
+  "cases": [
+    {"case": "4-p6", "table": "p6:b:m5:s0", "title": "Gate ablation headers", "rows": 17, "columns": 9, "checks": [
+      {"row": 0, "column": 0, "text": "Setting"},
+      {"row": 0, "column": 1, "text": "Gate Pos."},
+      {"row": 0, "column": 2, "text": "Gate Act."},
+      {"row": 0, "column": 3, "text": "Rank Pres."},
+      {"row": 0, "column": 4, "text": "Train Sco."},
+      {"row": 0, "column": 5, "text": "10 step"},
+      {"row": 1, "column": 0, "text": "Baseline", "column_span": 9}
+    ]},
+    {"case": "0-p24", "table": "p24:b:m2:s0", "title": "Method-to-equation rows", "rows": 16, "columns": 3, "checks": [
+      {"row": 1, "column": 0, "text": "Normalization position", "row_span": 3},
+      {"row": 1, "column": 1, "text": "Post Norm [22]"},
+      {"row": 4, "column": 1, "text": "LayerNorm [275]"},
+      {"row": 7, "column": 1, "text": "ReLU [278]"},
+      {"row": 12, "column": 1, "text": "Absolute [22]"},
+      {"row": 15, "column": 1, "text": "ALiBi [283]"}
+    ]},
+    {"case": "0-p57", "table": "p57:b:m0:s0", "title": "Task taxonomy and spanning labels", "rows": 21, "columns": 4, "checks": [
+      {"row": 1, "column": 0, "text": "Basic", "row_span": 9},
+      {"row": 1, "column": 1, "text": "Language Generation", "row_span": 3},
+      {"row": 3, "column": 2, "text": "Code Synthesis"},
+      {"row": 10, "column": 0, "text": "Advanced", "row_span": 11},
+      {"row": 16, "column": 1, "text": "Tool Manipulation", "row_span": 5},
+      {"row": 20, "column": 2, "text": "Data Interface"}
+    ]},
+    {"case": "0-p8", "table": "p8:b:m0:s0", "title": "Long language-model comparison", "rows": 58, "columns": 13, "checks": [
+      {"row": 2, "column": 1, "text": "T5 [82]"},
+      {"row": 2, "column": 2, "text": "Oct-2019"},
+      {"row": 3, "column": 1, "text": "mT5 [83]"},
+      {"row": 3, "column": 2, "text": "Oct-2020"}
+    ]},
+    {"case": "2-p32", "table": "p32:b:m0:s0", "title": "Terminal reproduction settings", "rows": 16, "columns": 7, "checks": [
+      {"row": 3, "column": 3, "text": "Text JSON"},
+      {"row": 11, "column": 0, "text": "Shared across all reproductions", "column_span": 7},
+      {"row": 12, "column": 1, "text": "4 h", "column_span": 6},
+      {"row": 13, "column": 1, "text": "10 h", "column_span": 6},
+      {"row": 14, "column": 1, "text": "6", "column_span": 6},
+      {"row": 15, "column": 1, "text": "4", "column_span": 6}
+    ]},
+    {"case": "2-p32", "table": "p32:b:m1:s0", "title": "Separate turns and tool-call columns", "rows": 5, "columns": 5, "checks": [
+      {"row": 0, "column": 2, "text": "Turns"},
+      {"row": 0, "column": 3, "text": "Tool calls"},
+      {"row": 1, "column": 2, "text": "12"},
+      {"row": 1, "column": 3, "text": "17"},
+      {"row": 4, "column": 2, "text": "92"},
+      {"row": 4, "column": 3, "text": "102"}
+    ]},
+    {"case": "3-p5", "table": "p5:b:m30:s0", "title": "SQL query-count summary", "rows": 2, "columns": 5, "checks": [
+      {"row": 0, "column": 1, "text": "BIRD dev"},
+      {"row": 0, "column": 2, "text": "Generated"},
+      {"row": 0, "column": 3, "text": "Pruned"},
+      {"row": 0, "column": 4, "text": "Expansion"},
+      {"row": 1, "column": 0, "text": "Query Count"},
+      {"row": 1, "column": 1, "text": "1,534"},
+      {"row": 1, "column": 4, "text": "58"}
+    ]}
+  ]
+}

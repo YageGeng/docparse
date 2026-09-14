@@ -79,12 +79,10 @@ impl TableStructureEngine for RecordingEngine {
                 .predict(Arc::clone(&request.image), request.timings.clone())
                 .await;
             let value = match &prediction {
-                Ok(p) => {
-                    json!({"structure_tokens":p.structure_tokens,"cell_bboxes":p.cell_bboxes,"score":p.score})
-                }
+                Ok(p) => json!(p),
                 Err(e) => json!({"error":e.to_string()}),
             };
-            std::fs::write(self.output.join(format!("{stem}.json")), serde_json::to_vec(&json!({"request_id":request.request_id,"page":request.page_number,"bbox":request.crop_bbox,"transform":request.crop_to_viewport,"prediction":value})).expect("prediction JSON")).expect("prediction");
+            std::fs::write(self.output.join(format!("{stem}.json")), serde_json::to_vec(&json!({"engine":self.engine.name(),"request_id":request.request_id,"page":request.page_number,"bbox":request.crop_bbox,"transform":request.crop_to_viewport,"prediction":value})).expect("prediction JSON")).expect("prediction");
             Ok(TsrTableInput::from((
                 &request,
                 prediction.map_err(|e| TableStructureError::Engine {
@@ -150,18 +148,20 @@ async fn refresh_tsr_captured_predictions() {
             )
             .await
         {
-            Ok(p) => {
-                json!({"structure_tokens":p.structure_tokens,"cell_bboxes":p.cell_bboxes,"score":p.score})
-            }
+            Ok(p) => json!(p),
             Err(e) => {
                 failures.push(format!("{}: {e}", path.display()));
                 json!({"error":e.to_string()})
             }
         };
+        value["engine"] = json!(engine.name());
         eprintln!(
-            "{}: {} cells",
+            "{}: {} structure boxes, {} detected cells",
             path.file_stem().expect("stem").to_string_lossy(),
             value["prediction"]["cell_bboxes"]
+                .as_array()
+                .map_or(0, Vec::len),
+            value["prediction"]["detected_cell_bboxes"]
                 .as_array()
                 .map_or(0, Vec::len)
         );
@@ -217,6 +217,18 @@ async fn real_pdfs_use_configured_table_model() {
     let initialization = Instant::now();
     let config =
         Arc::new(ValidatedConfig::try_from(raw).expect("validated config"));
+    let model_manifest: Option<docparse_layout::ModelManifest> =
+        if mode == TableMode::RulesOnly {
+            None
+        } else {
+            Some(
+                serde_json::from_slice(
+                    &std::fs::read(&config.tsr().model_manifest_path)
+                        .expect("model manifest"),
+                )
+                .expect("model identity"),
+            )
+        };
     let mut builder = DocParser::builder().config(Arc::clone(&config));
     if std::env::var_os("TSR_E2E_CAPTURE").is_some() {
         let captures = output.join("crops");
@@ -273,7 +285,7 @@ async fn real_pdfs_use_configured_table_model() {
             .iter()
             .filter(|t| t.stage == TimingStage::TsrInference)
             .count();
-        if mode == TableMode::ExternalOnly {
+        if mode == TableMode::TsrOnly {
             assert_eq!(
                 model_tables,
                 structured.len(),
@@ -305,15 +317,15 @@ async fn real_pdfs_use_configured_table_model() {
         .expect("write report");
         eprintln!("{record}");
         runs.push(record);
-        std::fs::write(output.join("report.json"), serde_json::to_vec_pretty(&json!({"status":if coverage.is_err() {"failed"} else {"running"},"mode":mode,"model":"SLANet_plus","initialization_ms":initialized_ms,"runs":runs})).expect("report")).expect("write report");
+        std::fs::write(output.join("report.json"), serde_json::to_vec_pretty(&json!({"status":if coverage.is_err() {"failed"} else {"running"},"mode":mode,"model":model_manifest.as_ref().map(|manifest| manifest.repository.as_str()),"revision":model_manifest.as_ref().map(|manifest| manifest.revision.as_str()),"initialization_ms":initialized_ms,"runs":runs})).expect("report")).expect("write report");
         if coverage.expect("table recovery acceptance failed") == "partial" {
             overall_status = "partial";
         }
     }
-    std::fs::write(output.join("report.json"), serde_json::to_vec_pretty(&json!({"status":overall_status,"mode":mode,"model":"SLANet_plus","revision":docparse_tsr::SLANET_PLUS_REVISION,"initialization_ms":initialized_ms,"runs":runs})).expect("report")).expect("write report");
+    std::fs::write(output.join("report.json"), serde_json::to_vec_pretty(&json!({"status":overall_status,"mode":mode,"model":model_manifest.as_ref().map(|manifest| manifest.repository.as_str()),"revision":model_manifest.as_ref().map(|manifest| manifest.revision.as_str()),"initialization_ms":initialized_ms,"runs":runs})).expect("report")).expect("write report");
 }
 
-/// Both enabled models must initialize from owned bytes even when every configured path is absent.
+/// All default models must initialize from owned bytes even when every configured path is absent.
 #[tokio::test]
 #[ignore = "requires installed pinned layout and TSR artifacts"]
 async fn explicit_parser_artifacts_never_load_configured_paths() {
@@ -330,8 +342,27 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
         &root.join("models/slanet-plus/model-manifest.json"),
     )
     .expect("TSR bytes");
+    let cells = docparse_layout::ModelArtifacts::from_paths(
+        &root.join("models/rtdetr-table-cell-wireless/inference.onnx"),
+        &root.join("models/rtdetr-table-cell-wireless/inference.yml"),
+        &root.join("models/rtdetr-table-cell-wireless/model-manifest.json"),
+    )
+    .expect("cell bytes");
     let absent = tempfile::tempdir().expect("empty model directory");
     let mut raw = docparse_config::RawConfig::default();
+    let cell_files = &mut raw
+        .tsr
+        .cell_detection
+        .as_mut()
+        .expect("default cells")
+        .files;
+    for path in [
+        &mut cell_files.model_path,
+        &mut cell_files.model_config_path,
+        &mut cell_files.model_manifest_path,
+    ] {
+        *path = absent.path().join("missing-artifact");
+    }
     for path in [
         &mut raw.layout.model_path,
         &mut raw.layout.model_config_path,
@@ -346,7 +377,10 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
         ValidatedConfig::try_from(raw).expect("config"),
         docparse_core::ParserArtifacts {
             layout,
-            tsr: Some(tsr),
+            tsr: Some(docparse_tsr::TsrArtifacts {
+                structure: tsr,
+                cell_detection: Some(cells),
+            }),
             ocr: None,
         },
     )

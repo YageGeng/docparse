@@ -8,7 +8,8 @@ mod wasm_compat;
 pub use config::{
     DatabaseConfig, FusionConfig, LayoutConfig, LogConfig, ModelFiles,
     OcrConfig, OcrPolicy, OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
-    ServerConfig, TableMode, TsrConfig,
+    ServerConfig, TableCellConfig, TableCellModel, TableMode, TsrConfig,
+    TsrModel,
 };
 pub use error::ConfigError;
 

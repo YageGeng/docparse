@@ -69,11 +69,27 @@ async fn capture_tsr_source_facts() {
     let directory = std::path::PathBuf::from(
         std::env::var("TSR_CAPTURE_DIR").expect("capture directory"),
     );
-    let document: crate::DocumentResult = serde_json::from_slice(
-        &std::fs::read(directory.join("document-0-full.json"))
-            .expect("document"),
-    )
-    .expect("document JSON");
+    let pages = if directory.join("document-0-full.json").exists() {
+        serde_json::from_slice::<crate::DocumentResult>(
+            &std::fs::read(directory.join("document-0-full.json"))
+                .expect("document"),
+        )
+        .expect("document JSON")
+        .pages
+    } else {
+        vec![
+            serde_json::from_slice::<crate::PageResult>(
+                &std::fs::read(directory.join("result.json"))
+                    .expect("page result"),
+            )
+            .expect("page JSON"),
+        ]
+    };
+    let crops = if directory.join("crops").is_dir() {
+        directory.join("crops")
+    } else {
+        directory.clone()
+    };
     let raw = docparse_config::RawConfig::default();
     let executor = PdfiumExecutor::open(
         PdfInput::Path(std::env::var("TSR_CAPTURE_PDF").expect("PDF").into()),
@@ -81,7 +97,7 @@ async fn capture_tsr_source_facts() {
     )
     .await
     .expect("PDFium");
-    for page in document.pages {
+    for page in pages {
         let tables: Vec<_> = page
             .blocks
             .into_iter()
@@ -100,7 +116,7 @@ async fn capture_tsr_source_facts() {
         for block in tables {
             let spans = assembler.locate(&block).expect("source spans");
             let facts = spans.iter().map(|s| serde_json::json!({"span":s.span,"baseline":s.baseline,"measured_baseline":s.measured_baseline,"mcid":s.mcid})).collect::<Vec<_>>();
-            std::fs::write(directory.join("crops").join(format!("{}.source.json",block.id.as_str().replace(':',"-"))),serde_json::to_vec(&serde_json::json!({"block":block,"words":facts,"rules":extracted.table_evidence.rules.iter().map(|r|match *r {crate::table::TableRule::Horizontal {y,left,right}=>serde_json::json!(["h",y,left,right]),crate::table::TableRule::Vertical {x,top,bottom}=>serde_json::json!(["v",x,top,bottom])}).collect::<Vec<_>>()})).expect("source JSON")).expect("source fixture");
+            std::fs::write(crops.join(format!("{}.source.json",block.id.as_str().replace(':',"-"))),serde_json::to_vec(&serde_json::json!({"block":block,"words":facts,"rules":extracted.table_evidence.rules.iter().map(|r|match *r {crate::table::TableRule::Horizontal {y,left,right}=>serde_json::json!(["h",y,left,right]),crate::table::TableRule::Vertical {x,top,bottom}=>serde_json::json!(["v",x,top,bottom])}).collect::<Vec<_>>()})).expect("source JSON")).expect("source fixture");
         }
     }
     executor.close().await.expect("close PDFium");

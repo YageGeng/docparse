@@ -37,10 +37,10 @@ The root `docparse.toml` is an example configuration. Native inference backends 
 
 Without `--config`, the CLI reads only `./docparse.toml` in the current directory and does not search parents. Library APIs do not load configuration files implicitly.
 
-Table recovery defaults to `tsr.mode = "fallback"`: local rules run first and
-unresolved tables use the pinned
-`PaddlePaddle/SLANet_plus_onnx` revision `7dbe640e127602bf506815e822c09758de73c482`.
-Set `tsr.mode = "external_only"` to send every table to the model,
+The default model combination is SLANet+ with wireless RT-DETR cell detection.
+The root configuration uses `tsr.mode = "tsr_only"` to send every table to TSR.
+Library defaults retain `"fallback"`: local rules run first and unresolved tables
+use that same model combination. Select `"tsr_only"` for every table,
 or `"rules_only"` to retain local behavior without loading TSR artifacts. Layout,
 OCR and TSR share the compiled native backend. Structured
 output keeps the existing `external_tsr` source value and records the engine in
@@ -48,6 +48,9 @@ evidence; a model prediction is accepted only after topology and source validati
 `table.source` distinguishes local `tagged_pdf`, `ruled`, and `text_alignment`
 reconstruction from `external_tsr` model/caller input. The Web inspector displays
 this as Rules or TSR input.
+
+Use `--profile tsr-baseline` (or `tsr.cell_detection.enabled = false`) for pure
+SLANet+, and `--profile tsr-upgraded` to compare SLANeXt wireless plus cell detection.
 
 ## Build and CUDA
 

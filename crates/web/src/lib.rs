@@ -59,6 +59,7 @@ impl From<ArtifactBytes> for ModelArtifacts {
 #[derive(Deserialize)]
 struct AuxiliaryArtifacts {
     tsr: Option<ArtifactBytes>,
+    tsr_cell_detection: Option<ArtifactBytes>,
     ocr: Option<OcrArtifactBytes>,
 }
 
@@ -116,7 +117,12 @@ impl WebParser {
             if validated.tsr().mode == docparse_core::TableMode::RulesOnly {
                 None
             } else {
-                auxiliary.tsr.map(ModelArtifacts::from)
+                auxiliary.tsr.map(|structure| docparse_tsr::TsrArtifacts {
+                    structure: ModelArtifacts::from(structure),
+                    cell_detection: auxiliary
+                        .tsr_cell_detection
+                        .map(ModelArtifacts::from),
+                })
             };
         let ocr_artifacts =
             if validated.ocr().policy == docparse_config::OcrPolicy::Disabled {

@@ -90,6 +90,8 @@ def main() -> None:
         config = tomllib.loads(config_path.read_text())
         assert config["tsr"]["model_path"] == str(model_dir.parent / "slanet-plus/inference.onnx")
         assert config["tsr"]["mode"] == "fallback"
+        assert config["tsr"]["cell_detection"]["enabled"] is True
+        assert config["tsr"]["cell_detection"]["model_path"] == str(model_dir.parent / "rtdetr-table-cell-wireless/inference.onnx")
         assert "execution_provider" not in config["layout"]
         build_command = runner.cargo_build_command("cuda", "release")
         assert isinstance(build_command, list)

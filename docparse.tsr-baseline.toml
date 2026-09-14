@@ -1,0 +1,7 @@
+# Compare SLANet+ alone against the default wireless cell detector combination.
+[tsr]
+mode = "tsr_only"
+model = "slanet_plus"
+
+[tsr.cell_detection]
+enabled = false

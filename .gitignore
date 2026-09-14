@@ -45,3 +45,6 @@ output.json
 /packages/web/dist/
 /packages/web/test-results/
 /packages/web/public/pdfjs/
+
+# Reproducible visual comparison; compact annotations and measurements stay versioned.
+/docs/reports/2026-09-14-tsr-model-comparison/comparison.html

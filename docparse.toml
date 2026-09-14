@@ -27,13 +27,23 @@ model_manifest_path = "models/pp-doclayout-v3/model-manifest.json"
 score_threshold = 0.5
 session_pool_size = 1
 
+# SLANet+ topology with independent wireless-table cell geometry.
 [tsr]
-mode = "fallback"
+mode = "tsr_only"
+model = "slanet_plus"
 model_path = "models/slanet-plus/inference.onnx"
 model_config_path = "models/slanet-plus/inference.yml"
 model_manifest_path = "models/slanet-plus/model-manifest.json"
 max_in_flight = 8
 timeout_ms = 60000
+
+[tsr.cell_detection]
+enabled = true
+model = "wireless"
+score_threshold = 0.3
+model_path = "models/rtdetr-table-cell-wireless/inference.onnx"
+model_config_path = "models/rtdetr-table-cell-wireless/inference.yml"
+model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
 
 [ocr]
 policy = "disabled"

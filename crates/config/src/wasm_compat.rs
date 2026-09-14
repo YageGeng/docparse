@@ -190,6 +190,17 @@ mod platform {
     impl RawConfig {
         /// Resolves all relative model artifact paths against the primary configuration directory.
         fn resolve_paths(&mut self, base_directory: &Path) {
+            if let Some(cells) = &mut self.tsr.cell_detection {
+                for path in [
+                    &mut cells.files.model_path,
+                    &mut cells.files.model_config_path,
+                    &mut cells.files.model_manifest_path,
+                ] {
+                    if path.is_relative() {
+                        *path = base_directory.join(&*path);
+                    }
+                }
+            }
             for path in [
                 &mut self.layout.model_path,
                 &mut self.layout.model_config_path,

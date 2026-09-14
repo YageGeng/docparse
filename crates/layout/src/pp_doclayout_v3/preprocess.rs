@@ -21,6 +21,23 @@ struct InterpolationWeights {
     coefficients: [i32; 4],
 }
 
+impl PageImage {
+    /// Reuses the verified OpenCV-compatible RGB resize for other detection model families.
+    pub fn resize_rgb_cubic(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>, PreprocessError> {
+        resize_inter_cubic(
+            self.data(),
+            self.width(),
+            self.height(),
+            width,
+            height,
+        )
+    }
+}
+
 /// Runs OpenCV-compatible RGB8 INTER_CUBIC resize and NCHW normalization.
 pub(crate) fn preprocess(
     image: &PageImage,
@@ -36,13 +53,7 @@ pub(crate) fn preprocess(
         });
     }
     let (model_width, model_height) = transform.model_size();
-    let resized = resize_inter_cubic(
-        image.data().as_ref(),
-        image.width(),
-        image.height(),
-        model_width,
-        model_height,
-    )?;
+    let resized = image.resize_rgb_cubic(model_width, model_height)?;
 
     let model_width_usize = usize::try_from(model_width)
         .map_err(|_source| PreprocessError::ArithmeticOverflow)?;

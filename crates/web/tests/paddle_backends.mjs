@@ -52,10 +52,11 @@ try {
         parser = await createParser({
           ...(scenario.provider ? { executionProvider: scenario.provider } : {}),
           allowCpuFallback: scenario.fallback ?? false,
-          // Backend checks force both models; ordinary parsing defaults to rules first.
-          config: { tsr: { mode: 'external_only' } },
+          // Backend checks force all default models; ordinary parsing defaults to rules first.
+          config: { tsr: { mode: 'tsr_only' } },
           artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
           tsrArtifacts: { kind: 'urls', model: '/models/slanet-plus/inference.onnx', config: '/models/slanet-plus/inference.yml', manifest: '/models/slanet-plus/model-manifest.json' },
+          tsrCellArtifacts: { kind: 'urls', model: '/models/rtdetr-table-cell-wireless/inference.onnx', config: '/models/rtdetr-table-cell-wireless/inference.yml', manifest: '/models/rtdetr-table-cell-wireless/model-manifest.json' },
         });
         const document = await parser.parse(new Uint8Array(bytes));
         return { provider: parser.executionProvider, pages: document.pages.length, errors: document.errors,
@@ -73,11 +74,11 @@ try {
       assert.equal(result.pages, 1, 'Supply one real table page for unambiguous per-model GPU measurements');
       assert.equal(result.errors.length, 0);
       assert(result.tables.length > 0);
-      assert.equal(result.metrics.sessions, 2, 'A failed GPU attempt leaked a live session');
+      assert.equal(result.metrics.sessions, 3, 'A failed GPU attempt leaked a live session');
       assert.equal(result.metrics.liveTensors, 0, 'Inference retained completed input/output tensors');
-      const engine = `slanet-plus-onnx-${scenario.expected === 'webgpu' ? 'webgpu' : 'cpu'}`;
+      const engine = `slanet-plus-onnx-${scenario.expected === 'webgpu' ? 'webgpu' : 'cpu'}+rtdetr-wireless`;
       assert(result.tables.every(b => b.table?.source === 'external_tsr' && b.evidence.some(e => e.details?.engine === engine)));
-      for (const name of ['layout', 'tsr']) {
+      for (const name of ['layout', 'tsr', 'tsr_cell_detection']) {
         const model = result.metrics.models.find(m => m.name === name && m.calls > 0);
         assert(model && model.providers.some(p => (p.name ?? p) === scenario.expected), `${name} did not use ${scenario.expected}`);
         assert(scenario.expected === 'webgpu' ? model.gpuSubmissions > 0 : model.gpuSubmissions === 0, `${name} GPU activity contradicts provider`);

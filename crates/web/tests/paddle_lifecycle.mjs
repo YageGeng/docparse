@@ -21,9 +21,10 @@ try {
     const { createParser } = await import('/dist/index.js');
     const options = {
       // Omitted provider must select WebGPU; explicitly request model work for lifecycle checks.
-      config: { tsr: { mode: 'external_only' } },
+      config: { tsr: { mode: 'tsr_only' } },
       artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
       tsrArtifacts: { kind: 'urls', model: '/models/slanet-plus/inference.onnx', config: '/models/slanet-plus/inference.yml', manifest: '/models/slanet-plus/model-manifest.json' },
+      tsrCellArtifacts: { kind: 'urls', model: '/models/rtdetr-table-cell-wireless/inference.onnx', config: '/models/rtdetr-table-cell-wireless/inference.yml', manifest: '/models/rtdetr-table-cell-wireless/model-manifest.json' },
     };
     const data = new Uint8Array(bytes);
     const controller = new AbortController();
@@ -39,7 +40,7 @@ try {
     const tables = doc => doc.pages.flatMap(p => p.blocks.filter(b => b.label === 'table').map(b => b.table ? [b.table.source, b.table.row_count, b.table.column_count, b.table.cells.map(c => [c.row,c.column,c.row_span,c.column_span,c.text])] : null));
     try {
       const first = await parser.parse(data);
-      const timed = await parser.parse(data, { table: { mode: 'external_only', timeout_ms: 1 } });
+      const timed = await parser.parse(data, { table: { mode: 'tsr_only', timeout_ms: 1 } });
       const repeated = await parser.parse(data);
       const codes = timed.pages.flatMap(p => p.warnings.map(w => w.code));
       return { abortCode, recoveredAfterAbort: tables(first).some(Boolean), stableReuse: JSON.stringify(tables(first)) === JSON.stringify(tables(repeated)), deadlineObserved: codes.includes('TableExternalTimeout'), timedCodes: codes, repeatedErrors: repeated.errors, repeatedWarnings: repeated.pages.map(p => p.warnings), firstTables: tables(first), repeatedTables: tables(repeated), provider: parser.executionProvider };

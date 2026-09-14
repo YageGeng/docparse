@@ -215,7 +215,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     // A full TSR stage must not retain OCR's slot for the following page.
     let gate = Arc::new(Semaphore::new(0));
     let mut raw = RawConfig::default();
-    raw.tsr.mode = TableMode::ExternalOnly;
+    raw.tsr.mode = TableMode::TsrOnly;
     raw.ocr.policy = OcrPolicy::Always;
     raw.runtime.page_concurrency = 1;
     raw.runtime.render_queue_capacity = 1;

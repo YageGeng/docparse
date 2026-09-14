@@ -25,7 +25,7 @@ WebParser.prototype.parse_with_options = function(bytes, options, callbacks) {
   if (fault === 'callback-type') callbacks.progress = 42;
   if (fault === 'callback-throw') callbacks.progress = () => { throw new Error('observer rejected'); };
   if (fault.startsWith('table-')) {
-    options = { mode: 'external_only' };
+    options = { mode: 'tsr_only' };
     callbacks.table_cancel = () => {};
     callbacks.table_request = request => {
       if (fault === 'table-throw') throw Object.defineProperty({}, 'message', { get() { throw new Error('nested message getter rejected'); } });

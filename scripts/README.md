@@ -10,9 +10,10 @@ per-script lockfiles are no longer used. Python subprocesses reuse uv's interpre
 rtk uv run --locked scripts/download_models.py
 ```
 
-This checks all five pinned models under the repository's `models/` directory:
-PP-DocLayoutV3, SLANet_plus, PP-OCRv6 detection, PP-OCRv6 recognition, and text-line
-orientation. Valid files are left untouched, missing or corrupt artifacts are
+This checks all nine pinned models under the repository's `models/` directory:
+PP-DocLayoutV3, SLANet_plus, both SLANeXt variants, both RT-DETR table-cell variants,
+PP-OCRv6 detection, PP-OCRv6 recognition, and text-line orientation.
+Valid files are left untouched, missing or corrupt artifacts are
 downloaded to temporary files and SHA-256 verified, and the manifest is published
 last. A missing manifest is rebuilt from verified local artifacts without fetching
 the weights again. Any failed model makes the command fail, while other models are

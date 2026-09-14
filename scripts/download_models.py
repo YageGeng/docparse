@@ -22,6 +22,10 @@ MODEL_BASE_URL = (
 MODEL_NAMES = (
     "pp-doclayout-v3",
     "slanet-plus",
+    "slanext-wired",
+    "slanext-wireless",
+    "rtdetr-table-cell-wired",
+    "rtdetr-table-cell-wireless",
     "pp-ocrv6-medium-det",
     "pp-ocrv6-medium-rec",
     "pp-lcnet-textline-ori",
@@ -67,6 +71,26 @@ class Model:
             return cls(name, MODEL_REPOSITORY, MODEL_REVISION, ARTIFACTS)
         # OCR model/config pairs carry their dictionaries and preprocessing contract together.
         ocr_models = {
+            "slanext-wired": (
+                "SLANeXt_wired_onnx", "04356de883011f433f83e5098793f3a501a9af6e",
+                "0a6e063b56e35a434eb6669eb2342113c6bd76a6ce5acaa0331f370c9e00732f",
+                "abbbd1b4dc6b1a2e9cd34c035514da53a1a6b1ec267292b0b8802025650a33bf",
+            ),
+            "slanext-wireless": (
+                "SLANeXt_wireless_onnx", "9207aaed01d1bbb0743af384bac5b0bd35869ba3",
+                "5c79ee87cce6712f8f640394decce72157bd1df13c9bccf86d071bd07a6e9f97",
+                "58d1d7fdffd3e58cfec98571b817ea012f2107d644bd4f8e4607fae84f1923a6",
+            ),
+            "rtdetr-table-cell-wired": (
+                "RT-DETR-L_wired_table_cell_det_onnx", "b2c0720b5fe6f1c0dd40f8a7993a3f28e04252f8",
+                "bf5490020512a31f43813d90feadae9526a2c3474ffe807571f2c23594f5958f",
+                "edf6d6180f2b9e3e666c744ee5ded38a72c6ef9056cd193250e3e55ba268acef",
+            ),
+            "rtdetr-table-cell-wireless": (
+                "RT-DETR-L_wireless_table_cell_det_onnx", "94c021be206064f0136ef1383fbd4b68b168fa61",
+                "47515940ec5c37156e09aa9acb20c4e7e22456cad6ce49473661f1762fb46a78",
+                "f2d0f00ea42aacc162f72a35cf54330e392a7d669e9a1b43896d3bd77a512621",
+            ),
             "pp-ocrv6-medium-det": (
                 "PP-OCRv6_medium_det_onnx",
                 "61323801669c338b7891481ec7bac61ce31b576a",

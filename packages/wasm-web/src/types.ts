@@ -49,7 +49,7 @@ export interface OcrOptions {
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
   layout?: { score_threshold?: number; session_pool_size?: number };
-  tsr?: TableOptions;
+  tsr?: TableOptions & { model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; model?: "wired" | "wireless"; score_threshold?: number } };
   runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
   render?: { dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;
@@ -65,6 +65,8 @@ export interface WebParserOptions {
   artifacts: ModelSource;
   /** Required for the default rules-first TSR fallback; omit only with config.tsr.mode = "rules_only". */
   tsrArtifacts?: ModelSource;
+  /** Required by default; omit when TSR is rules_only or cell_detection.enabled is false. */
+  tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
   runtimeBaseUrl?: string;
@@ -88,14 +90,14 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdfium_queue" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "runtime_load" | "model_download" | "model_init" | "pdfium_queue" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "table_cell_preprocess" | "table_cell_inference" | "table_cell_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }
 /** A PNG of the exact PDFium raster used for inference, without any overlay baked in. */
 export interface PageImageResult { pageNumber: number; width: number; height: number; blob: Blob }
 /** Structural recovery is scoped to regions already labeled table by layout. */
-export type TableMode = "rules_only" | "fallback" | "external_only";
+export type TableMode = "rules_only" | "fallback" | "tsr_only";
 /** Per-parse table overrides; omitted options inherit the parser's configured TSR policy. */
 export interface TableOptions { mode?: TableMode; max_in_flight?: number; timeout_ms?: number }
 /** An affine map from crop pixels to canonical viewport points. */
@@ -107,11 +109,11 @@ export interface TsrTableRequest {
   block_id: string;
   crop_bbox: Bbox;
   crop_to_viewport: AffineTransform;
-  reason: { kind: "external_only" } | { kind: "rules_failed"; message: string };
+  reason: { kind: "tsr_only" } | { kind: "rules_failed"; message: string };
   image: { width: number; height: number; blob: Blob };
 }
 /** Structure tokens paired one-to-one with cell boxes in the original request image's pixel space. */
-export interface TsrTableInput { request_id: string; structure_tokens: string[]; cell_bboxes: number[][] }
+export interface TsrTableInput { request_id: string; structure_tokens: string[]; cell_bboxes: number[][]; detected_cell_bboxes?: number[][] }
 
 /** Per-call cancellation and observations retained on the calling thread. */
 export interface ParseOptions {

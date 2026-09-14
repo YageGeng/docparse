@@ -86,6 +86,7 @@ Object.defineProperty(globalThis, "ort", {
           rustMemory.grow(1);
           metrics.forcedMemoryGrowth = (metrics.forcedMemoryGrowth ?? 0) + 1;
         }
+        if (args[0].image?.dims?.[2] === 640) model.name = "tsr_cell_detection";
         metrics.calls++;
         metrics.fetches = Array.isArray(args[1]) ? args[1] : Object.keys(args[1] ?? {});
         const started = performance.now();

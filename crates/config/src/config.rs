@@ -372,19 +372,78 @@ pub enum TableMode {
     RulesOnly,
     #[default]
     Fallback,
-    ExternalOnly,
+    TsrOnly,
 }
 
-/// SLANet_plus artifacts and per-document table policy; backend selection belongs to the build.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+/// Selects a fixed table structure model independently of its artifact paths.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TsrModel {
+    #[default]
+    SlanetPlus,
+    SlanextWired,
+    SlanextWireless,
+}
+
+/// Selects the dedicated detector for the table image family under evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableCellModel {
+    Wired,
+    Wireless,
+}
+
+/// Independently verified detection artifacts and the acceptance threshold for cells.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default)]
+pub struct TableCellConfig {
+    /// Allows layered profiles to disable the default detector without removing its paths.
+    #[builder(default = true)]
+    pub enabled: bool,
+    pub model: TableCellModel,
+    #[serde(flatten)]
+    pub files: ModelFiles,
+    pub score_threshold: f64,
+}
+
+impl Default for TableCellConfig {
+    /// Uses the wireless RT-DETR model alongside SLANet+ structure recognition.
+    fn default() -> Self {
+        Self::builder()
+            .model(TableCellModel::Wireless)
+            .files(ModelFiles::in_directory(
+                "models/rtdetr-table-cell-wireless",
+            ))
+            .score_threshold(0.3)
+            .build()
+    }
+}
+
+/// Structure artifacts, optional cell detection and per-document policy; the build selects the backend.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct TsrConfig {
+    #[serde(default)]
+    #[builder(default)]
+    pub model: TsrModel,
+    #[serde(default = "TsrConfig::default_cell_detection")]
+    #[builder(default = TsrConfig::default_cell_detection())]
+    pub cell_detection: Option<TableCellConfig>,
     pub model_path: PathBuf,
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub mode: TableMode,
     pub max_in_flight: usize,
     pub timeout_ms: u64,
+}
+
+impl TsrConfig {
+    /// Keeps serialized and builder defaults aligned for the recommended model combination.
+    fn default_cell_detection() -> Option<TableCellConfig> {
+        Some(TableCellConfig::default())
+    }
 }
 
 impl Default for TsrConfig {

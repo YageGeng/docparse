@@ -64,6 +64,11 @@ impl TryFrom<(&TsrTableRequest, Bbox, TsrTableInput, TsrGeometryPolicy)>
         ),
     ) -> Result<Self, Self::Error> {
         let invalid = |reason| TableStructureError::InvalidInput { reason };
+        if policy == TsrGeometryPolicy::Declared
+            && !input.detected_cell_bboxes.is_empty()
+        {
+            return Err(invalid("independent detection matching requires the predicted geometry policy".to_owned()));
+        }
         let bounds = if policy == TsrGeometryPolicy::Predicted {
             request.crop_bbox
         } else {
@@ -129,7 +134,9 @@ impl StructureDecoder {
         }
         if input.structure_tokens.is_empty()
             || input.structure_tokens.len() > MAX_TABLE_CELLS * 16
-            || input.cell_bboxes.is_empty()
+            || (input.cell_bboxes.is_empty()
+                && input.detected_cell_bboxes.is_empty())
+            || input.detected_cell_bboxes.len() > 300
             || input.cell_bboxes.len() > MAX_TABLE_CELLS
             || input
                 .structure_tokens
@@ -278,11 +285,15 @@ impl StructureDecoder {
                             }
                         }
                     }
-                    let raw_box = input
-                        .cell_bboxes
-                        .get(cells.len())
-                        .ok_or("fewer boxes than cell tokens")?;
-                    let bbox = Self::cell_box(request, table_bbox, raw_box)?;
+                    let bbox = if input.cell_bboxes.is_empty() {
+                        None
+                    } else {
+                        let raw_box = input
+                            .cell_bboxes
+                            .get(cells.len())
+                            .ok_or("fewer boxes than cell tokens")?;
+                        Some(Self::cell_box(request, table_bbox, raw_box)?)
+                    };
                     cells.push(
                         TableCell::builder()
                             .row(row)
@@ -290,7 +301,7 @@ impl StructureDecoder {
                             .row_span(row_span)
                             .column_span(column_span)
                             .is_header(is_th || stack.contains(&"thead"))
-                            .bbox(Some(bbox))
+                            .bbox(bbox)
                             .build(),
                     );
                     if cells.len() > MAX_TABLE_CELLS {
@@ -305,15 +316,27 @@ impl StructureDecoder {
                 _ => return Err("unsupported table structure token".to_owned()),
             }
         }
-        if !stack.is_empty() || cells.len() != input.cell_bboxes.len() {
+        if !stack.is_empty()
+            || (!input.cell_bboxes.is_empty()
+                && cells.len() != input.cell_bboxes.len())
+        {
             return Err("unbalanced tokens or unmatched cell boxes".to_owned());
         }
-        Ok(Table::builder()
+        let mut table = Table::builder()
             .row_count(row_count)
             .column_count(column_count)
             .cells(cells)
             .source(TableStructureSource::ExternalTsr)
-            .build())
+            .build();
+        if !input.detected_cell_bboxes.is_empty() {
+            let boxes = input
+                .detected_cell_bboxes
+                .iter()
+                .map(|raw| Self::cell_box(request, table_bbox, raw))
+                .collect::<Result<Vec<_>, _>>()?;
+            table.match_detected_cells(boxes)?;
+        }
+        Ok(table)
     }
 
     /// Validates crop pixels, transforms their corners, and removes sampling margins outside the layout.
@@ -412,6 +435,105 @@ impl StructureDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Detector order and count cannot be treated as the structure token order.
+    #[test]
+    fn independent_detection_binds_topology_without_structure_positions() {
+        let request = request();
+        let raw = serde_json::json!({
+            "request_id": request.request_id,
+            "structure_tokens": ["<tr>", "<td", " colspan=\"2\"", ">", "</td>", "</tr>", "<tr>", "<td></td>", "<td></td>", "</tr>"],
+            "cell_bboxes": [],
+            "detected_cell_bboxes": [[50, 15, 100, 30], [0, 0, 100, 15], [0, 15, 50, 30], [1, 0, 99, 15]]
+        });
+        let input: TsrTableInput =
+            serde_json::from_value(raw).expect("independent detections");
+        assert!(matches!(
+            CellGrid::try_from((
+                &request,
+                request.crop_bbox,
+                input.clone(),
+                TsrGeometryPolicy::Declared
+            )),
+            Err(TableStructureError::InvalidInput { .. })
+        ));
+        let grid = CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            input,
+            TsrGeometryPolicy::Predicted,
+        ))
+        .expect("detected grid");
+        assert_eq!((grid.table().row_count, grid.table().column_count), (2, 2));
+        assert_eq!(grid.table().cells.first().expect("header").column_span, 2);
+        assert!(
+            grid.table()
+                .cells
+                .get(1)
+                .expect("left")
+                .bbox
+                .expect("left cell")
+                .center()
+                .x
+                < grid
+                    .table()
+                    .cells
+                    .get(2)
+                    .expect("right")
+                    .bbox
+                    .expect("right cell")
+                    .center()
+                    .x
+        );
+    }
+
+    /// A compatible detector row order must correct crossed position-head anchors, not inherit their mistake.
+    #[test]
+    fn compatible_detector_rows_replace_crossed_structure_anchors() {
+        let request = request();
+        let input: TsrTableInput = serde_json::from_value(serde_json::json!({
+            "request_id": request.request_id,
+            "structure_tokens": ["<tr>", "<td></td>", "<td></td>", "</tr>", "<tr>", "<td></td>", "<td></td>", "</tr>"],
+            "cell_bboxes": [[50,0,100,15],[0,0,50,15],[0,15,50,30],[50,15,100,30]],
+            "detected_cell_bboxes": [[50,15,100,30],[0,0,50,15],[50,0,100,15],[0,15,50,30]]
+        })).expect("independent inputs");
+        let grid = CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            input,
+            TsrGeometryPolicy::Predicted,
+        ))
+        .expect("grid");
+        let cells = &grid.table().cells;
+        assert!(
+            cells.first().expect("first").bbox.expect("box").left
+                < cells.get(1).expect("second").bbox.expect("box").left
+        );
+    }
+
+    /// A detector's coarse box cannot enlarge one fine-grained cell across a neighboring logical row.
+    #[test]
+    fn coarse_detections_preserve_finer_structure_rows() {
+        let request = request();
+        let input: TsrTableInput = serde_json::from_value(serde_json::json!({
+            "request_id": request.request_id,
+            "structure_tokens": ["<tr>", "<td></td>", "<td></td>", "</tr>", "<tr>", "<td></td>", "<td></td>", "</tr>"],
+            "cell_bboxes": [[0,0,50,15],[50,0,100,15],[0,15,50,30],[50,15,100,30]],
+            "detected_cell_bboxes": [[0,0,50,30],[50,0,100,30]]
+        })).expect("independent inputs");
+        let grid = CellGrid::try_from((
+            &request,
+            request.crop_bbox,
+            input,
+            TsrGeometryPolicy::Predicted,
+        ))
+        .expect("fine grid");
+        let cells = &grid.table().cells;
+        assert!(
+            cells.first().expect("upper").bbox.expect("box").bottom
+                <= cells.get(2).expect("lower").bbox.expect("box").top
+        );
+    }
     use crate::{BlockId, TsrRequestReason};
     use docparse_layout::{
         AffineTransform, PageImage, PageImageInput, PixelFormat,
@@ -446,7 +568,7 @@ mod tests {
                     .f(20.0)
                     .build(),
             )
-            .reason(TsrRequestReason::ExternalOnly)
+            .reason(TsrRequestReason::TsrOnly)
             .build()
     }
 

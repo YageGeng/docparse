@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { tableCoverage } from './coverage.mjs';
+import { validateTableMode, tableCoverage } from './coverage.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -12,7 +12,7 @@ const { values, positionals: files } = parseArgs({ allowPositionals: true, optio
   'allow-unresolved': { type: 'boolean', default: false },
 } });
 assert(files.length > 0, 'Supply actual PDF paths after the options');
-assert(['external_only','fallback','rules_only'].includes(values.mode));
+values.mode = validateTableMode(values.mode);
 const output = resolve(values.output);
 await mkdir(dirname(output), { recursive: true });
 const report = { status: 'running', model: 'PaddlePaddle/SLANet_plus_onnx', revision: '7dbe640e127602bf506815e822c09758de73c482', mode: values.mode, startedAt: new Date().toISOString(), runs: [] };
@@ -57,12 +57,12 @@ try {
     const models = structured.filter(t => t.table.source === 'external_tsr');
     const inference = result.timings.filter(t => t.stage === 'tsr_inference');
     const coverage = tableCoverage(tables.length, structured.length, values['allow-unresolved']);
-    if (values.mode === 'external_only') {
+    if (values.mode === 'tsr_only') {
       assert.equal(models.length, structured.length, 'Default TSR silently substituted local rules');
       assert(inference.length >= models.length && inference.length > 0, 'No real table model inference reached the output');
-      assert(models.every(t => t.evidence.some(e => e.kind === 'external_table_structure' && e.details.engine === 'slanet-plus-onnx-webgpu')), 'Structured output must identify the real model');
+      assert(models.every(t => t.evidence.some(e => e.kind === 'external_table_structure' && e.details.engine === 'slanet-plus-onnx-webgpu+rtdetr-wireless')), 'Structured output must identify the real model');
     }
-    if (values.mode === 'external_only' && !values['allow-unresolved'] && basename(file) === '2303.18223v16.pdf') {
+    if (values.mode === 'tsr_only' && !values['allow-unresolved'] && basename(file) === '2303.18223v16.pdf') {
       const at = number => result.pages.find(p => p.page === number).tables;
       const shapes = [[8,58,13],[24,16,3],[33,6,13],[47,28,3],[57,21,4],[68,19,6],[82,11,2]];
       for (const [number,rows,columns] of shapes) {

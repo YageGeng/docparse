@@ -1,65 +1,81 @@
 //! One session per model, with owned inputs retained through actual native/JS execution.
 use crate::{
-    SlanetPlusEngine, TsrError, model::ModelOutputs, preprocess::SlanetInput,
+    SlanetPlusEngine, TsrError, artifacts::ModelKind, model::ModelResult,
+    preprocess::ModelInput,
 };
 use docparse_layout::wasm_compat::OnnxBackend;
 use docparse_layout::{
     ModelArtifacts,
     timing::{TimingStage, Timings},
 };
-use ort::{session::builder::SessionBuilder, value::TensorRef};
+use ort::session::builder::SessionBuilder;
 use std::sync::Arc;
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
+    use crate::TsrArtifacts;
     use docparse_layout::wasm_compat::SessionWorker;
     use ort::session::Session;
 
     /// Serializes only the TSR session, leaving layout inference independent.
     pub(crate) struct SessionRunner {
         session: SessionWorker<Session>,
+        kind: ModelKind,
     }
     impl SessionRunner {
         /// Initializes the configured graph on its dedicated inference thread.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
             backend: OnnxBackend,
+            kind: ModelKind,
         ) -> Result<Arc<Self>, TsrError> {
             let session = SessionWorker::new(move || {
-                // Preprocessing always produces [1, 3, 488, 488]. Specialize the pinned
-                // model's free dimensions so accelerator shape inference sees that contract.
-                Ok::<_, TsrError>(
-                    SessionBuilder::try_from(backend)?
-                        .with_dimension_override("DynamicDimension.0", 1)
-                        .map_err(ort::Error::from)?
+                // Only input dimensions are specialized; similarly named output symbols have other meanings.
+                let mut builder = SessionBuilder::try_from(backend)?
+                    .with_intra_threads(1)
+                    .map_err(ort::Error::from)?;
+                let batch_dimension = if matches!(kind, ModelKind::Cells(_)) {
+                    "DynamicDimension.2"
+                } else {
+                    "DynamicDimension.0"
+                };
+                builder = builder
+                    .with_dimension_override(batch_dimension, 1)
+                    .map_err(ort::Error::from)?;
+                if matches!(
+                    kind,
+                    ModelKind::Structure(docparse_config::TsrModel::SlanetPlus)
+                ) {
+                    builder = builder
                         .with_dimension_override("DynamicDimension.1", 488)
                         .map_err(ort::Error::from)?
                         .with_dimension_override("DynamicDimension.2", 488)
-                        .map_err(ort::Error::from)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?
-                        .commit_from_memory(&artifacts.model)?,
-                )
+                        .map_err(ort::Error::from)?;
+                }
+                Ok::<_, TsrError>(builder.commit_from_memory(&artifacts.model)?)
             })
             .await?;
             // ponytail: one session serializes TSR crops; add a pool only if measured throughput needs it.
-            Ok(Arc::new(Self { session }))
+            Ok(Arc::new(Self { session, kind }))
         }
 
         /// Runs on the same thread for every crop while retaining tensors through actual completion.
         pub(crate) async fn run(
             self: Arc<Self>,
-            input: SlanetInput,
+            input: ModelInput,
             timings: Timings,
-        ) -> Result<ModelOutputs, TsrError> {
+        ) -> Result<ModelResult, TsrError> {
             let queued = timings.start(TimingStage::TsrQueue);
-            self.session.run(move |session| {
-                drop(queued);
-                let _timer = timings.start(TimingStage::TsrInference);
-                let outputs = session.run(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? })?;
-                ModelOutputs::try_from(&outputs)
-            }).await?
+            let kind = self.kind;
+            self.session
+                .run(move |session| {
+                    drop(queued);
+                    let _timer = timings.start(kind.timing());
+                    let outputs = session.run(input.values()?)?;
+                    ModelResult::try_from((kind, &outputs))
+                })
+                .await?
         }
     }
 
@@ -70,11 +86,28 @@ mod platform {
         ) -> Result<Self, TsrError> {
             let paths = Arc::clone(&config);
             let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
-                ModelArtifacts::from_paths(
+                let structure = ModelArtifacts::from_paths(
                     &paths.tsr().model_path,
                     &paths.tsr().model_config_path,
                     &paths.tsr().model_manifest_path,
-                )
+                )?;
+                let cell_detection = paths
+                    .tsr()
+                    .cell_detection
+                    .as_ref()
+                    .filter(|cells| cells.enabled)
+                    .map(|cells| {
+                        ModelArtifacts::from_paths(
+                            &cells.files.model_path,
+                            &cells.files.model_config_path,
+                            &cells.files.model_manifest_path,
+                        )
+                    })
+                    .transpose()?;
+                Ok::<_, TsrError>(TsrArtifacts {
+                    structure,
+                    cell_detection,
+                })
             })
             .await??;
             Self::from_artifacts(config, artifacts).await
@@ -91,8 +124,8 @@ mod platform {
     /// A queued crop owns its tensor until the actor finishes or skips canceled work.
     #[derive(typed_builder::TypedBuilder)]
     struct Request {
-        input: SlanetInput,
-        response: oneshot::Sender<Result<ModelOutputs, TsrError>>,
+        input: ModelInput,
+        response: oneshot::Sender<Result<ModelResult, TsrError>>,
         timings: Timings,
         queued: docparse_layout::timing::StageTimer,
     }
@@ -104,6 +137,7 @@ mod platform {
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
             backend: OnnxBackend,
+            kind: ModelKind,
         ) -> Result<Arc<Self>, TsrError> {
             let mut session = SessionBuilder::try_from(backend)?
                 .commit_from_memory(&artifacts.model)
@@ -122,11 +156,20 @@ mod platform {
                     }
                     drop(request.queued);
                     let result = async {
-                        let _timer = request.timings.start(TimingStage::TsrInference);
-                        let mut outputs = session.run_async(ort::inputs! { "x" => TensorRef::from_array_view(&request.input.0)? }, &options).await?;
-                        ort_web::sync_outputs(&mut outputs).await.map_err(|error| TsrError::Inference { message: format!("TSR output synchronization failed: {error}") })?;
-                        ModelOutputs::try_from(&outputs)
-                    }.await;
+                        let _timer = request.timings.start(kind.timing());
+                        let mut outputs = session
+                            .run_async(request.input.values()?, &options)
+                            .await?;
+                        ort_web::sync_outputs(&mut outputs).await.map_err(
+                            |error| TsrError::Inference {
+                                message: format!(
+                                    "TSR output synchronization failed: {error}"
+                                ),
+                            },
+                        )?;
+                        ModelResult::try_from((kind, &outputs))
+                    }
+                    .await;
                     let _ = request.response.send(result);
                 }
                 tracing::debug!("closed browser TSR session");
@@ -137,9 +180,9 @@ mod platform {
         /// Sends owned buffers so a timed-out caller cannot release input memory during a JS Promise.
         pub(crate) async fn run(
             self: Arc<Self>,
-            input: SlanetInput,
+            input: ModelInput,
             timings: Timings,
-        ) -> Result<ModelOutputs, TsrError> {
+        ) -> Result<ModelResult, TsrError> {
             let queued = timings.start(TimingStage::TsrQueue);
             let (response, receiver) = oneshot::channel();
             self.sender

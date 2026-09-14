@@ -162,10 +162,11 @@ def verify_pdf_corpus(
 
 
 def verify_model(workspace: Path, model_dir: Path) -> None:
-    """Verify both enabled model families using the current uv-managed interpreter."""
+    """Verify all default model families using the current uv-managed interpreter."""
     for name, directory in [
         ("pp-doclayout-v3", model_dir),
         ("slanet-plus", model_dir.parent / "slanet-plus"),
+        ("rtdetr-table-cell-wireless", model_dir.parent / "rtdetr-table-cell-wireless"),
     ]:
         subprocess.run(
             [sys.executable, str(workspace / "scripts/download_models.py"),
@@ -187,6 +188,7 @@ def write_config(
     session_pool_size = 1 if execution_provider == "cuda" else page_concurrency
     # The current parser enables TSR by default; temporary run directories cannot supply its code-default relative paths.
     table_dir = model_dir.parent / "slanet-plus"
+    cell_dir = model_dir.parent / "rtdetr-table-cell-wireless"
     payload = f'''[layout]
 model_path = "{(model_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(model_dir / 'inference.yml').as_posix()}"
@@ -199,6 +201,12 @@ model_path = "{(table_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(table_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(table_dir / 'model-manifest.json').as_posix()}"
 mode = "fallback"
+
+[tsr.cell_detection]
+enabled = true
+model_path = "{(cell_dir / 'inference.onnx').as_posix()}"
+model_config_path = "{(cell_dir / 'inference.yml').as_posix()}"
+model_manifest_path = "{(cell_dir / 'model-manifest.json').as_posix()}"
 
 [runtime]
 page_concurrency = {page_concurrency}
