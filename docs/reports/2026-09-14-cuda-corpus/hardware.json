@@ -1,0 +1,11 @@
+{
+  "cpu": "Intel Core i9-14900HX",
+  "physical_cores": 24,
+  "logical_cpus": 32,
+  "ram_gib": 62.575931549072266,
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_memory_mib": 8188,
+  "driver": "615.71.09",
+  "os": "Linux-7.2.4-1-cachyos-x86_64-with-glibc2.44",
+  "base_commit": "818c0259e42488598296cd2eabe535cd10f8280a"
+}

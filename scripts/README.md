@@ -35,6 +35,7 @@ an explicitly selected single model; use `--models-dir` for an alternative root.
 | `check_wasm_compat.py` | Enforce Rust platform boundaries; used by pre-commit | Standard library |
 | `compare_e2e_runs.py` | Compare canonical native E2E hashes and document identities | Standard library |
 | `run_real_pdf_e2e.py` | Validate the exact corpus and run production native E2E | `dev` |
+| `benchmark.py` | Compare shared-model document concurrency with GPU/process telemetry | `dev` |
 | `reference_layout.py` | Generate an independent PaddleX/ONNX layout oracle | `reference` |
 
 The native E2E runner verifies layout and the sibling `slanet-plus` installation
@@ -68,6 +69,22 @@ removed. The unused legal-file synchronization script, whose crate list was stal
 was also removed. Model oracles and fixture generators are retained for reproducibility.
 
 ## Checks
+
+The native benchmark warms every enabled model, measures every PDF in the input
+directory, and separately records parsing, compact JSON writing, and file sync.
+Stage values are `(count, total_ms, max_ms)`; nested or overlapping stages must not
+be added into wall time. Failed/degraded runs are explicitly marked invalid.
+
+```sh
+rtk cargo build -p docparse-core --example benchmark --release --features layout-cuda,ocr-cuda,tsr-cuda
+rtk uv run --locked --group dev scripts/benchmark.py --pdf-dir ~/Downloads/docs \
+  --output-dir /tmp/docparse-benchmark --concurrency 1 2 4 --repeats 2
+```
+
+The output directory must not already exist. Use an otherwise idle GPU; process
+CPU percentages use 100% per logical CPU, and GPU samples include desktop activity.
+Temporary serialized results use the output directory's filesystem and are removed
+after measurement. Database/HTTP submission and client download time are excluded.
 
 ```sh
 rtk uv run --locked crates/layout/tests/python/download_models_test.py

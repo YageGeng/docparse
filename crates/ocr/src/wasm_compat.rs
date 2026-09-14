@@ -59,10 +59,13 @@ mod platform {
             self.session
                 .run(move |session| {
                     drop(queued);
-                    let _timer = timings.start(kind.timing());
+                    let inference = timings.start(kind.timing());
                     let outputs = session.run(
                     ort::inputs! {"x"=>TensorRef::from_array_view(&input.0)?},
                 )?;
+                    // Dense CTC probability validation and argmax execute on the CPU and must not be reported as inference.
+                    drop(inference);
+                    let _readback = timings.start(TimingStage::OcrReadback);
                     kind.read(&outputs)
                 })
                 .await?
@@ -133,12 +136,15 @@ mod platform {
                     }
                     drop(request.queued);
                     let result = async {
-                        let _timer = request.timings.start(kind.timing());
+                        let inference = request.timings.start(kind.timing());
                         let inputs = ort::inputs! {
                             "x" => TensorRef::from_array_view(&request.input.0)?
                         };
                         let mut outputs =
                             session.run_async(inputs, &options).await?;
+                        drop(inference);
+                        let _readback =
+                            request.timings.start(TimingStage::OcrReadback);
                         // The shared guard and owned input outlive GPU readback, even after caller cancellation.
                         ort_web::sync_outputs(&mut outputs).await.map_err(
                             |error| {

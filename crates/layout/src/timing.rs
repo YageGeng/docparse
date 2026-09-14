@@ -29,6 +29,8 @@ pub enum TimingStage {
     OcrOrientationInference,
     OcrRecognitionPreprocess,
     OcrRecognitionInference,
+    /// Output synchronization/copy and CPU probability validation/argmax, separate from the runtime call.
+    OcrReadback,
     OcrDecode,
     TextFinish,
     TableStructure,

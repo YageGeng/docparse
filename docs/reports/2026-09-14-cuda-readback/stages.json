@@ -1,0 +1,152 @@
+{
+  "DocumentContext": {
+    "count": 12,
+    "total_seconds": 0.07254357200000001,
+    "max_seconds": 0.032646028
+  },
+  "LayoutInference": {
+    "count": 368,
+    "total_seconds": 35.22940011299999,
+    "max_seconds": 0.309062376
+  },
+  "LayoutPostprocess": {
+    "count": 368,
+    "total_seconds": 0.0055469889999999996,
+    "max_seconds": 0.000130549
+  },
+  "LayoutPreprocess": {
+    "count": 368,
+    "total_seconds": 7.352211578,
+    "max_seconds": 0.03174681
+  },
+  "LayoutQueue": {
+    "count": 368,
+    "total_seconds": 56.881171287,
+    "max_seconds": 0.460099551
+  },
+  "LayoutReadback": {
+    "count": 368,
+    "total_seconds": 0.001770314,
+    "max_seconds": 0.000222673
+  },
+  "LinkValidate": {
+    "count": 12,
+    "total_seconds": 0.17427541000000002,
+    "max_seconds": 0.073243003
+  },
+  "Ocr": {
+    "count": 111,
+    "total_seconds": 448.984946632,
+    "max_seconds": 17.054809481
+  },
+  "OcrDecode": {
+    "count": 6146,
+    "total_seconds": 0.022707695999999992,
+    "max_seconds": 0.000388847
+  },
+  "OcrDetectionInference": {
+    "count": 111,
+    "total_seconds": 18.954462237,
+    "max_seconds": 0.58932523
+  },
+  "OcrDetectionPostprocess": {
+    "count": 111,
+    "total_seconds": 1.439067526,
+    "max_seconds": 0.024927256
+  },
+  "OcrDetectionPreprocess": {
+    "count": 111,
+    "total_seconds": 5.2669974779999995,
+    "max_seconds": 0.072683935
+  },
+  "OcrOrientationInference": {
+    "count": 6146,
+    "total_seconds": 18.963742874999998,
+    "max_seconds": 0.182242736
+  },
+  "OcrQueue": {
+    "count": 12514,
+    "total_seconds": 269.6556054420001,
+    "max_seconds": 5.885994896000001
+  },
+  "OcrReadback": {
+    "count": 12403,
+    "total_seconds": 13.715042480999996,
+    "max_seconds": 0.015503217
+  },
+  "OcrRecognitionInference": {
+    "count": 6146,
+    "total_seconds": 112.690082985,
+    "max_seconds": 0.480547106
+  },
+  "OcrRecognitionPreprocess": {
+    "count": 12292,
+    "total_seconds": 2.54489817,
+    "max_seconds": 0.004536739
+  },
+  "ParseTotal": {
+    "count": 12,
+    "total_seconds": 148.68827221700002,
+    "max_seconds": 26.486027123
+  },
+  "PdfOpen": {
+    "count": 12,
+    "total_seconds": 0.008560059,
+    "max_seconds": 0.001493734
+  },
+  "PdfRender": {
+    "count": 368,
+    "total_seconds": 7.143570456999998,
+    "max_seconds": 0.57745263
+  },
+  "TableExternal": {
+    "count": 6,
+    "total_seconds": 2.714196734,
+    "max_seconds": 0.921961834
+  },
+  "TableFill": {
+    "count": 6,
+    "total_seconds": 0.0071412310000000005,
+    "max_seconds": 0.004196288
+  },
+  "TableRules": {
+    "count": 121,
+    "total_seconds": 0.149865526,
+    "max_seconds": 0.013449399
+  },
+  "TextExtract": {
+    "count": 368,
+    "total_seconds": 4.262435804,
+    "max_seconds": 0.106576025
+  },
+  "TextFinish": {
+    "count": 736,
+    "total_seconds": 9.772801087,
+    "max_seconds": 0.229494279
+  },
+  "TextPrepare": {
+    "count": 368,
+    "total_seconds": 0.042418789000000005,
+    "max_seconds": 0.000654277
+  },
+  "TsrInference": {
+    "count": 12,
+    "total_seconds": 2.68648258,
+    "max_seconds": 0.711472395
+  },
+  "TsrPostprocess": {
+    "count": 12,
+    "total_seconds": 0.000643664,
+    "max_seconds": 0.000125303
+  },
+  "TsrPreprocess": {
+    "count": 12,
+    "total_seconds": 0.019908618,
+    "max_seconds": 0.003696436
+  },
+  "TsrQueue": {
+    "count": 12,
+    "total_seconds": 0.001791597,
+    "max_seconds": 0.000235598
+  }
+}
