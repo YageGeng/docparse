@@ -1,4 +1,4 @@
-"""Download and verify pinned layout, table and PaddleOCR ONNX artifacts."""
+"""Download and verify pinned layout, table, OCR and formula ONNX artifacts."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ MODEL_BASE_URL = (
     f"https://huggingface.co/{MODEL_REPOSITORY}/resolve/{MODEL_REVISION}"
 )
 MODEL_NAMES = (
+    "pp-formulanet-plus-l",
     "pp-doclayout-v3",
     "slanet-plus",
     "slanext-wired",
@@ -67,6 +68,11 @@ class Model:
     @classmethod
     def from_name(cls, name: str) -> Model:
         """Selects a pinned contract for either complete or targeted provisioning."""
+        if name == "pp-formulanet-plus-l":
+            return cls(name, "GreatV/oar-ocr", "7feb044d74be09e3e2078a89cec0f0f8688e942b", (
+                Artifact("inference.onnx", "https://github.com/GreatV/oar-ocr/releases/download/v0.3.0/pp-formulanet_plus-l.onnx", "b4924d69c731365048de3d11a5d1829f3dfd8b98b4dbfd82437f934c2611934f"),
+                Artifact("tokenizer.json", "https://www.modelscope.cn/api/v1/models/greatv/oar-ocr/repo?Revision=master&FilePath=pp-formulanet-tokenizer.json", "2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2"),
+            ))
         if name == "pp-doclayout-v3":
             return cls(name, MODEL_REPOSITORY, MODEL_REVISION, ARTIFACTS)
         # OCR model/config pairs carry their dictionaries and preprocessing contract together.
@@ -263,9 +269,9 @@ def install_model(output: Path, force: bool, model: Model | None = None) -> bool
 def parse_args() -> argparse.Namespace:
     """Parses command-line arguments for install or verification mode."""
     parser = argparse.ArgumentParser(
-        description="Download pinned layout, table and PaddleOCR ONNX artifacts."
+        description="Download pinned layout, table, OCR and formula ONNX artifacts."
     )
-    parser.add_argument("--model", choices=("all", *MODEL_NAMES), default="all", help="model to provision (default: all five models)")
+    parser.add_argument("--model", choices=("all", *MODEL_NAMES), default="all", help="model to provision (default: all registered models)")
     location = parser.add_mutually_exclusive_group()
     location.add_argument(
         "--models-dir",

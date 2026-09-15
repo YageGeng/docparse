@@ -60,6 +60,23 @@ async fn documentation_covers_routes_and_wire_schemas() {
         );
     }
     check_references(&spec, &spec);
+    assert!(
+        spec.pointer("/paths/~1api~1jobs~1result/get/parameters")
+            .and_then(Value::as_array)
+            .expect("result parameters")
+            .iter()
+            .any(|parameter| parameter.get("name").and_then(Value::as_str)
+                == Some("format")),
+        "result API must support JSON/Markdown selection"
+    );
+    assert!(
+        spec.pointer("/components/schemas/FormulaResult/properties/latex")
+            .is_some()
+    );
+    assert!(
+        spec.pointer("/components/schemas/FormulaResult/properties/markdown")
+            .is_some()
+    );
     // All job identifiers are required query parameters; the deployed spec must not expose capture paths.
     // The PDF source shares the same durable identifier and prefix as status and result queries.
     for (endpoint, method) in [

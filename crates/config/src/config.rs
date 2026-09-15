@@ -12,6 +12,10 @@ pub struct RawConfig {
     #[builder(default)]
     #[serde(default)]
     pub tsr: TsrConfig,
+    /// Optional formula recognition over existing layout detections.
+    #[builder(default)]
+    #[serde(default)]
+    pub formula: FormulaConfig,
     pub runtime: RuntimeConfig,
     pub render: RenderConfig,
     pub fusion: FusionConfig,
@@ -145,6 +149,37 @@ impl Default for RawConfig {
             .ocr(OcrConfig::default())
             .output(OutputConfig::default())
             .build()
+    }
+}
+
+/// Pinned PP-FormulaNet Plus-L artifacts and bounded formula inference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct FormulaConfig {
+    /// Enable recognition of every detected inline and display formula.
+    #[builder(default)]
+    pub enabled: bool,
+    /// ONNX graph with a dynamic batch and 768-pixel grayscale inputs.
+    #[builder(default = PathBuf::from("models/pp-formulanet-plus-l/inference.onnx"))]
+    pub model_path: PathBuf,
+    /// Matching ByteLevel BPE tokenizer; never substitute the OCR character dictionary.
+    #[builder(default = PathBuf::from("models/pp-formulanet-plus-l/tokenizer.json"))]
+    pub tokenizer_path: PathBuf,
+    /// Immutable artifact identity and SHA-256 digests.
+    #[builder(default = PathBuf::from("models/pp-formulanet-plus-l/model-manifest.json"))]
+    pub model_manifest_path: PathBuf,
+    /// Maximum formulas per actual ONNX invocation, including the final partial batch.
+    #[builder(default = 4)]
+    pub batch_size: usize,
+    /// Per-batch deadline including waiting for the shared model session.
+    #[builder(default = 120_000)]
+    pub timeout_ms: u64,
+}
+
+impl Default for FormulaConfig {
+    /// Preserves existing callers until formula recognition is explicitly configured.
+    fn default() -> Self {
+        Self::builder().build()
     }
 }
 

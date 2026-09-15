@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 
-ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout", "ocr", "tsr", "core", "pdfium", "pdfium-sys")}
+ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout", "ocr", "formula", "tsr", "core", "pdfium", "pdfium-sys")}
 # Keep the extracted adapters explicit instead of allowing their entire directories.
 ALLOWED.update({
     "crates/core/src/pdfium/input.rs",

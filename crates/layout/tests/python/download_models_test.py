@@ -27,6 +27,13 @@ def load_script_module():
 class DownloadModelsTest(unittest.TestCase):
     """Exercises downloads without accessing the network."""
 
+    def test_formula_model_has_matching_pinned_tokenizer(self):
+        """Formula provisioning selects the Plus-L graph and its BPE tokenizer together."""
+        self.assertIn("pp-formulanet-plus-l", self.module.MODEL_NAMES)
+        model = self.module.Model.from_name("pp-formulanet-plus-l")
+        self.assertEqual([artifact.filename for artifact in model.artifacts], ["inference.onnx", "tokenizer.json"])
+        self.assertEqual(model.artifacts[1].sha256, "2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2")
+
     def test_table_comparison_models_have_pinned_artifact_pairs(self):
         """Every selectable table model can be provisioned with immutable model and YAML identities."""
         for name in ("slanext-wired", "slanext-wireless", "rtdetr-table-cell-wired", "rtdetr-table-cell-wireless"):

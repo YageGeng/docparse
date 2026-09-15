@@ -19,6 +19,8 @@ pub(crate) struct PageAnalysisInput {
     layout_engine: Arc<dyn LayoutEngine>,
     #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
+    #[builder(default)]
+    formula_engine: Option<Arc<dyn docparse_formula::FormulaEngine>>,
     context: Arc<DocumentContext>,
     extracted: ExtractedPage,
     rendered: RenderedPage,
@@ -37,6 +39,7 @@ impl PageAnalysisInput {
             config,
             layout_engine,
             ocr_engine,
+            formula_engine,
             context,
             extracted,
             rendered,
@@ -79,6 +82,17 @@ impl PageAnalysisInput {
                 )
             }
         };
+        let formulas = detections
+            .iter()
+            .filter(|detection| {
+                matches!(
+                    detection.label,
+                    docparse_layout::LayoutLabel::InlineFormula
+                        | docparse_layout::LayoutLabel::DisplayFormula
+                )
+            })
+            .cloned()
+            .collect();
         let analyzer = PageAnalyzer::new(Arc::clone(&config))
             .with_timings(timings.clone());
         let preparation = timings.start(TimingStage::TextPrepare);
@@ -87,6 +101,8 @@ impl PageAnalysisInput {
         Ok(PageStage::builder()
             .config(config)
             .ocr_engine(ocr_engine)
+            .formula_engine(formula_engine)
+            .formulas(formulas)
             .rendered(rendered)
             .timings(timings)
             .tables(tables)
@@ -102,6 +118,9 @@ pub(crate) struct PageStage<D> {
     config: Arc<ValidatedConfig>,
     #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
+    #[builder(default)]
+    formula_engine: Option<Arc<dyn docparse_formula::FormulaEngine>>,
+    formulas: Vec<docparse_layout::LayoutDetection>,
     rendered: RenderedPage,
     timings: Timings,
     tables: Arc<TableRuntime>,
@@ -118,6 +137,8 @@ impl PageStage<crate::page::PageAnalysisDraft> {
         let Self {
             config,
             ocr_engine,
+            formula_engine,
+            formulas,
             rendered,
             timings,
             tables,
@@ -175,6 +196,8 @@ impl PageStage<crate::page::PageAnalysisDraft> {
         .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
         Ok(PageStage::builder()
             .config(config)
+            .formula_engine(formula_engine)
+            .formulas(formulas)
             .rendered(rendered)
             .timings(timings)
             .tables(tables)
@@ -194,6 +217,8 @@ impl PageStage<crate::page::PageTableDraft> {
             tables,
             layout_warning,
             mut draft,
+            formula_engine,
+            formulas,
             ..
         } = self;
         tables
@@ -205,6 +230,11 @@ impl PageStage<crate::page::PageTableDraft> {
                 &timings,
             )
             .await;
+        let formula_config = config.formula().clone();
+        let formula_timings = timings.clone();
+        // Table assembly has finished; retain its measured source words for exact formula byte ranges.
+        let formula_words =
+            std::mem::take(&mut draft.extracted.table_evidence.words);
         let mut page = docparse_layout::wasm_compat::run_cpu(move || {
             let _timer = timings.start(TimingStage::TextFinish);
             PageAnalyzer::new(config)
@@ -213,6 +243,17 @@ impl PageStage<crate::page::PageTableDraft> {
         })
         .await
         .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
+        if formula_config.enabled {
+            page.recognize_formulas(
+                formulas,
+                &rendered,
+                formula_engine.as_deref(),
+                &formula_config,
+                &formula_timings,
+                &formula_words,
+            )
+            .await;
+        }
         if let Some(warning) = layout_warning {
             page.warnings.push(warning);
             page.warnings.sort_by(|left, right| {

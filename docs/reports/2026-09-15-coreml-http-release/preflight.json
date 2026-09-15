@@ -1,0 +1,18 @@
+{
+  "queued": {
+    "count": 0,
+    "next_cursor": null
+  },
+  "running": {
+    "count": 0,
+    "next_cursor": null
+  },
+  "succeeded": {
+    "count": 20,
+    "next_cursor": null
+  },
+  "failed": {
+    "count": 0,
+    "next_cursor": null
+  }
+}

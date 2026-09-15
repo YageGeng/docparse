@@ -1,0 +1,142 @@
+[
+  {
+    "logical_id": "arxiv-2303.18223v16",
+    "basename": "2303.18223v16.pdf",
+    "sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7",
+    "size_bytes": 8577429,
+    "page_count": 144
+  },
+  {
+    "logical_id": "arxiv-2403.01632v4",
+    "basename": "2403.01632v4.pdf",
+    "sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431",
+    "size_bytes": 3111797,
+    "page_count": 47
+  },
+  {
+    "logical_id": "arxiv-2410.05779v3",
+    "basename": "2410.05779v3.pdf",
+    "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a",
+    "size_bytes": 1123301,
+    "page_count": 16
+  },
+  {
+    "logical_id": "arxiv-2603.01919v2",
+    "basename": "2603.01919v2.pdf",
+    "sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15",
+    "size_bytes": 10513591,
+    "page_count": 23
+  },
+  {
+    "logical_id": "arxiv-2604.18583v1",
+    "basename": "2604.18583v1.pdf",
+    "sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83",
+    "size_bytes": 26668188,
+    "page_count": 15
+  },
+  {
+    "logical_id": "arxiv-2604.18584v1",
+    "basename": "2604.18584v1.pdf",
+    "sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728",
+    "size_bytes": 9437000,
+    "page_count": 32
+  },
+  {
+    "logical_id": "arxiv-2604.21959v1",
+    "basename": "2604.21959v1.pdf",
+    "sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2",
+    "size_bytes": 122969,
+    "page_count": 3
+  },
+  {
+    "logical_id": "arxiv-2606.17056v1",
+    "basename": "2606.17056v1.pdf",
+    "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf",
+    "size_bytes": 992264,
+    "page_count": 25
+  },
+  {
+    "logical_id": "arxiv-2609.12610v1",
+    "basename": "2609.12610v1.pdf",
+    "sha256": "5bdfae15f870223af055d9d76bac314d14b2a901bf2cc58317cbc101b7d831fd",
+    "size_bytes": 749161,
+    "page_count": 12
+  },
+  {
+    "logical_id": "arxiv-2609.12973v1",
+    "basename": "2609.12973v1.pdf",
+    "sha256": "32f3286959e7c9b648c64fb6b2483477b652a0541afa04205938fdf5f2cc3843",
+    "size_bytes": 955018,
+    "page_count": 24
+  },
+  {
+    "logical_id": "arxiv-2609.13008v1",
+    "basename": "2609.13008v1.pdf",
+    "sha256": "6c1ff2f8d0b3cdd2dcc73b2cef39cc0f2a6b0ee470d7a21717c70f3454bc9683",
+    "size_bytes": 767298,
+    "page_count": 31
+  },
+  {
+    "logical_id": "arxiv-2609.13019v1",
+    "basename": "2609.13019v1.pdf",
+    "sha256": "a8e0cdeb0a1b331d6c5d707921704f734c9fa09638a7603987c0177a93643d4f",
+    "size_bytes": 1498229,
+    "page_count": 54
+  },
+  {
+    "logical_id": "arxiv-2609.13100v1",
+    "basename": "2609.13100v1.pdf",
+    "sha256": "6f3f6ebd1638bec4fc799713425f04de13bf670f860a45b95b5be6d870d55ebc",
+    "size_bytes": 1146269,
+    "page_count": 58
+  },
+  {
+    "logical_id": "arxiv-2609.13141v1",
+    "basename": "2609.13141v1.pdf",
+    "sha256": "62c1c4bb7894430bf17f8025801f79907ee373f86c816ce3f01971a34524f2ef",
+    "size_bytes": 1080046,
+    "page_count": 26
+  },
+  {
+    "logical_id": "arxiv-2609.13144v1",
+    "basename": "2609.13144v1.pdf",
+    "sha256": "043c1fe5ef4d01938db7e3c8fd8768213e6fd9f43bf9785b5ca90fabfdec69c3",
+    "size_bytes": 2067371,
+    "page_count": 56
+  },
+  {
+    "logical_id": "arxiv-2609.13146v1",
+    "basename": "2609.13146v1.pdf",
+    "sha256": "4f7e2b204719aef43442f79218de4f48d0ea2d9e09fc8b91696588723786c593",
+    "size_bytes": 11848176,
+    "page_count": 17
+  },
+  {
+    "logical_id": "document-17",
+    "basename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "sha256": "8b81a9c5c48281884dc4a4922764a36ba0d6911593103b018fdebb9423e06b4a",
+    "size_bytes": 655258,
+    "page_count": 13
+  },
+  {
+    "logical_id": "document-18",
+    "basename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "sha256": "2d5495c2a82d2c0b6174192fedb5b87c4da63e7a049691f57e155a6789de3c13",
+    "size_bytes": 20830083,
+    "page_count": 24
+  },
+  {
+    "logical_id": "document-19",
+    "basename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc",
+    "size_bytes": 922889,
+    "page_count": 32
+  },
+  {
+    "logical_id": "document-20",
+    "basename": "Towards Conversational AI for Disease Management.pdf",
+    "sha256": "31656acbb41a8768afae1dff1d68d6c4517d627ca1344581f9956334bb86d43c",
+    "size_bytes": 21270475,
+    "page_count": 42
+  }
+]

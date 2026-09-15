@@ -107,6 +107,133 @@ impl ResultValidator {
             ));
         }
 
+        let mut formula_ids = BTreeSet::new();
+        for (index, formula) in page.formulas.iter().enumerate() {
+            let location = format!("{path}.formulas[{index}]");
+            Self::validate_id_page(
+                formula.id.as_str(),
+                page.page_number,
+                &location,
+            )?;
+            Self::validate_bbox(formula.bbox, &location)?;
+            if !formula_ids.insert(formula.id.as_str())
+                || !matches!(
+                    formula.label,
+                    docparse_layout::LayoutLabel::InlineFormula
+                        | docparse_layout::LayoutLabel::DisplayFormula
+                )
+            {
+                return Err(Self::invalid(
+                    &location,
+                    "formula identity or label is invalid",
+                ));
+            }
+            match (&formula.latex, &formula.markdown, &formula.error) {
+                (Some(latex), Some(markdown), None)
+                    if !latex.trim().is_empty() =>
+                {
+                    let expected = if formula.label
+                        == docparse_layout::LayoutLabel::InlineFormula
+                    {
+                        format!("${latex}$")
+                    } else {
+                        format!("$$\n{latex}\n$$")
+                    };
+                    if *markdown != expected {
+                        return Err(Self::invalid(
+                            &location,
+                            "formula LaTeX and Markdown disagree",
+                        ));
+                    }
+                }
+                (None, None, Some(error)) if !error.is_empty() => {}
+                _ => {
+                    return Err(Self::invalid(
+                        &location,
+                        "formula must contain both representations or an explicit failure",
+                    ));
+                }
+            }
+            let block = formula.block_id.as_ref().and_then(|id| {
+                page.blocks.iter().find(|block| &block.id == id)
+            });
+            for span in &formula.text_spans {
+                let item = block
+                    .into_iter()
+                    .flat_map(|block| &block.lines)
+                    .flat_map(|line| &line.text_items)
+                    .find(|item| item.id == span.text_item_id)
+                    .ok_or_else(|| {
+                        Self::invalid(
+                            &location,
+                            "formula source item is missing",
+                        )
+                    })?;
+                if span.byte_range.is_empty()
+                    || item.raw_text.get(span.byte_range.clone()).is_none()
+                {
+                    return Err(Self::invalid(
+                        &location,
+                        "formula source bytes are invalid",
+                    ));
+                }
+                Self::validate_bbox(span.bbox, &location)?;
+            }
+            if formula.block_id.is_some() && block.is_none() {
+                return Err(Self::invalid(
+                    &location,
+                    "formula block reference is missing",
+                ));
+            }
+            match (
+                &formula.line_id,
+                formula.text_item_range,
+                formula.table_cell,
+            ) {
+                (Some(id), Some(range), None) => {
+                    let line = block
+                        .and_then(|block| {
+                            block.lines.iter().find(|line| &line.id == id)
+                        })
+                        .ok_or_else(|| {
+                            Self::invalid(
+                                &location,
+                                "formula line reference is missing",
+                            )
+                        })?;
+                    if range.start > range.end
+                        || range.end > line.text_items.len()
+                    {
+                        return Err(Self::invalid(
+                            &location,
+                            "formula text range exceeds its source line",
+                        ));
+                    }
+                }
+                (None, None, Some((row, column))) => {
+                    if !block
+                        .and_then(|block| block.table.as_ref())
+                        .is_some_and(|table| {
+                            table.cells.iter().any(|cell| {
+                                cell.row == row && cell.column == column
+                            })
+                        })
+                    {
+                        return Err(Self::invalid(
+                            &location,
+                            "formula cell reference is missing",
+                        ));
+                    }
+                }
+                (None, None, None) => {}
+                _ => {
+                    return Err(Self::invalid(
+                        &location,
+                        "formula anchors are inconsistent",
+                    ));
+                }
+            }
+        }
         // Replaced mapping failures still own their original IDs outside canonical reading order.
         for (index, item) in page.replaced_native_text.iter().enumerate() {
             let item_path = format!("{path}.replaced_native_text[{index}]");

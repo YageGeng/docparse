@@ -1,0 +1,64 @@
+[package]
+name = "docparse-formula"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Batched PP-FormulaNet Plus-L recognition through the shared ONNX backend"
+
+[features]
+default = []
+metal = ["docparse-layout/metal"]
+coreml = ["docparse-layout/coreml"]
+cuda = ["docparse-layout/cuda"]
+openvino = ["docparse-layout/openvino"]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm"]
+
+[dependencies]
+# workspace crates
+docparse-config.workspace = true
+docparse-layout.workspace = true
+
+# error
+thiserror.workspace = true
+
+# async
+tokio.workspace = true
+
+# config and serialization
+serde_json.workspace = true
+
+# hashing
+sha2.workspace = true
+
+# inference and image
+image.workspace = true
+ndarray.workspace = true
+ort.workspace = true
+tokenizers.workspace = true
+
+# cli and diagnostics
+tracing.workspace = true
+
+[dev-dependencies]
+# cli and diagnostics
+tracing-subscriber.workspace = true
+
+# testing
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# inference and image
+tokenizers = { workspace = true, features = ["unstable_wasm"] }
+
+# browser
+ort-web.workspace = true
+wasm-bindgen-futures.workspace = true

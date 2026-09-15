@@ -1,0 +1,4 @@
+file,job_id,pages,formulas,inline,display,table_formulas,failed,source_unchanged,canonical_blocks_sha256,result_sha256,worker_seconds,json_bytes,markdown_bytes
+2410.05779v3.pdf,88ee3d49-1e11-4586-9854-da055739a08a,16,24,22,2,1,0,True,3f3d088a030014085a1a4191cbb35c2f11c151470558ccc84c27a64d4110d25a,6f6089b8a575dd9d907442d70f9e4402c88af1949f3e4a7fa549b29b8574e847,183.735,6536895,67171
+2606.17056v1.pdf,cd86489f-da5c-4e70-845e-7e598690a10e,25,14,10,4,0,0,True,edca560d2564ea6c37528a76e4aae0fd037aed724524d82c7fe95afea98fab32,43930c8c86e9b31696c651c8d0cd3d4f89aadda8eb23aaca10e5dcbe2358198a,176.41,9179388,82592
+Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf,0e02999b-b60d-40a6-8c37-4ae89533ec5f,32,7,7,0,2,0,True,78ab7fbeca398c399807e0d97af0ceb85b69b4f9ba079eeb5bdf183f97ba79e2,a3c0276d54a732d29d314253e7a0185129e50ad78f32d5b78343a6430535be4f,170.407,12146828,111506

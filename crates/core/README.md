@@ -134,7 +134,7 @@ spans, and header flags remain unchanged; the normal 80% ownership and complete
 UTF-8 coverage checks still apply afterward. Caller-provided engines default to
 `Declared` geometry and retain their supplied positions.
 
-`ParserArtifacts { layout, tsr }` provides explicit model bytes for native and Web.
+`ParserArtifacts::builder().layout(layout).tsr(tsr).ocr(ocr).formula(formula).build()` provides explicit model bytes for native and Web.
 Pass it to `DocParser::from_artifacts` or `DocParserBuilder::artifacts`; enabled
 TSR requires `Some(tsr)` unless a table engine is injected. Byte-based creation
 never falls back to configured model paths. A single layout `ModelArtifacts`

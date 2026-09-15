@@ -838,6 +838,54 @@ pub struct PageError {
     pub message: String,
 }
 
+/// Recognized mathematics with non-owning references to its original layout and text.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
+pub struct FormulaResult {
+    /// Actual model/backend identity, including any documented compatibility executor.
+    #[builder(default)]
+    #[serde(default)]
+    pub engine: String,
+    /// Stable identity derived from the original layout detection row.
+    pub id: ModelRegionId,
+    /// Original inline_formula or display_formula classification.
+    pub label: LayoutLabel,
+    /// Original formula extent in viewport points.
+    pub bbox: Bbox,
+    /// Owning display block, prose block, or table block when matched.
+    #[builder(default)]
+    pub block_id: Option<BlockId>,
+    /// Matched line for inline replacement, without changing its source items.
+    #[builder(default)]
+    pub line_id: Option<LineId>,
+    /// Bounding item range; text_spans supplies exact byte boundaries for mixed text runs.
+    #[builder(default)]
+    pub text_item_range: Option<TextItemRange>,
+    /// Exact UTF-8 source slices; boundary prose in the same TextItem remains outside the replacement.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_spans: Vec<crate::TableTextSpan>,
+    /// Zero-based row and column for formulas inside a recovered table.
+    #[builder(default)]
+    pub table_cell: Option<(usize, usize)>,
+    /// Decoded LaTeX without outer Markdown math delimiters; null on failure.
+    #[builder(default)]
+    pub latex: Option<String>,
+    /// LaTeX wrapped with the original inline or display math delimiters.
+    #[builder(default)]
+    pub markdown: Option<String>,
+    /// Explicit recognition failure; original text remains available independently.
+    #[builder(default)]
+    pub error: Option<String>,
+}
+
 /// One page's canonical nested result.
 #[derive(
     Debug,
@@ -854,6 +902,10 @@ pub struct PageResult {
     pub height: f64,
     pub rotation: i32,
     pub blocks: Vec<Block>,
+    /// Formula recognition outputs retain both LaTeX and Markdown under every JSON visibility policy.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formulas: Vec<FormulaResult>,
     /// Original unusable PDF facts replaced by confident OCR; excluded from reading order, retained for audit.
     #[builder(default)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

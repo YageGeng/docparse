@@ -123,7 +123,7 @@ export interface paths {
         };
         /**
          * Streams the immutable successful JSON envelope from shared storage rather than loading it into API memory.
-         * @description Stream the persisted ApiResponse<DocumentResult> JSON after success. Result visibility follows the worker output configuration. Model/page warnings remain in the canonical result. This endpoint does not rerun parsing.
+         * @description Read the completed document as JSON (default) or Markdown. JSON includes both LaTeX and Markdown for every recognized formula. Markdown is a presentation of the stored result; no inference is repeated.
          */
         get: operations["result"];
         put?: never;
@@ -376,6 +376,33 @@ export interface components {
         };
         /** @description Stable identity for one residual XY-cut region. */
         FallbackRegionId: string;
+        /** @description Recognized mathematics with non-owning references to its original layout and text. */
+        FormulaResult: {
+            /** @description Original formula extent in viewport points. */
+            bbox: components["schemas"]["Bbox"];
+            block_id?: null | components["schemas"]["BlockId"];
+            /** @description Actual model/backend identity, including any documented compatibility executor. */
+            engine?: string;
+            /** @description Explicit recognition failure; original text remains available independently. */
+            error?: string | null;
+            /** @description Stable identity derived from the original layout detection row. */
+            id: components["schemas"]["ModelRegionId"];
+            /** @description Original inline_formula or display_formula classification. */
+            label: components["schemas"]["LayoutLabel"];
+            /** @description Decoded LaTeX without outer Markdown math delimiters; null on failure. */
+            latex?: string | null;
+            line_id?: null | components["schemas"]["LineId"];
+            /** @description LaTeX wrapped with the original inline or display math delimiters. */
+            markdown?: string | null;
+            /** @description Zero-based row and column for formulas inside a recovered table. */
+            table_cell?: [
+                number,
+                number
+            ] | null;
+            text_item_range?: null | components["schemas"]["TextItemRange"];
+            /** @description Exact UTF-8 source slices; boundary prose in the same TextItem remains outside the replacement. */
+            text_spans?: components["schemas"]["TableTextSpan"][];
+        };
         /**
          * @description Records whether polygon geometry is factual or derived from a bounding box.
          * @enum {string}
@@ -481,6 +508,8 @@ export interface components {
             diagnostics: {
                 [key: string]: string;
             };
+            /** @description Formula recognition outputs retain both LaTeX and Markdown under every JSON visibility policy. */
+            formulas?: components["schemas"]["FormulaResult"][];
             /** Format: double */
             height: number;
             /** Format: int32 */
@@ -599,6 +628,8 @@ export interface components {
             column_span: number;
             is_header: boolean;
             lines: components["schemas"]["TableCellLine"][];
+            /** @description Formula-enriched presentation; canonical text and source spans remain unchanged. */
+            markdown?: string | null;
             row: number;
             row_span: number;
             text: string;
@@ -1029,8 +1060,10 @@ export interface operations {
     result: {
         parameters: {
             query: {
-                /** @description UUID returned on submission, equal to the upload's Idempotency-Key. */
+                /** @description UUID returned by the upload endpoint. */
                 id: string;
+                /** @description Defaults to json; markdown returns text/markdown rather than a JSON envelope. */
+                format?: "json" | "markdown";
             };
             header?: never;
             path?: never;
@@ -1038,13 +1071,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Configured canonical document wrapped in the common success envelope */
+            /** @description Canonical JSON envelope or complete document Markdown */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApiResponse_DocumentResult"];
+                    "text/markdown": string;
                 };
             };
             /** @description Invalid task UUID (4001002) */

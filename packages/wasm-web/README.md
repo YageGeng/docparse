@@ -258,9 +258,9 @@ Short superscripts/subscripts join an unambiguous parent using font size, baseli
 shift and position before model assignment. Upright PDFium baselines keep body rows
 in order; nested indices follow the original typography graph, and adjacent fragments
 on the same body baseline reconnect after scripts fill their inline gap. Nearby rows
-remain separate. This does
-not provide LaTeX or structured formula recognition. Unmatched inline
-formula detections produce diagnostics instead of independent empty content blocks.
+remain separate. Optional PP-FormulaNet_plus-L recognition adds LaTeX and Markdown
+to `pages[].formulas` without changing source text ownership. Unmatched inline
+formula detections retain their diagnostics and independent recognition metadata.
 
 A merged block retains a stable primary identity and `source_region`. Its optional
 `source_regions` array records every contributing model/fallback region, including
@@ -433,3 +433,29 @@ Additional timing stages are `ocr_detection_preprocess`, `ocr_detection_inferenc
 `ocr_recognition_preprocess`, `ocr_recognition_inference`, and `ocr_decode`.
 Inference timings include output readback. Failed OCR produces page warnings;
 initialization failure never masquerades as successful text recovery.
+
+
+## Formula artifacts and output
+
+```ts
+const parser = await createParser({
+  artifacts: layoutArtifacts,
+  config: { tsr: { mode: "rules_only" }, formula: { enabled: true, batch_size: 4, timeout_ms: 120000 } },
+  formulaArtifacts: {
+    kind: "urls",
+    model: "/models/pp-formulanet-plus-l/inference.onnx",
+    tokenizer: "/models/pp-formulanet-plus-l/tokenizer.json",
+    manifest: "/models/pp-formulanet-plus-l/model-manifest.json",
+  },
+});
+const document = await parser.parse(pdfBytes);
+const markdown = await parser.render(document, "markdown");
+```
+
+Formula bytes use `{kind: "bytes", model, tokenizer, manifest}`. Only the detected
+inline/display regions enter recognition; formula numbers remain source text.
+Each `document.pages[].formulas[]` entry contains both representations, its actual
+engine and non-owning source anchors. Empty/failed recognition keeps an error and
+page warning. `formula_queue`, `formula_preprocess`, `formula_inference` and
+`formula_decode` are separate observations. The pinned graph is about 700 MiB,
+before runtime allocations.

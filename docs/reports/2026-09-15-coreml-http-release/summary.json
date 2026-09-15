@@ -1,0 +1,57 @@
+{
+  "documents": 20,
+  "pages": 694,
+  "http_batch_seconds": 369.6491666659713,
+  "pages_per_second": 1.8774558759579842,
+  "upload_batch_seconds": 0.7599930829601362,
+  "worker_duration_sum_seconds": 1767.702,
+  "worker_duration_median_seconds": 71.745,
+  "client_latency_median_seconds": 230.86280345916748,
+  "client_latency_max_seconds": 368.94891691207886,
+  "failed_documents": 0,
+  "retried_documents": 0,
+  "result_bytes": 389332117,
+  "warning_counts": {
+    "ContentLayoutOverlap": 51,
+    "EmptyModelRegion": 157,
+    "TableStructureUnavailable": 12,
+    "TableTextAssignmentFailed": 10,
+    "InvalidTsrInput": 2
+  },
+  "sampled_family_peak_rss_bytes": 5033050112,
+  "process_ids": [
+    49872,
+    49880,
+    49884,
+    49885,
+    49886,
+    49887
+  ],
+  "startup_to_ready_seconds": 9.090710417018272,
+  "warmups": [
+    {
+      "phase": "warmup-1",
+      "start_unix": 1789456639.491123,
+      "end_unix": 1789456660.8296719,
+      "elapsed_seconds": 21.33842312498018,
+      "upload_batch_seconds": 0.056264541985001415,
+      "documents": 1,
+      "expected_pages": 23
+    },
+    {
+      "phase": "warmup-2",
+      "start_unix": 1789456660.83081,
+      "end_unix": 1789456681.0633469,
+      "elapsed_seconds": 20.23241749999579,
+      "upload_batch_seconds": 0.02874295797664672,
+      "documents": 1,
+      "expected_pages": 23
+    }
+  ],
+  "server_exit_code": 0,
+  "model_runtime_failure_documents": 0,
+  "warned_documents": 16,
+  "table_warning_documents": 6,
+  "blocks": 10133,
+  "tables": 147
+}

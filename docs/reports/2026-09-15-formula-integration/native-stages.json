@@ -1,0 +1,137 @@
+[
+  {
+    "stage": "PdfiumQueue",
+    "count": 3,
+    "total_seconds": 2.4e-05
+  },
+  {
+    "stage": "PdfOpen",
+    "count": 3,
+    "total_seconds": 0.005278000000000001
+  },
+  {
+    "stage": "TextExtract",
+    "count": 73,
+    "total_seconds": 1.087363
+  },
+  {
+    "stage": "DocumentContext",
+    "count": 3,
+    "total_seconds": 0.006466
+  },
+  {
+    "stage": "PdfRender",
+    "count": 73,
+    "total_seconds": 3.2257779999999996
+  },
+  {
+    "stage": "LayoutPreprocess",
+    "count": 73,
+    "total_seconds": 3.516631
+  },
+  {
+    "stage": "LayoutQueue",
+    "count": 73,
+    "total_seconds": 943.095
+  },
+  {
+    "stage": "LayoutInference",
+    "count": 73,
+    "total_seconds": 112.776316
+  },
+  {
+    "stage": "LayoutReadback",
+    "count": 73,
+    "total_seconds": 0.004505
+  },
+  {
+    "stage": "LayoutPostprocess",
+    "count": 73,
+    "total_seconds": 0.0041530000000000004
+  },
+  {
+    "stage": "TextPrepare",
+    "count": 73,
+    "total_seconds": 0.24351699999999998
+  },
+  {
+    "stage": "TextFinish",
+    "count": 146,
+    "total_seconds": 1.253652
+  },
+  {
+    "stage": "TsrPreprocess",
+    "count": 30,
+    "total_seconds": 0.031596
+  },
+  {
+    "stage": "TsrQueue",
+    "count": 60,
+    "total_seconds": 2.636297
+  },
+  {
+    "stage": "TsrInference",
+    "count": 30,
+    "total_seconds": 12.091535
+  },
+  {
+    "stage": "TsrPostprocess",
+    "count": 30,
+    "total_seconds": 0.001796
+  },
+  {
+    "stage": "TableCellPreprocess",
+    "count": 30,
+    "total_seconds": 0.246861
+  },
+  {
+    "stage": "TableCellInference",
+    "count": 30,
+    "total_seconds": 34.536801
+  },
+  {
+    "stage": "TableCellPostprocess",
+    "count": 30,
+    "total_seconds": 0.003043
+  },
+  {
+    "stage": "TableExternal",
+    "count": 30,
+    "total_seconds": 49.575303
+  },
+  {
+    "stage": "TableFill",
+    "count": 30,
+    "total_seconds": 0.179607
+  },
+  {
+    "stage": "FormulaQueue",
+    "count": 19,
+    "total_seconds": 1267.520515
+  },
+  {
+    "stage": "FormulaPreprocess",
+    "count": 19,
+    "total_seconds": 0.240886
+  },
+  {
+    "stage": "FormulaInference",
+    "count": 19,
+    "total_seconds": 174.073325
+  },
+  {
+    "stage": "FormulaDecode",
+    "count": 19,
+    "total_seconds": 5.103143
+  },
+  {
+    "stage": "LinkValidate",
+    "count": 3,
+    "total_seconds": 0.09691200000000001
+  },
+  {
+    "stage": "ParseTotal",
+    "count": 3,
+    "total_seconds": 530.425116
+  }
+]

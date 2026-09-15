@@ -93,3 +93,13 @@ estimated_font_size_tolerance_points = 1.5
 formula_placeholder = "[formula]"
 include_evidence = true
 include_diagnostics = false
+
+# Recognize every layout-detected inline/display formula. JSON retains LaTeX and Markdown.
+# The pinned Plus-L export uses CPU compatibility inference on CoreML/Metal builds.
+[formula]
+enabled = true
+batch_size = 4
+timeout_ms = 120000
+model_path = "models/pp-formulanet-plus-l/inference.onnx"
+tokenizer_path = "models/pp-formulanet-plus-l/tokenizer.json"
+model_manifest_path = "models/pp-formulanet-plus-l/model-manifest.json"

@@ -6,10 +6,10 @@ mod validate;
 mod wasm_compat;
 
 pub use config::{
-    DatabaseConfig, FusionConfig, LayoutConfig, LogConfig, ModelFiles,
-    OcrConfig, OcrPolicy, OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
-    ServerConfig, TableCellConfig, TableCellModel, TableMode, TsrConfig,
-    TsrModel,
+    DatabaseConfig, FormulaConfig, FusionConfig, LayoutConfig, LogConfig,
+    ModelFiles, OcrConfig, OcrPolicy, OutputConfig, RawConfig, RenderConfig,
+    RuntimeConfig, ServerConfig, TableCellConfig, TableCellModel, TableMode,
+    TsrConfig, TsrModel,
 };
 pub use error::ConfigError;
 

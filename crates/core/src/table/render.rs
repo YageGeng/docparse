@@ -109,14 +109,44 @@ impl TableCell {
     /// Escapes untrusted source text without allowing HTML or Markdown syntax to change the grid.
     fn escaped_text(&self, markdown: bool) -> String {
         let mut text = String::new();
-        for ch in self.text.chars() {
+        let mut characters = self
+            .markdown
+            .as_deref()
+            .unwrap_or(&self.text)
+            .chars()
+            .peekable();
+        let mut in_math = false;
+        let mut escaped = false;
+        while let Some(mut ch) = characters.next() {
+            // Raw HTML tables need literal prose punctuation, while math commands retain their backslashes.
+            let prose_escape = !markdown
+                && self.markdown.is_some()
+                && !in_math
+                && ch == '\\'
+                && characters.peek().is_some_and(|next| {
+                    matches!(next, '\\' | '*' | '_' | '[' | ']' | '`')
+                });
+            if prose_escape {
+                ch = characters.next().unwrap_or(ch);
+            }
+            if self.markdown.is_some() && !prose_escape {
+                if ch == '$' && !escaped {
+                    in_math = !in_math;
+                }
+                escaped = ch == '\\' && !escaped;
+            } else {
+                escaped = false;
+            }
             match ch {
                 '&' => text.push_str("&amp;"),
                 '<' => text.push_str("&lt;"),
                 '>' => text.push_str("&gt;"),
+                '\n' if in_math => text.push(' '),
                 '\n' => text.push_str("<br>"),
                 '|' if markdown => text.push_str("&#124;"),
-                '\\' | '*' | '_' | '[' | ']' | '`' if markdown => {
+                '\\' | '*' | '_' | '[' | ']' | '`'
+                    if markdown && self.markdown.is_none() =>
+                {
                     text.push('\\');
                     text.push(ch);
                 }

@@ -12,6 +12,9 @@ use typed_builder::TypedBuilder;
 /// HTTP limits apply before input buffering; SSE polling is independent of worker progress delivery.
 #[derive(Clone, TypedBuilder)]
 pub struct HttpOptions {
+    /// Markdown projections use the same placeholder policy as the configured worker.
+    #[builder(default)]
+    pub output: docparse_config::OutputConfig,
     #[builder(default = 512 * 1024 * 1024)]
     pub max_upload_bytes: usize,
     #[builder(default = 4)]

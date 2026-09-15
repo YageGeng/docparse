@@ -56,11 +56,16 @@ impl From<ArtifactBytes> for ModelArtifacts {
 }
 
 /// Optional model families share one ABI argument without exposing filesystem paths.
-#[derive(Deserialize)]
+#[derive(Deserialize, typed_builder::TypedBuilder)]
 struct AuxiliaryArtifacts {
+    #[builder(default)]
     tsr: Option<ArtifactBytes>,
+    #[builder(default)]
     tsr_cell_detection: Option<ArtifactBytes>,
+    #[builder(default)]
     ocr: Option<OcrArtifactBytes>,
+    #[builder(default)]
+    formula: Option<ArtifactBytes>,
 }
 
 /// The three independently verified PaddleOCR networks supplied by the Worker.
@@ -157,11 +162,18 @@ impl WebParser {
         };
         let parser = DocParser::from_artifacts(
             validated,
-            docparse_core::ParserArtifacts {
-                layout: artifacts,
-                tsr: table_artifacts,
-                ocr: ocr_artifacts,
-            },
+            docparse_core::ParserArtifacts::builder()
+                .layout(artifacts)
+                .tsr(table_artifacts)
+                .ocr(ocr_artifacts)
+                .formula(auxiliary.formula.map(|artifact| {
+                    docparse_formula::FormulaArtifacts {
+                        model: Arc::from(artifact.model),
+                        tokenizer: Arc::from(artifact.config),
+                        manifest: Arc::from(artifact.manifest),
+                    }
+                }))
+                .build(),
         )
         .await
         .map_err(|error| {
@@ -170,6 +182,17 @@ impl WebParser {
             use docparse_ocr::OcrError;
             use docparse_tsr::TsrError;
             let code = match &error {
+                DocParseError::Formula(
+                    docparse_formula::FormulaError::Onnx(_)
+                    | docparse_formula::FormulaError::Layout(LayoutError::Ort {
+                        ..
+                    }),
+                ) => "ExecutionProviderInitializationFailed",
+                DocParseError::Formula(
+                    docparse_formula::FormulaError::Layout(
+                        LayoutError::ExecutionProviderUnavailable { .. },
+                    ),
+                ) => "ExecutionProviderUnavailable",
                 DocParseError::Layout(
                     LayoutError::ExecutionProviderUnavailable { .. },
                 )

@@ -23,8 +23,8 @@ rtk uv run --locked scripts/download_models.py --verify-only
 
 The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
 
-The default command provisions layout, SLANet_plus, OCR detection, OCR recognition,
-and text-line orientation in the repository's `models/` directory. Verified local
+The default command provisions layout, table models, OCR and PP-FormulaNet_plus-L
+with its matching tokenizer in the repository's `models/` directory. Verified local
 files are skipped; missing or corrupt files are downloaded and verified before
 publication. Use `--model slanet-plus` for one model, `--models-dir /path/to/models`
 for another root, or `--model pp-doclayout-v3 --output /path/to/layout` for an exact
@@ -67,9 +67,17 @@ rtk cargo build -p docparse-cli --features layout-cuda,tsr-cuda
 rtk docparse parse input.pdf --config docparse.toml --format json
 ```
 
-All native model families use one backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Model-prefixed CLI features forward to the shared backend, so enabling `layout-cuda` also selects CUDA for OCR and TSR. Server builds expose `cuda`, `coreml`, `metal`, and `openvino`; omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
+Native layout, OCR and TSR use one backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Model-prefixed CLI features forward to the shared backend, so enabling `layout-cuda` also selects CUDA for OCR and TSR. Server builds expose `cuda`, `coreml`, `metal`, and `openvino`; omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
 CoreML and Metal sessions request `FastPrediction` specialization for their reusable models. The [M4 benchmark report](docs/reports/2026-09-15-coreml-performance/README.md) records warmed real-PDF measurements and the compatibility and output checks for alternative settings.
+
+### Formula recognition
+
+Enable `[formula] enabled = true` to recognize every existing inline/display formula detection with PP-FormulaNet_plus-L. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Install its pinned graph/tokenizer with `rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-l`. Formula numbers remain native text.
+
+JSON includes `pages[].formulas[]`, with `latex`, `markdown`, the actual `engine`, source geometry, exact UTF-8 `text_spans`, and non-owning block/line/cell anchors. Failures retain an explicit `error` with null representations and a page warning. Markdown replaces the relevant presentation range while original text items and table spans remain available in JSON. The HTTP result endpoint accepts `?id=<uuid>&format=markdown`; omitting `format` returns JSON with both formula representations.
+
+The pinned Plus-L export does not reliably support repeated CoreML inference on this M4. CoreML/Metal builds therefore run **formula recognition on CPU**, with real tensor batches, and log the compatibility choice. Layout, OCR and table models keep their selected backend. Formula initialization and inference failures are explicit; no formula confidence is fabricated. See [the formula module](crates/formula/README.md) for the artifact and validation details.
 
 ## Rust API
 

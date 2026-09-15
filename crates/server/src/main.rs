@@ -85,10 +85,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let server = raw.server.clone();
+    let mut http_options = arguments.http_options(&server);
+    http_options.output = raw.output.clone();
     let state = AppState::new(
         connection::connect(&raw.database).await?,
         SharedStorage::new(&arguments.storage_dir).await?,
-        arguments.http_options(&server),
+        http_options,
         CancellationToken::new(),
     )?;
     let worker = arguments.build_worker(raw, &state).await?;

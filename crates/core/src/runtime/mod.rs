@@ -1,3 +1,4 @@
+mod formula;
 mod pipeline;
 mod stages;
 mod table;

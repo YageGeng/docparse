@@ -9,6 +9,10 @@ use web_time::Instant;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimingStage {
+    FormulaQueue,
+    FormulaPreprocess,
+    FormulaInference,
+    FormulaDecode,
     /// Waiting for an available PDFium process lease.
     PdfiumQueue,
     PdfOpen,

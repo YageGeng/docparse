@@ -36,7 +36,7 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
     if (!Object.hasOwn(raw, group) || !values || typeof values !== "object" || Array.isArray(values)) throw Object.assign(new Error(`Unknown or invalid configuration group ${group}`), { code: "InvalidConfig" });
     for (const key of Object.keys(values)) {
       // OCR's nested file groups are native-only; browser models arrive through the artifact API.
-      if (["layout", "tsr", "ocr"].includes(group) && ["model_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
+      if (["layout", "tsr", "ocr", "formula"].includes(group) && ["model_path", "tokenizer_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     const merged = { ...raw[group], ...values };
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
@@ -143,7 +143,8 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         recognition: await modelBytes(ocrSource.recognition, "ocr_recognition", progress),
         orientation: ocrSource.orientation ? await modelBytes(ocrSource.orientation, "ocr_orientation", progress) : undefined,
       } : undefined;
-      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts };
+      const formulaArtifacts = payload.formulaArtifacts ? await modelBytes(payload.formulaArtifacts, "formula", progress) : undefined;
+      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts, formula: formulaArtifacts };
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();

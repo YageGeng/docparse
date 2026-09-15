@@ -74,3 +74,62 @@ pub(crate) fn render_line(
     }
     rendered
 }
+
+/// Applies validated byte replacements without erasing surrounding source text or splitting UTF-8.
+pub(crate) fn replace_formula_ranges(
+    source: &str,
+    replacements: Vec<(Vec<std::ops::Range<usize>>, &str)>,
+    escape_prose: bool,
+) -> String {
+    let mut ordered = Vec::new();
+    for (mut spans, markdown) in replacements {
+        spans.retain(|range| source.get(range.clone()).is_some());
+        spans.sort_by_key(|range| (range.start, range.end));
+        let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+        for span in spans {
+            if let Some(last) = merged.last_mut()
+                && (span.start <= last.end
+                    || source.get(last.end..span.start).is_some_and(|gap| {
+                        gap.chars().all(char::is_whitespace)
+                    }))
+            {
+                last.end = last.end.max(span.end);
+            } else {
+                merged.push(span);
+            }
+        }
+        for (index, span) in merged.into_iter().enumerate() {
+            ordered.push((span, if index == 0 { markdown } else { "" }));
+        }
+    }
+    ordered.sort_by_key(|(range, _)| (range.start, range.end));
+    let mut result = String::new();
+    let mut consumed = 0;
+    let append_source = |output: &mut String, text: &str| {
+        for ch in text.chars() {
+            if ch == '$'
+                || (escape_prose
+                    && matches!(ch, '\\' | '*' | '_' | '[' | ']' | '`'))
+            {
+                output.push('\\');
+            }
+            output.push(ch);
+        }
+    };
+    for (range, markdown) in ordered {
+        if range.start > range.end || source.get(range.clone()).is_none() {
+            continue;
+        }
+        if range.start > consumed
+            && let Some(prefix) = source.get(consumed..range.start)
+        {
+            append_source(&mut result, prefix);
+        }
+        result.push_str(markdown);
+        consumed = consumed.max(range.end);
+    }
+    if let Some(suffix) = source.get(consumed..) {
+        append_source(&mut result, suffix);
+    }
+    result
+}

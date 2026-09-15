@@ -1,0 +1,46 @@
+{
+  "browser": "153.0.8010.37",
+  "provider": "webgpu",
+  "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "isFallbackAdapter": false
+  },
+  "pages": 32,
+  "formulas": 7,
+  "failed_formulas": 0,
+  "initialization_seconds": 87.71339999997616,
+  "parse_seconds": 21.914,
+  "model_sessions": [
+    {
+      "role": "layout",
+      "instrumentation_label": "layout",
+      "providers": [
+        {
+          "name": "webgpu"
+        }
+      ],
+      "calls": 32,
+      "gpu_submissions": 2624
+    },
+    {
+      "role": "formula",
+      "instrumentation_label": "tsr",
+      "providers": [
+        {
+          "name": "webgpu"
+        }
+      ],
+      "calls": 6,
+      "gpu_submissions": 20901
+    }
+  ],
+  "wasm_sha256": "3d67592c39150f6ed981cb08d9cb9f4717d129e9ef1311c03d07500aec88c587",
+  "wasm_bytes": 10164339,
+  "build_hashes_verified": true,
+  "adjacent_prose_preserved": true,
+  "tsr": "rules_only",
+  "ocr": "disabled"
+}

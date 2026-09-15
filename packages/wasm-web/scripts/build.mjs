@@ -51,10 +51,17 @@ glue = glue.replace(/^import \* as (\w+) from ['"](env|wasi_snapshot_preview1)['
   return `const ${name} = ${module === "env" ? "createEnvImports()" : "createWasiImports(() => wasm.memory)"};`;
 });
 if (!patched) throw new Error("wasm-bindgen glue has no recognized WASI imports; review the generated ABI before updating the patch");
-// WebIDL text codecs reject resizable buffers even though typed-array operations accept
-// them. Snapshot only UTF-8 strings at these two boundaries; tensor views remain borrowed.
+// WebIDL text codecs and WebCrypto reject resizable buffers even though typed-array
+// operations accept them. Copy only at these boundaries; tensor views remain borrowed.
 // Match the pinned generator exactly so an upgrade cannot silently skip this adaptation.
-const stringBoundaries = [
+const webIdlBoundaries = [
+  [
+    "globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));",
+    `const target = getArrayU8FromWasm0(arg0, arg1);
+            const random = new Uint8Array(target.byteLength);
+            globalThis.crypto.getRandomValues(random);
+            target.set(random);`,
+  ],
   [
     "return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));",
     "const view = getUint8ArrayMemory0().subarray(ptr, ptr + len);\n    return cachedTextDecoder.decode(view.buffer.resizable ? view.slice() : view);",
@@ -71,8 +78,8 @@ const stringBoundaries = [
         }`,
   ],
 ];
-for (const [original, replacement] of stringBoundaries) {
-  if (glue.split(original).length !== 2) throw new Error("Unexpected wasm-bindgen text codec glue; review resizable-memory support before updating the patch");
+for (const [original, replacement] of webIdlBoundaries) {
+  if (glue.split(original).length !== 2) throw new Error("Unexpected wasm-bindgen WebIDL glue; review resizable-memory support before updating the patch");
   glue = glue.replace(original, replacement);
 }
 glue = 'import { createWasiImports, createEnvImports } from "../wasm_imports.js";\n' + glue;

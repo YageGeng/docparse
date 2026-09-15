@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 # workspace crates
 docparse-config = { workspace = true, features = ["wasm"] }
 docparse-core = { workspace = true, features = ["wasm"] }
+docparse-formula = { workspace = true, features = ["wasm"] }
 docparse-layout = { workspace = true, features = ["wasm"] }
 docparse-ocr = { workspace = true, features = ["wasm"] }
 docparse-tsr = { workspace = true, features = ["wasm"] }

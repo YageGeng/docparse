@@ -1,0 +1,178 @@
+{
+  "counts": {
+    "inline_formula_spans": 4328,
+    "inline_partial": 4161,
+    "display_formula_blocks": 656,
+    "formula_number_blocks": 228,
+    "inline_complete": 141,
+    "inline_missing": 26
+  },
+  "documents": [
+    {
+      "file": "2303.18223v16.pdf",
+      "pages": 144,
+      "inline_formula_spans": 171,
+      "inline_partial": 164,
+      "display_formula_blocks": 13,
+      "formula_number_blocks": 11,
+      "inline_complete": 5,
+      "inline_missing": 2
+    },
+    {
+      "file": "2403.01632v4.pdf",
+      "pages": 47,
+      "inline_formula_spans": 557,
+      "inline_partial": 550,
+      "inline_missing": 2,
+      "inline_complete": 5,
+      "display_formula_blocks": 26
+    },
+    {
+      "file": "2410.05779v3.pdf",
+      "pages": 16,
+      "display_formula_blocks": 2,
+      "formula_number_blocks": 2,
+      "inline_formula_spans": 22,
+      "inline_partial": 14,
+      "inline_complete": 8
+    },
+    {
+      "file": "2603.01919v2.pdf",
+      "pages": 23,
+      "inline_formula_spans": 80,
+      "inline_partial": 80
+    },
+    {
+      "file": "2604.18583v1.pdf",
+      "pages": 15,
+      "inline_formula_spans": 140,
+      "inline_partial": 131,
+      "inline_complete": 5,
+      "display_formula_blocks": 23,
+      "formula_number_blocks": 22,
+      "inline_missing": 4
+    },
+    {
+      "file": "2604.18584v1.pdf",
+      "pages": 32,
+      "inline_formula_spans": 260,
+      "inline_partial": 258,
+      "display_formula_blocks": 13,
+      "inline_complete": 2
+    },
+    {
+      "file": "2604.21959v1.pdf",
+      "pages": 3
+    },
+    {
+      "file": "2606.17056v1.pdf",
+      "pages": 25,
+      "display_formula_blocks": 4,
+      "formula_number_blocks": 3,
+      "inline_formula_spans": 10,
+      "inline_partial": 10
+    },
+    {
+      "file": "2609.12610v1.pdf",
+      "pages": 12,
+      "inline_formula_spans": 187,
+      "inline_partial": 183,
+      "display_formula_blocks": 5,
+      "formula_number_blocks": 5,
+      "inline_complete": 4
+    },
+    {
+      "file": "2609.12973v1.pdf",
+      "pages": 24,
+      "inline_formula_spans": 50,
+      "inline_partial": 40,
+      "inline_complete": 10,
+      "display_formula_blocks": 2,
+      "formula_number_blocks": 2
+    },
+    {
+      "file": "2609.13008v1.pdf",
+      "pages": 31,
+      "inline_formula_spans": 553,
+      "inline_partial": 532,
+      "inline_complete": 20,
+      "display_formula_blocks": 74,
+      "formula_number_blocks": 45,
+      "inline_missing": 1
+    },
+    {
+      "file": "2609.13019v1.pdf",
+      "pages": 54,
+      "inline_formula_spans": 989,
+      "inline_partial": 965,
+      "display_formula_blocks": 231,
+      "inline_missing": 5,
+      "formula_number_blocks": 41,
+      "inline_complete": 19
+    },
+    {
+      "file": "2609.13100v1.pdf",
+      "pages": 58,
+      "inline_formula_spans": 921,
+      "inline_partial": 887,
+      "display_formula_blocks": 202,
+      "formula_number_blocks": 66,
+      "inline_complete": 34
+    },
+    {
+      "file": "2609.13141v1.pdf",
+      "pages": 26,
+      "inline_formula_spans": 145,
+      "inline_partial": 126,
+      "display_formula_blocks": 23,
+      "formula_number_blocks": 11,
+      "inline_complete": 10,
+      "inline_missing": 9
+    },
+    {
+      "file": "2609.13144v1.pdf",
+      "pages": 56,
+      "inline_formula_spans": 12,
+      "inline_partial": 12,
+      "display_formula_blocks": 1
+    },
+    {
+      "file": "2609.13146v1.pdf",
+      "pages": 17,
+      "inline_formula_spans": 69,
+      "inline_partial": 69,
+      "display_formula_blocks": 13,
+      "formula_number_blocks": 13
+    },
+    {
+      "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "pages": 13,
+      "inline_formula_spans": 82,
+      "inline_complete": 7,
+      "inline_partial": 73,
+      "display_formula_blocks": 7,
+      "inline_missing": 2
+    },
+    {
+      "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "pages": 24,
+      "display_formula_blocks": 17,
+      "formula_number_blocks": 7,
+      "inline_formula_spans": 73,
+      "inline_partial": 64,
+      "inline_missing": 1,
+      "inline_complete": 8
+    },
+    {
+      "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "pages": 32,
+      "inline_formula_spans": 7,
+      "inline_complete": 4,
+      "inline_partial": 3
+    },
+    {
+      "file": "Towards Conversational AI for Disease Management.pdf",
+      "pages": 42
+    }
+  ]
+}

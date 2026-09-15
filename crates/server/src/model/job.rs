@@ -13,6 +13,30 @@ pub struct JobQuery {
     pub id: Uuid,
 }
 
+/// Selects a stored document representation without rerunning PDF or model inference.
+#[derive(Debug, Default, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultFormat {
+    /// Canonical JSON, including both formula LaTeX and Markdown.
+    #[default]
+    Json,
+    /// Complete document Markdown with inline, display and table formulas.
+    Markdown,
+}
+
+/// A durable task identifier and an optional output representation.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct JobResultQuery {
+    /// UUID returned by the upload endpoint.
+    pub id: Uuid,
+    /// Defaults to json; markdown returns text/markdown rather than a JSON envelope.
+    #[serde(default)]
+    #[param(inline)]
+    pub format: Option<ResultFormat>,
+}
+
 /// Multipart contract for a streamed upload; the handler continues to process chunks instead of buffering this DTO.
 #[derive(utoipa::ToSchema)]
 pub struct PdfUpload {

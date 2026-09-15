@@ -118,6 +118,8 @@ pub(crate) struct ParseRuntime {
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
     #[builder(default)]
+    formula_engine: Option<Arc<dyn docparse_formula::FormulaEngine>>,
+    #[builder(default)]
     glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
@@ -429,6 +431,7 @@ impl ParseRuntime {
                             let config = Arc::clone(&self.config);
                             let layout_engine = Arc::clone(&self.layout_engine);
                             let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
+                            let formula_engine = self.formula_engine.as_ref().map(Arc::clone);
                             let tables = Arc::clone(&tables);
                             let context = Arc::clone(&scanned.context);
                             match result {
@@ -440,7 +443,7 @@ impl ParseRuntime {
                                     }
                                     layout_tasks.spawn(async move {
                                         (PageAnalysisInput::builder()
-                                            .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine)
+                                            .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine).formula_engine(formula_engine)
                                             .context(context).extracted(extracted).rendered(rendered).timings(page_timings).tables(tables).build()).prepare()
                                         .await
                                     });
