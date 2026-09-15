@@ -78,6 +78,154 @@ fn exact_json_comparison_requires_identical_bytes() {
     assert!(!short.is_exact());
 }
 
+/// Replays a real corpus and compares API output, excluding only run-local external TSR request IDs.
+#[tokio::test]
+#[ignore = "requires real models, E2E corpus variables and COREML_E2E_BASELINE_DIR"]
+async fn real_pdf_outputs_match_baseline() -> Result<(), Box<dyn Error>> {
+    /// Reads the standard response envelope without retaining two generic JSON object graphs.
+    #[derive(serde::Deserialize)]
+    struct HttpDocument {
+        data: DocumentResult,
+    }
+
+    let pdf_dir = required_env_path("DOCPARSE_E2E_PDF_DIR")?;
+    let manifest_path = required_env_path("DOCPARSE_E2E_MANIFEST")?;
+    let output_dir = required_env_path("DOCPARSE_E2E_OUTPUT_DIR")?;
+    let baseline_dir = required_env_path("COREML_E2E_BASELINE_DIR")?;
+    let config_path = required_env_path("DOCPARSE_E2E_CONFIG")?;
+    let manifest = load_manifest(&manifest_path)?;
+    let verified = verify_pdf_directory(&manifest, &pdf_dir)?;
+    let config = Arc::new(ValidatedConfig::try_from(
+        ConfigLoader::new(config_path).load_raw()?,
+    )?);
+    let parser = DocParser::builder()
+        .config(Arc::clone(&config))
+        .build()
+        .await?;
+    std::fs::create_dir_all(&output_dir)?;
+    let mut reports = Vec::new();
+    let mut all_exact = true;
+    let selected = std::env::var("DOCPARSE_E2E_ONLY").ok();
+    if let Some(selected) = &selected
+        && !verified
+            .iter()
+            .any(|document| &document.manifest.logical_id == selected)
+    {
+        return Err(io::Error::other(format!(
+            "unknown DOCPARSE_E2E_ONLY logical ID {selected}"
+        ))
+        .into());
+    }
+    for document in verified.into_iter().filter(|document| {
+        selected
+            .as_ref()
+            .is_none_or(|selected| selected == &document.manifest.logical_id)
+    }) {
+        let id = &document.manifest.logical_id;
+        let mut baseline: HttpDocument =
+            serde_json::from_reader(std::io::BufReader::new(File::open(
+                baseline_dir.join(format!("{id}.json")),
+            )?))?;
+        ResultValidator::validate(&baseline.data)?;
+        let original_invariant_error =
+            check_document_invariants(id, &baseline.data)
+                .err()
+                .map(|error| error.to_string());
+        // Concurrent crop admission assigns these correlation IDs from an atomic counter.
+        for evidence in baseline
+            .data
+            .pages
+            .iter_mut()
+            .flat_map(|page| &mut page.blocks)
+            .flat_map(|block| &mut block.evidence)
+            .filter(|evidence| evidence.kind == "external_table_structure")
+        {
+            if let Some(request_id) = evidence.details.get_mut("request_id") {
+                *request_id = "run-local".to_owned();
+            }
+        }
+        let expected = serde_json::to_vec(
+            &docparse_core::JsonRenderer::view_with_config(
+                &baseline.data,
+                config.output(),
+            ),
+        )?;
+        // Release the baseline object graph before inference; only its compact canonical bytes remain.
+        drop(baseline);
+        eprintln!("comparing real PDF output for {id}");
+        let mut result = parser.parse_path(&document.path).await?;
+        if result.pages.len() != usize::try_from(document.manifest.page_count)?
+        {
+            return Err(
+                io::Error::other(format!("{id}: page count changed")).into()
+            );
+        }
+        if !result.errors.is_empty() {
+            return Err(io::Error::other(format!("{id}: parse errors")).into());
+        }
+        ResultValidator::validate(&result)?;
+        let current_invariant_error = check_document_invariants(id, &result)
+            .err()
+            .map(|error| error.to_string());
+        // Preserve every other evidence, geometry, text, table, ordering and confidence value.
+        for evidence in result
+            .pages
+            .iter_mut()
+            .flat_map(|page| &mut page.blocks)
+            .flat_map(|block| &mut block.evidence)
+            .filter(|evidence| evidence.kind == "external_table_structure")
+        {
+            if let Some(request_id) = evidence.details.get_mut("request_id") {
+                *request_id = "run-local".to_owned();
+            }
+        }
+        let mut comparison = ExactJsonComparison::new(&expected);
+        serde_json::to_writer(
+            &mut comparison,
+            &docparse_core::JsonRenderer::view_with_config(
+                &result,
+                config.output(),
+            ),
+        )?;
+        let exact = comparison.is_exact();
+        let invariant_unchanged =
+            original_invariant_error == current_invariant_error;
+        all_exact &= exact && invariant_unchanged;
+        if !exact {
+            let mut actual = BufWriter::new(File::create(
+                output_dir.join(format!("{id}-actual.json")),
+            )?);
+            serde_json::to_writer(
+                &mut actual,
+                &docparse_core::JsonRenderer::view_with_config(
+                    &result,
+                    config.output(),
+                ),
+            )?;
+            actual.flush()?;
+            std::fs::write(
+                output_dir.join(format!("{id}-expected.json")),
+                &expected,
+            )?;
+        }
+        reports.push(serde_json::json!({"file":document.manifest.basename,"logical_id":id,
+            "pages":result.pages.len(),"source_sha256":document.manifest.sha256,"equal_without_run_local_request_ids":exact,
+            "invariant_status_unchanged":invariant_unchanged,"baseline_invariant_error":original_invariant_error,
+            "current_invariant_error":current_invariant_error}));
+        std::fs::write(
+            output_dir.join("output-comparison.json"),
+            serde_json::to_vec_pretty(&reports)?,
+        )?;
+        eprintln!(
+            "{id}: exact JSON={exact}, invariant status unchanged={invariant_unchanged}"
+        );
+    }
+    if !all_exact {
+        return Err(io::Error::other("real PDF output or invariant status changed; inspect output-comparison.json").into());
+    }
+    Ok(())
+}
+
 /// Runs the fixed real corpus through the production parser and writes deterministic artifacts.
 #[tokio::test]
 #[ignore = "requires fixed PP-DocLayoutV3 model and local E2E corpus"]

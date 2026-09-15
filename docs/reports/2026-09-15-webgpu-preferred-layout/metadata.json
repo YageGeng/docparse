@@ -1,0 +1,61 @@
+{
+  "rust_profile": "release",
+  "build_command": "rtk npm run build (packages/wasm-web)",
+  "post_bindgen_optimization": {
+    "binaryen": "132.0.0",
+    "flags": [
+      "-O4",
+      "--enable-simd",
+      "--enable-reference-types",
+      "--enable-bulk-memory",
+      "--enable-mutable-globals",
+      "--enable-nontrapping-float-to-int",
+      "--enable-sign-ext",
+      "--enable-exception-handling"
+    ],
+    "beforeBytes": 11683975,
+    "afterBytes": 8021613,
+    "durationMs": 111924.006167
+  },
+  "runtime_assets_verified_after_runs": true,
+  "source_commit": "500475a0029107540e97eb16dff04a311f43903e",
+  "production_preferred_layout_changed": false,
+  "runtime": "onnxruntime-web 1.27.0",
+  "source_hashes": {
+    "packages/wasm-web/tests/preferred-layout.mjs": "7317fb7c3b5bf91883d357a27a5790eccfd531d6c3cab96d6a745b5651860191",
+    "packages/wasm-web/tests/preferred-layout-browser.js": "01a254895c714c6180b231a9fbc9254532e1e2846afe2be9c457850b820044be",
+    "packages/wasm-web/tests/instrumented-worker.js": "804172132c590af7ff5ba086afd04ac4fdbdf477bcecbfb3fc8520062361f426"
+  },
+  "model_manifests": {
+    "pp-doclayout-v3": {
+      "files": {
+        "inference.onnx": "45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba",
+        "inference.yml": "506fcfac13b3b546ae40d7886b44126420f392adb694e3f8bb6a6286a1f90fdc"
+      },
+      "generated_at": "2026-09-07T03:28:00.197805Z",
+      "license": "Apache-2.0",
+      "repository": "PaddlePaddle/PP-DocLayoutV3_onnx",
+      "revision": "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6"
+    },
+    "slanet-plus": {
+      "files": {
+        "inference.onnx": "7790c0c13ce064782c9d22ebeb16b4da8216f83d3ba576da962c106ef58386da",
+        "inference.yml": "8a6372d3269a6f112fe13a2da7952a84da6e112c10a3146cbb43de5bd01d19fa"
+      },
+      "generated_at": "2026-09-10T16:38:35.764570Z",
+      "license": "Apache-2.0",
+      "repository": "PaddlePaddle/SLANet_plus_onnx",
+      "revision": "7dbe640e127602bf506815e822c09758de73c482"
+    },
+    "rtdetr-table-cell-wireless": {
+      "files": {
+        "inference.onnx": "47515940ec5c37156e09aa9acb20c4e7e22456cad6ce49473661f1762fb46a78",
+        "inference.yml": "f2d0f00ea42aacc162f72a35cf54330e392a7d669e9a1b43896d3bd77a512621"
+      },
+      "generated_at": "2026-09-14T11:21:41.897038Z",
+      "license": "Apache-2.0",
+      "repository": "PaddlePaddle/RT-DETR-L_wireless_table_cell_det_onnx",
+      "revision": "94c021be206064f0136ef1383fbd4b68b168fa61"
+    }
+  }
+}

@@ -1,0 +1,222 @@
+[
+  {
+    "file": "2303.18223v16.pdf",
+    "pages": 144,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "ac22d7b1ce1e9521a64ae56a6ff788288afeed1b68c9a609dda564f30d5541f8",
+      "NHWC-1": "ac22d7b1ce1e9521a64ae56a6ff788288afeed1b68c9a609dda564f30d5541f8",
+      "NHWC-2": "ac22d7b1ce1e9521a64ae56a6ff788288afeed1b68c9a609dda564f30d5541f8",
+      "NCHW-2": "ac22d7b1ce1e9521a64ae56a6ff788288afeed1b68c9a609dda564f30d5541f8"
+    }
+  },
+  {
+    "file": "2403.01632v4.pdf",
+    "pages": 47,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "582c113f0747cb092ecd76b8f48a1cb7a92a3461630c4d0ea85fa9e0dc6da636",
+      "NHWC-1": "582c113f0747cb092ecd76b8f48a1cb7a92a3461630c4d0ea85fa9e0dc6da636",
+      "NHWC-2": "582c113f0747cb092ecd76b8f48a1cb7a92a3461630c4d0ea85fa9e0dc6da636",
+      "NCHW-2": "582c113f0747cb092ecd76b8f48a1cb7a92a3461630c4d0ea85fa9e0dc6da636"
+    }
+  },
+  {
+    "file": "2410.05779v3.pdf",
+    "pages": 16,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "db615646edcc0f3e4dcb0daa96f3da51a0c6c0fec9a0dabc9a58e108f6e3d317",
+      "NHWC-1": "db615646edcc0f3e4dcb0daa96f3da51a0c6c0fec9a0dabc9a58e108f6e3d317",
+      "NHWC-2": "db615646edcc0f3e4dcb0daa96f3da51a0c6c0fec9a0dabc9a58e108f6e3d317",
+      "NCHW-2": "db615646edcc0f3e4dcb0daa96f3da51a0c6c0fec9a0dabc9a58e108f6e3d317"
+    }
+  },
+  {
+    "file": "2603.01919v2.pdf",
+    "pages": 23,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "b0f41dd59a6b8ed94db8b4332e4bc5ac0b2c59849c7e669d2e9b51f8f1c482fe",
+      "NHWC-1": "b0f41dd59a6b8ed94db8b4332e4bc5ac0b2c59849c7e669d2e9b51f8f1c482fe",
+      "NHWC-2": "b0f41dd59a6b8ed94db8b4332e4bc5ac0b2c59849c7e669d2e9b51f8f1c482fe",
+      "NCHW-2": "b0f41dd59a6b8ed94db8b4332e4bc5ac0b2c59849c7e669d2e9b51f8f1c482fe"
+    }
+  },
+  {
+    "file": "2604.18583v1.pdf",
+    "pages": 15,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "22d83b444f8ae8463ee88fdda90ad04215814e0ad5f02ddbfd887f34cb016afc",
+      "NHWC-1": "22d83b444f8ae8463ee88fdda90ad04215814e0ad5f02ddbfd887f34cb016afc",
+      "NHWC-2": "22d83b444f8ae8463ee88fdda90ad04215814e0ad5f02ddbfd887f34cb016afc",
+      "NCHW-2": "22d83b444f8ae8463ee88fdda90ad04215814e0ad5f02ddbfd887f34cb016afc"
+    }
+  },
+  {
+    "file": "2604.18584v1.pdf",
+    "pages": 32,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "adedf6c78b52035c4bbe363a92f5d5857373605dc6e25325e62bd31edd3a9928",
+      "NHWC-1": "adedf6c78b52035c4bbe363a92f5d5857373605dc6e25325e62bd31edd3a9928",
+      "NHWC-2": "adedf6c78b52035c4bbe363a92f5d5857373605dc6e25325e62bd31edd3a9928",
+      "NCHW-2": "adedf6c78b52035c4bbe363a92f5d5857373605dc6e25325e62bd31edd3a9928"
+    }
+  },
+  {
+    "file": "2604.21959v1.pdf",
+    "pages": 3,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "a60c3ff0d33b167413ca8d2530cc4b7fc4389328d6783cffa63c77a0168cf733",
+      "NHWC-1": "a60c3ff0d33b167413ca8d2530cc4b7fc4389328d6783cffa63c77a0168cf733",
+      "NHWC-2": "a60c3ff0d33b167413ca8d2530cc4b7fc4389328d6783cffa63c77a0168cf733",
+      "NCHW-2": "a60c3ff0d33b167413ca8d2530cc4b7fc4389328d6783cffa63c77a0168cf733"
+    }
+  },
+  {
+    "file": "2606.17056v1.pdf",
+    "pages": 25,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "3155409775eea9ed6087325d5b523a8d6924ebfed724d7f43cdd89903ba27483",
+      "NHWC-1": "3155409775eea9ed6087325d5b523a8d6924ebfed724d7f43cdd89903ba27483",
+      "NHWC-2": "3155409775eea9ed6087325d5b523a8d6924ebfed724d7f43cdd89903ba27483",
+      "NCHW-2": "3155409775eea9ed6087325d5b523a8d6924ebfed724d7f43cdd89903ba27483"
+    }
+  },
+  {
+    "file": "2609.12610v1.pdf",
+    "pages": 12,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "a3a9d7759f7f9990729442c38b02cc2a3db668b58445d528350c0e2a7146b3bc",
+      "NHWC-1": "a3a9d7759f7f9990729442c38b02cc2a3db668b58445d528350c0e2a7146b3bc",
+      "NHWC-2": "a3a9d7759f7f9990729442c38b02cc2a3db668b58445d528350c0e2a7146b3bc",
+      "NCHW-2": "a3a9d7759f7f9990729442c38b02cc2a3db668b58445d528350c0e2a7146b3bc"
+    }
+  },
+  {
+    "file": "2609.12973v1.pdf",
+    "pages": 24,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "9b698dde810a781bd27c326fae572674eff10858c587dac8baf5def3c4232c1b",
+      "NHWC-1": "9b698dde810a781bd27c326fae572674eff10858c587dac8baf5def3c4232c1b",
+      "NHWC-2": "9b698dde810a781bd27c326fae572674eff10858c587dac8baf5def3c4232c1b",
+      "NCHW-2": "9b698dde810a781bd27c326fae572674eff10858c587dac8baf5def3c4232c1b"
+    }
+  },
+  {
+    "file": "2609.13008v1.pdf",
+    "pages": 31,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "24d9007f6d2f569a8759bced0ab70a2e227d472f394107d9bc4746f21216db88",
+      "NHWC-1": "24d9007f6d2f569a8759bced0ab70a2e227d472f394107d9bc4746f21216db88",
+      "NHWC-2": "24d9007f6d2f569a8759bced0ab70a2e227d472f394107d9bc4746f21216db88",
+      "NCHW-2": "24d9007f6d2f569a8759bced0ab70a2e227d472f394107d9bc4746f21216db88"
+    }
+  },
+  {
+    "file": "2609.13019v1.pdf",
+    "pages": 54,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "b5014a0c6dc364f7f97627a80cb4a3391c01bd34b22d933e40c128465a73b6e0",
+      "NHWC-1": "b5014a0c6dc364f7f97627a80cb4a3391c01bd34b22d933e40c128465a73b6e0",
+      "NHWC-2": "b5014a0c6dc364f7f97627a80cb4a3391c01bd34b22d933e40c128465a73b6e0",
+      "NCHW-2": "b5014a0c6dc364f7f97627a80cb4a3391c01bd34b22d933e40c128465a73b6e0"
+    }
+  },
+  {
+    "file": "2609.13100v1.pdf",
+    "pages": 58,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "c6f9c3e43e0b1526b0fea1868c1643cfd3b118fe70bd340907314ab2730b6675",
+      "NHWC-1": "c6f9c3e43e0b1526b0fea1868c1643cfd3b118fe70bd340907314ab2730b6675",
+      "NHWC-2": "c6f9c3e43e0b1526b0fea1868c1643cfd3b118fe70bd340907314ab2730b6675",
+      "NCHW-2": "c6f9c3e43e0b1526b0fea1868c1643cfd3b118fe70bd340907314ab2730b6675"
+    }
+  },
+  {
+    "file": "2609.13141v1.pdf",
+    "pages": 26,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "ef92bdaa050ac721f261d34c29eb52e10acb955d35292bedbc743dde8b1198d6",
+      "NHWC-1": "ef92bdaa050ac721f261d34c29eb52e10acb955d35292bedbc743dde8b1198d6",
+      "NHWC-2": "ef92bdaa050ac721f261d34c29eb52e10acb955d35292bedbc743dde8b1198d6",
+      "NCHW-2": "ef92bdaa050ac721f261d34c29eb52e10acb955d35292bedbc743dde8b1198d6"
+    }
+  },
+  {
+    "file": "2609.13144v1.pdf",
+    "pages": 56,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "a722031842d845019c7935a4dc84844c013c37c04580ce25cd68445b38543204",
+      "NHWC-1": "a722031842d845019c7935a4dc84844c013c37c04580ce25cd68445b38543204",
+      "NHWC-2": "a722031842d845019c7935a4dc84844c013c37c04580ce25cd68445b38543204",
+      "NCHW-2": "a722031842d845019c7935a4dc84844c013c37c04580ce25cd68445b38543204"
+    }
+  },
+  {
+    "file": "2609.13146v1.pdf",
+    "pages": 17,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "064db83ef24fd9a9a2e1015e6c8a5e503e0ef715794f2075e8479052e4b3f801",
+      "NHWC-1": "064db83ef24fd9a9a2e1015e6c8a5e503e0ef715794f2075e8479052e4b3f801",
+      "NHWC-2": "064db83ef24fd9a9a2e1015e6c8a5e503e0ef715794f2075e8479052e4b3f801",
+      "NCHW-2": "064db83ef24fd9a9a2e1015e6c8a5e503e0ef715794f2075e8479052e4b3f801"
+    }
+  },
+  {
+    "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "pages": 13,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "c003cb62cf13f6f2054371f15269966ed97e7f4f91b19fa249b66dcc0862b052",
+      "NHWC-1": "c003cb62cf13f6f2054371f15269966ed97e7f4f91b19fa249b66dcc0862b052",
+      "NHWC-2": "c003cb62cf13f6f2054371f15269966ed97e7f4f91b19fa249b66dcc0862b052",
+      "NCHW-2": "c003cb62cf13f6f2054371f15269966ed97e7f4f91b19fa249b66dcc0862b052"
+    }
+  },
+  {
+    "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "pages": 24,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "b4b3ef3bc6ee839e2dfea56bf8330773f9b08c97b66f10b4e993ab5361e83502",
+      "NHWC-1": "b4b3ef3bc6ee839e2dfea56bf8330773f9b08c97b66f10b4e993ab5361e83502",
+      "NHWC-2": "b4b3ef3bc6ee839e2dfea56bf8330773f9b08c97b66f10b4e993ab5361e83502",
+      "NCHW-2": "b4b3ef3bc6ee839e2dfea56bf8330773f9b08c97b66f10b4e993ab5361e83502"
+    }
+  },
+  {
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "pages": 32,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "45729a262bceae373d65ed570e9a6b5d56f0648daba1dfa48032e1c73e435ced",
+      "NHWC-1": "45729a262bceae373d65ed570e9a6b5d56f0648daba1dfa48032e1c73e435ced",
+      "NHWC-2": "45729a262bceae373d65ed570e9a6b5d56f0648daba1dfa48032e1c73e435ced",
+      "NCHW-2": "45729a262bceae373d65ed570e9a6b5d56f0648daba1dfa48032e1c73e435ced"
+    }
+  },
+  {
+    "file": "Towards Conversational AI for Disease Management.pdf",
+    "pages": 42,
+    "all_four_normalized_outputs_identical": true,
+    "hashes": {
+      "NCHW-1": "e4d2d057049bd6d42136e32cb834b0834886ccb5f4daa44f2cdc8b6439489ac2",
+      "NHWC-1": "e4d2d057049bd6d42136e32cb834b0834886ccb5f4daa44f2cdc8b6439489ac2",
+      "NHWC-2": "e4d2d057049bd6d42136e32cb834b0834886ccb5f4daa44f2cdc8b6439489ac2",
+      "NCHW-2": "e4d2d057049bd6d42136e32cb834b0834886ccb5f4daa44f2cdc8b6439489ac2"
+    }
+  }
+]

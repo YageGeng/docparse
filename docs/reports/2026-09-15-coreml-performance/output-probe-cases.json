@@ -1,0 +1,18 @@
+[
+  {
+    "case": "legacy-fast-pruned",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-fast",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-pruned",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy",
+    "exit_code": 0
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "case": "legacy-threads2",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-threads4",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-fast-threads1",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-no-spin",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-fast",
+    "exit_code": 0
+  }
+]

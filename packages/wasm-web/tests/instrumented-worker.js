@@ -1,4 +1,7 @@
 // Capability-only fault injection keeps the actual CPU model and parser in fallback tests.
+const benchmarkParameters = new URL(location.href).searchParams;
+const preferredLayout = benchmarkParameters.get("preferredLayout");
+if (preferredLayout !== null && !["NCHW", "NHWC"].includes(preferredLayout)) throw new Error("Unknown benchmark preferredLayout");
 if (new URL(location.href).searchParams.has("noGpu")) Object.defineProperty(navigator, "gpu", {value: undefined, configurable: true});
 // Exercise older engines at the capability boundary while retaining the actual parser and ORT.
 if (new URL(location.href).searchParams.has("legacyMemory")) Object.defineProperty(WebAssembly.Memory.prototype, "toResizableBuffer", {value: undefined, configurable: true});
@@ -66,12 +69,22 @@ Object.defineProperty(globalThis, "ort", {
     });
     const create = value.InferenceSession.create;
     value.InferenceSession.create = async function (...args) {
+      // A/B tests change only this real session option, keeping the release Worker and models identical.
+      if (preferredLayout !== null) args[1] = { ...args[1], executionProviders: (args[1]?.executionProviders ?? []).map(provider =>
+        (provider.name ?? provider) === "webgpu" ? { ...(typeof provider === "string" ? { name: provider } : provider), preferredLayout } : provider) };
       metrics.providers = args[1]?.executionProviders ?? ["wasm"];
       // Reject only the GPU session boundary; recovery must initialize and run real CPU inference.
       if ((new URL(location.href).searchParams.has("failGpuInit") || (new URL(location.href).searchParams.has("failTsrGpuInit") && metrics.sessions === 1)) && metrics.providers.some(provider => (provider.name ?? provider) === "webgpu")) {
         throw new Error("Injected WebGPU session initialization failure");
       }
       const session = await create.apply(this, args);
+      if (benchmarkParameters.has("benchmark") && !metrics.adapter) {
+        const device = await value.env.webgpu.device;
+        const info = device.adapterInfo;
+        metrics.adapter = info ? { vendor: info.vendor, architecture: info.architecture, device: info.device, description: info.description, isFallbackAdapter: info.isFallbackAdapter } : null;
+        metrics.deviceFeatures = [...device.features];
+        metrics.wasmThreads = value.env.wasm.numThreads;
+      }
       metrics.sessions++;
       const model = { name: session.inputNames.includes("x") ? "tsr" : "layout", providers: metrics.providers, calls: 0, gpuSubmissions: 0 };
       metrics.models.push(model);
@@ -128,6 +141,8 @@ for (const name of ["instantiate", "instantiateStreaming"]) {
 
 /** Adds test observations to ordinary responses without changing the production protocol. */
 globalThis.postMessage = function (message, ...args) {
+  // Timing callbacks must not repeatedly clone the growing inference history during benchmarks.
+  if (benchmarkParameters.has("benchmark") && !("ok" in message)) { send(message, ...args); return; }
   metrics.memoryBytes = [...memories].map(memory => memory.buffer.byteLength);
   metrics.resizableMemory = rustMemory?.buffer.resizable === true;
   send({ ...message, metrics }, ...args);

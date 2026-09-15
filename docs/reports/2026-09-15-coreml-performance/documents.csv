@@ -1,0 +1,41 @@
+case,file,pages,median_seconds,round_1_seconds,round_2_seconds,warnings
+baseline-c2,2403.01632v4.pdf,47,63.3611821665,68.905536958,57.816827375,"{'ContentLayoutOverlap': 7, 'EmptyModelRegion': 2}"
+baseline-c2,2410.05779v3.pdf,16,31.911159603999998,35.599423791,28.222895417,{}
+baseline-c2,2603.01919v2.pdf,23,46.24771989600001,57.37018075,35.125259042,"{'InvalidTsrInput': 1, 'TableStructureUnavailable': 1}"
+baseline-c2,2604.18583v1.pdf,15,14.0948737085,10.790106417,17.399641,"{'ContentLayoutOverlap': 2, 'EmptyModelRegion': 1}"
+baseline-c2,2604.18584v1.pdf,32,36.090714666500006,23.844609542,48.336819791,"{'ContentLayoutOverlap': 6, 'EmptyModelRegion': 1}"
+baseline-c2,2604.21959v1.pdf,3,3.019076771,2.279182375,3.758971167,{}
+baseline-c2,2303.18223v16.pdf,144,198.493317688,199.594983042,197.391652334,"{'ContentLayoutOverlap': 5, 'EmptyModelRegion': 1}"
+baseline-c2,2609.12610v1.pdf,12,12.010942021,8.806321667,15.215562375,{'ContentLayoutOverlap': 4}
+baseline-c2,2606.17056v1.pdf,25,22.875813104000002,17.205558125,28.546068083,{}
+baseline-c2,2609.12973v1.pdf,24,20.891751499999998,17.452873708,24.330629292,"{'ContentLayoutOverlap': 4, 'EmptyModelRegion': 1}"
+baseline-c2,2609.13008v1.pdf,31,24.428482479000003,21.563649125,27.293315833,{}
+baseline-c2,2609.13019v1.pdf,54,51.866059854499994,47.736733042,55.995386667,"{'ContentLayoutOverlap': 10, 'TableStructureUnavailable': 2, 'TableTextAssignmentFailed': 2}"
+baseline-c2,2609.13100v1.pdf,58,61.58070777099999,59.117104917,64.044310625,{'ContentLayoutOverlap': 3}
+baseline-c2,2609.13141v1.pdf,26,28.698836479,31.299342958,26.09833,{'ContentLayoutOverlap': 1}
+baseline-c2,2609.13146v1.pdf,17,16.528059854,12.536760875,20.519358833,"{'ContentLayoutOverlap': 1, 'TableStructureUnavailable': 1, 'TableTextAssignmentFailed': 1}"
+baseline-c2,SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf,13,27.9781885625,30.295642792,25.660734333,"{'ContentLayoutOverlap': 1, 'EmptyModelRegion': 1}"
+baseline-c2,2609.13144v1.pdf,56,65.320526479,61.13697275,69.504080208,"{'ContentLayoutOverlap': 1, 'TableStructureUnavailable': 1, 'TableTextAssignmentFailed': 1}"
+baseline-c2,SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf,24,30.6343318125,19.001530417,42.267133208,{'ContentLayoutOverlap': 1}
+baseline-c2,Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf,32,47.854746771500004,31.934430584,63.775062959,{'ContentLayoutOverlap': 1}
+baseline-c2,Towards Conversational AI for Disease Management.pdf,42,41.5433845625,31.916420625,51.1703485,"{'ContentLayoutOverlap': 5, 'EmptyModelRegion': 150, 'TableStructureUnavailable': 7, 'TableTextAssignmentFailed': 7}"
+fast-c2,2403.01632v4.pdf,47,58.4654708335,69.165889208,47.765052459,"{'ContentLayoutOverlap': 7, 'EmptyModelRegion': 2}"
+fast-c2,2410.05779v3.pdf,16,21.189728979,21.123515458,21.2559425,{}
+fast-c2,2603.01919v2.pdf,23,33.523450354,32.196357625,34.850543083,"{'InvalidTsrInput': 1, 'TableStructureUnavailable': 1}"
+fast-c2,2604.18583v1.pdf,15,14.5519317295,14.269743334,14.834120125,"{'ContentLayoutOverlap': 2, 'EmptyModelRegion': 1}"
+fast-c2,2604.18584v1.pdf,32,34.933139749999995,34.164405875,35.701873625,"{'ContentLayoutOverlap': 6, 'EmptyModelRegion': 1}"
+fast-c2,2604.21959v1.pdf,3,2.951399604,3.245637083,2.657162125,{}
+fast-c2,2303.18223v16.pdf,144,168.9875916455,176.672569541,161.30261375,"{'ContentLayoutOverlap': 5, 'EmptyModelRegion': 1}"
+fast-c2,2609.12610v1.pdf,12,11.216572833,10.796586541,11.636559125,{'ContentLayoutOverlap': 4}
+fast-c2,2606.17056v1.pdf,25,21.7196253755,22.274282292,21.164968459,{}
+fast-c2,2609.12973v1.pdf,24,21.809060125,22.917148917,20.700971333,"{'ContentLayoutOverlap': 4, 'EmptyModelRegion': 1}"
+fast-c2,2609.13008v1.pdf,31,26.617263250500002,27.845681834,25.388844667,{}
+fast-c2,2609.13019v1.pdf,54,48.744422396000004,53.339527042,44.14931775,"{'ContentLayoutOverlap': 10, 'TableStructureUnavailable': 2, 'TableTextAssignmentFailed': 2}"
+fast-c2,2609.13100v1.pdf,58,53.8524164585,58.10533225,49.599500667,{'ContentLayoutOverlap': 3}
+fast-c2,2609.13141v1.pdf,26,23.617636208500002,24.092632417,23.14264,{'ContentLayoutOverlap': 1}
+fast-c2,2609.13146v1.pdf,17,20.365798583500002,20.603943292,20.127653875,"{'ContentLayoutOverlap': 1, 'TableStructureUnavailable': 1, 'TableTextAssignmentFailed': 1}"
+fast-c2,SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf,13,15.2519740835,15.657535167,14.846413,"{'ContentLayoutOverlap': 1, 'EmptyModelRegion': 1}"
+fast-c2,2609.13144v1.pdf,56,54.7849410835,56.81348875,52.756393417,"{'ContentLayoutOverlap': 1, 'TableStructureUnavailable': 1, 'TableTextAssignmentFailed': 1}"
+fast-c2,SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf,24,27.017217875500002,26.346992042,27.687443709,{'ContentLayoutOverlap': 1}
+fast-c2,Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf,32,38.35045637499999,39.952033042,36.748879708,{'ContentLayoutOverlap': 1}
+fast-c2,Towards Conversational AI for Disease Management.pdf,42,34.7072811875,39.617833625,29.79672875,"{'ContentLayoutOverlap': 5, 'EmptyModelRegion': 150, 'TableStructureUnavailable': 7, 'TableTextAssignmentFailed': 7}"

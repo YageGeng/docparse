@@ -1,0 +1,12 @@
+{
+  "baseline-c2": {
+    "maximum resident set size": 5391597568,
+    "peak memory footprint": 8652118592,
+    "involuntary context switches": 8811570
+  },
+  "fast-c2": {
+    "maximum resident set size": 4976410624,
+    "peak memory footprint": 8699107880,
+    "involuntary context switches": 6432725
+  }
+}

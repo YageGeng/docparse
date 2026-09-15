@@ -1,0 +1,84 @@
+[log]
+directives = "warn,ort=error"
+
+[server]
+max_uploads = 100
+worker_concurrency = 5
+pdfium_max_workers = 5
+host = "127.0.0.1"
+port = 8080
+api_prefix = "/api/v1/docparse"
+
+[layout]
+model_path = "../../../models/pp-doclayout-v3/inference.onnx"
+model_config_path = "../../../models/pp-doclayout-v3/inference.yml"
+model_manifest_path = "../../../models/pp-doclayout-v3/model-manifest.json"
+score_threshold = 0.5
+session_pool_size = 1
+
+# SLANet+ topology with independent wireless-table cell geometry.
+[tsr]
+mode = "tsr_only"
+model = "slanet_plus"
+model_path = "../../../models/slanet-plus/inference.onnx"
+model_config_path = "../../../models/slanet-plus/inference.yml"
+model_manifest_path = "../../../models/slanet-plus/model-manifest.json"
+max_in_flight = 8
+timeout_ms = 60000
+
+[tsr.cell_detection]
+enabled = true
+model = "wireless"
+score_threshold = 0.3
+model_path = "../../../models/rtdetr-table-cell-wireless/inference.onnx"
+model_config_path = "../../../models/rtdetr-table-cell-wireless/inference.yml"
+model_manifest_path = "../../../models/rtdetr-table-cell-wireless/model-manifest.json"
+
+[ocr]
+policy = "disabled"
+max_in_flight = 2
+# Group equal-width lines without increasing the number of model sessions.
+batch_size = 16
+
+[ocr.detection]
+model_path = "../../../models/pp-ocrv6-medium-det/inference.onnx"
+model_config_path = "../../../models/pp-ocrv6-medium-det/inference.yml"
+model_manifest_path = "../../../models/pp-ocrv6-medium-det/model-manifest.json"
+
+[ocr.recognition]
+model_path = "../../../models/pp-ocrv6-medium-rec/inference.onnx"
+model_config_path = "../../../models/pp-ocrv6-medium-rec/inference.yml"
+model_manifest_path = "../../../models/pp-ocrv6-medium-rec/model-manifest.json"
+
+[ocr.orientation]
+model_path = "../../../models/pp-lcnet-textline-ori/inference.onnx"
+model_config_path = "../../../models/pp-lcnet-textline-ori/inference.yml"
+model_manifest_path = "../../../models/pp-lcnet-textline-ori/model-manifest.json"
+
+[runtime]
+page_concurrency = 4
+render_queue_capacity = 2
+blocking_task_limit = 4
+continue_on_page_error = true
+
+[render]
+dpi = 144
+max_long_edge_pixels = 2400
+
+[fusion]
+minimum_line_coverage = 0.30
+center_minimum_line_coverage = 0.10
+assignment_coverage_weight = 0.55
+assignment_center_weight = 0.20
+assignment_baseline_weight = 0.10
+assignment_confidence_weight = 0.10
+assignment_specificity_weight = 0.05
+paragraph_gap_multiplier = 1.5
+indent_tolerance_points = 6.0
+font_size_tolerance_points = 0.5
+estimated_font_size_tolerance_points = 1.5
+
+[output]
+formula_placeholder = "[formula]"
+include_evidence = true
+include_diagnostics = false

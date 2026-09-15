@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "case": "baseline-c2",
+      "round_seconds": [
+        398.649252792,
+        458.688004416
+      ],
+      "median_seconds": 428.668628604,
+      "pages_per_second": 1.6189661516870892,
+      "failed_documents": 0,
+      "degraded_documents": 0
+    },
+    {
+      "case": "fast-c2",
+      "round_seconds": [
+        390.064315084,
+        353.393820416
+      ],
+      "median_seconds": 371.72906775,
+      "pages_per_second": 1.8669511216882768,
+      "failed_documents": 0,
+      "degraded_documents": 0
+    }
+  ],
+  "elapsed_reduction_percent": 13.282884973278552,
+  "throughput_increase_percent": 15.317489481961545
+}

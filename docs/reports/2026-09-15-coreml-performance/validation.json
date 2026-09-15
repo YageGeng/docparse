@@ -1,0 +1,27 @@
+{
+  "regular_rust_tests": {
+    "passed": 368,
+    "ignored": 20
+  },
+  "same_path_corpus_comparison": {
+    "documents": 20,
+    "pages": 694,
+    "raw_identical_documents": 14,
+    "identical_after_request_id_normalization": 20,
+    "preexisting_strict_assertion_failures": 3
+  },
+  "final_47_page_replay": "passed",
+  "clippy": "passed",
+  "wasm_check": "passed",
+  "platform_boundary": "passed",
+  "formatting": "passed",
+  "ocr_default_document_smoke": {
+    "status": "passed",
+    "recognized_lines": 13
+  },
+  "ocr_batch_matrix": {
+    "original": "failed",
+    "fast_prediction": "failed",
+    "same_error": "CoreML prediction execution failed in CoreMLExecutionProvider_12650901155684813566_CoreML_12650901155684813566_0_0"
+  }
+}

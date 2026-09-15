@@ -136,9 +136,17 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
                     } else {
                         ort::ep::coreml::ComputeUnits::All
                     };
+                    tracing::info!(
+                        "configuring CoreML with {:?} compute units and FastPrediction specialization",
+                        units
+                    );
                     Some(
                         ort::ep::CoreML::default()
                             .with_compute_units(units)
+                            // Sessions are reused across pages; favor steady-state prediction over compilation latency.
+                            .with_specialization_strategy(
+                                ort::ep::coreml::SpecializationStrategy::FastPrediction,
+                            )
                             .build(),
                     )
                 }

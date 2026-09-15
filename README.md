@@ -69,6 +69,8 @@ rtk docparse parse input.pdf --config docparse.toml --format json
 
 All native model families use one backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Model-prefixed CLI features forward to the shared backend, so enabling `layout-cuda` also selects CUDA for OCR and TSR. Server builds expose `cuda`, `coreml`, `metal`, and `openvino`; omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
+CoreML and Metal sessions request `FastPrediction` specialization for their reusable models. The [M4 benchmark report](docs/reports/2026-09-15-coreml-performance/README.md) records warmed real-PDF measurements and the compatibility and output checks for alternative settings.
+
 ## Rust API
 
 ```rust,no_run

@@ -1,0 +1,202 @@
+[
+  {
+    "baseline_invariant_error": "logical_id=arxiv-2303.18223v16 page=4 invariant=survey_formula_and_tables: fraction powers or header/data cells do not match the original PDF",
+    "current_invariant_error": "logical_id=arxiv-2303.18223v16 page=4 invariant=survey_formula_and_tables: fraction powers or header/data cells do not match the original PDF",
+    "exact_configured_json": false,
+    "file": "2303.18223v16.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2303.18223v16",
+    "pages": 144,
+    "source_sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2403.01632v4.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2403.01632v4",
+    "pages": 47,
+    "source_sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2410.05779v3.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2410.05779v3",
+    "pages": 16,
+    "source_sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2603.01919v2.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2603.01919v2",
+    "pages": 23,
+    "source_sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2604.18583v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2604.18583v1",
+    "pages": 15,
+    "source_sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2604.18584v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2604.18584v1",
+    "pages": 32,
+    "source_sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2604.21959v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2604.21959v1",
+    "pages": 3,
+    "source_sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2606.17056v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2606.17056v1",
+    "pages": 25,
+    "source_sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.12610v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.12610v1",
+    "pages": 12,
+    "source_sha256": "5bdfae15f870223af055d9d76bac314d14b2a901bf2cc58317cbc101b7d831fd"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.12973v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.12973v1",
+    "pages": 24,
+    "source_sha256": "32f3286959e7c9b648c64fb6b2483477b652a0541afa04205938fdf5f2cc3843"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.13008v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13008v1",
+    "pages": 31,
+    "source_sha256": "6c1ff2f8d0b3cdd2dcc73b2cef39cc0f2a6b0ee470d7a21717c70f3454bc9683"
+  },
+  {
+    "baseline_invariant_error": "logical_id=arxiv-2609.13019v1 page=19 invariant=block_bbox: bbox=Bbox { left: -144.54200744628906, top: 437.7900085449219, right: -134.66099548339844, bottom: 446.8479919433594 }, page=612x792",
+    "current_invariant_error": "logical_id=arxiv-2609.13019v1 page=19 invariant=block_bbox: bbox=Bbox { left: -144.54200744628906, top: 437.7900085449219, right: -134.66099548339844, bottom: 446.8479919433594 }, page=612x792",
+    "exact_configured_json": false,
+    "file": "2609.13019v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13019v1",
+    "pages": 54,
+    "source_sha256": "a8e0cdeb0a1b331d6c5d707921704f734c9fa09638a7603987c0177a93643d4f"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.13100v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13100v1",
+    "pages": 58,
+    "source_sha256": "6f3f6ebd1638bec4fc799713425f04de13bf670f860a45b95b5be6d870d55ebc"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.13141v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13141v1",
+    "pages": 26,
+    "source_sha256": "62c1c4bb7894430bf17f8025801f79907ee373f86c816ce3f01971a34524f2ef"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.13144v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13144v1",
+    "pages": 56,
+    "source_sha256": "043c1fe5ef4d01938db7e3c8fd8768213e6fd9f43bf9785b5ca90fabfdec69c3"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "2609.13146v1.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "arxiv-2609.13146v1",
+    "pages": 17,
+    "source_sha256": "4f7e2b204719aef43442f79218de4f48d0ea2d9e09fc8b91696588723786c593"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "document-17",
+    "pages": 13,
+    "source_sha256": "8b81a9c5c48281884dc4a4922764a36ba0d6911593103b018fdebb9423e06b4a"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "document-18",
+    "pages": 24,
+    "source_sha256": "2d5495c2a82d2c0b6174192fedb5b87c4da63e7a049691f57e155a6789de3c13"
+  },
+  {
+    "baseline_invariant_error": null,
+    "current_invariant_error": null,
+    "exact_configured_json": false,
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "document-19",
+    "pages": 32,
+    "source_sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc"
+  },
+  {
+    "baseline_invariant_error": "logical_id=document-20 page=1 invariant=block_bbox: bbox=Bbox { left: -15.53499984741211, top: 108.26599884033203, right: 578.4010009765625, bottom: 702.343017578125 }, page=595.2760009765625x790.8660278320313",
+    "current_invariant_error": "logical_id=document-20 page=1 invariant=block_bbox: bbox=Bbox { left: -15.53499984741211, top: 108.26599884033203, right: 578.4010009765625, bottom: 702.343017578125 }, page=595.2760009765625x790.8660278320313",
+    "exact_configured_json": false,
+    "file": "Towards Conversational AI for Disease Management.pdf",
+    "invariant_status_unchanged": true,
+    "logical_id": "document-20",
+    "pages": 42,
+    "source_sha256": "31656acbb41a8768afae1dff1d68d6c4517d627ca1344581f9956334bb86d43c"
+  }
+]

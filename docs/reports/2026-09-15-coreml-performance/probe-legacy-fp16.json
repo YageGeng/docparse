@@ -1,0 +1,530 @@
+[
+  {
+    "case": "legacy-fp16",
+    "loading_seconds": 2.985851083,
+    "records": [
+      {
+        "detections": [],
+        "repeat": 0,
+        "sample": "blank.png",
+        "seconds": 0.488129792
+      },
+      {
+        "detections": [],
+        "repeat": 0,
+        "sample": "dense-overlap.png",
+        "seconds": 0.326424958
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 157.0,
+              "left": 55.0,
+              "right": 604.0,
+              "top": 108.0
+            },
+            "class_id": 17,
+            "confidence": 0.8132302165031433,
+            "geometry_source": "DerivedFromBbox",
+            "label": "paragraph_title",
+            "metadata": {},
+            "model_order": 68,
+            "polygon": null,
+            "raw_label": "paragraph_title",
+            "source_detection_index": 0
+          },
+          {
+            "bbox": {
+              "bottom": 332.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 298.0
+            },
+            "class_id": 22,
+            "confidence": 0.507457435131073,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 191,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 3
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 50.0,
+              "right": 266.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5100563168525696,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 237,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 2
+          },
+          {
+            "bbox": {
+              "bottom": 476.0,
+              "left": 532.0,
+              "right": 761.0,
+              "top": 443.0
+            },
+            "class_id": 22,
+            "confidence": 0.5034999251365662,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 243,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 4
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5394210815429688,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 254,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 1
+          }
+        ],
+        "repeat": 0,
+        "sample": "input.png",
+        "seconds": 0.316984333
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 610.0,
+              "left": 0.0,
+              "right": 1197.0,
+              "top": 116.0
+            },
+            "class_id": 6,
+            "confidence": 0.5982024669647217,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 35,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 0,
+        "sample": "landscape.png",
+        "seconds": 0.319103791
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 714.0,
+              "left": 0.0,
+              "right": 580.0,
+              "top": 24.0
+            },
+            "class_id": 6,
+            "confidence": 0.5493335127830505,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 15,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 0,
+        "sample": "portrait.png",
+        "seconds": 0.310981958
+      },
+      {
+        "detections": [],
+        "repeat": 1,
+        "sample": "blank.png",
+        "seconds": 0.318200958
+      },
+      {
+        "detections": [],
+        "repeat": 1,
+        "sample": "dense-overlap.png",
+        "seconds": 0.311866625
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 157.0,
+              "left": 55.0,
+              "right": 604.0,
+              "top": 108.0
+            },
+            "class_id": 17,
+            "confidence": 0.8132302165031433,
+            "geometry_source": "DerivedFromBbox",
+            "label": "paragraph_title",
+            "metadata": {},
+            "model_order": 68,
+            "polygon": null,
+            "raw_label": "paragraph_title",
+            "source_detection_index": 0
+          },
+          {
+            "bbox": {
+              "bottom": 332.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 298.0
+            },
+            "class_id": 22,
+            "confidence": 0.507457435131073,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 191,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 3
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 50.0,
+              "right": 266.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5100563168525696,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 237,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 2
+          },
+          {
+            "bbox": {
+              "bottom": 476.0,
+              "left": 532.0,
+              "right": 761.0,
+              "top": 443.0
+            },
+            "class_id": 22,
+            "confidence": 0.5034999251365662,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 243,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 4
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5394210815429688,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 254,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 1
+          }
+        ],
+        "repeat": 1,
+        "sample": "input.png",
+        "seconds": 0.314821208
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 610.0,
+              "left": 0.0,
+              "right": 1197.0,
+              "top": 116.0
+            },
+            "class_id": 6,
+            "confidence": 0.5982024669647217,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 35,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 1,
+        "sample": "landscape.png",
+        "seconds": 0.317157333
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 714.0,
+              "left": 0.0,
+              "right": 580.0,
+              "top": 24.0
+            },
+            "class_id": 6,
+            "confidence": 0.5493335127830505,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 15,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 1,
+        "sample": "portrait.png",
+        "seconds": 0.316663917
+      },
+      {
+        "detections": [],
+        "repeat": 2,
+        "sample": "blank.png",
+        "seconds": 0.317907167
+      },
+      {
+        "detections": [],
+        "repeat": 2,
+        "sample": "dense-overlap.png",
+        "seconds": 0.31827025
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 157.0,
+              "left": 55.0,
+              "right": 604.0,
+              "top": 108.0
+            },
+            "class_id": 17,
+            "confidence": 0.8132302165031433,
+            "geometry_source": "DerivedFromBbox",
+            "label": "paragraph_title",
+            "metadata": {},
+            "model_order": 68,
+            "polygon": null,
+            "raw_label": "paragraph_title",
+            "source_detection_index": 0
+          },
+          {
+            "bbox": {
+              "bottom": 332.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 298.0
+            },
+            "class_id": 22,
+            "confidence": 0.507457435131073,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 191,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 3
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 50.0,
+              "right": 266.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5100563168525696,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 237,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 2
+          },
+          {
+            "bbox": {
+              "bottom": 476.0,
+              "left": 532.0,
+              "right": 761.0,
+              "top": 443.0
+            },
+            "class_id": 22,
+            "confidence": 0.5034999251365662,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 243,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 4
+          },
+          {
+            "bbox": {
+              "bottom": 523.0,
+              "left": 532.0,
+              "right": 762.0,
+              "top": 491.0
+            },
+            "class_id": 22,
+            "confidence": 0.5394210815429688,
+            "geometry_source": "DerivedFromBbox",
+            "label": "text",
+            "metadata": {},
+            "model_order": 254,
+            "polygon": null,
+            "raw_label": "text",
+            "source_detection_index": 1
+          }
+        ],
+        "repeat": 2,
+        "sample": "input.png",
+        "seconds": 0.322181791
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 610.0,
+              "left": 0.0,
+              "right": 1197.0,
+              "top": 116.0
+            },
+            "class_id": 6,
+            "confidence": 0.5982024669647217,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 35,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 2,
+        "sample": "landscape.png",
+        "seconds": 0.315931792
+      },
+      {
+        "detections": [
+          {
+            "bbox": {
+              "bottom": 714.0,
+              "left": 0.0,
+              "right": 580.0,
+              "top": 24.0
+            },
+            "class_id": 6,
+            "confidence": 0.5493335127830505,
+            "geometry_source": "DerivedFromBbox",
+            "label": "doc_title",
+            "metadata": {},
+            "model_order": 15,
+            "polygon": null,
+            "raw_label": "doc_title",
+            "source_detection_index": 0
+          }
+        ],
+        "repeat": 2,
+        "sample": "portrait.png",
+        "seconds": 0.316052708
+      }
+    ],
+    "schema": {
+      "inputs": [
+        {
+          "dtype": "f32",
+          "name": "im_shape",
+          "shape": [
+            "DynamicDimension.0",
+            2
+          ]
+        },
+        {
+          "dtype": "f32",
+          "name": "image",
+          "shape": [
+            "DynamicDimension.1",
+            3,
+            800,
+            800
+          ]
+        },
+        {
+          "dtype": "f32",
+          "name": "scale_factor",
+          "shape": [
+            "DynamicDimension.2",
+            2
+          ]
+        }
+      ],
+      "metadata": {
+        "custom": {},
+        "description": "",
+        "domain": "",
+        "graph_description": "",
+        "name": "PaddlePaddle Graph in PIR mode",
+        "producer": "",
+        "version": 9223372036854775807
+      },
+      "outputs": [
+        {
+          "dtype": "f32",
+          "name": "fetch_name_0",
+          "shape": [
+            "DynamicDimension.3",
+            7
+          ]
+        },
+        {
+          "dtype": "i32",
+          "name": "fetch_name_1",
+          "shape": [
+            "DynamicDimension.4"
+          ]
+        },
+        {
+          "dtype": "i32",
+          "name": "fetch_name_2",
+          "shape": [
+            "DynamicDimension.5",
+            200,
+            200
+          ]
+        }
+      ]
+    },
+    "warmup_seconds": 6.2217857500000004
+  }
+]

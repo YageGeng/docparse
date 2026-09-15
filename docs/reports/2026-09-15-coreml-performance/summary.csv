@@ -1,0 +1,3 @@
+case,round_seconds,median_seconds,pages_per_second,failed_documents,degraded_documents
+baseline-c2,"[398.649252792, 458.688004416]",428.668628604,1.6189661516870892,0,0
+fast-c2,"[390.064315084, 353.393820416]",371.72906775,1.8669511216882768,0,0

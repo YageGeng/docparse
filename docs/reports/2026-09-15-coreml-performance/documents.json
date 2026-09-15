@@ -1,0 +1,458 @@
+[
+  {
+    "case": "baseline-c2",
+    "file": "2403.01632v4.pdf",
+    "pages": 47,
+    "median_seconds": 63.3611821665,
+    "round_1_seconds": 68.905536958,
+    "round_2_seconds": 57.816827375,
+    "warnings": {
+      "ContentLayoutOverlap": 7,
+      "EmptyModelRegion": 2
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2410.05779v3.pdf",
+    "pages": 16,
+    "median_seconds": 31.911159603999998,
+    "round_1_seconds": 35.599423791,
+    "round_2_seconds": 28.222895417,
+    "warnings": {}
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2603.01919v2.pdf",
+    "pages": 23,
+    "median_seconds": 46.24771989600001,
+    "round_1_seconds": 57.37018075,
+    "round_2_seconds": 35.125259042,
+    "warnings": {
+      "InvalidTsrInput": 1,
+      "TableStructureUnavailable": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2604.18583v1.pdf",
+    "pages": 15,
+    "median_seconds": 14.0948737085,
+    "round_1_seconds": 10.790106417,
+    "round_2_seconds": 17.399641,
+    "warnings": {
+      "ContentLayoutOverlap": 2,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2604.18584v1.pdf",
+    "pages": 32,
+    "median_seconds": 36.090714666500006,
+    "round_1_seconds": 23.844609542,
+    "round_2_seconds": 48.336819791,
+    "warnings": {
+      "ContentLayoutOverlap": 6,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2604.21959v1.pdf",
+    "pages": 3,
+    "median_seconds": 3.019076771,
+    "round_1_seconds": 2.279182375,
+    "round_2_seconds": 3.758971167,
+    "warnings": {}
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2303.18223v16.pdf",
+    "pages": 144,
+    "median_seconds": 198.493317688,
+    "round_1_seconds": 199.594983042,
+    "round_2_seconds": 197.391652334,
+    "warnings": {
+      "ContentLayoutOverlap": 5,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.12610v1.pdf",
+    "pages": 12,
+    "median_seconds": 12.010942021,
+    "round_1_seconds": 8.806321667,
+    "round_2_seconds": 15.215562375,
+    "warnings": {
+      "ContentLayoutOverlap": 4
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2606.17056v1.pdf",
+    "pages": 25,
+    "median_seconds": 22.875813104000002,
+    "round_1_seconds": 17.205558125,
+    "round_2_seconds": 28.546068083,
+    "warnings": {}
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.12973v1.pdf",
+    "pages": 24,
+    "median_seconds": 20.891751499999998,
+    "round_1_seconds": 17.452873708,
+    "round_2_seconds": 24.330629292,
+    "warnings": {
+      "ContentLayoutOverlap": 4,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13008v1.pdf",
+    "pages": 31,
+    "median_seconds": 24.428482479000003,
+    "round_1_seconds": 21.563649125,
+    "round_2_seconds": 27.293315833,
+    "warnings": {}
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13019v1.pdf",
+    "pages": 54,
+    "median_seconds": 51.866059854499994,
+    "round_1_seconds": 47.736733042,
+    "round_2_seconds": 55.995386667,
+    "warnings": {
+      "ContentLayoutOverlap": 10,
+      "TableStructureUnavailable": 2,
+      "TableTextAssignmentFailed": 2
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13100v1.pdf",
+    "pages": 58,
+    "median_seconds": 61.58070777099999,
+    "round_1_seconds": 59.117104917,
+    "round_2_seconds": 64.044310625,
+    "warnings": {
+      "ContentLayoutOverlap": 3
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13141v1.pdf",
+    "pages": 26,
+    "median_seconds": 28.698836479,
+    "round_1_seconds": 31.299342958,
+    "round_2_seconds": 26.09833,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13146v1.pdf",
+    "pages": 17,
+    "median_seconds": 16.528059854,
+    "round_1_seconds": 12.536760875,
+    "round_2_seconds": 20.519358833,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "TableStructureUnavailable": 1,
+      "TableTextAssignmentFailed": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "pages": 13,
+    "median_seconds": 27.9781885625,
+    "round_1_seconds": 30.295642792,
+    "round_2_seconds": 25.660734333,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "2609.13144v1.pdf",
+    "pages": 56,
+    "median_seconds": 65.320526479,
+    "round_1_seconds": 61.13697275,
+    "round_2_seconds": 69.504080208,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "TableStructureUnavailable": 1,
+      "TableTextAssignmentFailed": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "pages": 24,
+    "median_seconds": 30.6343318125,
+    "round_1_seconds": 19.001530417,
+    "round_2_seconds": 42.267133208,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "pages": 32,
+    "median_seconds": 47.854746771500004,
+    "round_1_seconds": 31.934430584,
+    "round_2_seconds": 63.775062959,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "baseline-c2",
+    "file": "Towards Conversational AI for Disease Management.pdf",
+    "pages": 42,
+    "median_seconds": 41.5433845625,
+    "round_1_seconds": 31.916420625,
+    "round_2_seconds": 51.1703485,
+    "warnings": {
+      "ContentLayoutOverlap": 5,
+      "EmptyModelRegion": 150,
+      "TableStructureUnavailable": 7,
+      "TableTextAssignmentFailed": 7
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2403.01632v4.pdf",
+    "pages": 47,
+    "median_seconds": 58.4654708335,
+    "round_1_seconds": 69.165889208,
+    "round_2_seconds": 47.765052459,
+    "warnings": {
+      "ContentLayoutOverlap": 7,
+      "EmptyModelRegion": 2
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2410.05779v3.pdf",
+    "pages": 16,
+    "median_seconds": 21.189728979,
+    "round_1_seconds": 21.123515458,
+    "round_2_seconds": 21.2559425,
+    "warnings": {}
+  },
+  {
+    "case": "fast-c2",
+    "file": "2603.01919v2.pdf",
+    "pages": 23,
+    "median_seconds": 33.523450354,
+    "round_1_seconds": 32.196357625,
+    "round_2_seconds": 34.850543083,
+    "warnings": {
+      "InvalidTsrInput": 1,
+      "TableStructureUnavailable": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2604.18583v1.pdf",
+    "pages": 15,
+    "median_seconds": 14.5519317295,
+    "round_1_seconds": 14.269743334,
+    "round_2_seconds": 14.834120125,
+    "warnings": {
+      "ContentLayoutOverlap": 2,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2604.18584v1.pdf",
+    "pages": 32,
+    "median_seconds": 34.933139749999995,
+    "round_1_seconds": 34.164405875,
+    "round_2_seconds": 35.701873625,
+    "warnings": {
+      "ContentLayoutOverlap": 6,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2604.21959v1.pdf",
+    "pages": 3,
+    "median_seconds": 2.951399604,
+    "round_1_seconds": 3.245637083,
+    "round_2_seconds": 2.657162125,
+    "warnings": {}
+  },
+  {
+    "case": "fast-c2",
+    "file": "2303.18223v16.pdf",
+    "pages": 144,
+    "median_seconds": 168.9875916455,
+    "round_1_seconds": 176.672569541,
+    "round_2_seconds": 161.30261375,
+    "warnings": {
+      "ContentLayoutOverlap": 5,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.12610v1.pdf",
+    "pages": 12,
+    "median_seconds": 11.216572833,
+    "round_1_seconds": 10.796586541,
+    "round_2_seconds": 11.636559125,
+    "warnings": {
+      "ContentLayoutOverlap": 4
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2606.17056v1.pdf",
+    "pages": 25,
+    "median_seconds": 21.7196253755,
+    "round_1_seconds": 22.274282292,
+    "round_2_seconds": 21.164968459,
+    "warnings": {}
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.12973v1.pdf",
+    "pages": 24,
+    "median_seconds": 21.809060125,
+    "round_1_seconds": 22.917148917,
+    "round_2_seconds": 20.700971333,
+    "warnings": {
+      "ContentLayoutOverlap": 4,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13008v1.pdf",
+    "pages": 31,
+    "median_seconds": 26.617263250500002,
+    "round_1_seconds": 27.845681834,
+    "round_2_seconds": 25.388844667,
+    "warnings": {}
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13019v1.pdf",
+    "pages": 54,
+    "median_seconds": 48.744422396000004,
+    "round_1_seconds": 53.339527042,
+    "round_2_seconds": 44.14931775,
+    "warnings": {
+      "ContentLayoutOverlap": 10,
+      "TableStructureUnavailable": 2,
+      "TableTextAssignmentFailed": 2
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13100v1.pdf",
+    "pages": 58,
+    "median_seconds": 53.8524164585,
+    "round_1_seconds": 58.10533225,
+    "round_2_seconds": 49.599500667,
+    "warnings": {
+      "ContentLayoutOverlap": 3
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13141v1.pdf",
+    "pages": 26,
+    "median_seconds": 23.617636208500002,
+    "round_1_seconds": 24.092632417,
+    "round_2_seconds": 23.14264,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13146v1.pdf",
+    "pages": 17,
+    "median_seconds": 20.365798583500002,
+    "round_1_seconds": 20.603943292,
+    "round_2_seconds": 20.127653875,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "TableStructureUnavailable": 1,
+      "TableTextAssignmentFailed": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "pages": 13,
+    "median_seconds": 15.2519740835,
+    "round_1_seconds": 15.657535167,
+    "round_2_seconds": 14.846413,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "EmptyModelRegion": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "2609.13144v1.pdf",
+    "pages": 56,
+    "median_seconds": 54.7849410835,
+    "round_1_seconds": 56.81348875,
+    "round_2_seconds": 52.756393417,
+    "warnings": {
+      "ContentLayoutOverlap": 1,
+      "TableStructureUnavailable": 1,
+      "TableTextAssignmentFailed": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "pages": 24,
+    "median_seconds": 27.017217875500002,
+    "round_1_seconds": 26.346992042,
+    "round_2_seconds": 27.687443709,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "pages": 32,
+    "median_seconds": 38.35045637499999,
+    "round_1_seconds": 39.952033042,
+    "round_2_seconds": 36.748879708,
+    "warnings": {
+      "ContentLayoutOverlap": 1
+    }
+  },
+  {
+    "case": "fast-c2",
+    "file": "Towards Conversational AI for Disease Management.pdf",
+    "pages": 42,
+    "median_seconds": 34.7072811875,
+    "round_1_seconds": 39.617833625,
+    "round_2_seconds": 29.79672875,
+    "warnings": {
+      "ContentLayoutOverlap": 5,
+      "EmptyModelRegion": 150,
+      "TableStructureUnavailable": 7,
+      "TableTextAssignmentFailed": 7
+    }
+  }
+]

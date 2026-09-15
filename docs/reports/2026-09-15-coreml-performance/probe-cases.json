@@ -1,0 +1,22 @@
+[
+  {
+    "case": "legacy-fast",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-static-fast",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-fp16",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-gpu",
+    "exit_code": 0
+  },
+  {
+    "case": "legacy-ane",
+    "exit_code": 0
+  }
+]

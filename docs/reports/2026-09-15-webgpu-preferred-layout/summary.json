@@ -1,0 +1,46 @@
+{
+  "corpus_documents": 20,
+  "corpus_pages": 694,
+  "order": [
+    "NCHW-1",
+    "NHWC-1",
+    "NHWC-2",
+    "NCHW-2"
+  ],
+  "results": [
+    {
+      "layout": "NCHW",
+      "round_seconds": [
+        379.24360000008346,
+        384.40460000014303
+      ],
+      "median_parse_seconds": 381.8241000001133,
+      "pages_per_second": 1.8175908749599465,
+      "mean_validation_seconds": 13.630349999994039,
+      "round_corpus_wall_seconds": [
+        401.046579667,
+        406.15156149999984
+      ]
+    },
+    {
+      "layout": "NHWC",
+      "round_seconds": [
+        327.71690000003576,
+        319.5652999998331
+      ],
+      "median_parse_seconds": 323.64109999993445,
+      "pages_per_second": 2.1443506402621315,
+      "mean_validation_seconds": 13.44129999998212,
+      "round_corpus_wall_seconds": [
+        349.25473704100006,
+        341.2424942499999
+      ]
+    }
+  ],
+  "NHWC_elapsed_reduction_percent": 15.238168570334231,
+  "NHWC_throughput_increase_percent": 17.977630158898418,
+  "identical_documents_across_four_runs": 20,
+  "wasm_sha256": "81161c1fa032a68d0b7d9a4bf12d73264e27ea32efaa222fb53ea8e35c5f0398",
+  "browser": "153.0.8010.37",
+  "normalization": "Only external_table_structure evidence details.request_id is replaced with run-local"
+}

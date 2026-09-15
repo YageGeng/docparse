@@ -1,0 +1,135 @@
+[
+  {
+    "artifact": "layout-probe.json",
+    "case": "legacy",
+    "median_inference_ms": 393.344208,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-legacy-ane.json",
+    "case": "legacy-ane",
+    "median_inference_ms": 345.44770800000003,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 6
+  },
+  {
+    "artifact": "probe-legacy-fast.json",
+    "case": "legacy-fast",
+    "median_inference_ms": 331.630709,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-legacy-fp16.json",
+    "case": "legacy-fp16",
+    "median_inference_ms": 317.157333,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 6
+  },
+  {
+    "artifact": "probe-legacy-gpu.json",
+    "case": "legacy-gpu",
+    "median_inference_ms": 366.288583,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 6
+  },
+  {
+    "artifact": "probe-legacy-pruned.json",
+    "case": "legacy-pruned",
+    "median_inference_ms": 301.33025000000004,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-legacy-static-fast.json",
+    "case": "legacy-static-fast",
+    "median_inference_ms": 331.484708,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 6
+  },
+  {
+    "artifact": "probe-legacy-static.json",
+    "case": "legacy-static",
+    "median_inference_ms": 364.318417,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 6
+  },
+  {
+    "artifact": "probe-legacy-threads1.json",
+    "case": "legacy-threads1",
+    "median_inference_ms": 639.012083,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-output-legacy-fast-pruned.json",
+    "case": "legacy-fast-pruned",
+    "median_inference_ms": 305.45941700000003,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-output-legacy-fast.json",
+    "case": "legacy-fast",
+    "median_inference_ms": 304.17258400000003,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-output-legacy-pruned.json",
+    "case": "legacy-pruned",
+    "median_inference_ms": 305.605208,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-output-legacy.json",
+    "case": "legacy",
+    "median_inference_ms": 315.25345799999997,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy-fast-threads1.json",
+    "case": "legacy-fast-threads1",
+    "median_inference_ms": 1137.703708,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy-fast.json",
+    "case": "legacy-fast",
+    "median_inference_ms": 428.184292,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy-no-spin.json",
+    "case": "legacy-no-spin",
+    "median_inference_ms": 807.086125,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy-threads2.json",
+    "case": "legacy-threads2",
+    "median_inference_ms": 390.057042,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy-threads4.json",
+    "case": "legacy-threads4",
+    "median_inference_ms": 328.72525,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  },
+  {
+    "artifact": "probe-repeat-legacy.json",
+    "case": "legacy",
+    "median_inference_ms": 542.5718750000001,
+    "samples": 15,
+    "exact_detections_vs_initial_baseline": 15
+  }
+]

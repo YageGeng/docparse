@@ -1,0 +1,102 @@
+[
+  {
+    "file": "2303.18223v16.pdf",
+    "size_bytes": 8577429,
+    "sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7"
+  },
+  {
+    "file": "2403.01632v4.pdf",
+    "size_bytes": 3111797,
+    "sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431"
+  },
+  {
+    "file": "2410.05779v3.pdf",
+    "size_bytes": 1123301,
+    "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a"
+  },
+  {
+    "file": "2603.01919v2.pdf",
+    "size_bytes": 10513591,
+    "sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15"
+  },
+  {
+    "file": "2604.18583v1.pdf",
+    "size_bytes": 26668188,
+    "sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83"
+  },
+  {
+    "file": "2604.18584v1.pdf",
+    "size_bytes": 9437000,
+    "sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728"
+  },
+  {
+    "file": "2604.21959v1.pdf",
+    "size_bytes": 122969,
+    "sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2"
+  },
+  {
+    "file": "2606.17056v1.pdf",
+    "size_bytes": 992264,
+    "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf"
+  },
+  {
+    "file": "2609.12610v1.pdf",
+    "size_bytes": 749161,
+    "sha256": "5bdfae15f870223af055d9d76bac314d14b2a901bf2cc58317cbc101b7d831fd"
+  },
+  {
+    "file": "2609.12973v1.pdf",
+    "size_bytes": 955018,
+    "sha256": "32f3286959e7c9b648c64fb6b2483477b652a0541afa04205938fdf5f2cc3843"
+  },
+  {
+    "file": "2609.13008v1.pdf",
+    "size_bytes": 767298,
+    "sha256": "6c1ff2f8d0b3cdd2dcc73b2cef39cc0f2a6b0ee470d7a21717c70f3454bc9683"
+  },
+  {
+    "file": "2609.13019v1.pdf",
+    "size_bytes": 1498229,
+    "sha256": "a8e0cdeb0a1b331d6c5d707921704f734c9fa09638a7603987c0177a93643d4f"
+  },
+  {
+    "file": "2609.13100v1.pdf",
+    "size_bytes": 1146269,
+    "sha256": "6f3f6ebd1638bec4fc799713425f04de13bf670f860a45b95b5be6d870d55ebc"
+  },
+  {
+    "file": "2609.13141v1.pdf",
+    "size_bytes": 1080046,
+    "sha256": "62c1c4bb7894430bf17f8025801f79907ee373f86c816ce3f01971a34524f2ef"
+  },
+  {
+    "file": "2609.13144v1.pdf",
+    "size_bytes": 2067371,
+    "sha256": "043c1fe5ef4d01938db7e3c8fd8768213e6fd9f43bf9785b5ca90fabfdec69c3"
+  },
+  {
+    "file": "2609.13146v1.pdf",
+    "size_bytes": 11848176,
+    "sha256": "4f7e2b204719aef43442f79218de4f48d0ea2d9e09fc8b91696588723786c593"
+  },
+  {
+    "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+    "size_bytes": 655258,
+    "sha256": "8b81a9c5c48281884dc4a4922764a36ba0d6911593103b018fdebb9423e06b4a"
+  },
+  {
+    "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+    "size_bytes": 20830083,
+    "sha256": "2d5495c2a82d2c0b6174192fedb5b87c4da63e7a049691f57e155a6789de3c13"
+  },
+  {
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "size_bytes": 922889,
+    "sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc"
+  },
+  {
+    "file": "Towards Conversational AI for Disease Management.pdf",
+    "size_bytes": 21270475,
+    "sha256": "31656acbb41a8768afae1dff1d68d6c4517d627ca1344581f9956334bb86d43c"
+  }
+]

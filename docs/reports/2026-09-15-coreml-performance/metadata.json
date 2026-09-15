@@ -1,0 +1,21 @@
+{
+  "date": "2026-09-15T11:29:56.378959",
+  "baseline_commit": "500475a0029107540e97eb16dff04a311f43903e",
+  "hardware": {
+    "cpu": "Apple M4",
+    "memory_bytes": 17179869184,
+    "logical_cpus": 10
+  },
+  "documents": 20,
+  "service_policy": "Existing idle CoreML HTTP service remains running in every case; no competing parser jobs at start.",
+  "corpus": "/Volumes/Yage/Downloads/docs",
+  "power": "AC Power",
+  "thermal_warning": "None reported by pmset before experiments",
+  "final_binary_built": true,
+  "existing_service_restarted": false,
+  "final_api_check": {
+    "http_status": 200,
+    "jobs": 20,
+    "active_jobs": 0
+  }
+}

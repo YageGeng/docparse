@@ -1,0 +1,172 @@
+{
+  "inputs": [
+    {
+      "index": 0,
+      "file": "2303.18223v16.pdf",
+      "sizeBytes": 8577429,
+      "sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7",
+      "url": "/inputs/0.pdf"
+    },
+    {
+      "index": 1,
+      "file": "2403.01632v4.pdf",
+      "sizeBytes": 3111797,
+      "sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431",
+      "url": "/inputs/1.pdf"
+    },
+    {
+      "index": 2,
+      "file": "2410.05779v3.pdf",
+      "sizeBytes": 1123301,
+      "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a",
+      "url": "/inputs/2.pdf"
+    },
+    {
+      "index": 3,
+      "file": "2603.01919v2.pdf",
+      "sizeBytes": 10513591,
+      "sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15",
+      "url": "/inputs/3.pdf"
+    },
+    {
+      "index": 4,
+      "file": "2604.18583v1.pdf",
+      "sizeBytes": 26668188,
+      "sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83",
+      "url": "/inputs/4.pdf"
+    },
+    {
+      "index": 5,
+      "file": "2604.18584v1.pdf",
+      "sizeBytes": 9437000,
+      "sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728",
+      "url": "/inputs/5.pdf"
+    },
+    {
+      "index": 6,
+      "file": "2604.21959v1.pdf",
+      "sizeBytes": 122969,
+      "sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2",
+      "url": "/inputs/6.pdf"
+    },
+    {
+      "index": 7,
+      "file": "2606.17056v1.pdf",
+      "sizeBytes": 992264,
+      "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf",
+      "url": "/inputs/7.pdf"
+    },
+    {
+      "index": 8,
+      "file": "2609.12610v1.pdf",
+      "sizeBytes": 749161,
+      "sha256": "5bdfae15f870223af055d9d76bac314d14b2a901bf2cc58317cbc101b7d831fd",
+      "url": "/inputs/8.pdf"
+    },
+    {
+      "index": 9,
+      "file": "2609.12973v1.pdf",
+      "sizeBytes": 955018,
+      "sha256": "32f3286959e7c9b648c64fb6b2483477b652a0541afa04205938fdf5f2cc3843",
+      "url": "/inputs/9.pdf"
+    },
+    {
+      "index": 10,
+      "file": "2609.13008v1.pdf",
+      "sizeBytes": 767298,
+      "sha256": "6c1ff2f8d0b3cdd2dcc73b2cef39cc0f2a6b0ee470d7a21717c70f3454bc9683",
+      "url": "/inputs/10.pdf"
+    },
+    {
+      "index": 11,
+      "file": "2609.13019v1.pdf",
+      "sizeBytes": 1498229,
+      "sha256": "a8e0cdeb0a1b331d6c5d707921704f734c9fa09638a7603987c0177a93643d4f",
+      "url": "/inputs/11.pdf"
+    },
+    {
+      "index": 12,
+      "file": "2609.13100v1.pdf",
+      "sizeBytes": 1146269,
+      "sha256": "6f3f6ebd1638bec4fc799713425f04de13bf670f860a45b95b5be6d870d55ebc",
+      "url": "/inputs/12.pdf"
+    },
+    {
+      "index": 13,
+      "file": "2609.13141v1.pdf",
+      "sizeBytes": 1080046,
+      "sha256": "62c1c4bb7894430bf17f8025801f79907ee373f86c816ce3f01971a34524f2ef",
+      "url": "/inputs/13.pdf"
+    },
+    {
+      "index": 14,
+      "file": "2609.13144v1.pdf",
+      "sizeBytes": 2067371,
+      "sha256": "043c1fe5ef4d01938db7e3c8fd8768213e6fd9f43bf9785b5ca90fabfdec69c3",
+      "url": "/inputs/14.pdf"
+    },
+    {
+      "index": 15,
+      "file": "2609.13146v1.pdf",
+      "sizeBytes": 11848176,
+      "sha256": "4f7e2b204719aef43442f79218de4f48d0ea2d9e09fc8b91696588723786c593",
+      "url": "/inputs/15.pdf"
+    },
+    {
+      "index": 16,
+      "file": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "sizeBytes": 655258,
+      "sha256": "8b81a9c5c48281884dc4a4922764a36ba0d6911593103b018fdebb9423e06b4a",
+      "url": "/inputs/16.pdf"
+    },
+    {
+      "index": 17,
+      "file": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "sizeBytes": 20830083,
+      "sha256": "2d5495c2a82d2c0b6174192fedb5b87c4da63e7a049691f57e155a6789de3c13",
+      "url": "/inputs/17.pdf"
+    },
+    {
+      "index": 18,
+      "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "sizeBytes": 922889,
+      "sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc",
+      "url": "/inputs/18.pdf"
+    },
+    {
+      "index": 19,
+      "file": "Towards Conversational AI for Disease Management.pdf",
+      "sizeBytes": 21270475,
+      "sha256": "31656acbb41a8768afae1dff1d68d6c4517d627ca1344581f9956334bb86d43c",
+      "url": "/inputs/19.pdf"
+    }
+  ],
+  "config": {
+    "layout": {
+      "score_threshold": 0.5,
+      "session_pool_size": 1
+    },
+    "tsr": {
+      "mode": "tsr_only",
+      "max_in_flight": 1,
+      "timeout_ms": 60000
+    },
+    "ocr": {
+      "policy": "disabled"
+    },
+    "runtime": {
+      "page_concurrency": 1,
+      "render_queue_capacity": 1,
+      "blocking_task_limit": 1,
+      "continue_on_page_error": true
+    },
+    "render": {
+      "dpi": 144,
+      "max_long_edge_pixels": 2400
+    },
+    "output": {
+      "include_evidence": true,
+      "include_diagnostics": false
+    }
+  }
+}

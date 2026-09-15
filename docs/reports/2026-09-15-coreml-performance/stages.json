@@ -1,0 +1,278 @@
+[
+  {
+    "case": "baseline-c2",
+    "stage": "DocumentContext",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.08843635549999998
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LayoutInference",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 426.90149256
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LayoutPostprocess",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.012088904499999999
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LayoutPreprocess",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 16.289818437499996
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LayoutQueue",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 2747.5758182255
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LayoutReadback",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.007189827500000002
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "LinkValidate",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.35632712499999997
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "ParseTotal",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 844.2405529780001
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "PdfOpen",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.0405631845
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "PdfRender",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 15.858302566000003
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "PdfiumQueue",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.00013599849999999998
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TableCellInference",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 92.1968548705
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TableCellPostprocess",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 0.0031639780000000004
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TableCellPreprocess",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 1.2302669945000002
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TableExternal",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 138.6089672705
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TableFill",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 0.34040112199999994
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TextExtract",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 8.210202756000001
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TextFinish",
+    "mean_calls_per_corpus": 1388.0,
+    "mean_cumulative_seconds_per_corpus": 14.8337522575
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TextPrepare",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.16421666299999998
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TsrInference",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 39.10919858449999
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TsrPostprocess",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 0.008501395500000002
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TsrPreprocess",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 0.148651601
+  },
+  {
+    "case": "baseline-c2",
+    "stage": "TsrQueue",
+    "mean_calls_per_corpus": 324.0,
+    "mean_cumulative_seconds_per_corpus": 5.870191889999999
+  },
+  {
+    "case": "fast-c2",
+    "stage": "DocumentContext",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.09245395899999999
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LayoutInference",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 370.0903916775001
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LayoutPostprocess",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.008242853
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LayoutPreprocess",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 14.6536389905
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LayoutQueue",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 2364.511302496
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LayoutReadback",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.008157722000000003
+  },
+  {
+    "case": "fast-c2",
+    "stage": "LinkValidate",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.3984941454999999
+  },
+  {
+    "case": "fast-c2",
+    "stage": "ParseTotal",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 731.5043058960002
+  },
+  {
+    "case": "fast-c2",
+    "stage": "PdfOpen",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.0279104175
+  },
+  {
+    "case": "fast-c2",
+    "stage": "PdfRender",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 14.609485491500001
+  },
+  {
+    "case": "fast-c2",
+    "stage": "PdfiumQueue",
+    "mean_calls_per_corpus": 20.0,
+    "mean_cumulative_seconds_per_corpus": 0.000264253
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TableCellInference",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 87.67317949549998
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TableCellPostprocess",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 0.0022533709999999997
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TableCellPreprocess",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 1.0900444145
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TableExternal",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 132.97988570650003
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TableFill",
+    "mean_calls_per_corpus": 160.0,
+    "mean_cumulative_seconds_per_corpus": 0.269366646
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TextExtract",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 8.152844860499998
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TextFinish",
+    "mean_calls_per_corpus": 1388.0,
+    "mean_cumulative_seconds_per_corpus": 13.404097999000005
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TextPrepare",
+    "mean_calls_per_corpus": 694.0,
+    "mean_cumulative_seconds_per_corpus": 0.09532080600000001
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TsrInference",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 35.388856995000005
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TsrPostprocess",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 0.0070214725000000006
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TsrPreprocess",
+    "mean_calls_per_corpus": 164.0,
+    "mean_cumulative_seconds_per_corpus": 0.123332755
+  },
+  {
+    "case": "fast-c2",
+    "stage": "TsrQueue",
+    "mean_calls_per_corpus": 324.0,
+    "mean_cumulative_seconds_per_corpus": 8.658116353500002
+  }
+]

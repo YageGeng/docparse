@@ -1,0 +1,18 @@
+{
+  "case": "mlprogram",
+  "status": "rejected",
+  "error": "CoreML compilation rejects MaxPool.0: ceil_mode must be False when pad_type is equal to same",
+  "onnx_attributes": {
+    "kernel_shape": [
+      2,
+      2
+    ],
+    "strides": [
+      1,
+      1
+    ],
+    "auto_pad": "SAME_UPPER",
+    "ceil_mode": 1
+  },
+  "production_artifacts_modified": false
+}

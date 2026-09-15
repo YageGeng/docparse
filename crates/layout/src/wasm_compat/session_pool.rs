@@ -181,6 +181,231 @@ mod platform {
                 .join(relative)
         }
 
+        /// Compares CoreML options on identical production-preprocessed images before changing defaults.
+        #[cfg(all(feature = "coreml", target_os = "macos"))]
+        #[test]
+        #[ignore = "requires macOS CoreML, fixed model, DOCPARSE_COREML_PROBE_CASE and DOCPARSE_COREML_PROBE_OUTPUT"]
+        fn coreml_configuration_probe() -> Result<(), Box<dyn std::error::Error>>
+        {
+            use crate::pp_doclayout_v3::{
+                postprocess::postprocess_page, preprocess::preprocess,
+            };
+            use crate::{
+                AffineTransform, PageImage, PageImageInput, PageRotation,
+                PageTransform, PageTransformInput, PixelFormat,
+            };
+            use ort::ep::coreml::{
+                ComputeUnits, ModelFormat, SpecializationStrategy,
+            };
+            use ort::session::{OutputSelector, RunOptions, Session};
+            use std::time::Instant;
+
+            let oracle: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(repository_path(
+                    "crates/layout/tests/fixtures/model/python_outputs.json",
+                ))?)?;
+            let mut samples = Vec::new();
+            for sample in oracle
+                .get("samples")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("missing samples")?
+            {
+                let name = sample
+                    .get("input")
+                    .and_then(|input| input.get("basename"))
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("missing basename")?;
+                let image = image::open(repository_path(&format!(
+                    "crates/layout/tests/fixtures/model/{name}"
+                )))?
+                .into_rgb8();
+                let (width, height) = image.dimensions();
+                let page = PageImage::try_from(
+                    PageImageInput::builder()
+                        .width(width)
+                        .height(height)
+                        .pixel_format(PixelFormat::Rgb8)
+                        .data(Arc::from(image.into_raw()))
+                        .build(),
+                )?;
+                let transform = PageTransform::try_from(
+                    PageTransformInput::builder()
+                        .page_to_viewport(AffineTransform::identity())
+                        .viewport_width(f64::from(width))
+                        .viewport_height(f64::from(height))
+                        .render_width(width)
+                        .render_height(height)
+                        .model_width(800)
+                        .model_height(800)
+                        .rotation(PageRotation::Degrees0)
+                        .build(),
+                )?;
+                samples.push((
+                    name.to_owned(),
+                    preprocess(&page, &transform)?,
+                    transform,
+                ));
+            }
+            let model = std::fs::read(repository_path(
+                "models/pp-doclayout-v3/inference.onnx",
+            ))?;
+            let output =
+                PathBuf::from(std::env::var("DOCPARSE_COREML_PROBE_OUTPUT")?);
+            let selected = std::env::var("DOCPARSE_COREML_PROBE_CASE")?;
+            let mut reports = Vec::new();
+            let cases = [
+                "legacy",
+                "mlprogram",
+                "legacy-static",
+                "legacy-fast",
+                "legacy-static-fast",
+                "legacy-fp16",
+                "legacy-gpu",
+                "legacy-ane",
+                "legacy-threads1",
+                "legacy-threads2",
+                "legacy-threads4",
+                "legacy-fast-threads1",
+                "legacy-no-spin",
+                "legacy-pruned",
+                "legacy-fast-pruned",
+            ];
+            if !cases.contains(&selected.as_str()) {
+                return Err(
+                    format!("unknown CoreML probe case {selected}").into()
+                );
+            }
+            for name in cases {
+                if selected != name {
+                    continue;
+                }
+                eprintln!("loading CoreML probe {name}");
+                let loading = Instant::now();
+                let mut provider = ort::ep::CoreML::default()
+                    .with_compute_units(if name.ends_with("gpu") {
+                        ComputeUnits::CPUAndGPU
+                    } else if name.ends_with("ane") {
+                        ComputeUnits::CPUAndNeuralEngine
+                    } else {
+                        ComputeUnits::All
+                    });
+                if !name.starts_with("legacy") {
+                    provider =
+                        provider.with_model_format(ModelFormat::MLProgram);
+                }
+                if name.contains("fast") {
+                    provider = provider.with_specialization_strategy(
+                        SpecializationStrategy::FastPrediction,
+                    );
+                }
+                if name.ends_with("fp16") {
+                    provider =
+                        provider.with_low_precision_accumulation_on_gpu(true);
+                }
+                let mut builder = Session::builder()?
+                    .with_execution_providers([provider
+                        .build()
+                        .error_on_failure()])?;
+                if let Some((_, threads)) = name.split_once("threads") {
+                    builder = builder.with_intra_threads(threads.parse()?)?;
+                }
+                if name == "legacy-no-spin" {
+                    builder = builder.with_config_entry(
+                        "session.intra_op.allow_spinning",
+                        "0",
+                    )?;
+                }
+                if name.contains("static") {
+                    for symbol in [
+                        "DynamicDimension.0",
+                        "DynamicDimension.1",
+                        "DynamicDimension.2",
+                    ] {
+                        builder = builder.with_dimension_override(symbol, 1)?;
+                    }
+                }
+                let native = if name.ends_with("pruned") {
+                    use ort::editor::{Graph, Model, ONNX_DOMAIN, Opset};
+                    let mut editable = builder.edit_from_memory(&model)?;
+                    crate::ModelSchema::from_session(&editable)?
+                        .validate_pp_doclayout_v3()?;
+                    let mut graph = Graph::new()?;
+                    graph.set_outputs(
+                        editable.outputs().iter().take(2).map(|outlet| {
+                            ort::value::Outlet::new(
+                                outlet.name(),
+                                outlet.dtype().clone(),
+                            )
+                        }),
+                    )?;
+                    let mut update = Model::new([Opset::new(
+                        ONNX_DOMAIN,
+                        editable
+                            .opset_for_domain(ONNX_DOMAIN)
+                            .ok_or("missing ONNX opset")?,
+                    )?])?;
+                    update.add_graph(graph)?;
+                    editable.apply_model(&update)?;
+                    editable.into_session()?
+                } else {
+                    builder.commit_from_memory(&model)?
+                };
+                let mut session = super::LayoutSession {
+                    session: native,
+                    options: RunOptions::new()?.with_outputs(
+                        OutputSelector::no_default()
+                            .with("fetch_name_0")
+                            .with("fetch_name_1"),
+                    ),
+                };
+                let schema =
+                    crate::ModelSchema::from_session(&session.session)?;
+                let loading_seconds = loading.elapsed().as_secs_f64();
+                // Exercise every image twice before collecting repeated runtime intervals.
+                let warming = Instant::now();
+                for _ in 0..2 {
+                    for (_, input, _) in &samples {
+                        session
+                            .run(input, &crate::timing::Timings::default())?;
+                    }
+                }
+                let warmup_seconds = warming.elapsed().as_secs_f64();
+                let mut records = Vec::<serde_json::Value>::new();
+                for repeat in 0..3 {
+                    for (sample_index, (sample, input, transform)) in
+                        samples.iter().enumerate()
+                    {
+                        let started = Instant::now();
+                        let raw = session
+                            .run(input, &crate::timing::Timings::default())?;
+                        let seconds = started.elapsed().as_secs_f64();
+                        let detections = postprocess_page(
+                            raw.boxes.view(),
+                            raw.count,
+                            0.5,
+                            transform,
+                        )?;
+                        if repeat > 0 {
+                            let expected = records
+                                .get(sample_index)
+                                .and_then(|record| record.get("detections"))
+                                .ok_or("missing first-repeat detections")?;
+                            if &serde_json::to_value(&detections)? != expected {
+                                return Err(format!("CoreML {name} changed {sample} between identical repeated inputs").into());
+                            }
+                        }
+                        records.push(serde_json::json!({"sample":sample,"repeat":repeat,"seconds":seconds,"detections":detections}));
+                    }
+                }
+                eprintln!(
+                    "CoreML probe {name}: load {loading_seconds:.3}s, warmup {warmup_seconds:.3}s"
+                );
+                reports.push(serde_json::json!({"case":name,"loading_seconds":loading_seconds,"warmup_seconds":warmup_seconds,"schema":schema,"records":records}));
+                std::fs::write(&output, serde_json::to_vec_pretty(&reports)?)?;
+            }
+            Ok(())
+        }
+
         /// Verifies a dropped lease returns its unique session slot and semaphore permit.
         #[tokio::test]
         #[ignore = "requires fixed PP-DocLayoutV3 model"]
