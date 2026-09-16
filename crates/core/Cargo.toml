@@ -50,6 +50,9 @@ tracing.workspace = true
 web-time.workspace = true
 
 [dev-dependencies]
+# async
+futures-util.workspace = true
+
 # config and serialization
 figment.workspace = true
 

@@ -65,7 +65,7 @@ keeps the configured value. Changes take effect after restarting the server.
 the file, and an explicit `--max-uploads` overrides both. This does not change
 the browser's per-page upload queue or the document parsing concurrency.
 The PDFium limit is independent of `server.worker_concurrency` and
-`runtime.page_concurrency` (pages per analysis stage). Layout/OCR/TSR sessions
+`runtime.page_concurrency` (pages per analysis stage). Layout/OCR/TSR/formula sessions
 remain shared in the server; workers initialize only PDFium. `PdfiumQueue`
 measures waiting for a process slot separately from `PdfOpen`.
 
@@ -393,12 +393,19 @@ The duration is saved atomically with the attempt outcome; the completion log us
 the same value. Retries clear it, while historical or interrupted attempts remain null.
 
 Full-document native extraction still precedes global watermark/font statistics.
-After this pass, render, layout/preparation, OCR/composition, and TSR/completion
-run as separate bounded stages. Each analysis stage admits at most
-`runtime.page_concurrency` pages. Up to roughly `3 * page_concurrency +
+After this pass, render, layout/preparation, OCR/composition, TSR/page assembly,
+and formula recognition/projection run as separate bounded stages. Each analysis
+stage admits at most `runtime.page_concurrency` pages, including completed results
+waiting for downstream capacity. Up to roughly `4 * page_concurrency +
 render_queue_capacity + 1` page rasters can be retained per document, plus native
 facts, model tensors, and final results. Queue pressure intentionally stops
 further rasterization instead of growing memory without bound.
+
+Relative to the former combined TSR/formula stage, this allows up to one extra
+`page_concurrency` of owned pages per document. With page concurrency 4 and five
+concurrent document jobs, budget for up to 20 additional rasters plus page data.
+Formula overload still backpressures the bounded upstream stages; isolating its
+slots allows earlier table work to overlap without unbounded buffering.
 
 PDFium remains process-serialized for safety and closes immediately after the
 last raster has been delivered, allowing other documents to open while inference

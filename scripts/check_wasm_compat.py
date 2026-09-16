@@ -11,7 +11,7 @@ ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout"
 # Keep the extracted adapters explicit instead of allowing their entire directories.
 ALLOWED.update({
     "crates/core/src/pdfium/input.rs",
-    "crates/core/src/wasm_compat/task_set.rs",
+    "crates/core/src/wasm_compat/task_set/mod.rs",
     "crates/core/src/wasm_compat/timeout.rs",
     "crates/core/src/pdfium/worker.rs",
     # This declaration-only module selects the optional native IPC implementation.

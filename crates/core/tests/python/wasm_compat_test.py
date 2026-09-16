@@ -56,7 +56,10 @@ class CompatibilityBoundaryTest(unittest.TestCase):
         """Allow the extracted adapters without opening their directory to arbitrary cfgs."""
         source = '#[cfg(target_arch = "wasm32")]\nfn run() {}'
         for path, expected in (
-            ("crates/core/src/wasm_compat/task_set.rs", 0),
+            ("crates/core/src/wasm_compat/task_set/mod.rs", 0),
+            ("crates/core/src/wasm_compat/task_set.rs", 1),
+            ("crates/core/src/wasm_compat/task_set/native.rs", 1),
+            ("crates/core/src/wasm_compat/task_set/web.rs", 1),
             ("crates/core/src/pdfium/mod.rs", 0),
             ("crates/core/src/pdfium/worker.rs", 0),
             ("crates/core/src/pdfium/input.rs", 0),
