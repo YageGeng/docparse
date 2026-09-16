@@ -67,7 +67,7 @@ This comparison establishes output equivalence between these two settings on the
 ## Reproduce
 
 ```sh
-rtk proxy npm --prefix packages/wasm-web run build
+rtk npm run build --prefix packages/wasm-web
 rtk proxy node packages/wasm-web/tests/preferred-layout.mjs --pdf-dir /Volumes/Yage/Downloads/docs --output target/webgpu-layout-repeat
 ```
 

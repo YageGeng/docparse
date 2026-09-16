@@ -99,7 +99,7 @@ let document = parser.parse_path("input.pdf").await?;
 
 The `wasm32-unknown-unknown` build runs the same PDFium, model, preprocessing, and fusion algorithms in a dedicated module Worker. See the [Web package guide](packages/wasm-web/README.md) and [native/Web specification](docs/superpowers/specs/2026-09-07-native-web-wasm-design.md).
 
-The shared Rust entry points are `DocParser::from_artifacts(config, ParserArtifacts { layout, tsr: Some(tsr) })` and `parse_bytes(Arc<[u8]>)`. Both enabled models use the supplied bytes without reading configured paths. Rules-only parsers may still pass a single layout `ModelArtifacts`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
+The shared Rust entry points are `DocParser::from_artifacts(config, ParserArtifacts::builder().layout(layout).tsr(Some(tsr)).build())` and `parse_bytes(Arc<[u8]>)`. Enabled model families use the supplied bytes without reading configured paths. Rules-only parsers may still pass a single layout `ModelArtifacts`. Filesystem and blocking APIs remain native capabilities. Cross-platform crates require the `wasm` feature for browser builds; `docparse-web` enables these dependency features directly. Native provider features cannot be combined with a Web target. Model bytes are checked against provenance, SHA-256, YAML, and tensor contracts.
 
 Custom LayoutEngine/OcrEngine implementations must return `WasmBoxedFuture` instead of using async_trait. This preserves native Send/Sync bounds while allowing local browser futures:
 
@@ -195,13 +195,36 @@ rtk uv run --locked scripts/compare_e2e_runs.py \
 
 E2E builds release tests before timing their binaries directly. Use `--cargo-profile dev` only when diagnosing debug behavior. Performance and Cargo profile are recorded in `summary.json`, not used as cross-machine thresholds. Canonical hashes exclude timings, absolute paths, and host details.
 
-Use the [HTTP workbench](packages/web/README.md) to upload PDFs, recover durable tasks,
-and inspect original pages alongside parsed text and tables. The
-[WASM browser example](packages/wasm-web/README.md) provides local browser inference.
+## Frontend applications
+
+Run frontend commands from the repository root, selecting the package with
+`--prefix`. Keep each development server in its own terminal.
+
+The [HTTP workbench](packages/web/README.md) uploads PDFs to the native server and
+inspects persisted results. Start the configured backend in another terminal,
+then run:
+
+```sh
+rtk npm ci --prefix packages/web
+rtk npm run dev --prefix packages/web
+```
+
+The [WASM browser example](packages/wasm-web/README.md) parses PDFs locally in the
+browser. Complete the tools and model setup in its guide, then run:
+
+```sh
+rtk npm ci --prefix packages/wasm-web --ignore-scripts
+rtk npm run build --prefix packages/wasm-web
+rtk npm run example --prefix packages/wasm-web
+```
+
+The workbench opens at <http://127.0.0.1:5173>; the WASM example opens at
+<http://127.0.0.1:8768/example/>. The package guides list build, type-check,
+preview, and acceptance commands with the same repository-root convention.
 
 ## Initial scope
 
-- Formula regions preserve location and content status without LaTeX recognition.
+- Optional formula recognition provides LaTeX and Markdown for detected inline and display regions while preserving original source text.
 - User PDFs, models, rendered images, and generated E2E reports are excluded from Git and crate packages. Small generated regression PDFs and their font licenses are maintained as source fixtures.
 
 ## Provenance and licensing

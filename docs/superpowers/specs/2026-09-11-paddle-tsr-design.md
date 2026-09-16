@@ -75,12 +75,18 @@ Web 增加显式 tsrArtifacts，与现有 layout 的 URLs/bytes 模型输入一�
 
 ### 可复现入口
 
+Run these commands from the repository root. Keep the example server running in this terminal:
+
 ```sh
 rtk uv run scripts/download_models.py --model slanet-plus
 rtk cargo test -p docparse-tsr -- --include-ignored
 rtk npm run build --prefix packages/wasm-web
-rtk npm run build:example --prefix packages/wasm-web
-rtk proxy node packages/wasm-web/scripts/serve-example.mjs
+rtk npm run example --prefix packages/wasm-web
+```
+
+Run browser acceptance from another terminal at the repository root:
+
+```sh
 rtk proxy node crates/web/tests/paddle_tsr.mjs /absolute/path/to/document.pdf
 rtk proxy node crates/web/tests/paddle_tsr.mjs --mode fallback --output packages/wasm-web/test-results/paddle-tsr/browser-fallback.json /absolute/path/to/document.pdf
 ```

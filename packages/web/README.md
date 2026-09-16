@@ -6,21 +6,31 @@ A React and TypeScript workbench for the native Axum server. Parsing runs on
 
 ## Run
 
+Run every shell command in this guide from the repository root. Select the
+workbench with `--prefix packages/web`.
+
 Create the PostgreSQL database and configure the server's database connection
 before starting. The server automatically applies pending migrations on that
-connection, including upload metadata and the task-history index:
+connection, including upload metadata and the task-history index. Start the
+native server in one terminal, choosing the backend feature for your host:
 
 ```sh
 rtk cargo run -p docparse-server --release --features cuda
+```
+
+In a second terminal, install and start the workbench:
+
+```sh
 rtk npm ci --prefix packages/web
 rtk npm run dev --prefix packages/web
 ```
 
 Open <http://127.0.0.1:5173>. Use Node.js 22.13 or newer for the pinned Vite and PDF.js;
 this package was validated with Node.js 26.8.2. The dev server listens on loopback
-and proxies `/api` to `http://127.0.0.1:8080` by default.
+and proxies `/api/v1/docparse` to `http://127.0.0.1:8080` by default.
 
-Copy `.env.example` to `.env.local` when using a different API prefix or server.
+Copy `packages/web/.env.example` to `packages/web/.env.local` for local settings
+and API type generation.
 `VITE_API_PREFIX` must match `server.api_prefix`. `VITE_API_TARGET` controls the
 development/preview proxy, and `VITE_BASE_PATH` controls the static application
 mount point. Neither is a place for credentials. Restart Vite after changing
@@ -32,7 +42,7 @@ rtk npm run build --prefix packages/web
 rtk npm run preview --prefix packages/web
 ```
 
-The build produces `dist/`, including the PDF.js worker, fonts, CMaps, ICC profiles, image
+The build produces `packages/web/dist/`, including the PDF.js worker, fonts, CMaps, ICC profiles, image
 decoders and their license notices. Production needs only a static web server and
 a same-origin proxy to Axum. Route application navigations such as `/document` to
 `index.html`; preserve the configured API prefix, allow streaming uploads, and
@@ -100,16 +110,18 @@ snapshots and release the PDF/result readers, including after deletion in anothe
 
 `src/api/schema.d.ts` is generated from utoipa rather than handwritten SDK types.
 Normal builds use the checked-in declaration file and do not contact the backend.
-After changing the server contract, run the server and regenerate:
+After changing the server contract, run the server and regenerate. The local
+environment file described above supplies the OpenAPI URL for the default API prefix:
 
 ```sh
 rtk npm run api:generate --prefix packages/web
 # With a different server or prefix:
 rtk proxy env DOCPARSE_OPENAPI_URL=http://127.0.0.1:8091/api/openapi.json \
-  npm run api:generate --prefix packages/web
+  rtk npm run api:generate --prefix packages/web
 ```
 
-The generator also reads `DOCPARSE_OPENAPI_URL` from `.env.local`.
+The generator reads `DOCPARSE_OPENAPI_URL` from `packages/web/.env.local`; the
+explicit environment variable takes precedence.
 
 ## Organization
 

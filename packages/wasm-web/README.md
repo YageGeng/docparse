@@ -2,6 +2,10 @@
 
 Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3, SLANet_plus and PaddleOCR models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
 
+Run every shell command in this guide from the repository root. Select this
+package with `--prefix packages/wasm-web`; use its npm scripts for builds,
+checks, and the interactive example.
+
 ## Build
 
 Prepare the pinned model and tools from the repository root:
@@ -12,20 +16,27 @@ rtk cargo install wasm-bindgen-cli --version 0.2.125 --locked
 rtk uv run --locked scripts/download_models.py
 ```
 
-Run these commands in `packages/wasm-web`:
+Install and build the browser package:
 
 ```sh
-rtk npm ci --ignore-scripts
-rtk npm run build
+rtk npm ci --prefix packages/wasm-web --ignore-scripts
+rtk npm run build --prefix packages/wasm-web
 ```
 
-`npm run build` uses Cargo's release profile, runs wasm-bindgen, then runs the pinned npm Binaryen 132.0.0 `wasm-opt -O4`. No system `wasm-opt` installation is required. Optimization preserves SIMD, bulk memory, reference types, and PDFium exception handling; invalid output fails the build. The manifest records optimization flags, before/after byte sizes, elapsed optimization time, and the hash of the optimized artifact. ORT's own prebuilt WASM files are copied unchanged.
+`npm run build --prefix packages/wasm-web` uses Cargo's release profile, runs wasm-bindgen, then runs the pinned npm Binaryen 132.0.0 `wasm-opt -O4`. No system `wasm-opt` installation is required. Optimization preserves SIMD, bulk memory, reference types, and PDFium exception handling; invalid output fails the build. The manifest records optimization flags, before/after byte sizes, elapsed optimization time, and the hash of the optimized artifact. ORT's own prebuilt WASM files are copied unchanged.
 
-`dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
+`packages/wasm-web/dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. Its `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
 
-The SDK build excludes the example and its presentation dependencies. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
+The SDK build excludes the example and its presentation dependencies. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `packages/wasm-web/example/src`, consumes the built public SDK, and emits only to `packages/wasm-web/example/dist`.
 
-Copy the complete `dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The explicit single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
+Check the SDK and example from the repository root after building the SDK:
+
+```sh
+rtk npm run check --prefix packages/wasm-web
+rtk npm run check:example --prefix packages/wasm-web
+```
+
+Copy the complete `packages/wasm-web/dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The explicit single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
 
 ## Usage
 
@@ -135,13 +146,13 @@ Observations describe elapsed attempts, not success. Error/cancellation can leav
 
 The example selects WebGPU, automatic OCR, and rules-first TSR fallback by default. The OCR selector offers automatic missing-region recovery, all pages, and off. Its table selector also provides TSR-only and rules-only modes. The example explicitly allows CPU fallback for all enabled models on unsupported devices. Its engine selector also supports CPU/WASM, releasing the old Worker when changed. The engine status shows the initialized backend, including CPU fallback, rather than only the requested preference.
 
-After preparing the model and building the package, run this command in `packages/wasm-web`:
+After preparing the models and building the SDK, start the example from the repository root:
 
 ```sh
-rtk npm run example
+rtk npm run example --prefix packages/wasm-web
 ```
 
-This type-checks `example/src/main.ts`, bundles its presentation libraries and KaTeX fonts locally with esbuild, and starts the static server. Use `rtk npm run build:example` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM.
+This type-checks `packages/wasm-web/example/src/main.ts`, bundles its presentation libraries and KaTeX fonts locally with esbuild, and starts the static server. Use `rtk npm run build:example --prefix packages/wasm-web` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM. Keep this terminal running and use a separate terminal for acceptance commands.
 
 Open <http://127.0.0.1:8768/example/>. Select **Prepare models** to initialize the selected models before choosing a PDF. Choosing a PDF during preparation keeps that preparation running. **Parse document** also prepares automatically when needed and reuses ready sessions. Changing the engine, table mode, or OCR policy releases those sessions and enables preparation again. The example displays actual model-download, text-extraction, and page-analysis progress. Browse the PDFium page thumbnails, zoom the page, and toggle overlays without changing the parsed geometry. Click an overlay, or use the region menu, to inspect and copy its text. On narrow screens the selected text opens in a dismissible floating inspector.
 
@@ -155,7 +166,13 @@ long extracted text scroll within their own panels. Exported PNG resolution is u
 
 **Export PNG** opens the generated image for inspection; **Save PNG** then downloads it. Some embedded browsers cancel file downloads, but the image remains available in the preview. Cancel stops the Worker; the next parse creates a fresh parser. A ready model is reused when choosing another PDF. Returning through browser history does not revoke a cached document's preview URLs.
 
-The static server exposes only the example, built SDK, and model directory. It does not receive PDF uploads or perform parsing. Set `PORT` to use another local port. The example uses PDFium's inference raster and SVG hit targets; it has no pdf.js dependency. Native PDF text is extracted; image-only and outlined text still require OCR.
+The static server exposes only the example, built SDK, and model directory. It does not receive PDF uploads or perform parsing. Set `PORT` to use another local port:
+
+```sh
+rtk proxy env PORT=8769 rtk npm run example --prefix packages/wasm-web
+```
+
+The example uses PDFium's inference raster and SVG hit targets; it has no pdf.js dependency. Native PDF text is extracted; image-only and outlined text still require OCR.
 
 ### UI end-to-end acceptance
 
@@ -171,11 +188,16 @@ and subsequent UI assertions can exceed a 30-second host limit.
 The unified entry builds the SDK and example, regenerates native references, starts owned servers on free ports, and runs SDK acceptance, UI flows, and export-race checks against the real model:
 
 ```sh
-rtk npx playwright install chromium
-rtk npm run test:e2e
+rtk npm exec --prefix packages/wasm-web -- playwright install chromium
+rtk npm run test:e2e --prefix packages/wasm-web
 ```
 
-Use `-- --headed` to watch the command-line browser, `-- --channel chrome` to use an installed Chrome, or `-- --cycles 20` for the longer SDK repeat matrix. Reports and the final screenshot are written to `test-results/e2e/`. Playwright is a development-only E2E dependency; there are no frontend unit tests.
+Pass script arguments after `--`, keeping `--prefix` before it. For example,
+`rtk npm run test:e2e --prefix packages/wasm-web -- --headed` shows the browser.
+Use `--channel chrome` to select an installed Chrome or `--cycles 20` for the
+longer SDK repeat matrix. Reports and the final screenshot are written to
+`packages/wasm-web/test-results/e2e/`. Playwright is a development-only E2E
+dependency; there are no frontend unit tests.
 
 `tests/run.e2e.mjs` owns command-line preparation and browser startup. Its exported `prepareE2E()` can also prepare servers from a Node host. The browser-controller-independent `tests/suite.e2e.mjs` exports `runE2E(driver, environment)` for both the CLI and Browser Use. A Browser Use driver supplies `page: tab.playwright`, `navigate: url => tab.goto(url)`, and the tab's CDP capability. Exhaust the generator and close the prepared environment when finished.
 
@@ -242,7 +264,7 @@ Set `{executionProvider: "webgpu"}` to request WebGPU explicitly. The WASM depen
 
 GPU-to-CPU fallback is disabled by default. Only `allowCpuFallback: true` permits CPU fallback when GPU capability or provider initialization is unavailable. Model hash/schema and inference-data failures do not trigger fallback. The read-only `parser.executionProvider` reports the initialized backend, including `"wasm"` after fallback. ORT may still execute unsupported operators on CPU within a WebGPU session. Browser layout, TSR and OCR serialize actual inference through output readback to avoid cross-session GPU buffer reuse after a caller timeout. See the [ONNX Runtime WebGPU guide](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html).
 
-Run `rtk npm run test:e2e -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
+Run `rtk npm run test:e2e --prefix packages/wasm-web -- --provider webgpu` for strict GPU acceptance. The real-model test records actual GPU queue submissions and inference durations in addition to provider registration. A GPU request with no observed GPU commands fails acceptance.
 
 ## Content layouts and reference annotations
 
