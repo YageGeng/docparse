@@ -1,0 +1,932 @@
+{
+  "source": "2604.18583v1.pdf page 5: the right-column figure caption formula must not enter the left-column Computational Bottleneck paragraph.",
+  "formula_bbox": {
+    "left": 311.0,
+    "top": 279.0,
+    "right": 327.0,
+    "bottom": 293.0
+  },
+  "blocks": [
+    {
+      "id": "p5:b:m5:s0",
+      "label": "text",
+      "text": "Computational Bottleneck. Since the cost of standard 2D",
+      "markdown": null,
+      "raw_label": "text",
+      "label_source": "Model",
+      "confidence": 0.9539660215377808,
+      "bbox": {
+        "left": 47.86399841308594,
+        "top": 278.77899169921875,
+        "right": 301.5740051269531,
+        "bottom": 346.0740051269531
+      },
+      "polygon": null,
+      "source_region": {
+        "label": "text",
+        "model_region_id": "p5:m5",
+        "fallback_region_id": null,
+        "bbox": {
+          "left": 46.0,
+          "top": 277.0,
+          "right": 303.0,
+          "bottom": 348.0
+        },
+        "polygon": null,
+        "geometry_source": "DerivedFromBbox",
+        "confidence": 0.9539660215377808,
+        "model_order": 51
+      },
+      "model_region_id": "p5:m5",
+      "model_order": 51,
+      "final_order": 4,
+      "evidence": [],
+      "semantic_hints": {},
+      "lines": [
+        {
+          "id": "p5:b:m5:s0:l0",
+          "text": "Computational Bottleneck. Since the cost of standard 2D",
+          "bbox": {
+            "left": 48.0,
+            "top": 278.77899169921875,
+            "right": 299.99798583984375,
+            "bottom": 288.3739929199219
+          },
+          "baseline": {
+            "start": {
+              "x": 48.0,
+              "y": 285.69500732421875
+            },
+            "end": {
+              "x": 299.99798583984375,
+              "y": 285.69500732421875
+            }
+          },
+          "rotation": 0.0,
+          "direction": "LeftToRight",
+          "model_region_coverage": null,
+          "inline_spans": [],
+          "text_items": [
+            {
+              "id": "p5:t76",
+              "raw_text": "Computational Bottleneck",
+              "raw_bbox": {
+                "left": 48.0,
+                "top": 278.8550109863281,
+                "right": 165.78199768066406,
+                "bottom": 288.22198486328125
+              },
+              "bbox": {
+                "left": 48.0,
+                "top": 278.8550109863281,
+                "right": 165.78199768066406,
+                "bottom": 288.22198486328125
+              },
+              "baseline": {
+                "start": {
+                  "x": 48.0,
+                  "y": 285.69500732421875
+                },
+                "end": {
+                  "x": 165.64599609375,
+                  "y": 285.69500732421875
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 76,
+              "final_order": 0,
+              "style": {
+                "font_name": "URWPalladioL-Bold",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.72599983215332,
+                "font_descent": -2.5269999504089355,
+                "font_size_estimated": false,
+                "weight": 615,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  48.0,
+                  506.30499267578125
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  67,
+                  111,
+                  109,
+                  112,
+                  117,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  97,
+                  108,
+                  0,
+                  66,
+                  111,
+                  116,
+                  116,
+                  108,
+                  101,
+                  110,
+                  101,
+                  99,
+                  107
+                ],
+                "mcid": null,
+                "text_object_index": 43,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t77",
+              "raw_text": ". ",
+              "raw_bbox": {
+                "left": 165.78199768066406,
+                "top": 278.968994140625,
+                "right": 168.20399475097656,
+                "bottom": 288.22198486328125
+              },
+              "bbox": {
+                "left": 165.78199768066406,
+                "top": 278.968994140625,
+                "right": 168.20399475097656,
+                "bottom": 288.22198486328125
+              },
+              "baseline": {
+                "start": {
+                  "x": 165.78199768066406,
+                  "y": 285.69500732421875
+                },
+                "end": {
+                  "x": 167.74899291992188,
+                  "y": 285.69500732421875
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 77,
+              "final_order": 1,
+              "style": {
+                "font_name": "URWPalladioL-Bold",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.72599983215332,
+                "font_descent": -2.5269999504089355,
+                "font_size_estimated": false,
+                "weight": 615,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  48.0,
+                  506.30499267578125
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  46,
+                  0
+                ],
+                "mcid": null,
+                "text_object_index": 43,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t78",
+              "raw_text": "Since the cost of standard 2D",
+              "raw_bbox": {
+                "left": 171.53799438476562,
+                "top": 278.77899169921875,
+                "right": 299.99798583984375,
+                "bottom": 288.3739929199219
+              },
+              "bbox": {
+                "left": 171.53799438476562,
+                "top": 278.77899169921875,
+                "right": 299.99798583984375,
+                "bottom": 288.3739929199219
+              },
+              "baseline": {
+                "start": {
+                  "x": 171.53799438476562,
+                  "y": 285.69500732421875
+                },
+                "end": {
+                  "x": 299.7749938964844,
+                  "y": 285.69500732421875
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 78,
+              "final_order": 2,
+              "style": {
+                "font_name": "URWPalladioL-Roma",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.792500019073486,
+                "font_descent": -2.678999900817871,
+                "font_size_estimated": false,
+                "weight": 420,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  171.53781127929688,
+                  506.30499267578125
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  83,
+                  105,
+                  110,
+                  99,
+                  101,
+                  0,
+                  116,
+                  104,
+                  101,
+                  0,
+                  99,
+                  111,
+                  115,
+                  116,
+                  0,
+                  111,
+                  102,
+                  0,
+                  115,
+                  116,
+                  97,
+                  110,
+                  100,
+                  97,
+                  114,
+                  100,
+                  0,
+                  50,
+                  68
+                ],
+                "mcid": null,
+                "text_object_index": 44,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p5:b:m11:s0",
+      "label": "figure_title",
+      "text": "Tgsfexhibit distinct structural properties. The coarsest low-",
+      "markdown": null,
+      "raw_label": "figure_title",
+      "label_source": "Model",
+      "confidence": 0.934155285358429,
+      "bbox": {
+        "left": 311.5989990234375,
+        "top": 245.71499633789062,
+        "right": 565.572998046875,
+        "bottom": 360.4469909667969
+      },
+      "polygon": null,
+      "source_region": {
+        "label": "figure_title",
+        "model_region_id": "p5:m11",
+        "fallback_region_id": null,
+        "bbox": {
+          "left": 307.0,
+          "top": 244.0,
+          "right": 565.0,
+          "bottom": 364.0
+        },
+        "polygon": null,
+        "geometry_source": "DerivedFromBbox",
+        "confidence": 0.934155285358429,
+        "model_order": 184
+      },
+      "model_region_id": "p5:m11",
+      "model_order": 184,
+      "final_order": 12,
+      "evidence": [],
+      "semantic_hints": {},
+      "lines": [
+        {
+          "id": "p5:b:m11:s0:l3",
+          "text": "Tgsfexhibit distinct structural properties. The coarsest low-",
+          "bbox": {
+            "left": 311.5989990234375,
+            "top": 277.60400390625,
+            "right": 565.572998046875,
+            "bottom": 291.5790100097656
+          },
+          "baseline": {
+            "start": {
+              "x": 311.5989990234375,
+              "y": 287.23199462890625
+            },
+            "end": {
+              "x": 565.572998046875,
+              "y": 287.23199462890625
+            }
+          },
+          "rotation": 0.0,
+          "direction": "LeftToRight",
+          "model_region_coverage": null,
+          "inline_spans": [],
+          "text_items": [
+            {
+              "id": "p5:t218",
+              "raw_text": "T",
+              "raw_bbox": {
+                "left": 311.5989990234375,
+                "top": 280.3179931640625,
+                "right": 319.5690002441406,
+                "bottom": 289.1650085449219
+              },
+              "bbox": {
+                "left": 311.5989990234375,
+                "top": 280.3179931640625,
+                "right": 319.5690002441406,
+                "bottom": 289.1650085449219
+              },
+              "baseline": {
+                "start": {
+                  "x": 311.5989990234375,
+                  "y": 287.23199462890625
+                },
+                "end": {
+                  "x": 319.1409912109375,
+                  "y": 287.23199462890625
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 218,
+              "final_order": 0,
+              "style": {
+                "font_name": "CMBX10",
+                "font_size": 9.962599754333496,
+                "font_height": 9.962599754333496,
+                "font_ascent": 6.914044380187988,
+                "font_descent": -1.9327443838119507,
+                "font_size_estimated": false,
+                "weight": 570,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  311.5989990234375,
+                  504.76800537109375
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  84
+                ],
+                "mcid": null,
+                "text_object_index": 133,
+                "unicode_mapping": "Complete",
+                "generated_space": false,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t219",
+              "raw_text": "gs",
+              "raw_bbox": {
+                "left": 319.5690002441406,
+                "top": 277.60400390625,
+                "right": 326.6889953613281,
+                "bottom": 283.86700439453125
+              },
+              "bbox": {
+                "left": 319.5690002441406,
+                "top": 277.60400390625,
+                "right": 326.6889953613281,
+                "bottom": 283.86700439453125
+              },
+              "baseline": {
+                "start": {
+                  "x": 319.5690002441406,
+                  "y": 282.4440002441406
+                },
+                "end": {
+                  "x": 326.375,
+                  "y": 282.4440002441406
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 219,
+              "final_order": 1,
+              "style": {
+                "font_name": "CMR7",
+                "font_size": 6.973800182342529,
+                "font_height": 6.973800182342529,
+                "font_ascent": 4.839817523956299,
+                "font_descent": -1.352917194366455,
+                "font_size_estimated": false,
+                "weight": 395,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  319.5690002441406,
+                  509.5559997558594
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  103,
+                  115
+                ],
+                "mcid": null,
+                "text_object_index": 134,
+                "unicode_mapping": "Complete",
+                "generated_space": false,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t220",
+              "raw_text": "f",
+              "raw_bbox": {
+                "left": 319.5690002441406,
+                "top": 285.25299072265625,
+                "right": 323.781005859375,
+                "bottom": 291.5790100097656
+              },
+              "bbox": {
+                "left": 319.5690002441406,
+                "top": 285.25299072265625,
+                "right": 323.781005859375,
+                "bottom": 291.5790100097656
+              },
+              "baseline": {
+                "start": {
+                  "x": 319.5690002441406,
+                  "y": 290.1629943847656
+                },
+                "end": {
+                  "x": 323.781005859375,
+                  "y": 290.1629943847656
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 220,
+              "final_order": 2,
+              "style": {
+                "font_name": "CMMI7",
+                "font_size": 6.973800182342529,
+                "font_height": 6.973800182342529,
+                "font_ascent": 4.839817523956299,
+                "font_descent": -1.352917194366455,
+                "font_size_estimated": false,
+                "weight": 405,
+                "flags": 524356,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  319.5690002441406,
+                  501.8370056152344
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  102
+                ],
+                "mcid": null,
+                "text_object_index": 135,
+                "unicode_mapping": "Complete",
+                "generated_space": false,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t221",
+              "raw_text": "exhibit distinct structural properties",
+              "raw_bbox": {
+                "left": 329.9410095214844,
+                "top": 280.3349914550781,
+                "right": 484.9909973144531,
+                "bottom": 289.9110107421875
+              },
+              "bbox": {
+                "left": 329.9410095214844,
+                "top": 280.3349914550781,
+                "right": 484.9909973144531,
+                "bottom": 289.9110107421875
+              },
+              "baseline": {
+                "start": {
+                  "x": 329.9410095214844,
+                  "y": 287.23199462890625
+                },
+                "end": {
+                  "x": 484.6709899902344,
+                  "y": 287.23199462890625
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 221,
+              "final_order": 3,
+              "style": {
+                "font_name": "URWPalladioL-Roma",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.792500019073486,
+                "font_descent": -2.678999900817871,
+                "font_size_estimated": false,
+                "weight": 420,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  329.9410095214844,
+                  504.76800537109375
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  101,
+                  120,
+                  104,
+                  105,
+                  98,
+                  105,
+                  116,
+                  0,
+                  100,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  99,
+                  116,
+                  0,
+                  115,
+                  116,
+                  114,
+                  117,
+                  99,
+                  116,
+                  117,
+                  114,
+                  97,
+                  108,
+                  0,
+                  112,
+                  114,
+                  111,
+                  112,
+                  101,
+                  114,
+                  116,
+                  105,
+                  101,
+                  115
+                ],
+                "mcid": null,
+                "text_object_index": 136,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t222",
+              "raw_text": ". ",
+              "raw_bbox": {
+                "left": 484.9909973144531,
+                "top": 280.4389953613281,
+                "right": 487.4129943847656,
+                "bottom": 289.9110107421875
+              },
+              "bbox": {
+                "left": 484.9909973144531,
+                "top": 280.4389953613281,
+                "right": 487.4129943847656,
+                "bottom": 289.9110107421875
+              },
+              "baseline": {
+                "start": {
+                  "x": 484.9909973144531,
+                  "y": 287.23199462890625
+                },
+                "end": {
+                  "x": 486.7640075683594,
+                  "y": 287.23199462890625
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 222,
+              "final_order": 4,
+              "style": {
+                "font_name": "URWPalladioL-Roma",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.792500019073486,
+                "font_descent": -2.678999900817871,
+                "font_size_estimated": false,
+                "weight": 420,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  329.9410095214844,
+                  504.76800537109375
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  46,
+                  0
+                ],
+                "mcid": null,
+                "text_object_index": 136,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": []
+            },
+            {
+              "id": "p5:t223",
+              "raw_text": "The coarsest low-",
+              "raw_bbox": {
+                "left": 490.1650085449219,
+                "top": 280.3349914550781,
+                "right": 565.572998046875,
+                "bottom": 289.9110107421875
+              },
+              "bbox": {
+                "left": 490.1650085449219,
+                "top": 280.3349914550781,
+                "right": 565.572998046875,
+                "bottom": 289.9110107421875
+              },
+              "baseline": {
+                "start": {
+                  "x": 490.1650085449219,
+                  "y": 287.23199462890625
+                },
+                "end": {
+                  "x": 565.3690185546875,
+                  "y": 287.23199462890625
+                }
+              },
+              "rotation": 0.0,
+              "source": "Native",
+              "confidence": null,
+              "extraction_order": 223,
+              "final_order": 5,
+              "style": {
+                "font_name": "URWPalladioL-Roma",
+                "font_size": 9.5,
+                "font_height": 9.5,
+                "font_ascent": 6.792500019073486,
+                "font_descent": -2.678999900817871,
+                "font_size_estimated": false,
+                "weight": 420,
+                "flags": 524292,
+                "bold": false,
+                "italic": false,
+                "monospace": false,
+                "fill_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "stroke_color": [
+                  0,
+                  0,
+                  0,
+                  255
+                ],
+                "text_matrix": [
+                  1.0199999809265137,
+                  0.0,
+                  0.0,
+                  1.0,
+                  329.9410095214844,
+                  504.76800537109375
+                ]
+              },
+              "provenance": {
+                "char_codes": [
+                  84,
+                  104,
+                  101,
+                  0,
+                  99,
+                  111,
+                  97,
+                  114,
+                  115,
+                  101,
+                  115,
+                  116,
+                  0,
+                  108,
+                  111,
+                  119,
+                  45
+                ],
+                "mcid": null,
+                "text_object_index": 136,
+                "unicode_mapping": "Complete",
+                "generated_space": true,
+                "link": null,
+                "strike": false
+              },
+              "repair_actions": [
+                "GlyphNameRecovery"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

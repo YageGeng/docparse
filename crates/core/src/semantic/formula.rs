@@ -55,6 +55,13 @@ impl FormulaMatcher {
                 .get_mut(block_index)
                 .and_then(|block| block.lines.get_mut(line_index))
             {
+                tracing::debug!(
+                    "attached inline formula {} on page {} to line {} with {:?} source coverage",
+                    formula.source_detection_index,
+                    self.page_number,
+                    line.id.as_str(),
+                    span.content_status
+                );
                 line.inline_spans.push(span);
                 line.inline_spans.sort_by(|left, right| {
                     left.bbox
@@ -74,13 +81,21 @@ impl FormulaMatcher {
         unmatched
     }
 
-    /// Selects the strongest geometrically compatible line with stable index ties.
+    /// Prefers actual text ownership before typographic fit, constraining missing-text insertion to its layout.
     fn best_line(
         blocks: &[Block],
         formula: &LayoutDetection,
     ) -> Option<(usize, usize)> {
-        let mut best: Option<(usize, usize, f64, f64)> = None;
+        let mut best: Option<(usize, usize, f64, f64, f64)> = None;
         for (block_index, block) in blocks.iter().enumerate() {
+            // Original layout bounds include missing formula pixels that the text-derived block box may omit.
+            let region_coverage = block
+                .source_regions()
+                .map(|region| {
+                    region.bbox.intersection_area(formula.bbox)
+                        / formula.bbox.area()
+                })
+                .reduce(f64::max);
             for (line_index, line) in block.lines.iter().enumerate() {
                 let vertical_overlap =
                     Self::vertical_overlap(line.bbox, formula.bbox);
@@ -108,26 +123,48 @@ impl FormulaMatcher {
                 {
                     continue;
                 }
+                let text_coverage = (line
+                    .text_items
+                    .iter()
+                    .map(|item| item.bbox.intersection_area(formula.bbox))
+                    .sum::<f64>()
+                    / formula.bbox.area())
+                .clamp(0.0, 1.0);
+                // Horizontal tolerance is for missing text within its owner, not for jumping a column gutter.
+                if text_coverage == 0.0
+                    && region_coverage.is_some_and(|coverage| coverage < 0.5)
+                {
+                    continue;
+                }
                 let score = vertical_ratio
                     + (1.0
                         - baseline_distance
                             / maximum_distance.max(f64::EPSILON));
-                let candidate =
-                    (block_index, line_index, score, baseline_distance);
+                let candidate = (
+                    block_index,
+                    line_index,
+                    text_coverage,
+                    score,
+                    baseline_distance,
+                );
                 let replace = best.as_ref().is_none_or(|current| {
-                    candidate.2.total_cmp(&current.2).is_gt()
-                        || (candidate.2.total_cmp(&current.2).is_eq()
-                            && (candidate.3.total_cmp(&current.3).is_lt()
-                                || (candidate.3.total_cmp(&current.3).is_eq()
-                                    && (candidate.0, candidate.1)
-                                        < (current.0, current.1))))
+                    candidate
+                        .2
+                        .total_cmp(&current.2)
+                        .then_with(|| candidate.3.total_cmp(&current.3))
+                        .then_with(|| current.4.total_cmp(&candidate.4))
+                        .then_with(|| {
+                            (current.0, current.1)
+                                .cmp(&(candidate.0, candidate.1))
+                        })
+                        .is_gt()
                 });
                 if replace {
                     best = Some(candidate);
                 }
             }
         }
-        best.map(|(block_index, line_index, _, _)| (block_index, line_index))
+        best.map(|(block_index, line_index, _, _, _)| (block_index, line_index))
     }
 
     /// Builds one span and derives completeness strictly from overlapping text facts.
@@ -394,5 +431,112 @@ mod tests {
         assert_eq!(block.id.as_str(), "p1:b:m9:s0");
         assert_eq!(block.label, LayoutLabel::InlineFormula);
         assert!(block.lines.is_empty());
+    }
+
+    /// Real caption ownership must outrank an adjacent column's better baseline, with or without native formula glyphs.
+    #[test]
+    fn caption_formula_does_not_cross_columns() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/formula/cross-column-caption.json"
+        ))
+        .expect("fixture");
+        let original: Vec<Block> = serde_json::from_value(
+            fixture.get("blocks").expect("blocks").clone(),
+        )
+        .expect("source blocks");
+        let bounds: Bbox = serde_json::from_value(
+            fixture.get("formula_bbox").expect("formula bbox").clone(),
+        )
+        .expect("bbox");
+        for case in [
+            "original",
+            "reversed",
+            "no-regions",
+            "missing-glyphs",
+            "missing-caption",
+        ] {
+            let mut blocks = original.clone();
+            match case {
+                "reversed" => blocks.reverse(),
+                "no-regions" => {
+                    for block in &mut blocks {
+                        block.source_region = None;
+                        block.source_regions.clear();
+                    }
+                }
+                "missing-glyphs" => {
+                    let line = blocks
+                        .iter_mut()
+                        .find(|block| block.label == LayoutLabel::FigureTitle)
+                        .expect("caption")
+                        .lines
+                        .first_mut()
+                        .expect("caption line");
+                    line.text_items.retain(|item| {
+                        item.bbox.intersection_area(bounds) == 0.0
+                    });
+                }
+                "missing-caption" => blocks
+                    .retain(|block| block.label != LayoutLabel::FigureTitle),
+                _ => {}
+            }
+            let native_before: Vec<_> = blocks
+                .iter()
+                .flat_map(|block| &block.lines)
+                .flat_map(|line| &line.text_items)
+                .cloned()
+                .collect();
+            let unmatched = FormulaMatcher::new(5).attach(
+                &mut blocks,
+                vec![formula(
+                    32,
+                    [bounds.left, bounds.top, bounds.right, bounds.bottom],
+                )],
+            );
+            assert!(
+                blocks
+                    .iter()
+                    .filter(|block| block.id.as_str() == "p5:b:m5:s0")
+                    .flat_map(|block| &block.lines)
+                    .all(|line| line.inline_spans.is_empty()),
+                "{case}: left-column prose acquired a right-column formula"
+            );
+            if case == "missing-caption" {
+                assert_eq!(
+                    unmatched.len(),
+                    1,
+                    "an absent owner must not promote a neighboring layout"
+                );
+            } else {
+                assert!(unmatched.is_empty(), "{case}");
+                let line = blocks
+                    .iter()
+                    .find(|block| block.id.as_str() == "p5:b:m11:s0")
+                    .expect("caption")
+                    .lines
+                    .first()
+                    .expect("caption line");
+                let span =
+                    line.inline_spans.first().expect("caption owns formula");
+                assert_eq!(span.bbox, bounds);
+                assert_eq!(
+                    span.content_status == InlineContentStatus::Missing,
+                    case == "missing-glyphs"
+                );
+                if case != "missing-glyphs" {
+                    assert_eq!(span.extracted_text.as_deref(), Some("Tgsf"));
+                }
+            }
+            let native_after: Vec<_> = blocks
+                .iter()
+                .flat_map(|block| &block.lines)
+                .flat_map(|line| &line.text_items)
+                .cloned()
+                .collect();
+            assert_eq!(
+                native_before, native_after,
+                "formula binding cannot move or duplicate source text"
+            );
+        }
     }
 }

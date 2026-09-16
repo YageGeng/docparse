@@ -224,7 +224,7 @@ impl FormulaResult {
         {
             // Superscripts and subscripts may have separate source lines; geometry still bounds every slice.
             for line in &block.lines {
-                for item in &line.text_items {
+                for (item_index, item) in line.text_items.iter().enumerate() {
                     if let Some(measured) = words.get(&item.id) {
                         for word in measured {
                             let Some(text) =
@@ -235,20 +235,60 @@ impl FormulaResult {
                             let overlap =
                                 self.bbox.intersection_area(word.bbox);
                             // Only the anchor line may contribute a lightly clipped delimiter; neighboring rows still need majority coverage.
-                            let punctuation = self.line_id.as_ref()
-                                == Some(&line.id)
+                            let anchor_line =
+                                self.line_id.as_ref() == Some(&line.id);
+                            let punctuation = anchor_line
                                 && !text.trim().is_empty()
                                 && text
                                     .trim()
                                     .chars()
                                     .all(|ch| ch.is_ascii_punctuation());
-                            if overlap <= 0.0
-                                || (overlap
-                                    / word.bbox.area().max(f64::EPSILON)
-                                    < 0.5
-                                    && !punctuation)
+                            // TeX overbars are separate, full-size glyphs whose thin ink can lie above the detector box.
+                            // Require the existing inline ownership range and measured nearby ink, never neighboring rows or prose.
+                            let overbar = anchor_line
+                                && item.source == crate::TextSource::Native
+                                && matches!(
+                                    text.trim(),
+                                    "¯" | "\u{0304}" | "\u{0305}"
+                                )
+                                && self.text_item_range.is_some_and(|range| {
+                                    (range.start..range.end)
+                                        .contains(&item_index)
+                                })
+                                && word.bbox.left >= self.bbox.left
+                                && word.bbox.right <= self.bbox.right
+                                && item.style.as_ref().is_some_and(|style| {
+                                    !style.font_size_estimated
+                                        && style.font_size.is_some_and(|size| {
+                                            size.is_finite()
+                                                && size > 0.0
+                                                && word.bbox.height()
+                                                    <= size * 0.2
+                                                && word.bbox.top < self.bbox.top
+                                                && word.bbox.bottom
+                                                    <= self.bbox.top
+                                                        + size * 0.2
+                                                && self.bbox.top
+                                                    - word.bbox.bottom
+                                                    <= size * 0.5
+                                        })
+                                });
+                            if !overbar
+                                && (overlap <= 0.0
+                                    || (overlap
+                                        / word.bbox.area().max(f64::EPSILON)
+                                        < 0.5
+                                        && !punctuation))
                             {
                                 continue;
+                            }
+                            if overbar {
+                                tracing::debug!(
+                                    "including clipped overbar {} in formula {} on page {}",
+                                    item.id.as_str(),
+                                    self.id.as_str(),
+                                    page.page_number
+                                );
                             }
                             let start = word.byte_range.start + text.len()
                                 - text.trim_start().len();
@@ -727,6 +767,126 @@ impl PageResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clipped measured overbar belongs to its anchored formula, while nearby text remains outside.
+    #[test]
+    fn motion_descriptor_recovers_only_its_anchored_overbar() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/formula/motion-descriptor-overbar.json"
+        ))
+        .expect("fixture");
+        let block: crate::Block = serde_json::from_value(
+            fixture.get("block").expect("fixture block").clone(),
+        )
+        .expect("block");
+        let original: FormulaResult = serde_json::from_value(
+            fixture.get("formula").expect("fixture formula").clone(),
+        )
+        .expect("formula");
+        let original_words: std::collections::BTreeMap<
+            crate::TextItemId,
+            Vec<crate::TableWord>,
+        > = serde_json::from_value(
+            fixture.get("words").expect("fixture words").clone(),
+        )
+        .expect("words");
+        for case in [
+            "overbar",
+            "combining",
+            "prose",
+            "far-above",
+            "sideways",
+            "estimated",
+            "outside-range",
+            "other-line",
+        ] {
+            let expected = matches!(case, "overbar" | "combining");
+            let mut page = PageResult::builder()
+                .page_number(4)
+                .width(612.0)
+                .height(792.0)
+                .rotation(0)
+                .blocks(vec![block.clone()])
+                .build();
+            let mut formula = original.clone();
+            let mut words = original_words.clone();
+            let block = page.blocks.first_mut().expect("block");
+            let line = block.lines.first_mut().expect("line");
+            let accent = line.text_items.last_mut().expect("overbar");
+            let accent_id = accent.id.clone();
+            let word = words
+                .get_mut(&accent_id)
+                .expect("accent words")
+                .first_mut()
+                .expect("accent word");
+            match case {
+                "combining" => accent.raw_text = "\u{0305}".into(),
+                "prose" => {
+                    accent.raw_text = "a".into();
+                    word.byte_range.end = 1;
+                }
+                "far-above" => {
+                    word.bbox.top -= 20.0;
+                    word.bbox.bottom -= 20.0;
+                }
+                "sideways" => {
+                    word.bbox.left += 30.0;
+                    word.bbox.right += 30.0;
+                }
+                "estimated" => {
+                    accent.style.as_mut().expect("style").font_size_estimated =
+                        true
+                }
+                "outside-range" => {
+                    formula.text_item_range.as_mut().expect("range").end = 3
+                }
+                "other-line" => {
+                    let accent = line.text_items.pop().expect("accent");
+                    block.lines.push(
+                        crate::Line::builder()
+                            .id(crate::LineId::new(&block.id, 4))
+                            .text(accent.raw_text.clone())
+                            .bbox(accent.bbox)
+                            .direction(crate::WritingDirection::LeftToRight)
+                            .text_items(vec![accent])
+                            .build(),
+                    );
+                }
+                _ => {}
+            }
+            let before = serde_json::to_value(&page).expect("source");
+            formula.bind_text_spans(&page, &words);
+            formula.refine_crop(&page);
+            assert_eq!(
+                formula
+                    .text_spans
+                    .iter()
+                    .any(|span| span.text_item_id == accent_id),
+                expected,
+                "{case}"
+            );
+            assert_eq!(formula.bbox, original.bbox);
+            assert_eq!(
+                before,
+                serde_json::to_value(&page).expect("unchanged source")
+            );
+            if expected {
+                assert!(
+                    formula.crop_bbox.expect("completed crop").top <= 572.928
+                );
+                formula.latex = Some(r"\bar{\theta}_{f}".into());
+                formula.markdown = Some(r"$\bar{\theta}_{f}$".into());
+                page.formulas.push(formula);
+                page.project_formulas("[formula]");
+                let block = page.blocks.first().expect("block");
+                assert_eq!(
+                    block.markdown.as_deref(),
+                    Some(r"on the motion descriptor $\bar{\theta}_{f}$")
+                );
+                assert!(block.text.contains('¯'));
+            }
+        }
+    }
 
     /// Grazing punctuation from the real page-four/page-thirteen failures cannot expand another formula's crop.
     #[test]

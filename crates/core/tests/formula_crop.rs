@@ -50,6 +50,130 @@ impl FormulaEngine for Capture {
     }
 }
 
+/// Preserves the detached overbar in the real page-four motion descriptor without duplicating it in prose.
+#[tokio::test]
+#[ignore = "requires FORMULA_CROP_PDF=2604.18583v1.pdf, provisioned models and FORMULA_CROP_OUTPUT"]
+async fn real_motion_descriptor_preserves_overbar() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = PathBuf::from(
+        std::env::var("FORMULA_CROP_OUTPUT").expect("output directory"),
+    );
+    std::fs::create_dir_all(&output).expect("output directory");
+    let mut raw = ConfigLoader::new(root.join("docparse.toml"))
+        .load_raw()
+        .expect("config");
+    raw.tsr.mode = TableMode::RulesOnly;
+    raw.ocr.policy = OcrPolicy::Disabled;
+    raw.formula.enabled = true;
+    let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
+    let session = LocalPdfiumProvider
+        .open(
+            PdfInput::Path(PathBuf::from(
+                std::env::var("FORMULA_CROP_PDF").expect("PDF"),
+            )),
+            config.runtime(),
+            Timings::default(),
+        )
+        .await
+        .expect("PDFium session");
+    let extracted = session
+        .pre_scan_page(4, None)
+        .await
+        .expect("extraction")
+        .extracted;
+    std::fs::write(
+        output.join("extracted-page4.json"),
+        serde_json::to_vec_pretty(&extracted).expect("JSON"),
+    )
+    .expect("save extraction");
+    let rendered = session
+        .render_page(4, config.render())
+        .await
+        .expect("raster");
+    image::save_buffer(
+        output.join("page4-pdfium.png"),
+        rendered.image.data(),
+        rendered.image.width(),
+        rendered.image.height(),
+        image::ColorType::Rgb8,
+    )
+    .expect("save raster");
+    session.close().await.expect("close PDF");
+    let engine = PpFormulaNetEngine::from_config(Arc::clone(&config))
+        .await
+        .expect("formula engine");
+    let parser = DocParser::builder()
+        .config(config)
+        .formula_engine(Arc::new(Capture {
+            engine,
+            output: output.clone(),
+            sequence: AtomicUsize::new(0),
+        }))
+        .build()
+        .await
+        .expect("parser");
+    let page = parser
+        .parse_page(
+            PageInput::builder()
+                .extracted(extracted)
+                .image(rendered.image)
+                .transform(rendered.transform)
+                .build(),
+        )
+        .await
+        .expect("page");
+    std::fs::write(
+        output.join("page4.json"),
+        serde_json::to_vec_pretty(&page).expect("JSON"),
+    )
+    .expect("save page");
+    let formula = page
+        .formulas
+        .iter()
+        .find(|formula| {
+            (150.0..160.0).contains(&formula.bbox.left)
+                && (570.0..580.0).contains(&formula.bbox.top)
+        })
+        .expect("motion descriptor");
+    eprintln!(
+        "motion descriptor: {:?}, crop {:?}, spans {:?}",
+        formula.latex, formula.crop_bbox, formula.text_spans
+    );
+    let latex: String = formula
+        .latex
+        .as_ref()
+        .expect("LaTeX")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        latex.contains("\\bar")
+            && latex.contains("\\theta")
+            && latex.contains("_{f}"),
+        "missing motion descriptor overbar: {latex}"
+    );
+    assert!(
+        formula
+            .text_spans
+            .iter()
+            .any(|span| span.text_item_id.as_str() == "p4:t124"),
+        "overbar must be bound to the formula"
+    );
+    let block = page
+        .blocks
+        .iter()
+        .find(|block| Some(&block.id) == formula.block_id.as_ref())
+        .expect("block");
+    assert!(
+        !block.markdown.as_ref().expect("Markdown").contains('¯'),
+        "overbar must not remain as duplicate prose"
+    );
+    assert!(
+        block.text.contains('¯'),
+        "canonical source text must remain intact"
+    );
+}
+
 /// Reproduces missing-script and neighboring-row cases through real PDFium, layout and formula inference.
 #[tokio::test]
 #[ignore = "requires FORMULA_CROP_PDF, provisioned models and FORMULA_CROP_OUTPUT"]

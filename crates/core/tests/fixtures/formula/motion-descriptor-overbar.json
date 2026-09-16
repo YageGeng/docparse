@@ -1,0 +1,607 @@
+{
+  "source": "2604.18583v1.pdf, page 4, motion descriptor in the Drivable Human Template Mesh paragraph",
+  "block": {
+    "id": "p4:b:m7:s0",
+    "label": "text",
+    "text": "on the motion descriptor θf¯",
+    "markdown": null,
+    "raw_label": "text",
+    "label_source": "Model",
+    "confidence": 0.9224823713302612,
+    "bbox": {
+      "left": 48.0,
+      "top": 572.0609741210938,
+      "right": 165.35699462890625,
+      "bottom": 584.3759765625
+    },
+    "polygon": null,
+    "source_region": {
+      "label": "text",
+      "model_region_id": "p4:m7",
+      "fallback_region_id": null,
+      "bbox": {
+        "left": 45.0,
+        "top": 538.0,
+        "right": 303.0,
+        "bottom": 584.5
+      },
+      "polygon": null,
+      "geometry_source": "DerivedFromBbox",
+      "confidence": 0.9224823713302612,
+      "model_order": 102
+    },
+    "model_region_id": "p4:m7",
+    "model_order": 102,
+    "final_order": 6,
+    "evidence": [],
+    "semantic_hints": {},
+    "lines": [
+      {
+        "id": "p4:b:m7:s0:l3",
+        "text": "on the motion descriptor θf¯",
+        "bbox": {
+          "left": 48.0,
+          "top": 572.0609741210938,
+          "right": 165.35699462890625,
+          "bottom": 584.3759765625
+        },
+        "baseline": {
+          "start": {
+            "x": 48.0,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 165.35699462890625,
+            "y": 581.4650268554688
+          }
+        },
+        "rotation": 0.0,
+        "direction": "LeftToRight",
+        "model_region_coverage": null,
+        "inline_spans": [
+          {
+            "label": "inline_formula",
+            "confidence": 0.66888028383255,
+            "bbox": {
+              "left": 155.0,
+              "top": 574.5,
+              "right": 166.0,
+              "bottom": 585.5
+            },
+            "polygon": null,
+            "text_item_range": {
+              "start": 1,
+              "end": 4
+            },
+            "extracted_text": "θf¯",
+            "content_status": "Complete"
+          }
+        ],
+        "text_items": [
+          {
+            "id": "p4:t122",
+            "raw_text": "on the motion descriptor ",
+            "raw_bbox": {
+              "left": 48.0,
+              "top": 574.5679931640625,
+              "right": 152.88999938964844,
+              "bottom": 584.1439819335938
+            },
+            "bbox": {
+              "left": 48.0,
+              "top": 574.5679931640625,
+              "right": 152.88999938964844,
+              "bottom": 584.1439819335938
+            },
+            "baseline": {
+              "start": {
+                "x": 48.0,
+                "y": 581.4650268554688
+              },
+              "end": {
+                "x": 152.69000244140625,
+                "y": 581.4650268554688
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 122,
+            "final_order": 0,
+            "style": {
+              "font_name": "URWPalladioL-Roma",
+              "font_size": 9.5,
+              "font_height": 9.5,
+              "font_ascent": 6.792500019073486,
+              "font_descent": -2.678999900817871,
+              "font_size_estimated": false,
+              "weight": 420,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                48.0,
+                210.53500366210938
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                111,
+                110,
+                0,
+                116,
+                104,
+                101,
+                0,
+                109,
+                111,
+                116,
+                105,
+                111,
+                110,
+                0,
+                100,
+                101,
+                115,
+                99,
+                114,
+                105,
+                112,
+                116,
+                111,
+                114,
+                0
+              ],
+              "mcid": null,
+              "text_object_index": 80,
+              "unicode_mapping": "Complete",
+              "generated_space": true,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t123",
+            "raw_text": "θ",
+            "raw_bbox": {
+              "left": 155.54800415039062,
+              "top": 574.4710083007812,
+              "right": 161.13699340820312,
+              "bottom": 583.3980102539062
+            },
+            "bbox": {
+              "left": 155.54800415039062,
+              "top": 574.4710083007812,
+              "right": 161.13699340820312,
+              "bottom": 583.3980102539062
+            },
+            "baseline": {
+              "start": {
+                "x": 155.54800415039062,
+                "y": 581.4650268554688
+              },
+              "end": {
+                "x": 160.9980010986328,
+                "y": 581.4650268554688
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 123,
+            "final_order": 1,
+            "style": {
+              "font_name": "CMMIB10",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.914044380187988,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 565,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                155.54800415039062,
+                210.53500366210938
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                18
+              ],
+              "mcid": null,
+              "text_object_index": 82,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t125",
+            "raw_text": "f",
+            "raw_bbox": {
+              "left": 161.14500427246094,
+              "top": 578.0499877929688,
+              "right": 165.35699462890625,
+              "bottom": 584.3759765625
+            },
+            "bbox": {
+              "left": 161.14500427246094,
+              "top": 578.0499877929688,
+              "right": 165.35699462890625,
+              "bottom": 584.3759765625
+            },
+            "baseline": {
+              "start": {
+                "x": 161.14500427246094,
+                "y": 582.9600219726562
+              },
+              "end": {
+                "x": 165.35699462890625,
+                "y": 582.9600219726562
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 125,
+            "final_order": 2,
+            "style": {
+              "font_name": "CMMI7",
+              "font_size": 6.973800182342529,
+              "font_height": 6.973800182342529,
+              "font_ascent": 4.839817523956299,
+              "font_descent": -1.352917194366455,
+              "font_size_estimated": false,
+              "weight": 405,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                161.14500427246094,
+                209.04000854492188
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                102
+              ],
+              "mcid": null,
+              "text_object_index": 83,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t124",
+            "raw_text": "¯",
+            "raw_bbox": {
+              "left": 156.5959930419922,
+              "top": 572.0609741210938,
+              "right": 162.3249969482422,
+              "bottom": 580.9080200195312
+            },
+            "bbox": {
+              "left": 156.5959930419922,
+              "top": 572.0609741210938,
+              "right": 162.3249969482422,
+              "bottom": 580.9080200195312
+            },
+            "baseline": {
+              "start": {
+                "x": 156.5959930419922,
+                "y": 578.9749755859375
+              },
+              "end": {
+                "x": 161.51800537109375,
+                "y": 578.9749755859375
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 124,
+            "final_order": 3,
+            "style": {
+              "font_name": "CMBX10",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.914044380187988,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 570,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                156.59600830078125,
+                213.02500915527344
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                22
+              ],
+              "mcid": null,
+              "text_object_index": 81,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          }
+        ]
+      }
+    ]
+  },
+  "formula": {
+    "engine": "pp-formulanet-plus-s-onnx-cpu",
+    "id": "p4:m48",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 155.0,
+      "top": 574.5,
+      "right": 166.0,
+      "bottom": 585.5
+    },
+    "crop_bbox": null,
+    "block_id": "p4:b:m7:s0",
+    "line_id": "p4:b:m7:s0:l3",
+    "text_item_range": {
+      "start": 1,
+      "end": 4
+    },
+    "text_spans": [],
+    "table_cell": null,
+    "latex": null,
+    "markdown": null,
+    "error": null
+  },
+  "words": {
+    "p4:t122": [
+      {
+        "byte_range": {
+          "start": 0,
+          "end": 3
+        },
+        "bbox": {
+          "left": 48.30400085449219,
+          "top": 577.010009765625,
+          "right": 58.62099838256836,
+          "bottom": 581.64599609375
+        },
+        "baseline": {
+          "start": {
+            "x": 48.0,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 58.62099838256836,
+            "y": 581.4650268554688
+          }
+        },
+        "mcid": null
+      },
+      {
+        "byte_range": {
+          "start": 3,
+          "end": 7
+        },
+        "bbox": {
+          "left": 61.584999084472656,
+          "top": 574.5679931640625,
+          "right": 74.25800323486328,
+          "bottom": 581.64599609375
+        },
+        "baseline": {
+          "start": {
+            "x": 61.375999450683594,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 74.25800323486328,
+            "y": 581.4650268554688
+          }
+        },
+        "mcid": null
+      },
+      {
+        "byte_range": {
+          "start": 7,
+          "end": 14
+        },
+        "bbox": {
+          "left": 77.36499786376953,
+          "top": 574.9390258789062,
+          "right": 107.27100372314453,
+          "bottom": 581.64599609375
+        },
+        "baseline": {
+          "start": {
+            "x": 77.21199798583984,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 107.27100372314453,
+            "y": 581.4650268554688
+          }
+        },
+        "mcid": null
+      },
+      {
+        "byte_range": {
+          "start": 14,
+          "end": 25
+        },
+        "bbox": {
+          "left": 110.35800170898438,
+          "top": 574.5679931640625,
+          "right": 152.69000244140625,
+          "bottom": 584.125
+        },
+        "baseline": {
+          "start": {
+            "x": 110.0260009765625,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 152.69000244140625,
+            "y": 581.4650268554688
+          }
+        },
+        "mcid": null
+      }
+    ],
+    "p4:t123": [
+      {
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 156.00599670410156,
+          "top": 574.4710083007812,
+          "right": 160.9980010986328,
+          "bottom": 581.5349731445312
+        },
+        "baseline": {
+          "start": {
+            "x": 155.54800415039062,
+            "y": 581.4650268554688
+          },
+          "end": {
+            "x": 160.9980010986328,
+            "y": 581.4650268554688
+          }
+        },
+        "mcid": null
+      }
+    ],
+    "p4:t125": [
+      {
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 161.6540069580078,
+          "top": 578.0499877929688,
+          "right": 165.35699462890625,
+          "bottom": 584.3759765625
+        },
+        "baseline": {
+          "start": {
+            "x": 161.14500427246094,
+            "y": 582.9600219726562
+          },
+          "end": {
+            "x": 165.35699462890625,
+            "y": 582.9600219726562
+          }
+        },
+        "mcid": null
+      }
+    ],
+    "p4:t124": [
+      {
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 157.39300537109375,
+          "top": 572.927978515625,
+          "right": 161.51800537109375,
+          "bottom": 573.4459838867188
+        },
+        "baseline": {
+          "start": {
+            "x": 156.5959930419922,
+            "y": 578.9749755859375
+          },
+          "end": {
+            "x": 161.51800537109375,
+            "y": 578.9749755859375
+          }
+        },
+        "mcid": null
+      }
+    ]
+  }
+}
