@@ -5,8 +5,11 @@ execution lifecycle. The module takes formula crops, verifies the pinned graph
 and BPE tokenizer, runs a real `[batch, 1, edge, edge]` tensor and returns one decoded
 LaTeX string per crop. Core supplies existing layout boxes, applies batch/deadline
 limits and attaches LaTeX and Markdown without replacing source text facts.
-Plus-S is the default, with a 384-pixel input edge; explicitly supplied Plus-L
-artifacts retain their 768-pixel input edge. The verified graph hash selects the
+`formula.inline_enabled` and `formula.display_enabled` independently control which
+regions enter recognition; both default to true. Set both to false to skip model
+loading. The former `formula.enabled` master switch is no longer accepted.
+Plus-S remains the default. Plus-S and Plus-M use a 384-pixel input edge;
+explicitly supplied Plus-L artifacts retain their 768-pixel input edge. The verified graph hash selects the
 variant, even when files are renamed.
 
 ## Artifacts
@@ -17,9 +20,31 @@ rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s --ve
 ```
 
 - Plus-S graph SHA-256: `449d205c8fb2fe0a9b134a5e4a0f2421c2e7812fd902ea67dfda4e9ef4588978`.
+- Plus-M graph SHA-256: `9e3539c2b4eeed28f2d35e342fd5bb0bdaa7f6034a475fc7e890c92780910618`.
 - Plus-L graph SHA-256: `b4924d69c731365048de3d11a5d1829f3dfd8b98b4dbfd82437f934c2611934f`.
 - Tokenizer SHA-256: `2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2`.
 - Reference/export provenance: OAR-OCR `7feb044d74be09e3e2078a89cec0f0f8688e942b`, release v0.3.0 model artifact.
+
+To select Plus-M, update the existing `[formula]` section in `docparse.toml`:
+
+```toml
+[formula]
+inline_enabled = true
+display_enabled = true
+model_path = "models/pp-formulanet-plus-m/inference.onnx"
+tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
+model_manifest_path = "models/pp-formulanet-plus-m/model-manifest.json"
+```
+
+Then provision the model and start the server from the repository root:
+
+```sh
+rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-m
+rtk cargo run --release -p docparse-server --features coreml
+```
+
+Use `--features cuda` on a CUDA host. Medium is a different model with the same
+384-pixel input size as Small; selecting it does not increase crop resolution.
 
 The graph emits i64 token IDs rather than probabilities. Decoding checks output
 cardinality and termination, preserves LaTeX content, and does not invent a
@@ -43,7 +68,7 @@ failed or consumed excessive resources, including with microbatch 1. Disabling
 memory patterns/CPU arenas did not fix the failure. MLProgram dynamic shapes
 failed compilation; fixed-batch alternatives did not produce a validated reusable
 accelerated path. The retained Apple behavior is therefore an explicit CPU
-compatibility executor for both variants. JSON reports the actual model, e.g.
+compatibility executor for all three variants. JSON reports the actual model, e.g.
 `pp-formulanet-plus-s-onnx-cpu`. Plus-S acceleration through CoreML is not
 claimed by this default-model change.
 
@@ -66,7 +91,8 @@ rtk proxy env FORMULA_TEST_CROP=/absolute/path/to/formula.png \
 
 Use `--features coreml` to verify the Apple compatibility executor. The test checks
 multi-image batches, cancellation and subsequent session reuse. Set
-`FORMULA_TEST_MODEL=pp-formulanet-plus-l` to check the optional large model.
+`FORMULA_TEST_MODEL=pp-formulanet-plus-m` or `pp-formulanet-plus-l` to check the
+optional medium or large model.
 `FORMULA_BENCH_OUTPUT=/absolute/path/to/result.json` records first/batched timings
 and three subsequent warm single-crop runs separately.
 

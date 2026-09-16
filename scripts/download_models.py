@@ -21,6 +21,7 @@ MODEL_BASE_URL = (
 )
 MODEL_NAMES = (
     "pp-formulanet-plus-s",
+    "pp-formulanet-plus-m",
     "pp-formulanet-plus-l",
     "pp-doclayout-v3",
     "slanet-plus",
@@ -69,9 +70,10 @@ class Model:
     @classmethod
     def from_name(cls, name: str) -> Model:
         """Selects a pinned contract for either complete or targeted provisioning."""
-        if name in ("pp-formulanet-plus-s", "pp-formulanet-plus-l"):
+        if name in ("pp-formulanet-plus-s", "pp-formulanet-plus-m", "pp-formulanet-plus-l"):
             digest = {
                 "pp-formulanet-plus-s": "449d205c8fb2fe0a9b134a5e4a0f2421c2e7812fd902ea67dfda4e9ef4588978",
+                "pp-formulanet-plus-m": "9e3539c2b4eeed28f2d35e342fd5bb0bdaa7f6034a475fc7e890c92780910618",
                 "pp-formulanet-plus-l": "b4924d69c731365048de3d11a5d1829f3dfd8b98b4dbfd82437f934c2611934f",
             }[name]
             return cls(name, "GreatV/oar-ocr", "7feb044d74be09e3e2078a89cec0f0f8688e942b", (

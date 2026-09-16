@@ -279,7 +279,8 @@ impl DocParserBuilder {
     /// Loads layout and enabled OCR/table models once, preserving explicitly injected engines.
     pub async fn build(self) -> Result<DocParser, DocParseError> {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
-        let formula_enabled = config.formula().enabled;
+        let formula_enabled =
+            config.formula().inline_enabled || config.formula().display_enabled;
         if formula_enabled
             && self.formula_engine.is_none()
             && self

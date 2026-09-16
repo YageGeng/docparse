@@ -12,6 +12,8 @@ const pdf = await realpath(process.argv[2]);
 const output = resolve(process.argv[3] ?? "target/formula-browser.json");
 const provider = process.argv[4] ?? "webgpu";
 assert(["webgpu", "wasm"].includes(provider));
+const recognition = process.argv[5] ?? "all";
+assert(["all", "inline", "display", "off", "softmax"].includes(recognition));
 const build = JSON.parse(await readFile(resolve(root, "packages/wasm-web/dist/build-manifest.json"), "utf8"));
 assert(build.optimization.flags.includes("-O4"), "Run the production release build first");
 const server = createServer(async (request, response) => {
@@ -37,31 +39,32 @@ const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage();
 const recorder = await readFile(resolve(root, "packages/wasm-web/tests/instrumented-worker.js"), "utf8");
 await page.route("**/__formula-observe.js?*", route => route.fulfill({ contentType: "text/javascript", body: recorder }));
-await page.addInitScript(() => {
+await page.addInitScript(benchmarkGpu => {
   const NativeWorker = Worker;
   window.Worker = class extends NativeWorker {
     /** Observes actual sessions without changing the selected provider or model outputs. */
     constructor(url, options) {
       const entry = new URL("/__formula-observe.js", location.href);
-      entry.searchParams.set("worker", String(url)); entry.searchParams.set("benchmark", "1");
+      entry.searchParams.set("worker", String(url));
+      if (benchmarkGpu) entry.searchParams.set("benchmark", "1");
       super(entry, options);
       this.addEventListener("message", ({ data }) => { if (data.metrics) window.formulaMetrics = data.metrics; });
     }
   };
-});
+}, provider === "webgpu");
 page.on("console", message => console.log(message.text().slice(0, 400)));
 const deadline = setTimeout(() => { console.error("Formula browser deadline exceeded"); void browser.close(); }, 600000);
 try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  const result = await page.evaluate(async provider => {
+  const result = await page.evaluate(async ({ provider, recognition }) => {
     const { createParser } = await import("/sdk/index.js");
     let parser;
     try {
       const started = performance.now();
       parser = await createParser({ executionProvider: provider, allowCpuFallback: false,
         artifacts: { kind: "urls", model: "/models/pp-doclayout-v3/inference.onnx", config: "/models/pp-doclayout-v3/inference.yml", manifest: "/models/pp-doclayout-v3/model-manifest.json" },
-        formulaArtifacts: { kind: "urls", model: "/models/pp-formulanet-plus-s/inference.onnx", tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json", manifest: "/models/pp-formulanet-plus-s/model-manifest.json" },
-        config: { tsr: { mode: "rules_only" }, formula: { enabled: true, batch_size: 2, timeout_ms: 120000 } },
+        formulaArtifacts: recognition === "off" ? undefined : { kind: "urls", model: "/models/pp-formulanet-plus-s/inference.onnx", tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json", manifest: "/models/pp-formulanet-plus-s/model-manifest.json" },
+        config: { tsr: { mode: "rules_only" }, formula: { inline_enabled: !["display", "off"].includes(recognition), display_enabled: !["inline", "off"].includes(recognition), batch_size: 2, timeout_ms: 120000 } },
         onProgress: progress => { if (progress.stage !== "downloading") console.log(JSON.stringify(progress)); },
       });
       const initializationMs = performance.now() - started;
@@ -71,16 +74,19 @@ try {
       const parseMs = performance.now() - parsing;
       const markdown = await parser.render(document, "markdown");
       return { provider: parser.executionProvider, initializationMs, parseMs, pages: document.pages.length, errors: document.errors,
+        nativeText: document.pages.map(page => page.blocks.map(block => ({ id: block.id, text: block.text }))),
         formulas: document.pages.flatMap(page => page.formulas ?? []), markdown, metrics: window.formulaMetrics };
     } catch (error) { return { error: error.code, message: error.message, metrics: window.formulaMetrics }; }
     finally { await parser?.close(); }
-  }, provider);
+  }, { provider, recognition });
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, JSON.stringify({ ...result, browser: browser.version(), wasmHash: build.hashes["pkg/docparse_web_bg.wasm"] }, null, 2));
   assert.equal(result.error, undefined, result.message);
   assert.equal(result.provider, provider);
   assert.equal(result.errors.length, 0);
-  assert(result.formulas.length > 0);
+  assert.equal(result.formulas.length === 0, recognition === "off");
+  if (recognition === "inline") assert(result.formulas.every(formula => formula.label === "inline_formula"));
+  if (recognition === "display") assert(result.formulas.every(formula => formula.label === "display_formula"));
   if (process.argv[5] === "softmax") {
     const formula = result.formulas.find(formula => formula.id.startsWith("p4:") && formula.bbox.left < 300 && formula.bbox.top > 670 && formula.latex?.replaceAll(" ", "").includes("softmax"));
     assert(formula && !formula.error, "Missing page-four softmax normalization formula");
@@ -94,7 +100,7 @@ try {
     assert(result.formulas.every(formula => result.markdown.includes(formula.latex)), "Markdown omitted a recognized formula");
   }
   if (pdf.includes("Terminal-Universe_")) assert(result.markdown.includes("learning rate of"), "Formula replacement erased adjacent source prose");
-  assert.equal(result.metrics.sessions, 2);
+  assert.equal(result.metrics.sessions, recognition === "off" ? 1 : 2);
   if (provider === "webgpu") assert(result.metrics.models.every(model => model.calls > 0 && model.gpuSubmissions > 0));
-  console.log(JSON.stringify({ pages: result.pages, formulas: result.formulas.length, parseMs: result.parseMs, provider }));
+  console.log(JSON.stringify({ pages: result.pages, formulas: result.formulas.length, parseMs: result.parseMs, provider, recognition }));
 } finally { clearTimeout(deadline); await browser.close(); await new Promise(resolve => server.close(resolve)); }

@@ -10,7 +10,7 @@ export async function runTableInputChecks(page, { pdfPath, baseUrl = 'http://127
     const { createParser } = await import(`${baseUrl}/dist/index.js`);
     const parser = await createParser({
       executionProvider: 'webgpu', allowCpuFallback: true,
-      config: { tsr: { mode: 'rules_only' } },
+      config: { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: 'rules_only' } },
       artifacts: { kind: 'urls', model: `${baseUrl}/models/inference.onnx`, config: `${baseUrl}/models/inference.yml`, manifest: `${baseUrl}/models/model-manifest.json` },
     });
     const pdf = new Uint8Array(bytes);

@@ -330,6 +330,8 @@ async fn pdf_logs_follow_jobs_across_execution_boundaries() {
             )
             .expect("state"), &docparse_config::ServerConfig::default()).expect("router");
         let mut raw = RawConfig::default();
+        raw.formula.inline_enabled = false;
+        raw.formula.display_enabled = false;
         raw.tsr.mode = TableMode::RulesOnly;
         let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
         let parser = DocParser::builder()

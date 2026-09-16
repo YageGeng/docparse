@@ -6,7 +6,7 @@
 
 - `tsr_only` 是跳过前置规则重建的配置名称，已将旧名称 `external_only` 完整重命名，不保留别名。原始文字填充和完整性验证始终保留。
 - TSR 支持 SLANet+、SLANeXt wired、SLANeXt wireless，并可配置独立 RT-DETR wired/wireless 单元格检测。
-- 默认组合为 SLANet+ 加无线单元格检测；主配置使用 `tsr_only`，库默认保留 `fallback`。`tsr-baseline` 配置通过 `cell_detection.enabled = false` 关闭检测，`tsr-upgraded` 保留 SLANeXt 无线模型对照。
+- 默认组合为 SLANet+ 加无线单元格检测；主配置使用 `tsr_only`，库默认保留 `fallback`。直接修改 `docparse.toml`：通过 `tsr.cell_detection.enabled = false` 关闭检测；对照 SLANeXt 无线模型时设置 `tsr.model = "slanext_wireless"`、更新三个结构模型路径，并开启无线单元格检测。完整内联配置见 `crates/tsr/README.md`。
 - 结构模型与检测器分别使用显式模型路径、配置路径和 manifest 路径。未启用的模型不加载。
 - 结构 tokens、结构位置头和独立检测框分别保留；SLANeXt 的无效位置输出不参与文字匹配。
 - 检测框和逻辑单元格经过显式匹配后进入现有 CellGrid。不能假设检测数量与 tokens 数量相同或顺序一致，不能用任意最近框填充缺失结果。

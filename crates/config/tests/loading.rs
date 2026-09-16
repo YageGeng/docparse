@@ -66,8 +66,20 @@ fn default_wireless_cells_can_be_disabled_by_profile() {
     let cells = main.tsr.cell_detection.as_ref().expect("main cells");
     assert!(cells.enabled);
     assert_eq!(cells.model, docparse_config::TableCellModel::Wireless);
-    let baseline = ConfigLoader::new(&config_path)
-        .with_profile("tsr-baseline")
+    // Profile merging must not depend on optional benchmark profiles being shipped with the checkout.
+    let directory = tempfile::tempdir().expect("profile directory");
+    let profile_base = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[tsr]\nmode = \"tsr_only\"\n",
+    );
+    write_config(
+        directory.path(),
+        "docparse.without-cells.toml",
+        "[tsr.cell_detection]\nenabled = false\n",
+    );
+    let baseline = ConfigLoader::new(profile_base)
+        .with_profile("without-cells")
         .load_raw()
         .expect("baseline config");
     assert!(

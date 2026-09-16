@@ -53,7 +53,7 @@ try {
           ...(scenario.provider ? { executionProvider: scenario.provider } : {}),
           allowCpuFallback: scenario.fallback ?? false,
           // Backend checks force all default models; ordinary parsing defaults to rules first.
-          config: { tsr: { mode: 'tsr_only' } },
+          config: { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: 'tsr_only' } },
           artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
           tsrArtifacts: { kind: 'urls', model: '/models/slanet-plus/inference.onnx', config: '/models/slanet-plus/inference.yml', manifest: '/models/slanet-plus/model-manifest.json' },
           tsrCellArtifacts: { kind: 'urls', model: '/models/rtdetr-table-cell-wireless/inference.onnx', config: '/models/rtdetr-table-cell-wireless/inference.yml', manifest: '/models/rtdetr-table-cell-wireless/model-manifest.json' },

@@ -15,7 +15,8 @@ async fn real_caption_formula_keeps_its_layout_owner() {
         .expect("config");
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Disabled;
-    raw.formula.enabled = true;
+    raw.formula.inline_enabled = true;
+    raw.formula.display_enabled = true;
     let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
     let session = LocalPdfiumProvider
         .open(

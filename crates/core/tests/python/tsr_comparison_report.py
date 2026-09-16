@@ -109,13 +109,44 @@ On the real page-6 crop, OpenCV/Python ONNX reference inference matches all thre
 
 ## Reproduction
 
-The main configuration uses `tsr_only` with SLANet+ and wireless RT-DETR cell detection. Library defaults use the same combination with rules-first fallback. Use the `tsr-baseline` profile for SLANet+ alone and `tsr-upgraded` for SLANeXt wireless plus that detector.
+The main configuration uses `tsr_only` with SLANet+ and wireless RT-DETR cell detection. Library defaults use the same combination with rules-first fallback.
+
+For a pure SLANet+ comparison, replace the existing TSR sections in `docparse.toml`:
+
+```toml
+[tsr]
+mode = "tsr_only"
+model = "slanet_plus"
+model_path = "models/slanet-plus/inference.onnx"
+model_config_path = "models/slanet-plus/inference.yml"
+model_manifest_path = "models/slanet-plus/model-manifest.json"
+
+[tsr.cell_detection]
+enabled = false
+```
+
+Alternatively, use SLANeXt wireless with independent wireless cell detection:
+
+```toml
+[tsr]
+mode = "tsr_only"
+model = "slanext_wireless"
+model_path = "models/slanext-wireless/inference.onnx"
+model_config_path = "models/slanext-wireless/inference.yml"
+model_manifest_path = "models/slanext-wireless/model-manifest.json"
+
+[tsr.cell_detection]
+enabled = true
+model = "wireless"
+score_threshold = 0.3
+model_path = "models/rtdetr-table-cell-wireless/inference.onnx"
+model_config_path = "models/rtdetr-table-cell-wireless/inference.yml"
+model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
+```
 
 ```sh
 rtk uv run --locked scripts/download_models.py
 rtk cargo run -p docparse-cli --release -- parse input.pdf
-rtk cargo run -p docparse-cli --release -- parse input.pdf --profile tsr-baseline
-rtk cargo run -p docparse-cli --release -- parse input.pdf --profile tsr-upgraded
 rtk proxy env TSR_COMPARE_VARIANT=cells-wireless rtk cargo test -p docparse-core --release --test tsr_comparison -- --ignored --nocapture
 ```
 

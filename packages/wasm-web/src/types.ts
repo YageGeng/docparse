@@ -57,7 +57,14 @@ export interface OcrOptions {
 
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
-  formula?: { enabled?: boolean; batch_size?: number; timeout_ms?: number };
+  formula?: {
+    /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
+    inline_enabled?: boolean;
+    /** Defaults to true; false skips display recognition independently of inline formulas. */
+    display_enabled?: boolean;
+    batch_size?: number;
+    timeout_ms?: number;
+  };
   layout?: { score_threshold?: number; session_pool_size?: number };
   tsr?: TableOptions & { model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; model?: "wired" | "wireless"; score_threshold?: number } };
   runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
@@ -79,7 +86,7 @@ export interface WebParserOptions {
   tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
-  /** Required when config.formula.enabled is true. */
+  /** Required unless both config.formula.inline_enabled and display_enabled are false. */
   formulaArtifacts?: FormulaSource;
   runtimeBaseUrl?: string;
   /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */

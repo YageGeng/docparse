@@ -327,16 +327,58 @@ fn native_deployment_settings_are_validated_separately() {
     parser.database.max_connections = 0;
     ValidatedConfig::try_from(parser).expect("parser does not open a database");
 }
-/// Formula inference is opt-in, bounded, and independent of the OCR policy.
+/// Formula kinds default on independently, retain bounded batches, and reject the removed master switch.
 #[test]
 fn formula_configuration_accepts_bounded_batches() {
     let mut value = serde_json::to_value(docparse_config::RawConfig::default())
         .expect("default config");
-    value.as_object_mut().expect("object").insert("formula".into(), serde_json::json!({"enabled": true, "batch_size": 4, "timeout_ms": 120000}));
+    value.as_object_mut().expect("object").insert(
+        "formula".into(),
+        serde_json::json!({"batch_size": 4, "timeout_ms": 120000}),
+    );
     let raw =
         serde_json::from_value::<docparse_config::RawConfig>(value.clone());
-    docparse_config::ValidatedConfig::try_from(raw.expect("formula config"))
-        .expect("valid formula config");
+    let valid = docparse_config::ValidatedConfig::try_from(
+        raw.expect("formula config"),
+    )
+    .expect("valid formula config");
+    assert_eq!(
+        serde_json::to_value(valid.formula())
+            .expect("formula JSON")
+            .get("inline_enabled"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    value
+        .get_mut("formula")
+        .expect("formula")
+        .as_object_mut()
+        .expect("object")
+        .insert("inline_enabled".into(), false.into());
+    let disabled: docparse_config::RawConfig =
+        serde_json::from_value(value.clone()).expect("inline option");
+    assert_eq!(
+        serde_json::to_value(disabled.formula)
+            .expect("formula JSON")
+            .get("inline_enabled"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        serde_json::to_value(valid.formula())
+            .expect("formula JSON")
+            .get("display_enabled"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    let mut legacy = value.clone();
+    legacy
+        .get_mut("formula")
+        .expect("formula")
+        .as_object_mut()
+        .expect("object")
+        .insert("enabled".into(), true.into());
+    assert!(
+        serde_json::from_value::<docparse_config::RawConfig>(legacy).is_err(),
+        "the master switch must not remain configurable"
+    );
     for invalid in [0, 33] {
         *value
             .pointer_mut("/formula/batch_size")

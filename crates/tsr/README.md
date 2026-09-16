@@ -60,22 +60,53 @@ Its structure tokens require an independent cell detector.
 RGB preprocessing at 640 pixels and returns crop-pixel boxes. The core decoder
 matches those observations to logical cells before source-text filling.
 
-The default config includes the former `tsr-cells` combination. The `tsr-baseline`
-profile disables cell detection for a pure SLANet+ comparison; `tsr-upgraded`
-selects SLANeXt wireless with the wireless detector. `SlanetPlusEngine` remains available as the
+The default config includes the former `tsr-cells` combination.
+`SlanetPlusEngine` remains available as the
 original public name; `PaddleTsrEngine` names the expanded implementation.
-All supported models are provisioned by the existing downloader:
 
 Rust callers constructing `ParserArtifacts` directly use `TsrArtifacts` with
 both independently verified model sets by default. With cell detection disabled,
 a single-model `tsr` artifact can use `.into()`. Browser callers supply `tsrCellArtifacts`
 alongside their structure `tsrArtifacts` and select the models in `config.tsr`.
 
+For a pure SLANet+ comparison, replace the existing TSR sections in `docparse.toml`:
+
+```toml
+[tsr]
+mode = "tsr_only"
+model = "slanet_plus"
+model_path = "models/slanet-plus/inference.onnx"
+model_config_path = "models/slanet-plus/inference.yml"
+model_manifest_path = "models/slanet-plus/model-manifest.json"
+
+[tsr.cell_detection]
+enabled = false
+```
+
+Alternatively, use SLANeXt wireless with independent wireless cell detection:
+
+```toml
+[tsr]
+mode = "tsr_only"
+model = "slanext_wireless"
+model_path = "models/slanext-wireless/inference.onnx"
+model_config_path = "models/slanext-wireless/inference.yml"
+model_manifest_path = "models/slanext-wireless/model-manifest.json"
+
+[tsr.cell_detection]
+enabled = true
+model = "wireless"
+score_threshold = 0.3
+model_path = "models/rtdetr-table-cell-wireless/inference.onnx"
+model_config_path = "models/rtdetr-table-cell-wireless/inference.yml"
+model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
+```
+
+Provision the models and run from the repository root with the selected settings:
+
 ```sh
 rtk uv run --locked scripts/download_models.py
 rtk cargo run -p docparse-cli -- parse input.pdf
-rtk cargo run -p docparse-cli -- parse input.pdf --profile tsr-baseline
-rtk cargo run -p docparse-cli -- parse input.pdf --profile tsr-upgraded
 ```
 
 The existing benchmark warms the actual table crop twice, exercising every

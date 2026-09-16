@@ -217,6 +217,8 @@ impl Fixture {
             .config(Arc::new(
                 ValidatedConfig::try_from({
                     let mut raw = RawConfig::default();
+                    raw.formula.inline_enabled = false;
+                    raw.formula.display_enabled = false;
                     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
                     raw
                 })
@@ -570,6 +572,8 @@ impl TableStructureEngine for ConcurrentEngine {
 #[tokio::test]
 async fn external_budget_is_shared_across_pages() {
     let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.runtime.page_concurrency = 4;
     raw.render.max_long_edge_pixels = 800;
@@ -627,6 +631,8 @@ async fn external_crop_rounding_preserves_layout_boundaries() {
         .config(Arc::new(
             ValidatedConfig::try_from({
                 let mut raw = RawConfig::default();
+                raw.formula.inline_enabled = false;
+                raw.formula.display_enabled = false;
                 raw.tsr.mode = docparse_config::TableMode::RulesOnly;
                 raw
             })
@@ -828,6 +834,8 @@ async fn parser_table_defaults_and_explicit_rule_override_select_the_provider()
         (Some(TableMode::Fallback), 1),
     ] {
         let mut raw = RawConfig::default();
+        raw.formula.inline_enabled = false;
+        raw.formula.display_enabled = false;
         if let Some(mode) = mode {
             raw.tsr.mode = mode;
         }

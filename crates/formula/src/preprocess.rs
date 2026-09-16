@@ -15,9 +15,9 @@ impl TryFrom<(Vec<Arc<PageImage>>, ModelKind)> for FormulaInput {
     fn try_from(
         (images, kind): (Vec<Arc<PageImage>>, ModelKind),
     ) -> Result<Self, Self::Error> {
-        // The pinned Small and Large graphs have different fixed spatial input dimensions.
+        // The pinned Small/Medium and Large graphs have different fixed spatial input dimensions.
         let edge: u32 = match kind {
-            ModelKind::PlusS => 384,
+            ModelKind::PlusS | ModelKind::PlusM => 384,
             ModelKind::PlusL => 768,
         };
         let batch = images.len();

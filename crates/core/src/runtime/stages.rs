@@ -281,7 +281,7 @@ impl PageStage<PageFormulaDraft> {
             draft: PageFormulaDraft { mut page, words },
             ..
         } = self;
-        if config.formula().enabled {
+        if config.formula().inline_enabled || config.formula().display_enabled {
             page.recognize_formulas(
                 formulas,
                 &rendered,

@@ -428,7 +428,7 @@ impl PageResult {
     /// Recognizes actual batches and records crop, inference and empty-output failures for each affected region.
     pub(crate) async fn recognize_formulas(
         &mut self,
-        detections: Vec<LayoutDetection>,
+        mut detections: Vec<LayoutDetection>,
         rendered: &RenderedPage,
         engine: Option<&dyn FormulaEngine>,
         config: &ValidatedConfig,
@@ -438,6 +438,21 @@ impl PageResult {
             Vec<crate::TableWord>,
         >,
     ) {
+        if !config.formula().inline_enabled || !config.formula().display_enabled
+        {
+            let count = detections.len();
+            // Keep native formula geometry for text assembly, but skip disabled crops and model calls entirely.
+            detections.retain(|detection| match detection.label {
+                LayoutLabel::InlineFormula => config.formula().inline_enabled,
+                LayoutLabel::DisplayFormula => config.formula().display_enabled,
+                _ => false,
+            });
+            tracing::debug!(
+                "skipping {} disabled formula regions on page {}",
+                count - detections.len(),
+                self.page_number
+            );
+        }
         if detections.is_empty() {
             return;
         }

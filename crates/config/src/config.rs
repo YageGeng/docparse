@@ -152,14 +152,17 @@ impl Default for RawConfig {
     }
 }
 
-/// Pinned PP-FormulaNet Plus-S artifacts and bounded formula inference.
+/// Pinned PP-FormulaNet artifacts and bounded formula inference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct FormulaConfig {
-    /// Enable recognition of every detected inline and display formula.
-    #[builder(default)]
-    pub enabled: bool,
-    /// ONNX graph with dynamic batches; Plus-S uses 384-pixel grayscale inputs and Plus-L uses 768.
+    /// Recognize detected inline formulas; false preserves their native text and layout.
+    #[builder(default = true)]
+    pub inline_enabled: bool,
+    /// Recognize detected display formulas independently of inline recognition.
+    #[builder(default = true)]
+    pub display_enabled: bool,
+    /// ONNX graph with dynamic batches; Plus-S/Plus-M use 384-pixel grayscale inputs and Plus-L uses 768.
     #[builder(default = PathBuf::from("models/pp-formulanet-plus-s/inference.onnx"))]
     pub model_path: PathBuf,
     /// Matching ByteLevel BPE tokenizer; never substitute the OCR character dictionary.
@@ -177,7 +180,7 @@ pub struct FormulaConfig {
 }
 
 impl Default for FormulaConfig {
-    /// Preserves existing callers until formula recognition is explicitly configured.
+    /// Enables both formula kinds unless the caller explicitly disables either one.
     fn default() -> Self {
         Self::builder().build()
     }

@@ -532,6 +532,8 @@ async fn durable_http_survives_disconnected_clients() {
     let gate = Arc::new(Semaphore::new(0));
     let (entered, mut receiver) = mpsc::unbounded_channel();
     let mut config = RawConfig::default();
+    config.formula.inline_enabled = false;
+    config.formula.display_enabled = false;
     config.tsr.mode = TableMode::RulesOnly;
     let config = Arc::new(ValidatedConfig::try_from(config).expect("config"));
     let parser = DocParser::builder()
@@ -1228,6 +1230,8 @@ async fn worker_renews_during_synchronous_parser_work() {
     assert_eq!(lease.job.id, id);
     let (entered, mut receiver) = mpsc::unbounded_channel();
     let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
     let parser = DocParser::builder()

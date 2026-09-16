@@ -32,7 +32,7 @@ assert(inputs.length > 0, "No PDFs found");
 const warmup = inputs.find(input => input.file === "2603.01919v2.pdf");
 assert(warmup, "This corpus benchmark warms model families with 2603.01919v2.pdf");
 const selected = values.smoke ? [inputs.reduce((a, b) => a.sizeBytes < b.sizeBytes ? a : b)] : inputs;
-const config = { layout: { score_threshold: 0.5, session_pool_size: 1 }, tsr: { mode: "tsr_only", max_in_flight: 1, timeout_ms: 60000 },
+const config = { formula: { inline_enabled: false, display_enabled: false }, layout: { score_threshold: 0.5, session_pool_size: 1 }, tsr: { mode: "tsr_only", max_in_flight: 1, timeout_ms: 60000 },
   ocr: { policy: "disabled" }, runtime: { page_concurrency: 1, render_queue_capacity: 1, blocking_task_limit: 1, continue_on_page_error: true },
   render: { dpi: 144, max_long_edge_pixels: 2400 }, output: { include_evidence: true, include_diagnostics: false } };
 const manifest = { inputs, config };

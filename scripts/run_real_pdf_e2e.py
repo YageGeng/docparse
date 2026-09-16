@@ -234,6 +234,10 @@ estimated_font_size_tolerance_points = 1.5
 [ocr]
 policy = "disabled"
 
+[formula]
+inline_enabled = false
+display_enabled = false
+
 [output]
 formula_placeholder = "[formula]"
 include_evidence = true

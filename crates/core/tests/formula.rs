@@ -9,7 +9,9 @@ use docparse_layout::{
 use std::sync::{Arc, Mutex};
 
 /// Existing layout detections provide the only formula regions; numbering is a separate class.
-struct Layout;
+struct Layout {
+    display_formulas: bool,
+}
 impl LayoutEngine for Layout {
     /// Returns the test engine identity.
     fn name(&self) -> &str {
@@ -24,7 +26,8 @@ impl LayoutEngine for Layout {
         &self,
         _request: LayoutRequest,
     ) -> WasmBoxedFuture<'_, Result<Vec<LayoutDetection>, LayoutError>> {
-        Box::pin(async {
+        let display_formulas = self.display_formulas;
+        Box::pin(async move {
             Ok([
                 LayoutLabel::InlineFormula,
                 LayoutLabel::DisplayFormula,
@@ -33,6 +36,9 @@ impl LayoutEngine for Layout {
             ]
             .into_iter()
             .enumerate()
+            .filter(|(_, label)| {
+                display_formulas || *label != LayoutLabel::DisplayFormula
+            })
             .map(|(i, label)| {
                 LayoutDetection::builder()
                     .source_detection_index(i as u32)
@@ -99,7 +105,6 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
     for fail in [false, true] {
         let mut raw = RawConfig::default();
         raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-        raw.formula.enabled = true;
         raw.formula.batch_size = 2;
         raw.runtime.page_concurrency = 1;
         raw.runtime.render_queue_capacity = 1;
@@ -107,7 +112,9 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
         let batches = Arc::new(Mutex::new(Vec::new()));
         let parser = DocParser::builder()
             .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
-            .layout_engine(Arc::new(Layout))
+            .layout_engine(Arc::new(Layout {
+                display_formulas: true,
+            }))
             .formula_engine(Arc::new(Recognizer {
                 batches: Arc::clone(&batches),
                 fail,
@@ -149,6 +156,93 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
                     .any(|warning| warning.code == "FormulaRecognitionFailed"),
                 fail
             );
+        }
+    }
+}
+
+/// Independent toggles cover all combinations, skipping disabled crops while preserving native facts.
+#[tokio::test]
+async fn independent_formula_toggles_preserve_native_source() {
+    for display_formulas in [true, false] {
+        let mut original_source = None;
+        for (display_enabled, inline_enabled) in
+            [(true, true), (true, false), (false, true), (false, false)]
+        {
+            let mut raw = RawConfig::default();
+            raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+            raw.formula.batch_size = 2;
+            raw.runtime.page_concurrency = 1;
+            raw.runtime.render_queue_capacity = 1;
+            let mut value = serde_json::to_value(raw).expect("config JSON");
+            value
+                .get_mut("formula")
+                .expect("formula config")
+                .as_object_mut()
+                .expect("object")
+                .insert("inline_enabled".into(), inline_enabled.into());
+            value
+                .get_mut("formula")
+                .expect("formula")
+                .as_object_mut()
+                .expect("object")
+                .insert("display_enabled".into(), display_enabled.into());
+            let raw: RawConfig =
+                serde_json::from_value(value).expect("inline formula option");
+            let batches = Arc::new(Mutex::new(Vec::new()));
+            let parser = DocParser::builder()
+                .config(Arc::new(
+                    ValidatedConfig::try_from(raw).expect("config"),
+                ))
+                .layout_engine(Arc::new(Layout { display_formulas }))
+                .formula_engine(Arc::new(Recognizer {
+                    batches: Arc::clone(&batches),
+                    fail: false,
+                }))
+                .build()
+                .await
+                .expect("parser");
+            let result = parser
+                .parse_bytes(Arc::from(
+                    include_bytes!("fixtures/pdf/multipage_layout.pdf")
+                        .as_slice(),
+                ))
+                .await
+                .expect("document");
+            let expected = usize::from(inline_enabled)
+                + if display_enabled && display_formulas {
+                    2
+                } else {
+                    0
+                };
+            assert_eq!(
+                batches.lock().expect("batches").iter().sum::<usize>(),
+                expected * 3
+            );
+            for page in &result.pages {
+                assert_eq!(page.formulas.len(), expected);
+                assert!(
+                    inline_enabled
+                        || page.formulas.iter().all(|formula| formula.label
+                            == LayoutLabel::DisplayFormula)
+                );
+                assert!(
+                    page.warnings
+                        .iter()
+                        .all(|warning| warning.code
+                            != "FormulaRecognitionFailed")
+                );
+            }
+            let source: Vec<_> = result
+                .pages
+                .iter()
+                .flat_map(|page| &page.blocks)
+                .map(|block| (block.text.clone(), block.lines.clone()))
+                .collect();
+            if let Some(original) = &original_source {
+                assert_eq!(&source, original);
+            } else {
+                original_source = Some(source);
+            }
         }
     }
 }

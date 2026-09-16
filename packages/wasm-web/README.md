@@ -63,6 +63,12 @@ const parser = await prepareModels({
     config: "/models/rtdetr-table-cell-wireless/inference.yml",
     manifest: "/models/rtdetr-table-cell-wireless/model-manifest.json",
   },
+  formulaArtifacts: {
+    kind: "urls",
+    model: "/models/pp-formulanet-plus-s/inference.onnx",
+    tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json",
+    manifest: "/models/pp-formulanet-plus-s/model-manifest.json",
+  },
 });
 
 try {
@@ -99,7 +105,7 @@ the execution provider change. Native callers already prepare their sessions in
 | TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
-| Formula recognition | The example's Formulas switch defaults to on. SDK callers enable `config.formula.enabled` and provide `formulaArtifacts`. |
+| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Supply `formulaArtifacts` unless `config.formula.inline_enabled` and `display_enabled` are both false. |
 
 Disabled models do not require artifact sources and are not downloaded or
 initialized, even if sources are supplied. Preparation accepts `signal`,
@@ -225,7 +231,7 @@ With Codex Browser Use, pass `tab.playwright` as `page`. The generator yields pr
 
 ```typescript
 const parser = await createParser({
-  artifacts,
+  artifacts, tsrArtifacts, tsrCellArtifacts, formulaArtifacts,
   onProgress: event => console.log(event.stage),
 });
 const document = await parser.parse(pdfBytes, {
@@ -434,7 +440,7 @@ const parser = await createParser({
     recognition: modelSource("pp-ocrv6-medium-rec"),
     orientation: modelSource("pp-lcnet-textline-ori"),
   },
-  config: { ocr: { policy: "missing_regions" } },
+  config: { ocr: { policy: "missing_regions" }, formula: { inline_enabled: false, display_enabled: false } },
   executionProvider: "webgpu",
 });
 ```
@@ -477,7 +483,7 @@ rtk proxy node crates/web/tests/formula_ui.mjs /absolute/path/to/formulas.pdf
 ```ts
 const parser = await createParser({
   artifacts: layoutArtifacts,
-  config: { tsr: { mode: "rules_only" }, formula: { enabled: true, batch_size: 4, timeout_ms: 120000 } },
+  config: { tsr: { mode: "rules_only" }, formula: { inline_enabled: true, display_enabled: true, batch_size: 4, timeout_ms: 120000 } },
   formulaArtifacts: {
     kind: "urls",
     model: "/models/pp-formulanet-plus-s/inference.onnx",
@@ -495,9 +501,11 @@ Each `document.pages[].formulas[]` entry contains both representations, its actu
 engine and non-owning source anchors. Empty/failed recognition keeps an error and
 page warning. `formula_queue`, `formula_preprocess`, `formula_inference` and
 `formula_decode` are separate observations. The default Plus-S graph is about 221 MiB,
-before runtime allocations. Plus-L remains supported with explicit artifacts
-from `models/pp-formulanet-plus-l/`; its graph is about 700 MiB. Graph identity
-selects the matching 384-pixel or 768-pixel preprocessing automatically.
+before runtime allocations. Explicit artifacts from `models/pp-formulanet-plus-m/`
+select Plus-M (about 565 MiB, 384-pixel input); `models/pp-formulanet-plus-l/`
+selects Plus-L (about 700 MiB, 768-pixel input). Graph identity selects preprocessing
+automatically. Native model checks do not establish browser runtime compatibility;
+validate the selected model/provider combination before deployment.
 
 Inline formulas are rendered directly inside paragraph text using the optional
 `block.markdown` projection produced by Rust. This preserves native UTF-8 span
@@ -505,3 +513,17 @@ mapping without duplicating byte-offset logic in JavaScript. Paragraph copy
 returns Markdown source; per-formula LaTeX/Markdown copy remains in the collapsed
 formula details. Invalid math leaves the surrounding prose visible. Original
 `block.text` and `text_items[].raw_text` remain unchanged in JSON.
+
+### Independent formula switches
+
+`formula.inline_enabled` and `formula.display_enabled` both default to `true`.
+They control recognition independently; neither is a master switch. For display
+formulas only, use `config: { formula: { inline_enabled: false, display_enabled: true } }`.
+Set both to `false` to omit formula artifacts and skip model loading. Disabled
+kinds retain native text and layout evidence but do not produce recognized entries
+in `pages[].formulas`. The example exposes separate Inline formulas and Display
+formulas switches; changing either invalidates the prepared parser.
+
+The former `formula.enabled` key has been removed. Replace `enabled: false` with
+both switches set to false; replace `enabled: true` with both set to true or omit
+them to use the defaults.

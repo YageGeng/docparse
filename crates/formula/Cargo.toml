@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-description = "Batched PP-FormulaNet Plus-S/Plus-L recognition through the shared ONNX backend"
+description = "Batched PP-FormulaNet Plus-S/Plus-M/Plus-L recognition through the shared ONNX backend"
 
 [features]
 default = []

@@ -294,6 +294,8 @@ impl TableLayout {
             .config(Arc::new(
                 ValidatedConfig::try_from({
                     let mut raw = RawConfig::default();
+                    raw.formula.inline_enabled = false;
+                    raw.formula.display_enabled = false;
                     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
                     raw
                 })

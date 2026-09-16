@@ -205,7 +205,8 @@ async fn real_pdfs_use_configured_table_model() {
         .load_raw()
         .expect("production config");
     // This acceptance isolates table models; formula inference has separate real-model checks.
-    raw.formula.enabled = false;
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     if let Ok(mode) = std::env::var("TSR_E2E_MODE") {
         raw.tsr.mode = serde_json::from_value(json!(mode)).expect("table mode");
     }

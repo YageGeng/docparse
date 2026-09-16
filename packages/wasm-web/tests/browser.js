@@ -96,7 +96,7 @@ async function verifyReferenceInput(bytes, name) {
 const base = new URL("../../../", import.meta.url);
 const options = { artifacts: { kind: "urls", model: new URL("models/pp-doclayout-v3/inference.onnx", base).href, config: new URL("models/pp-doclayout-v3/inference.yml", base).href, manifest: new URL("models/pp-doclayout-v3/model-manifest.json", base).href } };
 options.tsrArtifacts = { kind: "urls", model: new URL("models/slanet-plus/inference.onnx", base).href, config: new URL("models/slanet-plus/inference.yml", base).href, manifest: new URL("models/slanet-plus/model-manifest.json", base).href };
-options.config = { tsr: { mode: "rules_only" } };
+options.config = { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: "rules_only" } };
 options.executionProvider = parameters.get("provider") === "webgpu" ? "webgpu" : "wasm";
 if (parameters.has("fallback")) options.allowCpuFallback = true;
 let parser;
@@ -314,7 +314,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   await parser.close(); await parser.close();
   report.tests.push("PASS: active cancellation, terminal parser state, idempotent close"); render();
 
-  await rejects(createParser({ ...options, config: { layout: { model_path: "/fake.onnx" } } }), "InvalidConfig");
+  await rejects(createParser({ ...options, config: { formula: { inline_enabled: false, display_enabled: false }, layout: { model_path: "/fake.onnx" } } }), "InvalidConfig");
   const replacement = await createParser(options);
   try { assert((await replacement.parse(bytes)).pages.length === 1, "New Worker failed after cancellation"); }
   finally { await replacement.close(); }

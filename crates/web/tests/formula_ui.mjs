@@ -29,7 +29,7 @@ await page.addInitScript(() => {
     }
     /** Records only the formula switch and artifact presence before forwarding unchanged. */
     postMessage(message, transfer) {
-      if (message.method === "init") window.formulaUi.init.push({ enabled: message.payload.config.formula.enabled, artifacts: Boolean(message.payload.formulaArtifacts) });
+      if (message.method === "init") window.formulaUi.init.push({ inline: message.payload.config.formula.inline_enabled, display: message.payload.config.formula.display_enabled, artifacts: Boolean(message.payload.formulaArtifacts) });
       super.postMessage(message, transfer);
     }
     /** Counts the actual teardown caused by a model-setting change. */
@@ -54,13 +54,15 @@ async function ready(expected) {
 
 try {
   await page.goto(url);
-  assert(await page.getByRole("switch", { name: "Formulas" }).isChecked());
+  assert(await page.getByRole("switch", { name: "Inline formulas", exact: true }).isChecked());
+  assert(await page.getByRole("switch", { name: "Display formulas", exact: true }).isChecked());
   await inspectViewport(page);
   await page.locator("#prepare").click();
-  assert(await page.locator("#formula-enabled").isDisabled());
+  assert(await page.locator("#inline-formula-enabled").isDisabled());
+  assert(await page.locator("#display-formula-enabled").isDisabled());
   await ready("Models ready");
   assert.equal(await page.locator("#engine-status").getAttribute("data-provider"), "webgpu");
-  assert.deepEqual(await page.evaluate(() => window.formulaUi.init), [{ enabled: true, artifacts: true }]);
+  assert.deepEqual(await page.evaluate(() => window.formulaUi.init), [{ inline: true, display: true, artifacts: true }]);
   assert.equal(formulaRequests.length, 3, "All formula assets must be served by the production example");
   await page.locator("#file").setInputFiles(pdf);
   await page.locator("#parse").click();
@@ -122,7 +124,10 @@ try {
   const warmTimings = await page.evaluate(offset => window.formulaUi.timings.slice(offset), warmStart);
   assert.deepEqual(await page.evaluate(() => window.formulaUi.documents[1].pages.flatMap(page => page.formulas ?? []).map(formula => formula.latex)), formulas.map(formula => formula.latex));
   const requestsBeforeOff = formulaRequests.length;
-  await page.locator("#formula-enabled").uncheck();
+  await page.locator("#display-formula-enabled").uncheck();
+  assert(await page.locator("#inline-formula-enabled").isChecked());
+  assert(await page.locator("#inline-formula-enabled").isEnabled());
+  await page.locator("#inline-formula-enabled").uncheck();
   assert.equal(await page.locator(".formula-result").count(), 0);
   assert(await page.locator("#prepare").isEnabled());
   assert.equal(await page.evaluate(() => window.formulaUi.terminated), 1);
@@ -132,15 +137,17 @@ try {
   await page.locator("#parse").click();
   await ready("Your document is ready");
   assert.equal(formulaRequests.length, requestsBeforeOff, "Disabled recognition must not download formula assets");
-  assert.deepEqual(await page.evaluate(() => window.formulaUi.init[1]), { enabled: false, artifacts: false });
+  assert.deepEqual(await page.evaluate(() => window.formulaUi.init[1]), { inline: false, display: false, artifacts: false });
   assert.equal(await page.evaluate(() => window.formulaUi.documents[2].pages.flatMap(page => page.formulas ?? []).length), 0);
   const disabledTimings = await page.evaluate(offset => window.formulaUi.timings.slice(offset), timingCount);
   assert.equal(disabledTimings.some(timing => timing.stage.startsWith("formula_")), false);
-  await page.locator("#formula-enabled").check();
+  await page.locator("#display-formula-enabled").check();
+  assert.equal(await page.locator("#inline-formula-enabled").isChecked(), false);
+  await page.locator("#inline-formula-enabled").check();
   assert(await page.locator("#prepare").isEnabled());
   assert.equal(await page.evaluate(() => window.formulaUi.terminated), 2);
   assert.deepEqual(errors, []);
-  const report = { status: "passed", browser: browser.version(), model: "pp-formulanet-plus-s", pages: document.pages.length, formulas: formulas.length, labels: [...new Set(formulas.map(formula => formula.label))], formulaRequests, checks: ["default-on", "real-webgpu", "latex-markdown-inspector", "clipboard", "narrow-viewport", "warm-output-parity", "off-no-download-or-inference", "setting-change-rebuild"] };
+  const report = { status: "passed", browser: browser.version(), model: "pp-formulanet-plus-s", pages: document.pages.length, formulas: formulas.length, labels: [...new Set(formulas.map(formula => formula.label))], formulaRequests, checks: ["default-on", "independent-switches", "real-webgpu", "latex-markdown-inspector", "clipboard", "narrow-viewport", "warm-output-parity", "off-no-download-or-inference", "setting-change-rebuild"] };
   await writeFile(resolve(output, "summary.json"), JSON.stringify(report, null, 2) + "\n");
   await writeFile(resolve(output, "timings.json"), JSON.stringify({ cold: coldTimings, warm: warmTimings, disabled: disabledTimings }, null, 2) + "\n");
   console.log(JSON.stringify(report));

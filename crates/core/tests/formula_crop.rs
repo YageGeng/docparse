@@ -64,7 +64,8 @@ async fn real_motion_descriptor_preserves_overbar() {
         .expect("config");
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Disabled;
-    raw.formula.enabled = true;
+    raw.formula.inline_enabled = true;
+    raw.formula.display_enabled = true;
     let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
     let session = LocalPdfiumProvider
         .open(
@@ -189,7 +190,8 @@ async fn real_softmax_crop_preserves_component_subscript() {
     // Isolate formula inference while retaining the production raster and layout configuration.
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Disabled;
-    raw.formula.enabled = true;
+    raw.formula.inline_enabled = true;
+    raw.formula.display_enabled = true;
     let config =
         Arc::new(ValidatedConfig::try_from(raw).expect("validated config"));
     let session = LocalPdfiumProvider

@@ -49,8 +49,9 @@ evidence; a model prediction is accepted only after topology and source validati
 reconstruction from `external_tsr` model/caller input. The Web inspector displays
 this as Rules or TSR input.
 
-Use `--profile tsr-baseline` (or `tsr.cell_detection.enabled = false`) for pure
-SLANet+, and `--profile tsr-upgraded` to compare SLANeXt wireless plus cell detection.
+For pure SLANet+, set `tsr.cell_detection.enabled = false` directly in
+`docparse.toml`. To compare SLANeXt wireless plus cell detection, replace the TSR
+settings with the [inline configuration examples](crates/tsr/README.md).
 
 ## Build and CUDA
 
@@ -73,7 +74,23 @@ CoreML and Metal sessions request `FastPrediction` specialization for their reus
 
 ### Formula recognition
 
-Enable `[formula] enabled = true` to recognize every existing inline/display formula detection with PP-FormulaNet_plus-S by default. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Install its pinned graph/tokenizer with `rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s`. Formula numbers remain native text.
+`[formula] inline_enabled = true` and `display_enabled = true` independently enable inline and display formula recognition. Both default to true and use PP-FormulaNet_plus-S. Set both to false to skip formula model loading; the former `formula.enabled` key is no longer accepted. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Install its pinned graph/tokenizer with `rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s`. Formula numbers remain native text. Disabling either kind preserves its native text and layout while skipping recognition and recognized-LaTeX projection.
+
+To evaluate Plus-M, provision `--model pp-formulanet-plus-m` and update the existing
+`[formula]` section in `docparse.toml`:
+
+```toml
+[formula]
+inline_enabled = true
+display_enabled = true
+model_path = "models/pp-formulanet-plus-m/inference.onnx"
+tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
+model_manifest_path = "models/pp-formulanet-plus-m/model-manifest.json"
+```
+
+Start the server or CLI with this configuration. Plus-M uses
+the same 384-pixel input edge as Plus-S; it is an optional quality comparison,
+not a verified accuracy upgrade for every formula. See `crates/formula/README.md`.
 
 JSON includes `pages[].formulas[]`, with `latex`, `markdown`, the actual `engine`, source geometry, exact UTF-8 `text_spans`, and non-owning block/line/cell anchors. Failures retain an explicit `error` with null representations and a page warning. Markdown replaces the relevant presentation range while original text items and table spans remain available in JSON. The HTTP result endpoint accepts `?id=<uuid>&format=markdown`; omitting `format` returns JSON with both formula representations.
 

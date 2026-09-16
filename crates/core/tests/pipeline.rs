@@ -133,6 +133,8 @@ impl docparse_core::TableStructureEngine for GatedEnrichment {
 #[tokio::test]
 async fn slow_ocr_allows_later_layout_and_another_document() {
     let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Always;
     raw.runtime.page_concurrency = 1;
@@ -177,6 +179,8 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     while receiver.try_recv().is_ok() {}
     let gate = Arc::new(Semaphore::new(0));
     let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Always;
     let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -226,6 +230,8 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     // A full TSR stage must not retain OCR's slot for the following page.
     let gate = Arc::new(Semaphore::new(0));
     let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::TsrOnly;
     raw.ocr.policy = OcrPolicy::Always;
     raw.runtime.page_concurrency = 1;
@@ -325,7 +331,8 @@ async fn slow_formulas_allow_later_tables() {
     let mut raw = RawConfig::default();
     raw.tsr.mode = TableMode::TsrOnly;
     raw.ocr.policy = OcrPolicy::Disabled;
-    raw.formula.enabled = true;
+    raw.formula.inline_enabled = true;
+    raw.formula.display_enabled = true;
     raw.runtime.page_concurrency = 1;
     raw.runtime.render_queue_capacity = 1;
     let gate = Arc::new(Semaphore::new(0));

@@ -90,6 +90,8 @@ async fn cancelled_parser_releases_hung_renderer() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../core/tests/fixtures/pdf/extraction_metadata.pdf");
     let mut raw = docparse_config::RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
     raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     let pool =

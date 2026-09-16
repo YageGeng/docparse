@@ -1,0 +1,352 @@
+{
+  "input_pdf": "2604.18583v1.pdf",
+  "input_sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83",
+  "page": 4,
+  "crop_sha256": "7ae6f477309fc13b015bc309220ccd8bbd0ec6b17fcde4cf3cacd241535c7d45",
+  "input_dimensions": [
+    422,
+    29
+  ],
+  "provider": "CPU compatibility executor in a macOS CoreML release build",
+  "models": {
+    "s": {
+      "engine": "pp-formulanet-plus-s-onnx-cpu",
+      "latex": "\\mathbf { T } _ { f } ^ { \\acute { g s } } \\; = \\; ( \\bar { \\pm } _ { i } ^ { \\acute { u v } } , \\bar { \\mathbf { d } } _ { i } ^ { \\mathrm { u v } } , \\mathbf { q } _ { i } ^ { \\mathrm { u v } } , \\mathbf { s } _ { i } ^ { \\mathrm { u v } } , \\overset { \\circ } { \\alpha } { } _ { i } ^ { \\mathrm { u v } } , \\mathfrak { \\eta } { } _ { i } ^ { \\mathrm { u v } } ) _ { f } \\; \\in \\; \\mathbb { R } ^ { N \\times 2 6 }",
+      "warm_inference_ms": [
+        326.926959,
+        321.0115,
+        316.723042
+      ],
+      "warm_median_ms": 321.0115,
+      "timings": {
+        "engine": "pp-formulanet-plus-s-onnx-cpu",
+        "first_and_batched": [
+          {
+            "duration_ms": 0.020665999999999997,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.44741600000000004,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 338.727416,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.096708,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.009667,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 1.0675000000000001,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 658.255042,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.069416,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.012417,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 1.420709,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 878.949625,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.081542,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 1.004083,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.447042,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 313.181875,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.038208,
+            "page_number": null,
+            "stage": "formula_decode"
+          }
+        ],
+        "latex": [
+          "\\mathbf { T } _ { f } ^ { \\acute { g s } } \\; = \\; ( \\bar { \\pm } _ { i } ^ { \\acute { u v } } , \\bar { \\mathbf { d } } _ { i } ^ { \\mathrm { u v } } , \\mathbf { q } _ { i } ^ { \\mathrm { u v } } , \\mathbf { s } _ { i } ^ { \\mathrm { u v } } , \\overset { \\circ } { \\alpha } { } _ { i } ^ { \\mathrm { u v } } , \\mathfrak { \\eta } { } _ { i } ^ { \\mathrm { u v } } ) _ { f } \\; \\in \\; \\mathbb { R } ^ { N \\times 2 6 }"
+        ],
+        "warm_single_crop": [
+          {
+            "duration_ms": 0.010084000000000001,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.455334,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 326.926959,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.039875,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.011208000000000001,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.44708299999999995,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 321.0115,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.040874999999999995,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.009208000000000001,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.461834,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 316.723042,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.039125,
+            "page_number": null,
+            "stage": "formula_decode"
+          }
+        ]
+      }
+    },
+    "m": {
+      "engine": "pp-formulanet-plus-m-onnx-cpu",
+      "latex": "\\mathbf { T } _ { f } ^ { \\check { \\mathrm { g s } } } \\; = \\; ( \\bar { \\boldsymbol { \\mu } } _ { i } ^ { \\mathrm { u v } } , \\bar { \\mathbf { d } } _ { i } ^ { \\mathrm { u v } } , \\mathbf { q } _ { i } ^ { \\mathrm { u v } } , \\mathbf { s } _ { i } ^ { \\mathrm { u v } } , \\overset { \\circ } { \\alpha } _ { i } ^ { \\mathrm { u v } } , \\boldsymbol { \\eta } _ { i } ^ { \\mathrm { u v } } ) _ { f } \\; \\in \\; \\mathbb { R } ^ { N \\times 2 6 }",
+      "warm_inference_ms": [
+        1508.933333,
+        1542.193375,
+        1551.7765
+      ],
+      "warm_median_ms": 1542.193375,
+      "timings": {
+        "engine": "pp-formulanet-plus-m-onnx-cpu",
+        "first_and_batched": [
+          {
+            "duration_ms": 0.014917,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.528583,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 1545.2691249999998,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.071917,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.008166,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.9202499999999999,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 4592.232583999999,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.16145800000000002,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.013583,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 1.515334,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 5390.79525,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.107292,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 3.609542,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.452208,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 1605.7125829999998,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.043207999999999996,
+            "page_number": null,
+            "stage": "formula_decode"
+          }
+        ],
+        "latex": [
+          "\\mathbf { T } _ { f } ^ { \\check { \\mathrm { g s } } } \\; = \\; ( \\bar { \\boldsymbol { \\mu } } _ { i } ^ { \\mathrm { u v } } , \\bar { \\mathbf { d } } _ { i } ^ { \\mathrm { u v } } , \\mathbf { q } _ { i } ^ { \\mathrm { u v } } , \\mathbf { s } _ { i } ^ { \\mathrm { u v } } , \\overset { \\circ } { \\alpha } _ { i } ^ { \\mathrm { u v } } , \\boldsymbol { \\eta } _ { i } ^ { \\mathrm { u v } } ) _ { f } \\; \\in \\; \\mathbb { R } ^ { N \\times 2 6 }"
+        ],
+        "warm_single_crop": [
+          {
+            "duration_ms": 0.010208,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.509958,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 1508.933333,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.039334,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.010792,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.509666,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 1542.193375,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.063917,
+            "page_number": null,
+            "stage": "formula_decode"
+          },
+          {
+            "duration_ms": 0.008667,
+            "page_number": null,
+            "stage": "formula_queue"
+          },
+          {
+            "duration_ms": 0.46625,
+            "page_number": null,
+            "stage": "formula_preprocess"
+          },
+          {
+            "duration_ms": 1551.7765,
+            "page_number": null,
+            "stage": "formula_inference"
+          },
+          {
+            "duration_ms": 0.039083,
+            "page_number": null,
+            "stage": "formula_decode"
+          }
+        ]
+      }
+    }
+  },
+  "pages": [
+    {
+      "page": 4,
+      "formulas": 41,
+      "inference_failures": 0,
+      "engines": [
+        "pp-formulanet-plus-m-onnx-cpu"
+      ]
+    },
+    {
+      "page": 5,
+      "formulas": 20,
+      "inference_failures": 0,
+      "engines": [
+        "pp-formulanet-plus-m-onnx-cpu"
+      ]
+    }
+  ],
+  "syntax_vs_semantics": "Zero inference failures does not establish mathematical accuracy."
+}

@@ -69,7 +69,8 @@ model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 # Recognize every layout-detected inline/display formula. JSON retains LaTeX and Markdown.
 # Formula models use CPU compatibility inference on CoreML/Metal builds.
 [formula]
-enabled = true
+inline_enabled = true
+display_enabled = true
 batch_size = 4
 timeout_ms = 120000
 model_path = "models/pp-formulanet-plus-s/inference.onnx"

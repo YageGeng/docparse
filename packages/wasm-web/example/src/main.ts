@@ -14,7 +14,8 @@ const ui = {
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
   tableMode: document.querySelector<HTMLSelectElement>("#table-mode")!,
   ocrPolicy: document.querySelector<HTMLSelectElement>("#ocr-policy")!,
-  formulaEnabled: document.querySelector<HTMLInputElement>("#formula-enabled")!,
+  displayFormulaEnabled: document.querySelector<HTMLInputElement>("#display-formula-enabled")!,
+  inlineFormulaEnabled: document.querySelector<HTMLInputElement>("#inline-formula-enabled")!,
   formulas: document.querySelector<HTMLElement>("#formula-results")!,
   timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
   timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
@@ -98,7 +99,8 @@ function controls(): void {
   ui.provider.disabled = busy;
   ui.tableMode.disabled = busy;
   ui.ocrPolicy.disabled = busy;
-  ui.formulaEnabled.disabled = busy;
+  ui.displayFormulaEnabled.disabled = busy;
+  ui.inlineFormulaEnabled.disabled = busy;
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -399,7 +401,7 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
         detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),
         orientation: modelSource("pp-lcnet-textline-ori"),
       },
-      formulaArtifacts: ui.formulaEnabled.checked ? {
+      formulaArtifacts: (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked) ? {
         kind: "urls",
         model: new URL("../models/pp-formulanet-plus-s/inference.onnx", location.href).href,
         tokenizer: new URL("../models/pp-formulanet-plus-s/tokenizer.json", location.href).href,
@@ -408,7 +410,7 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
       // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
       executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
       allowCpuFallback: true,
-      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { enabled: ui.formulaEnabled.checked } },
+      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { display_enabled: ui.displayFormulaEnabled.checked, inline_enabled: ui.inlineFormulaEnabled.checked } },
       signal, onProgress: event => { if (run === generation) progress(event); },
       onTiming: event => { if (run === generation) recordTiming("Preparation", event); },
     });
@@ -434,7 +436,7 @@ async function runOperation(mode: "prepare" | "parse"): Promise<void> {
   try {
     const current = await ensureParser(run, signal);
     if (mode === "prepare") {
-      const models = ["layout", ...(ui.tableMode.value === "rules_only" ? [] : ["TSR"]), ...(ui.ocrPolicy.value === "disabled" ? [] : ["OCR"]), ...(ui.formulaEnabled.checked ? ["formulas"] : [])];
+      const models = ["layout", ...(ui.tableMode.value === "rules_only" ? [] : ["TSR"]), ...(ui.ocrPolicy.value === "disabled" ? [] : ["OCR"]), ...(ui.inlineFormulaEnabled.checked ? ["inline formulas"] : []), ...(ui.displayFormulaEnabled.checked ? ["display formulas"] : [])];
       status("Models ready", `${models.join(" + ")} initialized. ${selectedFile ? "Select Parse document to continue." : "Choose a PDF to start parsing."}`, "done");
       return;
     }
@@ -569,7 +571,8 @@ function modelSettingsChanged(): void {
 ui.provider.addEventListener("change", modelSettingsChanged);
 ui.tableMode.addEventListener("change", modelSettingsChanged);
 ui.ocrPolicy.addEventListener("change", modelSettingsChanged);
-ui.formulaEnabled.addEventListener("change", modelSettingsChanged);
+ui.displayFormulaEnabled.addEventListener("change", modelSettingsChanged);
+ui.inlineFormulaEnabled.addEventListener("change", modelSettingsChanged);
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));
 ui.next.addEventListener("click", () => showPage(pageNumber + 1));
 ui.select.addEventListener("change", () => selectBlock(ui.select.value));

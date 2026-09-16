@@ -62,7 +62,7 @@ try {
       try {
         const progress = [], images = [], timings = [];
         parser = await createParser({
-          config: { tsr: { mode: 'rules_only' } },
+          config: { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: 'rules_only' } },
           artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
         });
         const document = await parser.parse(new Uint8Array(bytes), {
