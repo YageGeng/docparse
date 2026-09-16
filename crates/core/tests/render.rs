@@ -108,6 +108,151 @@ fn renderers_preserve_canonical_document() {
     );
 }
 
+/// JSON keeps both formula representations even when evidence and diagnostics are hidden.
+#[test]
+fn recognized_formula_json_and_markdown_preserve_source_text() {
+    let original = document();
+    let page = original.pages.first().expect("page");
+    let block = page.blocks.first().expect("block");
+    let line = block.lines.first().expect("line");
+    let formula = docparse_core::FormulaResult::builder()
+        .id(docparse_core::ModelRegionId::detected(1, 0))
+        .label(LayoutLabel::InlineFormula)
+        .bbox(Bbox::try_from([91.0, 10.0, 99.0, 20.0]).expect("formula bbox"))
+        .block_id(Some(block.id.clone()))
+        .line_id(Some(line.id.clone()))
+        .text_item_range(Some(TextItemRange::new(1, 1)))
+        .latex(Some("x^{2}".into()))
+        .markdown(Some("$x^{2}$".into()))
+        .build();
+    let mut recognized = original.clone();
+    recognized
+        .pages
+        .first_mut()
+        .expect("page")
+        .formulas
+        .push(formula);
+    let visibility = OutputConfig::builder()
+        .formula_placeholder("[formula]".into())
+        .include_evidence(false)
+        .include_diagnostics(false)
+        .build();
+    let json = serde_json::to_value(JsonRenderer::view_with_config(
+        &recognized,
+        &visibility,
+    ))
+    .expect("JSON view");
+    assert_eq!(
+        json.pointer("/pages/0/formulas/0/latex")
+            .and_then(serde_json::Value::as_str),
+        Some("x^{2}")
+    );
+    assert_eq!(
+        json.pointer("/pages/0/formulas/0/markdown")
+            .and_then(serde_json::Value::as_str),
+        Some("$x^{2}$")
+    );
+    assert_eq!(
+        MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+            .render(&recognized),
+        "hello $x^{2}$"
+    );
+    assert_eq!(
+        recognized.pages.first().expect("page").blocks,
+        original.pages.first().expect("original").blocks
+    );
+    let mut invalid = recognized.clone();
+    invalid
+        .pages
+        .first_mut()
+        .expect("page")
+        .formulas
+        .first_mut()
+        .expect("formula")
+        .markdown = Some("$different$".into());
+    docparse_core::ResultValidator::validate(&invalid)
+        .expect_err("JSON formula representations must agree");
+}
+
+/// A measured word inside a larger PDF text run must not consume adjacent prose or sentence punctuation.
+#[test]
+fn inline_formula_uses_exact_byte_spans_inside_a_text_item() {
+    let mut document = document();
+    let page = document.pages.first_mut().expect("page");
+    let block = page.blocks.first_mut().expect("block");
+    let line = block.lines.first_mut().expect("line");
+    let item = line.text_items.first_mut().expect("item");
+    item.raw_text = "learning rate of 7, next".into();
+    line.text = item.raw_text.clone();
+    block.text = line.text.clone();
+    line.inline_spans.clear();
+    page.formulas.push(
+        docparse_core::FormulaResult::builder()
+            .id(docparse_core::ModelRegionId::detected(1, 0))
+            .label(LayoutLabel::InlineFormula)
+            .bbox(item.bbox)
+            .block_id(Some(block.id.clone()))
+            .line_id(Some(line.id.clone()))
+            .text_item_range(Some(TextItemRange::new(0, 1)))
+            .text_spans(vec![docparse_core::TableTextSpan {
+                text_item_id: item.id.clone(),
+                byte_range: 17..18,
+                bbox: item.bbox,
+            }])
+            .latex(Some("7".into()))
+            .markdown(Some("$7$".into()))
+            .build(),
+    );
+    assert_eq!(
+        MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+            .render(&document),
+        "learning rate of $7$, next"
+    );
+}
+
+/// Unselected source words between two formula slices must survive the Markdown projection.
+#[test]
+fn disjoint_formula_slices_preserve_intervening_source() {
+    let mut document = document();
+    let page = document.pages.first_mut().expect("page");
+    let block = page.blocks.first_mut().expect("block");
+    let line = block.lines.first_mut().expect("line");
+    let item = line.text_items.first_mut().expect("item");
+    item.raw_text = "a 引用 b".into();
+    line.text = item.raw_text.clone();
+    block.text = line.text.clone();
+    line.inline_spans.clear();
+    page.formulas.push(
+        docparse_core::FormulaResult::builder()
+            .id(docparse_core::ModelRegionId::detected(1, 0))
+            .label(LayoutLabel::InlineFormula)
+            .bbox(item.bbox)
+            .block_id(Some(block.id.clone()))
+            .line_id(Some(line.id.clone()))
+            .text_item_range(Some(TextItemRange::new(0, 1)))
+            .text_spans(vec![
+                docparse_core::TableTextSpan {
+                    text_item_id: item.id.clone(),
+                    byte_range: 0..1,
+                    bbox: item.bbox,
+                },
+                docparse_core::TableTextSpan {
+                    text_item_id: item.id.clone(),
+                    byte_range: 9..10,
+                    bbox: item.bbox,
+                },
+            ])
+            .latex(Some("a+b".into()))
+            .markdown(Some("$a+b$".into()))
+            .build(),
+    );
+    assert_eq!(
+        MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+            .render(&document),
+        "$a+b$ 引用 "
+    );
+}
+
 /// Semantic prose heals wrapped words while raw and non-prose output retain physical lines.
 #[test]
 fn character_cleanup_is_a_read_only_presentation() {

@@ -327,3 +327,24 @@ fn native_deployment_settings_are_validated_separately() {
     parser.database.max_connections = 0;
     ValidatedConfig::try_from(parser).expect("parser does not open a database");
 }
+/// Formula inference is opt-in, bounded, and independent of the OCR policy.
+#[test]
+fn formula_configuration_accepts_bounded_batches() {
+    let mut value = serde_json::to_value(docparse_config::RawConfig::default())
+        .expect("default config");
+    value.as_object_mut().expect("object").insert("formula".into(), serde_json::json!({"enabled": true, "batch_size": 4, "timeout_ms": 120000}));
+    let raw =
+        serde_json::from_value::<docparse_config::RawConfig>(value.clone());
+    docparse_config::ValidatedConfig::try_from(raw.expect("formula config"))
+        .expect("valid formula config");
+    for invalid in [0, 33] {
+        *value
+            .pointer_mut("/formula/batch_size")
+            .expect("batch_size") = invalid.into();
+        let raw =
+            serde_json::from_value::<docparse_config::RawConfig>(value.clone())
+                .expect("shape");
+        docparse_config::ValidatedConfig::try_from(raw)
+            .expect_err("invalid formula batch must fail");
+    }
+}

@@ -121,7 +121,7 @@ impl LineFragment {
     }
 
     /// Selects a typographic parent only when it clearly outranks every competing source run.
-    pub(super) fn script_parent(&self, fragments: &[Self]) -> Option<usize> {
+    pub(crate) fn script_parent(&self, fragments: &[Self]) -> Option<usize> {
         let mut best: Option<(usize, f64)> = None;
         let mut runner_up = f64::INFINITY;
         for (index, parent) in fragments.iter().enumerate() {

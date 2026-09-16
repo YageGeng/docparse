@@ -1,7 +1,7 @@
 use crate::{
-    ConfigError, DatabaseConfig, FusionConfig, LayoutConfig, OcrConfig,
-    OutputConfig, RawConfig, RenderConfig, RuntimeConfig, ServerConfig,
-    TsrConfig,
+    ConfigError, DatabaseConfig, FormulaConfig, FusionConfig, LayoutConfig,
+    OcrConfig, OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
+    ServerConfig, TsrConfig,
 };
 use typed_builder::TypedBuilder;
 
@@ -16,6 +16,7 @@ pub struct ValidatedConfig {
     pub(crate) platform: crate::wasm_compat::PlatformOptions,
     layout: LayoutConfig,
     tsr: TsrConfig,
+    formula: FormulaConfig,
     runtime: RuntimeConfig,
     render: RenderConfig,
     fusion: FusionConfig,
@@ -24,6 +25,10 @@ pub struct ValidatedConfig {
 }
 
 impl ValidatedConfig {
+    /// Returns formula artifact paths and the validated batch/deadline limits.
+    pub fn formula(&self) -> &FormulaConfig {
+        &self.formula
+    }
     /// Returns validated layout engine configuration.
     pub fn layout(&self) -> &LayoutConfig {
         &self.layout
@@ -291,9 +296,22 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             "fusion.estimated_font_size_tolerance_points",
         )?;
 
+        if !(1..=32).contains(&config.formula.batch_size) {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.batch_size",
+                reason: "must be between 1 and 32",
+            });
+        }
+        if !(1..=86_400_000).contains(&config.formula.timeout_ms) {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.timeout_ms",
+                reason: "must be between 1 and 86400000",
+            });
+        }
         let RawConfig {
             layout,
             tsr,
+            formula,
             runtime,
             render,
             fusion,
@@ -305,6 +323,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         Ok(Self::builder()
             .layout(layout)
             .tsr(tsr)
+            .formula(formula)
             .runtime(runtime)
             .render(render)
             .fusion(fusion)

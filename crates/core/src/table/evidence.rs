@@ -10,7 +10,7 @@ use typed_builder::TypedBuilder;
 use super::{MAX_TABLE_CELLS, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS};
 use crate::{Baseline, TextItemId};
 
-/// Compact measured word geometry retained only until the page's tables are assembled.
+/// Compact measured word geometry retained through table assembly and formula projection.
 #[derive(
     Debug, Clone, PartialEq, TypedBuilder, serde::Serialize, serde::Deserialize,
 )]

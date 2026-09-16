@@ -423,3 +423,14 @@ The integration runs use `DOCPARSE_TEST_DATABASE_URL`. They apply migrations to
 that database and leave their uniquely identified task rows in place. The HTTP
 test exercises real PDFium and a controlled injected layout engine to verify
 disconnects, heartbeat renewal, draining, and cross-instance persistence.
+
+
+## Formula recognition output
+
+`GET /api/jobs/result?id=<uuid>&format=markdown` projects the stored document into
+`text/markdown; charset=utf-8` without running inference again. Default
+`format=json` remains the streamed success envelope. Enabled formula recognition
+stores both `latex` and `markdown` in `pages[].formulas[]`; Markdown uses those
+results in prose, independent equations and table cells. Failures retain source
+geometry and an error while original text stays available in JSON. The configured
+API prefix applies to this route as usual.

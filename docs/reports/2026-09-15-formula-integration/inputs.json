@@ -1,0 +1,23 @@
+[
+  {
+    "logical_id": "arxiv-2410.05779v3",
+    "basename": "2410.05779v3.pdf",
+    "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a",
+    "size_bytes": 1123301,
+    "page_count": 16
+  },
+  {
+    "logical_id": "arxiv-2606.17056v1",
+    "basename": "2606.17056v1.pdf",
+    "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf",
+    "size_bytes": 992264,
+    "page_count": 25
+  },
+  {
+    "logical_id": "document-19",
+    "basename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc",
+    "size_bytes": 922889,
+    "page_count": 32
+  }
+]

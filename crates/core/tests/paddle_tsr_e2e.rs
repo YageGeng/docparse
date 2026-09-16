@@ -204,6 +204,8 @@ async fn real_pdfs_use_configured_table_model() {
     let mut raw = ConfigLoader::new(root.join("docparse.toml"))
         .load_raw()
         .expect("production config");
+    // This acceptance isolates table models; formula inference has separate real-model checks.
+    raw.formula.enabled = false;
     if let Ok(mode) = std::env::var("TSR_E2E_MODE") {
         raw.tsr.mode = serde_json::from_value(json!(mode)).expect("table mode");
     }
@@ -375,14 +377,13 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
     }
     let parser = DocParser::from_artifacts(
         ValidatedConfig::try_from(raw).expect("config"),
-        docparse_core::ParserArtifacts {
-            layout,
-            tsr: Some(docparse_tsr::TsrArtifacts {
+        docparse_core::ParserArtifacts::builder()
+            .layout(layout)
+            .tsr(Some(docparse_tsr::TsrArtifacts {
                 structure: tsr,
                 cell_detection: Some(cells),
-            }),
-            ocr: None,
-        },
+            }))
+            .build(),
     )
     .await
     .expect("byte-only construction");

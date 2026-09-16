@@ -1,0 +1,931 @@
+{
+  "phase": "corpus",
+  "start_unix": 1789456681.064367,
+  "end_unix": 1789457050.715779,
+  "elapsed_seconds": 369.6491666659713,
+  "upload_batch_seconds": 0.7599930829601362,
+  "documents": 20,
+  "expected_pages": 694,
+  "jobs": [
+    {
+      "logical_id": "arxiv-2303.18223v16",
+      "basename": "2303.18223v16.pdf",
+      "sha256": "641410ae1454ff9f849ac430b41a57f0772cca7079ac5fbaf0c2d35df450e4a7",
+      "size_bytes": 8577429,
+      "page_count": 144,
+      "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.064461,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.474282,
+        "time_starttransfer": 0.00027,
+        "size_upload": 8577641,
+        "size_download": 328
+      },
+      "upload_wall_seconds": 0.4844484579516575,
+      "upload_finished_unix": 1789456681.548888,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+        "filename": "2303.18223v16.pdf",
+        "size_bytes": 8577429,
+        "created_at": "2026-09-15T07:18:01.509098+00:00",
+        "updated_at": "2026-09-15T07:24:00.763751+00:00",
+        "status": "succeeded",
+        "version": 144,
+        "attempts": 1,
+        "duration_ms": 358931,
+        "progress": {
+          "stage": "complete",
+          "total": 144
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 360.5416757079656,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.395254,
+        "time_starttransfer": 0.000807,
+        "size_upload": 0,
+        "size_download": 122479293
+      },
+      "download_wall_seconds": 0.4134816250298172,
+      "download_finished_unix": 1789457042.021873
+    },
+    {
+      "logical_id": "arxiv-2403.01632v4",
+      "basename": "2403.01632v4.pdf",
+      "sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431",
+      "size_bytes": 3111797,
+      "page_count": 47,
+      "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.064539,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.25313,
+        "time_starttransfer": 0.000393,
+        "size_upload": 3112008,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.2915658749989234,
+      "upload_finished_unix": 1789456681.356095,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+        "filename": "2403.01632v4.pdf",
+        "size_bytes": 3111797,
+        "created_at": "2026-09-15T07:18:01.323585+00:00",
+        "updated_at": "2026-09-15T07:20:18.594476+00:00",
+        "status": "succeeded",
+        "version": 45,
+        "attempts": 1,
+        "duration_ms": 137267,
+        "progress": {
+          "stage": "complete",
+          "total": 47
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 138.59411224996438,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.178024,
+        "time_starttransfer": 0.006719,
+        "size_upload": 0,
+        "size_download": 23450043
+      },
+      "download_wall_seconds": 0.2078646660083905,
+      "download_finished_unix": 1789456819.867276
+    },
+    {
+      "logical_id": "arxiv-2410.05779v3",
+      "basename": "2410.05779v3.pdf",
+      "sha256": "bd72eebf611df1366b251c16ce4eac7aac699e519783c586feb2c5c43899347a",
+      "size_bytes": 1123301,
+      "page_count": 16,
+      "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.0654552,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.247034,
+        "time_starttransfer": 0.000262,
+        "size_upload": 1123512,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.25837554200552404,
+      "upload_finished_unix": 1789456681.323741,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+        "filename": "2410.05779v3.pdf",
+        "size_bytes": 1123301,
+        "created_at": "2026-09-15T07:18:01.251709+00:00",
+        "updated_at": "2026-09-15T07:18:39.286899+00:00",
+        "status": "succeeded",
+        "version": 18,
+        "attempts": 1,
+        "duration_ms": 37960,
+        "progress": {
+          "stage": "complete",
+          "total": 16
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 39.173310665995814,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.026977,
+        "time_starttransfer": 0.001235,
+        "size_upload": 0,
+        "size_download": 6499680
+      },
+      "download_wall_seconds": 0.04776445898460224,
+      "download_finished_unix": 1789456720.285846
+    },
+    {
+      "logical_id": "arxiv-2603.01919v2",
+      "basename": "2603.01919v2.pdf",
+      "sha256": "75f507cc115f8fa7a2097d4e4052131b36c12d09ab8aa21c62d6b3184c787d15",
+      "size_bytes": 10513591,
+      "page_count": 23,
+      "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.068185,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.475922,
+        "time_starttransfer": 0.000382,
+        "size_upload": 10513802,
+        "size_download": 328
+      },
+      "upload_wall_seconds": 0.512086333008483,
+      "upload_finished_unix": 1789456681.580085,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+        "filename": "2603.01919v2.pdf",
+        "size_bytes": 10513591,
+        "created_at": "2026-09-15T07:18:01.549754+00:00",
+        "updated_at": "2026-09-15T07:19:13.472303+00:00",
+        "status": "succeeded",
+        "version": 22,
+        "attempts": 1,
+        "duration_ms": 71641,
+        "progress": {
+          "stage": "complete",
+          "total": 23
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 72.59632670797873,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.168521,
+        "time_starttransfer": 0.002513,
+        "size_upload": 0,
+        "size_download": 16498602
+      },
+      "download_wall_seconds": 0.20532241597538814,
+      "download_finished_unix": 1789456753.866549
+    },
+    {
+      "logical_id": "arxiv-2604.18583v1",
+      "basename": "2604.18583v1.pdf",
+      "sha256": "7b0b2e1bc48f305368f56e6ee7998e1b3318697cf8f523fe569609b2292f0f83",
+      "size_bytes": 26668188,
+      "page_count": 15,
+      "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.3238862,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.369565,
+        "time_starttransfer": 0.000509,
+        "size_upload": 26668399,
+        "size_download": 328
+      },
+      "upload_wall_seconds": 0.38270695897517726,
+      "upload_finished_unix": 1789456681.70651,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+        "filename": "2604.18583v1.pdf",
+        "size_bytes": 26668188,
+        "created_at": "2026-09-15T07:18:01.676504+00:00",
+        "updated_at": "2026-09-15T07:20:02.677331+00:00",
+        "status": "succeeded",
+        "version": 19,
+        "attempts": 1,
+        "duration_ms": 49201,
+        "progress": {
+          "stage": "complete",
+          "total": 15
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 122.28284299996449,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.055207,
+        "time_starttransfer": 0.002091,
+        "size_upload": 0,
+        "size_download": 10504089
+      },
+      "download_wall_seconds": 0.07981908298097551,
+      "download_finished_unix": 1789456803.4280179
+    },
+    {
+      "logical_id": "arxiv-2604.18584v1",
+      "basename": "2604.18584v1.pdf",
+      "sha256": "fb157c94174fd63634e96971319af88fb5d662386f1ad6d77df49dac2800b728",
+      "size_bytes": 9437000,
+      "page_count": 32,
+      "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.356147,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.274621,
+        "time_starttransfer": 0.00041,
+        "size_upload": 9437211,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.2836842910037376,
+      "upload_finished_unix": 1789456681.639807,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+        "filename": "2604.18584v1.pdf",
+        "size_bytes": 9437000,
+        "created_at": "2026-09-15T07:18:01.635062+00:00",
+        "updated_at": "2026-09-15T07:20:17.363281+00:00",
+        "status": "succeeded",
+        "version": 30,
+        "attempts": 1,
+        "duration_ms": 98067,
+        "progress": {
+          "stage": "complete",
+          "total": 32
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 136.48019883298548,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.090784,
+        "time_starttransfer": 0.001935,
+        "size_upload": 0,
+        "size_download": 15165282
+      },
+      "download_wall_seconds": 0.11412562499754131,
+      "download_finished_unix": 1789456817.660005
+    },
+    {
+      "logical_id": "arxiv-2604.21959v1",
+      "basename": "2604.21959v1.pdf",
+      "sha256": "b9c342ac22948fb32572979febb0320d4e861509761cd49587c92f02348c4cc2",
+      "size_bytes": 122969,
+      "page_count": 3,
+      "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.548973,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.074433,
+        "time_starttransfer": 0.062375,
+        "size_upload": 123180,
+        "size_download": 326
+      },
+      "upload_wall_seconds": 0.08519333298318088,
+      "upload_finished_unix": 1789456681.634121,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+        "filename": "2604.21959v1.pdf",
+        "size_bytes": 122969,
+        "created_at": "2026-09-15T07:18:01.615119+00:00",
+        "updated_at": "2026-09-15T07:18:07.299296+00:00",
+        "status": "succeeded",
+        "version": 7,
+        "attempts": 1,
+        "duration_ms": 5467,
+        "progress": {
+          "stage": "complete",
+          "total": 3
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 6.8123278329730965,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.004386,
+        "time_starttransfer": 0.001129,
+        "size_upload": 0,
+        "size_download": 807065
+      },
+      "download_wall_seconds": 0.018190582981333137,
+      "download_finished_unix": 1789456687.8951712
+    },
+    {
+      "logical_id": "arxiv-2606.17056v1",
+      "basename": "2606.17056v1.pdf",
+      "sha256": "9c62b4fc349782e40292d2f00d163ffcb670cd9688146b1a9fc20b63898dbbdf",
+      "size_bytes": 992264,
+      "page_count": 25,
+      "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.580124,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.045808,
+        "time_starttransfer": 0.045707,
+        "size_upload": 992475,
+        "size_download": 326
+      },
+      "upload_wall_seconds": 0.05383787502069026,
+      "upload_finished_unix": 1789456681.633943,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+        "filename": "2606.17056v1.pdf",
+        "size_bytes": 992264,
+        "created_at": "2026-09-15T07:18:01.621631+00:00",
+        "updated_at": "2026-09-15T07:19:28.237237+00:00",
+        "status": "succeeded",
+        "version": 28,
+        "attempts": 1,
+        "duration_ms": 80933,
+        "progress": {
+          "stage": "complete",
+          "total": 25
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 87.81673041597242,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.037066,
+        "time_starttransfer": 0.001364,
+        "size_upload": 0,
+        "size_download": 9144823
+      },
+      "download_wall_seconds": 0.056976000021677464,
+      "download_finished_unix": 1789456768.9387279
+    },
+    {
+      "logical_id": "arxiv-2609.12610v1",
+      "basename": "2609.12610v1.pdf",
+      "sha256": "5bdfae15f870223af055d9d76bac314d14b2a901bf2cc58317cbc101b7d831fd",
+      "size_bytes": 749161,
+      "page_count": 12,
+      "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.633982,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.062302,
+        "time_starttransfer": 0.051762,
+        "size_upload": 749372,
+        "size_download": 326
+      },
+      "upload_wall_seconds": 0.07246858399594203,
+      "upload_finished_unix": 1789456681.706435,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+        "filename": "2609.12610v1.pdf",
+        "size_bytes": 749161,
+        "created_at": "2026-09-15T07:18:01.676517+00:00",
+        "updated_at": "2026-09-15T07:20:05.873837+00:00",
+        "status": "succeeded",
+        "version": 14,
+        "attempts": 1,
+        "duration_ms": 37633,
+        "progress": {
+          "stage": "complete",
+          "total": 12
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 125.35270633298205,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.027309,
+        "time_starttransfer": 0.001404,
+        "size_upload": 0,
+        "size_download": 8300859
+      },
+      "download_wall_seconds": 0.04721733398037031,
+      "download_finished_unix": 1789456806.465211
+    },
+    {
+      "logical_id": "arxiv-2609.12973v1",
+      "basename": "2609.12973v1.pdf",
+      "sha256": "32f3286959e7c9b648c64fb6b2483477b652a0541afa04205938fdf5f2cc3843",
+      "size_bytes": 955018,
+      "page_count": 24,
+      "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.6341782,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.062365,
+        "time_starttransfer": 0.062282,
+        "size_upload": 955229,
+        "size_download": 326
+      },
+      "upload_wall_seconds": 0.07400508300634101,
+      "upload_finished_unix": 1789456681.7081442,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+        "filename": "2609.12973v1.pdf",
+        "size_bytes": 955018,
+        "created_at": "2026-09-15T07:18:01.695523+00:00",
+        "updated_at": "2026-09-15T07:21:03.623008+00:00",
+        "status": "succeeded",
+        "version": 26,
+        "attempts": 1,
+        "duration_ms": 60942,
+        "progress": {
+          "stage": "complete",
+          "total": 24
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 183.19336166599533,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.024376,
+        "time_starttransfer": 0.001321,
+        "size_upload": 0,
+        "size_download": 7112881
+      },
+      "download_wall_seconds": 0.04126141598680988,
+      "download_finished_unix": 1789456864.300289
+    },
+    {
+      "logical_id": "arxiv-2609.13008v1",
+      "basename": "2609.13008v1.pdf",
+      "sha256": "6c1ff2f8d0b3cdd2dcc73b2cef39cc0f2a6b0ee470d7a21717c70f3454bc9683",
+      "size_bytes": 767298,
+      "page_count": 31,
+      "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.6398861,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.059717,
+        "time_starttransfer": 0.059657,
+        "size_upload": 767509,
+        "size_download": 326
+      },
+      "upload_wall_seconds": 0.06816854205681011,
+      "upload_finished_unix": 1789456681.708008,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+        "filename": "2609.13008v1.pdf",
+        "size_bytes": 767298,
+        "created_at": "2026-09-15T07:18:01.706406+00:00",
+        "updated_at": "2026-09-15T07:21:28.543547+00:00",
+        "status": "succeeded",
+        "version": 32,
+        "attempts": 1,
+        "duration_ms": 82664,
+        "progress": {
+          "stage": "complete",
+          "total": 31
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 207.4851939159562,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.077971,
+        "time_starttransfer": 0.002196,
+        "size_upload": 0,
+        "size_download": 14755236
+      },
+      "download_wall_seconds": 0.1003311249660328,
+      "download_finished_unix": 1789456888.651496
+    },
+    {
+      "logical_id": "arxiv-2609.13019v1",
+      "basename": "2609.13019v1.pdf",
+      "sha256": "a8e0cdeb0a1b331d6c5d707921704f734c9fa09638a7603987c0177a93643d4f",
+      "size_bytes": 1498229,
+      "page_count": 54,
+      "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.706472,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.022207,
+        "time_starttransfer": 0.000602,
+        "size_upload": 1498440,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.03167112497612834,
+      "upload_finished_unix": 1789456681.738126,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+        "filename": "2609.13019v1.pdf",
+        "size_bytes": 1498229,
+        "created_at": "2026-09-15T07:18:01.732853+00:00",
+        "updated_at": "2026-09-15T07:22:40.838323+00:00",
+        "status": "succeeded",
+        "version": 52,
+        "attempts": 1,
+        "duration_ms": 142239,
+        "progress": {
+          "stage": "complete",
+          "total": 54
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 280.5679424579721,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.166733,
+        "time_starttransfer": 0.001892,
+        "size_upload": 0,
+        "size_download": 46088551
+      },
+      "download_wall_seconds": 0.18592616700334474,
+      "download_finished_unix": 1789456961.819965
+    },
+    {
+      "logical_id": "arxiv-2609.13100v1",
+      "basename": "2609.13100v1.pdf",
+      "sha256": "6f3f6ebd1638bec4fc799713425f04de13bf670f860a45b95b5be6d870d55ebc",
+      "size_bytes": 1146269,
+      "page_count": 58,
+      "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.706539,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.017154,
+        "time_starttransfer": 0.000432,
+        "size_upload": 1146480,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.026988749974407256,
+      "upload_finished_unix": 1789456681.733508,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+        "filename": "2609.13100v1.pdf",
+        "size_bytes": 1146269,
+        "created_at": "2026-09-15T07:18:01.723906+00:00",
+        "updated_at": "2026-09-15T07:22:48.364551+00:00",
+        "status": "succeeded",
+        "version": 53,
+        "attempts": 1,
+        "duration_ms": 150997,
+        "progress": {
+          "stage": "complete",
+          "total": 58
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 287.63622804096667,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.225707,
+        "time_starttransfer": 0.010709,
+        "size_upload": 0,
+        "size_download": 31216992
+      },
+      "download_wall_seconds": 0.25507920898962766,
+      "download_finished_unix": 1789456968.957581
+    },
+    {
+      "logical_id": "arxiv-2609.13141v1",
+      "basename": "2609.13141v1.pdf",
+      "sha256": "62c1c4bb7894430bf17f8025801f79907ee373f86c816ce3f01971a34524f2ef",
+      "size_bytes": 1080046,
+      "page_count": 26,
+      "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.7080598,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.019652,
+        "time_starttransfer": 0.000451,
+        "size_upload": 1080257,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.03189849999034777,
+      "upload_finished_unix": 1789456681.7399411,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+        "filename": "2609.13141v1.pdf",
+        "size_bytes": 1080046,
+        "created_at": "2026-09-15T07:18:01.736836+00:00",
+        "updated_at": "2026-09-15T07:22:15.478254+00:00",
+        "status": "succeeded",
+        "version": 27,
+        "attempts": 1,
+        "duration_ms": 71849,
+        "progress": {
+          "stage": "complete",
+          "total": 26
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 255.2658598749549,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.066056,
+        "time_starttransfer": 0.00204,
+        "size_upload": 0,
+        "size_download": 15861323
+      },
+      "download_wall_seconds": 0.09024004201637581,
+      "download_finished_unix": 1789456936.422057
+    },
+    {
+      "logical_id": "arxiv-2609.13144v1",
+      "basename": "2609.13144v1.pdf",
+      "sha256": "043c1fe5ef4d01938db7e3c8fd8768213e6fd9f43bf9785b5ca90fabfdec69c3",
+      "size_bytes": 2067371,
+      "page_count": 56,
+      "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.708162,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.021694,
+        "time_starttransfer": 0.000484,
+        "size_upload": 2067582,
+        "size_download": 327
+      },
+      "upload_wall_seconds": 0.032709082996007055,
+      "upload_finished_unix": 1789456681.740861,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+        "filename": "2609.13144v1.pdf",
+        "size_bytes": 2067371,
+        "created_at": "2026-09-15T07:18:01.737767+00:00",
+        "updated_at": "2026-09-15T07:23:42.416828+00:00",
+        "status": "succeeded",
+        "version": 52,
+        "attempts": 1,
+        "duration_ms": 133868,
+        "progress": {
+          "stage": "complete",
+          "total": 56
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 341.3733772499836,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.033022,
+        "time_starttransfer": 0.001299,
+        "size_upload": 0,
+        "size_download": 11851826
+      },
+      "download_wall_seconds": 0.05058279098011553,
+      "download_finished_unix": 1789457022.4905002
+    },
+    {
+      "logical_id": "arxiv-2609.13146v1",
+      "basename": "2609.13146v1.pdf",
+      "sha256": "4f7e2b204719aef43442f79218de4f48d0ea2d9e09fc8b91696588723786c593",
+      "size_bytes": 11848176,
+      "page_count": 17,
+      "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.733546,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.036339,
+        "time_starttransfer": 0.000581,
+        "size_upload": 11848387,
+        "size_download": 328
+      },
+      "upload_wall_seconds": 0.04552508401684463,
+      "upload_finished_unix": 1789456681.779056,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+        "filename": "2609.13146v1.pdf",
+        "size_bytes": 11848176,
+        "created_at": "2026-09-15T07:18:01.777178+00:00",
+        "updated_at": "2026-09-15T07:23:35.441063+00:00",
+        "status": "succeeded",
+        "version": 20,
+        "attempts": 1,
+        "duration_ms": 47072,
+        "progress": {
+          "stage": "complete",
+          "total": 17
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 335.2676038329955,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.035115,
+        "time_starttransfer": 0.001844,
+        "size_upload": 0,
+        "size_download": 7252400
+      },
+      "download_wall_seconds": 0.0627758750342764,
+      "download_finished_unix": 1789457016.3968608
+    },
+    {
+      "logical_id": "document-17",
+      "basename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "sha256": "8b81a9c5c48281884dc4a4922764a36ba0d6911593103b018fdebb9423e06b4a",
+      "size_bytes": 655258,
+      "page_count": 13,
+      "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.7381911,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.016421,
+        "time_starttransfer": 0.016292,
+        "size_upload": 655533,
+        "size_download": 390
+      },
+      "upload_wall_seconds": 0.028184291964862496,
+      "upload_finished_unix": 1789456681.766339,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+        "filename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+        "size_bytes": 655258,
+        "created_at": "2026-09-15T07:18:01.764147+00:00",
+        "updated_at": "2026-09-15T07:22:52.076656+00:00",
+        "status": "succeeded",
+        "version": 15,
+        "attempts": 1,
+        "duration_ms": 36594,
+        "progress": {
+          "stage": "complete",
+          "total": 13
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 291.6987488750019,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.034947,
+        "time_starttransfer": 0.00089,
+        "size_upload": 0,
+        "size_download": 10459914
+      },
+      "download_wall_seconds": 0.05164729105308652,
+      "download_finished_unix": 1789456972.816621
+    },
+    {
+      "logical_id": "document-18",
+      "basename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "sha256": "2d5495c2a82d2c0b6174192fedb5b87c4da63e7a049691f57e155a6789de3c13",
+      "size_bytes": 20830083,
+      "page_count": 24,
+      "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.740003,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.05137,
+        "time_starttransfer": 0.000443,
+        "size_upload": 20830356,
+        "size_download": 390
+      },
+      "upload_wall_seconds": 0.06072379200486466,
+      "upload_finished_unix": 1789456681.800701,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+        "filename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+        "size_bytes": 20830083,
+        "created_at": "2026-09-15T07:18:01.798601+00:00",
+        "updated_at": "2026-09-15T07:23:47.870747+00:00",
+        "status": "succeeded",
+        "version": 23,
+        "attempts": 1,
+        "duration_ms": 55791,
+        "progress": {
+          "stage": "complete",
+          "total": 24
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 347.41524333297275,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.048188,
+        "time_starttransfer": 0.001076,
+        "size_upload": 0,
+        "size_download": 11983762
+      },
+      "download_wall_seconds": 0.06581274996278808,
+      "download_finished_unix": 1789457028.54812
+    },
+    {
+      "logical_id": "document-19",
+      "basename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "sha256": "681041b9963b4fc0d0d633046ee5a26a4d3177050d51f697a232ab7458cd36dc",
+      "size_bytes": 922889,
+      "page_count": 32,
+      "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.741051,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.016786,
+        "time_starttransfer": 0.016701,
+        "size_upload": 923169,
+        "size_download": 395
+      },
+      "upload_wall_seconds": 0.028897833020891994,
+      "upload_finished_unix": 1789456681.769814,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+        "filename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+        "size_bytes": 922889,
+        "created_at": "2026-09-15T07:18:01.767083+00:00",
+        "updated_at": "2026-09-15T07:23:54.218356+00:00",
+        "status": "succeeded",
+        "version": 31,
+        "attempts": 1,
+        "duration_ms": 73373,
+        "progress": {
+          "stage": "complete",
+          "total": 32
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 353.4811998329824,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.044646,
+        "time_starttransfer": 0.001266,
+        "size_upload": 0,
+        "size_download": 12138439
+      },
+      "download_wall_seconds": 0.06300466600805521,
+      "download_finished_unix": 1789457034.6108239
+    },
+    {
+      "logical_id": "document-20",
+      "basename": "Towards Conversational AI for Disease Management.pdf",
+      "sha256": "31656acbb41a8768afae1dff1d68d6c4517d627ca1344581f9956334bb86d43c",
+      "size_bytes": 21270475,
+      "page_count": 42,
+      "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+      "phase": "corpus",
+      "upload_started_unix": 1789456681.766397,
+      "upload": {
+        "http_code": 202,
+        "time_total": 0.046128,
+        "time_starttransfer": 0.000344,
+        "size_upload": 21270722,
+        "size_download": 364
+      },
+      "upload_wall_seconds": 0.057819082983769476,
+      "upload_finished_unix": 1789456681.824193,
+      "observed_status": "succeeded",
+      "snapshot": {
+        "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+        "filename": "Towards Conversational AI for Disease Management.pdf",
+        "size_bytes": 21270475,
+        "created_at": "2026-09-15T07:18:01.822239+00:00",
+        "updated_at": "2026-09-15T07:24:10.657859+00:00",
+        "status": "succeeded",
+        "version": 37,
+        "attempts": 1,
+        "duration_ms": 35213,
+        "progress": {
+          "stage": "complete",
+          "total": 42
+        },
+        "error": null
+      },
+      "terminal_observed_seconds": 369.61088720796397,
+      "download": {
+        "http_code": 200,
+        "time_total": 0.020307,
+        "time_starttransfer": 0.001295,
+        "size_upload": 0,
+        "size_download": 7761057
+      },
+      "download_wall_seconds": 0.03767225000774488,
+      "download_finished_unix": 1789457050.715314
+    }
+  ]
+}

@@ -37,7 +37,7 @@ async function startServer(command, args, env, children) {
 /** Builds production artifacts and native references, then owns both test server lifetimes. */
 export async function prepareE2E() {
   run(process.execPath, [join(packageRoot, "scripts/build.mjs")]);
-  run(process.execPath, [join(packageRoot, "node_modules/typescript/bin/tsc"), "-p", join(packageRoot, "example/tsconfig.json")]);
+  run("npm", ["run", "build:example", "--prefix", packageRoot]);
   run("cargo", ["test", "-p", "docparse-core", "--locked", "--test", "web_reference", "--", "--ignored", "--nocapture"], {
     ...process.env, DOCPARSE_WEB_REFERENCE_DIR: join(packageRoot, "test-results/native"),
   });

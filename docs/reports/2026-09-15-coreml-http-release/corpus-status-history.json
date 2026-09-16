@@ -1,0 +1,1174 @@
+[
+  {
+    "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+    "status": "queued",
+    "observed_seconds": 0.7610481249867007,
+    "snapshot": {
+      "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+      "filename": "Towards Conversational AI for Disease Management.pdf",
+      "size_bytes": 21270475,
+      "created_at": "2026-09-15T07:18:01.822239+00:00",
+      "updated_at": "2026-09-15T07:18:01.822239+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+    "status": "queued",
+    "observed_seconds": 0.7610492910025641,
+    "snapshot": {
+      "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+      "filename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "size_bytes": 20830083,
+      "created_at": "2026-09-15T07:18:01.798601+00:00",
+      "updated_at": "2026-09-15T07:18:01.798601+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+    "status": "queued",
+    "observed_seconds": 0.7610496659763157,
+    "snapshot": {
+      "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+      "filename": "2609.13146v1.pdf",
+      "size_bytes": 11848176,
+      "created_at": "2026-09-15T07:18:01.777178+00:00",
+      "updated_at": "2026-09-15T07:18:01.777178+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+    "status": "queued",
+    "observed_seconds": 0.7610498750000261,
+    "snapshot": {
+      "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+      "filename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "size_bytes": 922889,
+      "created_at": "2026-09-15T07:18:01.767083+00:00",
+      "updated_at": "2026-09-15T07:18:01.767083+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+    "status": "queued",
+    "observed_seconds": 0.7610501250019297,
+    "snapshot": {
+      "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+      "filename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "size_bytes": 655258,
+      "created_at": "2026-09-15T07:18:01.764147+00:00",
+      "updated_at": "2026-09-15T07:18:01.764147+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+    "status": "queued",
+    "observed_seconds": 0.7610503750038333,
+    "snapshot": {
+      "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+      "filename": "2609.13144v1.pdf",
+      "size_bytes": 2067371,
+      "created_at": "2026-09-15T07:18:01.737767+00:00",
+      "updated_at": "2026-09-15T07:18:01.737767+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+    "status": "queued",
+    "observed_seconds": 0.7610506659839302,
+    "snapshot": {
+      "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+      "filename": "2609.13141v1.pdf",
+      "size_bytes": 1080046,
+      "created_at": "2026-09-15T07:18:01.736836+00:00",
+      "updated_at": "2026-09-15T07:18:01.736836+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+    "status": "queued",
+    "observed_seconds": 0.7610508329817094,
+    "snapshot": {
+      "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+      "filename": "2609.13019v1.pdf",
+      "size_bytes": 1498229,
+      "created_at": "2026-09-15T07:18:01.732853+00:00",
+      "updated_at": "2026-09-15T07:18:01.732853+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+    "status": "queued",
+    "observed_seconds": 0.7610510409576818,
+    "snapshot": {
+      "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+      "filename": "2609.13100v1.pdf",
+      "size_bytes": 1146269,
+      "created_at": "2026-09-15T07:18:01.723906+00:00",
+      "updated_at": "2026-09-15T07:18:01.723906+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+    "status": "queued",
+    "observed_seconds": 0.7610514159896411,
+    "snapshot": {
+      "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+      "filename": "2609.13008v1.pdf",
+      "size_bytes": 767298,
+      "created_at": "2026-09-15T07:18:01.706406+00:00",
+      "updated_at": "2026-09-15T07:18:01.706406+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+    "status": "queued",
+    "observed_seconds": 0.7610522079630755,
+    "snapshot": {
+      "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+      "filename": "2609.12973v1.pdf",
+      "size_bytes": 955018,
+      "created_at": "2026-09-15T07:18:01.695523+00:00",
+      "updated_at": "2026-09-15T07:18:01.695523+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+    "status": "queued",
+    "observed_seconds": 0.7610523749608546,
+    "snapshot": {
+      "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+      "filename": "2609.12610v1.pdf",
+      "size_bytes": 749161,
+      "created_at": "2026-09-15T07:18:01.676517+00:00",
+      "updated_at": "2026-09-15T07:18:01.676517+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+    "status": "queued",
+    "observed_seconds": 0.7610525829950348,
+    "snapshot": {
+      "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+      "filename": "2604.18583v1.pdf",
+      "size_bytes": 26668188,
+      "created_at": "2026-09-15T07:18:01.676504+00:00",
+      "updated_at": "2026-09-15T07:18:01.676504+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+    "status": "queued",
+    "observed_seconds": 0.7610527499928139,
+    "snapshot": {
+      "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+      "filename": "2604.18584v1.pdf",
+      "size_bytes": 9437000,
+      "created_at": "2026-09-15T07:18:01.635062+00:00",
+      "updated_at": "2026-09-15T07:18:01.635062+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+    "status": "queued",
+    "observed_seconds": 0.7610529160010628,
+    "snapshot": {
+      "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+      "filename": "2606.17056v1.pdf",
+      "size_bytes": 992264,
+      "created_at": "2026-09-15T07:18:01.621631+00:00",
+      "updated_at": "2026-09-15T07:18:01.621631+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+    "status": "queued",
+    "observed_seconds": 0.761053082998842,
+    "snapshot": {
+      "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+      "filename": "2604.21959v1.pdf",
+      "size_bytes": 122969,
+      "created_at": "2026-09-15T07:18:01.615119+00:00",
+      "updated_at": "2026-09-15T07:18:01.615119+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+    "status": "queued",
+    "observed_seconds": 0.7610532499966212,
+    "snapshot": {
+      "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+      "filename": "2603.01919v2.pdf",
+      "size_bytes": 10513591,
+      "created_at": "2026-09-15T07:18:01.549754+00:00",
+      "updated_at": "2026-09-15T07:18:01.549754+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+    "status": "queued",
+    "observed_seconds": 0.7610534579725936,
+    "snapshot": {
+      "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+      "filename": "2303.18223v16.pdf",
+      "size_bytes": 8577429,
+      "created_at": "2026-09-15T07:18:01.509098+00:00",
+      "updated_at": "2026-09-15T07:18:01.509098+00:00",
+      "status": "queued",
+      "version": 1,
+      "attempts": 0,
+      "duration_ms": null,
+      "progress": null,
+      "error": null
+    }
+  },
+  {
+    "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+    "status": "running",
+    "observed_seconds": 0.7610536660067737,
+    "snapshot": {
+      "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+      "filename": "2403.01632v4.pdf",
+      "size_bytes": 3111797,
+      "created_at": "2026-09-15T07:18:01.323585+00:00",
+      "updated_at": "2026-09-15T07:18:01.328349+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "scanning",
+        "total": 47
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+    "status": "running",
+    "observed_seconds": 0.7610538749722764,
+    "snapshot": {
+      "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+      "filename": "2410.05779v3.pdf",
+      "size_bytes": 1123301,
+      "created_at": "2026-09-15T07:18:01.251709+00:00",
+      "updated_at": "2026-09-15T07:18:01.325616+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+    "status": "running",
+    "observed_seconds": 1.7640004999702796,
+    "snapshot": {
+      "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+      "filename": "2604.21959v1.pdf",
+      "size_bytes": 122969,
+      "created_at": "2026-09-15T07:18:01.615119+00:00",
+      "updated_at": "2026-09-15T07:18:02.331753+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 3
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+    "status": "running",
+    "observed_seconds": 1.7640011659823358,
+    "snapshot": {
+      "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+      "filename": "2603.01919v2.pdf",
+      "size_bytes": 10513591,
+      "created_at": "2026-09-15T07:18:01.549754+00:00",
+      "updated_at": "2026-09-15T07:18:02.331763+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 23
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+    "status": "running",
+    "observed_seconds": 1.7640014580101706,
+    "snapshot": {
+      "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+      "filename": "2303.18223v16.pdf",
+      "size_bytes": 8577429,
+      "created_at": "2026-09-15T07:18:01.509098+00:00",
+      "updated_at": "2026-09-15T07:18:02.342389+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 24,
+        "stage": "scanning",
+        "total": 144
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+    "status": "running",
+    "observed_seconds": 6.812326874991413,
+    "snapshot": {
+      "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+      "filename": "2606.17056v1.pdf",
+      "size_bytes": 992264,
+      "created_at": "2026-09-15T07:18:01.621631+00:00",
+      "updated_at": "2026-09-15T07:18:07.804382+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 25
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+    "status": "succeeded",
+    "observed_seconds": 6.812327582971193,
+    "snapshot": {
+      "id": "e2d1b5f7-468d-4f48-8c29-43310794c546",
+      "filename": "2604.21959v1.pdf",
+      "size_bytes": 122969,
+      "created_at": "2026-09-15T07:18:01.615119+00:00",
+      "updated_at": "2026-09-15T07:18:07.299296+00:00",
+      "status": "succeeded",
+      "version": 7,
+      "attempts": 1,
+      "duration_ms": 5467,
+      "progress": {
+        "stage": "complete",
+        "total": 3
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+    "status": "running",
+    "observed_seconds": 39.17329979100032,
+    "snapshot": {
+      "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+      "filename": "2604.18584v1.pdf",
+      "size_bytes": 9437000,
+      "created_at": "2026-09-15T07:18:01.635062+00:00",
+      "updated_at": "2026-09-15T07:18:39.797702+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 32
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+    "status": "succeeded",
+    "observed_seconds": 39.173309749981854,
+    "snapshot": {
+      "id": "2edda7ec-258e-48e5-b7fe-1608c50861e8",
+      "filename": "2410.05779v3.pdf",
+      "size_bytes": 1123301,
+      "created_at": "2026-09-15T07:18:01.251709+00:00",
+      "updated_at": "2026-09-15T07:18:39.286899+00:00",
+      "status": "succeeded",
+      "version": 18,
+      "attempts": 1,
+      "duration_ms": 37960,
+      "progress": {
+        "stage": "complete",
+        "total": 16
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+    "status": "running",
+    "observed_seconds": 72.5963244579616,
+    "snapshot": {
+      "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+      "filename": "2604.18583v1.pdf",
+      "size_bytes": 26668188,
+      "created_at": "2026-09-15T07:18:01.676504+00:00",
+      "updated_at": "2026-09-15T07:19:13.475884+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+    "status": "succeeded",
+    "observed_seconds": 72.5963263749727,
+    "snapshot": {
+      "id": "6fd4cb16-7621-462c-9766-c60ab8681d4a",
+      "filename": "2603.01919v2.pdf",
+      "size_bytes": 10513591,
+      "created_at": "2026-09-15T07:18:01.549754+00:00",
+      "updated_at": "2026-09-15T07:19:13.472303+00:00",
+      "status": "succeeded",
+      "version": 22,
+      "attempts": 1,
+      "duration_ms": 71641,
+      "progress": {
+        "stage": "complete",
+        "total": 23
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+    "status": "running",
+    "observed_seconds": 87.8167235829751,
+    "snapshot": {
+      "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+      "filename": "2609.12610v1.pdf",
+      "size_bytes": 749161,
+      "created_at": "2026-09-15T07:18:01.676517+00:00",
+      "updated_at": "2026-09-15T07:19:28.741088+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 12
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+    "status": "succeeded",
+    "observed_seconds": 87.81673016597051,
+    "snapshot": {
+      "id": "d826d42e-bdc6-41ea-a768-a67d874d7b94",
+      "filename": "2606.17056v1.pdf",
+      "size_bytes": 992264,
+      "created_at": "2026-09-15T07:18:01.621631+00:00",
+      "updated_at": "2026-09-15T07:19:28.237237+00:00",
+      "status": "succeeded",
+      "version": 28,
+      "attempts": 1,
+      "duration_ms": 80933,
+      "progress": {
+        "stage": "complete",
+        "total": 25
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+    "status": "running",
+    "observed_seconds": 122.28283879096853,
+    "snapshot": {
+      "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+      "filename": "2609.12973v1.pdf",
+      "size_bytes": 955018,
+      "created_at": "2026-09-15T07:18:01.695523+00:00",
+      "updated_at": "2026-09-15T07:20:03.183250+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 24
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+    "status": "succeeded",
+    "observed_seconds": 122.28284254099708,
+    "snapshot": {
+      "id": "92563173-c669-4969-a862-5cbd8fe3c7a5",
+      "filename": "2604.18583v1.pdf",
+      "size_bytes": 26668188,
+      "created_at": "2026-09-15T07:18:01.676504+00:00",
+      "updated_at": "2026-09-15T07:20:02.677331+00:00",
+      "status": "succeeded",
+      "version": 19,
+      "attempts": 1,
+      "duration_ms": 49201,
+      "progress": {
+        "stage": "complete",
+        "total": 15
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+    "status": "running",
+    "observed_seconds": 125.35270379099529,
+    "snapshot": {
+      "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+      "filename": "2609.13008v1.pdf",
+      "size_bytes": 767298,
+      "created_at": "2026-09-15T07:18:01.706406+00:00",
+      "updated_at": "2026-09-15T07:20:05.879043+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+    "status": "succeeded",
+    "observed_seconds": 125.35270608298015,
+    "snapshot": {
+      "id": "f7435dcb-dc38-468e-acfd-074bf0e0c9d9",
+      "filename": "2609.12610v1.pdf",
+      "size_bytes": 749161,
+      "created_at": "2026-09-15T07:18:01.676517+00:00",
+      "updated_at": "2026-09-15T07:20:05.873837+00:00",
+      "status": "succeeded",
+      "version": 14,
+      "attempts": 1,
+      "duration_ms": 37633,
+      "progress": {
+        "stage": "complete",
+        "total": 12
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+    "status": "running",
+    "observed_seconds": 136.48019458295312,
+    "snapshot": {
+      "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+      "filename": "2609.13100v1.pdf",
+      "size_bytes": 1146269,
+      "created_at": "2026-09-15T07:18:01.723906+00:00",
+      "updated_at": "2026-09-15T07:20:17.366306+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+    "status": "succeeded",
+    "observed_seconds": 136.48019858298358,
+    "snapshot": {
+      "id": "8eaaf6ce-cf05-4481-b824-e8af313ad32a",
+      "filename": "2604.18584v1.pdf",
+      "size_bytes": 9437000,
+      "created_at": "2026-09-15T07:18:01.635062+00:00",
+      "updated_at": "2026-09-15T07:20:17.363281+00:00",
+      "status": "succeeded",
+      "version": 30,
+      "attempts": 1,
+      "duration_ms": 98067,
+      "progress": {
+        "stage": "complete",
+        "total": 32
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+    "status": "running",
+    "observed_seconds": 138.5940944160102,
+    "snapshot": {
+      "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+      "filename": "2609.13019v1.pdf",
+      "size_bytes": 1498229,
+      "created_at": "2026-09-15T07:18:01.732853+00:00",
+      "updated_at": "2026-09-15T07:20:19.098702+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 39,
+        "stage": "scanning",
+        "total": 54
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+    "status": "succeeded",
+    "observed_seconds": 138.59410724998452,
+    "snapshot": {
+      "id": "caac5201-c371-48c9-80bc-d35ef1a12535",
+      "filename": "2403.01632v4.pdf",
+      "size_bytes": 3111797,
+      "created_at": "2026-09-15T07:18:01.323585+00:00",
+      "updated_at": "2026-09-15T07:20:18.594476+00:00",
+      "status": "succeeded",
+      "version": 45,
+      "attempts": 1,
+      "duration_ms": 137267,
+      "progress": {
+        "stage": "complete",
+        "total": 47
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+    "status": "running",
+    "observed_seconds": 183.19335245800903,
+    "snapshot": {
+      "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+      "filename": "2609.13141v1.pdf",
+      "size_bytes": 1080046,
+      "created_at": "2026-09-15T07:18:01.736836+00:00",
+      "updated_at": "2026-09-15T07:21:04.128739+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 26
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+    "status": "succeeded",
+    "observed_seconds": 183.19336120795924,
+    "snapshot": {
+      "id": "f869dfef-40de-4221-8676-49bbb22563f9",
+      "filename": "2609.12973v1.pdf",
+      "size_bytes": 955018,
+      "created_at": "2026-09-15T07:18:01.695523+00:00",
+      "updated_at": "2026-09-15T07:21:03.623008+00:00",
+      "status": "succeeded",
+      "version": 26,
+      "attempts": 1,
+      "duration_ms": 60942,
+      "progress": {
+        "stage": "complete",
+        "total": 24
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+    "status": "running",
+    "observed_seconds": 207.48513962497236,
+    "snapshot": {
+      "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+      "filename": "2609.13144v1.pdf",
+      "size_bytes": 2067371,
+      "created_at": "2026-09-15T07:18:01.737767+00:00",
+      "updated_at": "2026-09-15T07:21:28.548266+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+    "status": "succeeded",
+    "observed_seconds": 207.48519333300646,
+    "snapshot": {
+      "id": "3bb68f36-f443-44e9-adc3-664caedf67a0",
+      "filename": "2609.13008v1.pdf",
+      "size_bytes": 767298,
+      "created_at": "2026-09-15T07:18:01.706406+00:00",
+      "updated_at": "2026-09-15T07:21:28.543547+00:00",
+      "status": "succeeded",
+      "version": 32,
+      "attempts": 1,
+      "duration_ms": 82664,
+      "progress": {
+        "stage": "complete",
+        "total": 31
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+    "status": "running",
+    "observed_seconds": 255.2658569579944,
+    "snapshot": {
+      "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+      "filename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "size_bytes": 655258,
+      "created_at": "2026-09-15T07:18:01.764147+00:00",
+      "updated_at": "2026-09-15T07:22:15.982479+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 13
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+    "status": "succeeded",
+    "observed_seconds": 255.2658596659894,
+    "snapshot": {
+      "id": "af9d768d-c1f0-4950-9c57-56410ee8154c",
+      "filename": "2609.13141v1.pdf",
+      "size_bytes": 1080046,
+      "created_at": "2026-09-15T07:18:01.736836+00:00",
+      "updated_at": "2026-09-15T07:22:15.478254+00:00",
+      "status": "succeeded",
+      "version": 27,
+      "attempts": 1,
+      "duration_ms": 71849,
+      "progress": {
+        "stage": "complete",
+        "total": 26
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+    "status": "running",
+    "observed_seconds": 280.567939999979,
+    "snapshot": {
+      "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+      "filename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "size_bytes": 922889,
+      "created_at": "2026-09-15T07:18:01.767083+00:00",
+      "updated_at": "2026-09-15T07:22:41.358964+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 32
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+    "status": "succeeded",
+    "observed_seconds": 280.5679422079702,
+    "snapshot": {
+      "id": "81dac2d4-43a7-4f0b-a4d9-d2cd38e764c0",
+      "filename": "2609.13019v1.pdf",
+      "size_bytes": 1498229,
+      "created_at": "2026-09-15T07:18:01.732853+00:00",
+      "updated_at": "2026-09-15T07:22:40.838323+00:00",
+      "status": "succeeded",
+      "version": 52,
+      "attempts": 1,
+      "duration_ms": 142239,
+      "progress": {
+        "stage": "complete",
+        "total": 54
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+    "status": "running",
+    "observed_seconds": 287.6362208749633,
+    "snapshot": {
+      "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+      "filename": "2609.13146v1.pdf",
+      "size_bytes": 11848176,
+      "created_at": "2026-09-15T07:18:01.777178+00:00",
+      "updated_at": "2026-09-15T07:22:48.368191+00:00",
+      "status": "running",
+      "version": 3,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "stage": "opening"
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+    "status": "succeeded",
+    "observed_seconds": 287.636227415991,
+    "snapshot": {
+      "id": "0768c8f2-bf04-4b15-a7e2-fc22fab574ba",
+      "filename": "2609.13100v1.pdf",
+      "size_bytes": 1146269,
+      "created_at": "2026-09-15T07:18:01.723906+00:00",
+      "updated_at": "2026-09-15T07:22:48.364551+00:00",
+      "status": "succeeded",
+      "version": 53,
+      "attempts": 1,
+      "duration_ms": 150997,
+      "progress": {
+        "stage": "complete",
+        "total": 58
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+    "status": "running",
+    "observed_seconds": 291.6987420829828,
+    "snapshot": {
+      "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+      "filename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "size_bytes": 20830083,
+      "created_at": "2026-09-15T07:18:01.798601+00:00",
+      "updated_at": "2026-09-15T07:22:52.580858+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 24
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+    "status": "succeeded",
+    "observed_seconds": 291.69874854100635,
+    "snapshot": {
+      "id": "90b52df8-1f9f-4ec0-bd40-bd353e9abcbd",
+      "filename": "SQLMorph_ Query Mutation and Fine-Grained Metrics for Text-to-SQL Evaluation.pdf",
+      "size_bytes": 655258,
+      "created_at": "2026-09-15T07:18:01.764147+00:00",
+      "updated_at": "2026-09-15T07:22:52.076656+00:00",
+      "status": "succeeded",
+      "version": 15,
+      "attempts": 1,
+      "duration_ms": 36594,
+      "progress": {
+        "stage": "complete",
+        "total": 13
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+    "status": "running",
+    "observed_seconds": 335.26759708300233,
+    "snapshot": {
+      "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+      "filename": "Towards Conversational AI for Disease Management.pdf",
+      "size_bytes": 21270475,
+      "created_at": "2026-09-15T07:18:01.822239+00:00",
+      "updated_at": "2026-09-15T07:23:35.946070+00:00",
+      "status": "running",
+      "version": 4,
+      "attempts": 1,
+      "duration_ms": null,
+      "progress": {
+        "completed": 0,
+        "stage": "analyzing",
+        "total": 42
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+    "status": "succeeded",
+    "observed_seconds": 335.2676034999895,
+    "snapshot": {
+      "id": "de58ec25-95f7-4ce7-b562-a3b9a808ebb9",
+      "filename": "2609.13146v1.pdf",
+      "size_bytes": 11848176,
+      "created_at": "2026-09-15T07:18:01.777178+00:00",
+      "updated_at": "2026-09-15T07:23:35.441063+00:00",
+      "status": "succeeded",
+      "version": 20,
+      "attempts": 1,
+      "duration_ms": 47072,
+      "progress": {
+        "stage": "complete",
+        "total": 17
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+    "status": "succeeded",
+    "observed_seconds": 341.3733630409697,
+    "snapshot": {
+      "id": "967449ab-d25d-4dc1-9bfd-1eae11bd1358",
+      "filename": "2609.13144v1.pdf",
+      "size_bytes": 2067371,
+      "created_at": "2026-09-15T07:18:01.737767+00:00",
+      "updated_at": "2026-09-15T07:23:42.416828+00:00",
+      "status": "succeeded",
+      "version": 52,
+      "attempts": 1,
+      "duration_ms": 133868,
+      "progress": {
+        "stage": "complete",
+        "total": 56
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+    "status": "succeeded",
+    "observed_seconds": 347.4152400830062,
+    "snapshot": {
+      "id": "a46fe039-8945-406e-9676-5be1a9e54b06",
+      "filename": "SyncWorld_ Visual Calibration Enables World Models as Zero-Shot Simulators.pdf",
+      "size_bytes": 20830083,
+      "created_at": "2026-09-15T07:18:01.798601+00:00",
+      "updated_at": "2026-09-15T07:23:47.870747+00:00",
+      "status": "succeeded",
+      "version": 23,
+      "attempts": 1,
+      "duration_ms": 55791,
+      "progress": {
+        "stage": "complete",
+        "total": 24
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+    "status": "succeeded",
+    "observed_seconds": 353.48119491600664,
+    "snapshot": {
+      "id": "640cca1e-17ad-432d-bd54-5bbc48d6937d",
+      "filename": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+      "size_bytes": 922889,
+      "created_at": "2026-09-15T07:18:01.767083+00:00",
+      "updated_at": "2026-09-15T07:23:54.218356+00:00",
+      "status": "succeeded",
+      "version": 31,
+      "attempts": 1,
+      "duration_ms": 73373,
+      "progress": {
+        "stage": "complete",
+        "total": 32
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+    "status": "succeeded",
+    "observed_seconds": 360.5416732499725,
+    "snapshot": {
+      "id": "aaa8a23b-8630-44dd-8d8c-0d2c0e3a8711",
+      "filename": "2303.18223v16.pdf",
+      "size_bytes": 8577429,
+      "created_at": "2026-09-15T07:18:01.509098+00:00",
+      "updated_at": "2026-09-15T07:24:00.763751+00:00",
+      "status": "succeeded",
+      "version": 144,
+      "attempts": 1,
+      "duration_ms": 358931,
+      "progress": {
+        "stage": "complete",
+        "total": 144
+      },
+      "error": null
+    }
+  },
+  {
+    "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+    "status": "succeeded",
+    "observed_seconds": 369.61088304099394,
+    "snapshot": {
+      "id": "9f7bca32-3e67-4d20-a8c8-b5550ef34411",
+      "filename": "Towards Conversational AI for Disease Management.pdf",
+      "size_bytes": 21270475,
+      "created_at": "2026-09-15T07:18:01.822239+00:00",
+      "updated_at": "2026-09-15T07:24:10.657859+00:00",
+      "status": "succeeded",
+      "version": 37,
+      "attempts": 1,
+      "duration_ms": 35213,
+      "progress": {
+        "stage": "complete",
+        "total": 42
+      },
+      "error": null
+    }
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "http": {
+    "status": "passed",
+    "job": "73c91f42-c0a2-4b79-86a6-2c5d50144c48",
+    "browser": "153.0.8010.48",
+    "pages": 16,
+    "formulas": 24,
+    "renderedAndCopied": 24,
+    "engines": [
+      "pp-formulanet-plus-s-onnx-cpu"
+    ]
+  },
+  "wasm": {
+    "status": "passed",
+    "browser": "153.0.8010.48",
+    "model": "pp-formulanet-plus-s",
+    "pages": 16,
+    "formulas": 24,
+    "labels": [
+      "display_formula",
+      "inline_formula"
+    ],
+    "formulaRequests": [
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/inference.onnx",
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/tokenizer.json",
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/model-manifest.json"
+    ],
+    "checks": [
+      "default-on",
+      "real-webgpu",
+      "latex-markdown-inspector",
+      "clipboard",
+      "narrow-viewport",
+      "warm-output-parity",
+      "off-no-download-or-inference",
+      "setting-change-rebuild"
+    ]
+  },
+  "rust_tests": {
+    "passed": 427,
+    "ignored": 33
+  },
+  "pre_commit": "passed",
+  "native_and_wasm_clippy": "passed",
+  "canonical_source_comparison": "unchanged block text, lines and text items",
+  "regressions": [
+    "UTF-8 byte spans",
+    "cross-line subscripts",
+    "ambiguous anchor fallback",
+    "invalid LaTeX preserves adjacent prose"
+  ]
+}

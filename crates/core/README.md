@@ -1,5 +1,11 @@
 # docparse-core
 
+Formula records retain the original layout `bbox`. When native glyph metrics
+justify completing a clipped formula or an adjacent script, `crop_bbox` records
+the refined inference bounds and `text_spans` includes the recovered source.
+The original text facts remain unchanged; ambiguous or estimated script geometry
+does not expand the crop.
+
 DocParse 的原生 PDF 文本提取、文档上下文、版面/文字融合、异步 parser、稳定 schema、关系和 JSON/Text/Markdown/SVG 输出 crate。
 
 主要入口是 `DocParser`/`DocParserBuilder`。自定义 layout/OCR 通过 `Arc<dyn LayoutEngine>` 与 `Arc<dyn OcrEngine>` 注入；默认解析运行 production PP-DocLayoutV3。完整 API 和 E2E 命令见仓库根目录 `README.md`。
@@ -134,7 +140,7 @@ spans, and header flags remain unchanged; the normal 80% ownership and complete
 UTF-8 coverage checks still apply afterward. Caller-provided engines default to
 `Declared` geometry and retain their supplied positions.
 
-`ParserArtifacts { layout, tsr }` provides explicit model bytes for native and Web.
+`ParserArtifacts::builder().layout(layout).tsr(tsr).ocr(ocr).formula(formula).build()` provides explicit model bytes for native and Web.
 Pass it to `DocParser::from_artifacts` or `DocParserBuilder::artifacts`; enabled
 TSR requires `Some(tsr)` unless a table engine is injected. Byte-based creation
 never falls back to configured model paths. A single layout `ModelArtifacts`

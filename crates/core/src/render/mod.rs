@@ -74,3 +74,111 @@ pub(crate) fn render_line(
     }
     rendered
 }
+
+/// Applies validated byte replacements without erasing surrounding source text or splitting UTF-8.
+pub(crate) fn replace_formula_ranges(
+    source: &str,
+    replacements: Vec<(Vec<std::ops::Range<usize>>, &str)>,
+    escape_prose: bool,
+) -> String {
+    let mut ordered = Vec::new();
+    for (mut spans, markdown) in replacements {
+        spans.retain(|range| source.get(range.clone()).is_some());
+        spans.sort_by_key(|range| (range.start, range.end));
+        let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+        for span in spans {
+            if let Some(last) = merged.last_mut()
+                && (span.start <= last.end
+                    || source.get(last.end..span.start).is_some_and(|gap| {
+                        gap.chars().all(char::is_whitespace)
+                    }))
+            {
+                last.end = last.end.max(span.end);
+            } else {
+                merged.push(span);
+            }
+        }
+        for (index, span) in merged.into_iter().enumerate() {
+            ordered.push((span, if index == 0 { markdown } else { "" }));
+        }
+    }
+    ordered.sort_by_key(|(range, _)| (range.start, range.end));
+    let mut result = String::new();
+    let mut consumed = 0;
+    let mut after_formula = false;
+    let append_source = |output: &mut String,
+                         text: &str,
+                         after_formula: bool| {
+        // Dollar math cannot close immediately before an ASCII word, including a PDF run with no space.
+        if after_formula
+            && text
+                .starts_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            output.push(' ');
+        }
+        for ch in text.chars() {
+            if ch == '$'
+                || (escape_prose
+                    && matches!(ch, '\\' | '*' | '_' | '[' | ']' | '`'))
+            {
+                output.push('\\');
+            }
+            output.push(ch);
+        }
+    };
+    for (range, markdown) in ordered {
+        if range.start > range.end || source.get(range.clone()).is_none() {
+            continue;
+        }
+        if range.start > consumed
+            && let Some(prefix) = source.get(consumed..range.start)
+        {
+            append_source(&mut result, prefix, after_formula);
+            after_formula = false;
+        }
+        if !markdown.is_empty() {
+            // Separate opening delimiters from words and neighboring formulas without changing punctuation or CJK spacing.
+            if result.ends_with(|ch: char| {
+                ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$')
+            }) {
+                result.push(' ');
+            }
+            result.push_str(markdown);
+            after_formula = true;
+        }
+        consumed = consumed.max(range.end);
+    }
+    if let Some(suffix) = source.get(consumed..) {
+        append_source(&mut result, suffix, after_formula);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replace_formula_ranges;
+
+    /// Inline math remains parseable beside PDF runs that omit spaces, without separating punctuation or CJK prose.
+    #[test]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "Each replacement contains source byte ranges, not byte positions."
+    )]
+    fn inline_formula_delimiters_have_word_boundaries() {
+        for (source, ranges, expected) in [
+            ("useSito", vec![(vec![3..5], "$S^{i}$")], "use $S^{i}$ to"),
+            ("2x3", vec![(vec![1..2], "$x$")], "2 $x$ 3"),
+            ("(x),", vec![(vec![1..2], "$x$")], "($x$),"),
+            ("中x文", vec![(vec![3..4], "$x$")], "中$x$文"),
+            ("use x next", vec![(vec![4..5], "$x$")], "use $x$ next"),
+            (
+                "xy",
+                vec![(vec![0..1], "$x$"), (vec![1..2], "$y$")],
+                "$x$ $y$",
+            ),
+            ("xi.next", vec![(vec![0..1, 1..2], "$x_i$")], "$x_i$.next"),
+        ] {
+            assert_eq!(replace_formula_ranges(source, ranges, true), expected);
+        }
+    }
+}

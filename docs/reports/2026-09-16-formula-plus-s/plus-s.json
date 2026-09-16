@@ -1,0 +1,150 @@
+{
+  "engine": "pp-formulanet-plus-s-onnx-cpu",
+  "first_and_batched": [
+    {
+      "duration_ms": 0.028833,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 0.5732499999999999,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 144.70545900000002,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.059333000000000004,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.009959,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.214917,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 442.162667,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.032833,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.026708,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.8840000000000001,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 638.673916,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.038458,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 1.326292,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 0.5582919999999999,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 143.607875,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.026416,
+      "page_number": null,
+      "stage": "formula_decode"
+    }
+  ],
+  "latex": [
+    "q \\in \\mathit { l i v e } ( Q ) \\mathit { i f f } \\exists w \\in \\Sigma ^ { * } \\mathit { s . t . } \\enspace \\delta ^ { * } ( w , q ) \\in F"
+  ],
+  "warm_single_crop": [
+    {
+      "duration_ms": 0.010667,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 0.566167,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 185.69012500000002,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.028666999999999998,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.013625000000000002,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 0.565333,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 144.41675,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.023708,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.010917000000000001,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 0.565834,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 140.150708,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.023083,
+      "page_number": null,
+      "stage": "formula_decode"
+    }
+  ]
+}

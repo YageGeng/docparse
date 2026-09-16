@@ -1,0 +1,100 @@
+{
+  "commit": "366ebdc0674397c9e2be269d721cc440910ed528",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "cpu": "Apple M4",
+  "memory_bytes": 17179869184,
+  "build_commands": [
+    "cargo build --release --locked -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker",
+    "cargo build --release --locked -p docparse-server --features coreml --bin docparse-server"
+  ],
+  "config": {
+    "server": {
+      "max_uploads": 100,
+      "worker_concurrency": 5,
+      "pdfium_max_workers": 5,
+      "host": "127.0.0.1",
+      "port": 8080,
+      "api_prefix": "/api/v1/docparse"
+    },
+    "runtime": {
+      "page_concurrency": 4,
+      "render_queue_capacity": 2,
+      "blocking_task_limit": 4,
+      "continue_on_page_error": true
+    },
+    "layout": {
+      "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-doclayout-v3/inference.onnx",
+      "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-doclayout-v3/inference.yml",
+      "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-doclayout-v3/model-manifest.json",
+      "score_threshold": 0.5,
+      "session_pool_size": 1
+    },
+    "render": {
+      "dpi": 144,
+      "max_long_edge_pixels": 2400
+    },
+    "ocr": {
+      "policy": "disabled",
+      "max_in_flight": 2,
+      "batch_size": 16,
+      "detection": {
+        "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/inference.onnx",
+        "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/inference.yml",
+        "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-det/model-manifest.json"
+      },
+      "recognition": {
+        "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/inference.onnx",
+        "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/inference.yml",
+        "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-ocrv6-medium-rec/model-manifest.json"
+      },
+      "orientation": {
+        "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/inference.onnx",
+        "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/inference.yml",
+        "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-lcnet-textline-ori/model-manifest.json"
+      }
+    },
+    "tsr": {
+      "mode": "tsr_only",
+      "model": "slanet_plus",
+      "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/slanet-plus/inference.onnx",
+      "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/slanet-plus/inference.yml",
+      "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/slanet-plus/model-manifest.json",
+      "max_in_flight": 8,
+      "timeout_ms": 60000,
+      "cell_detection": {
+        "enabled": true,
+        "model": "wireless",
+        "score_threshold": 0.3,
+        "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/inference.onnx",
+        "model_config_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/inference.yml",
+        "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/rtdetr-table-cell-wireless/model-manifest.json"
+      }
+    },
+    "formula": {
+      "enabled": true,
+      "batch_size": 4,
+      "timeout_ms": 120000,
+      "model_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-formulanet-plus-l/inference.onnx",
+      "tokenizer_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-formulanet-plus-l/tokenizer.json",
+      "model_manifest_path": "/Volumes/Yage/Documents/WorkSpace/docparse/models/pp-formulanet-plus-l/model-manifest.json"
+    },
+    "output": {
+      "formula_placeholder": "[formula]",
+      "include_evidence": true,
+      "include_diagnostics": false
+    }
+  },
+  "poll_interval_seconds": 1,
+  "upload_concurrency": 4,
+  "download_concurrency": 2,
+  "url": "http://127.0.0.1:8080/api/v1/docparse",
+  "binary_sha256": {
+    "docparse-server": "e09aa3c11231b69da868572440131f03943c5674e70e2a3c0786165e21e6a289",
+    "docparse-pdfium-worker": "7e2d0a49ba950e470d5db53cbc6a936b214812d342017ba6cf247317bcd454ee"
+  },
+  "log_filter": "warn,docparse_server=info,docparse_layout::wasm_compat::backend=info,docparse_tsr::model=info,docparse_layout::timing=debug,ort=warn",
+  "started_at": "2026-09-15T10:38:06.858786+00:00",
+  "server_pid": 2729,
+  "startup_to_ready_seconds": 11.634570957976393,
+  "server_exit_code": 0
+}

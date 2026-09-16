@@ -4,6 +4,7 @@ import type { PageResult, Table } from "@/api/client";
 import { blockLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FormulaView, MathPreview } from "./FormulaView";
 
 /** Presents canonical table cells with their original row/column spans and escaped text content. */
 function TableView({ table }: { table: Table }) {
@@ -24,7 +25,7 @@ function TableView({ table }: { table: Table }) {
                       rowSpan={cell.row_span}
                       colSpan={cell.column_span}
                     >
-                      {cell.text}
+                      {cell.markdown ? <MathPreview source={cell.markdown} format="markdown" preserveProse /> : cell.text}
                     </Cell>
                   );
                 })}
@@ -56,7 +57,7 @@ export function ResultInspector({
   const json = useMemo(
     () =>
       tab === "json" && page
-        ? JSON.stringify(selectedBlock ?? page, null, 2)
+        ? JSON.stringify(selectedBlock ? { ...selectedBlock, formulas: page.formulas?.filter(formula => formula.block_id === selectedBlock.id) ?? [] } : page, null, 2)
         : "",
     [tab, page, selectedBlock],
   );
@@ -77,8 +78,8 @@ export function ResultInspector({
     const text =
       tab === "json"
         ? json
-        : (selectedBlock?.text ??
-          page?.blocks.map((block) => block.text).join("\n\n") ??
+        : (selectedBlock?.markdown ?? selectedBlock?.text ??
+          page?.blocks.map((block) => block.markdown ?? block.text).join("\n\n") ??
           "");
     try {
       await navigator.clipboard.writeText(text);
@@ -172,7 +173,8 @@ export function ResultInspector({
                   </button>
                   {block.table ? (
                     <TableView table={block.table} />
-                  ) : (
+                  ) : (["inline_formula", "display_formula"].includes(typeof block.label === "string" ? block.label : "") && page.formulas?.some(formula => formula.block_id === block.id && formula.latex)) ? null : (
+                    block.markdown ? <div className="inline-prose"><MathPreview source={block.markdown} format="markdown" preserveProse /></div> :
                     <p
                       className={
                         block.label === "doc_title" ||
@@ -184,8 +186,10 @@ export function ResultInspector({
                       {block.text || "此区域没有可提取的文字。"}
                     </p>
                   )}
+                  {block.markdown ? <details className="formula-details"><summary>公式详情与复制</summary><FormulaView formulas={page.formulas?.filter(formula => formula.block_id === block.id) ?? []} /></details> : <FormulaView formulas={page.formulas?.filter(formula => formula.block_id === block.id) ?? []} />}
                 </article>
               ))}
+              <FormulaView formulas={page.formulas?.filter(formula => !formula.block_id) ?? []} />
               {!page.blocks.length && (
                 <p className="p-5 text-sm text-muted-foreground">
                   这一页没有检测到内容区域。

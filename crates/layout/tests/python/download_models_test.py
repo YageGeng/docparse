@@ -27,6 +27,18 @@ def load_script_module():
 class DownloadModelsTest(unittest.TestCase):
     """Exercises downloads without accessing the network."""
 
+    def test_formula_model_has_matching_pinned_tokenizer(self):
+        """Both supported formula variants retain their own graph and the matching BPE tokenizer."""
+        for name, digest in [
+            ("pp-formulanet-plus-s", "449d205c8fb2fe0a9b134a5e4a0f2421c2e7812fd902ea67dfda4e9ef4588978"),
+            ("pp-formulanet-plus-l", "b4924d69c731365048de3d11a5d1829f3dfd8b98b4dbfd82437f934c2611934f"),
+        ]:
+            self.assertIn(name, self.module.MODEL_NAMES)
+            model = self.module.Model.from_name(name)
+            self.assertEqual([artifact.filename for artifact in model.artifacts], ["inference.onnx", "tokenizer.json"])
+            self.assertEqual(model.artifacts[0].sha256, digest)
+            self.assertEqual(model.artifacts[1].sha256, "2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2")
+
     def test_table_comparison_models_have_pinned_artifact_pairs(self):
         """Every selectable table model can be provisioned with immutable model and YAML identities."""
         for name in ("slanext-wired", "slanext-wireless", "rtdetr-table-cell-wired", "rtdetr-table-cell-wireless"):

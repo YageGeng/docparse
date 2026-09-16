@@ -10,23 +10,24 @@ description = "Native PDF extraction and layout-text fusion for docparse"
 [features]
 default = []
 pdfium-ipc = ["dep:ipc-channel", "dep:tracing-subscriber"]
-wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
-ocr-coreml = ["docparse-ocr/coreml"]
-ocr-cuda = ["docparse-ocr/cuda"]
-ocr-metal = ["docparse-ocr/metal"]
-ocr-openvino = ["docparse-ocr/openvino"]
-layout-metal = ["docparse-layout/metal"]
-tsr-coreml = ["docparse-tsr/coreml"]
-tsr-cuda = ["docparse-tsr/cuda"]
-tsr-metal = ["docparse-tsr/metal"]
-tsr-openvino = ["docparse-tsr/openvino"]
-layout-coreml = ["docparse-layout/coreml"]
-layout-cuda = ["docparse-layout/cuda"]
-layout-openvino = ["docparse-layout/openvino"]
+wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
+ocr-coreml = ["docparse-ocr/coreml", "docparse-formula/coreml"]
+ocr-cuda = ["docparse-ocr/cuda", "docparse-formula/cuda"]
+ocr-metal = ["docparse-ocr/metal", "docparse-formula/metal"]
+ocr-openvino = ["docparse-ocr/openvino", "docparse-formula/openvino"]
+layout-metal = ["docparse-layout/metal", "docparse-formula/metal"]
+tsr-coreml = ["docparse-tsr/coreml", "docparse-formula/coreml"]
+tsr-cuda = ["docparse-tsr/cuda", "docparse-formula/cuda"]
+tsr-metal = ["docparse-tsr/metal", "docparse-formula/metal"]
+tsr-openvino = ["docparse-tsr/openvino", "docparse-formula/openvino"]
+layout-coreml = ["docparse-layout/coreml", "docparse-formula/coreml"]
+layout-cuda = ["docparse-layout/cuda", "docparse-formula/cuda"]
+layout-openvino = ["docparse-layout/openvino", "docparse-formula/openvino"]
 
 [dependencies]
 # workspace crates
 docparse-config.workspace = true
+docparse-formula.workspace = true
 docparse-layout.workspace = true
 docparse-ocr.workspace = true
 docparse-tsr.workspace = true

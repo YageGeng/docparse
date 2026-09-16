@@ -123,3 +123,27 @@ The generator also reads `DOCPARSE_OPENAPI_URL` from `.env.local`.
 Browser acceptance uses the production release CUDA server with isolated
 PostgreSQL/storage and real PDFs. Frontend unit tests are not required by this
 repository; backend contract and persistence regressions live in crate `tests/`.
+
+## Formula previews
+
+The content inspector renders recognized inline/display formulas in both LaTeX
+and Markdown views using KaTeX. Copy buttons copy the exact corresponding JSON
+source, including Markdown delimiters. Formula-only regions show the recognized
+math. Paragraphs use the backend-projected `block.markdown` to typeset inline
+formulas at their original UTF-8 source ranges, preserving adjacent prose.
+Formula details and individual source-copy actions are collapsed below such
+paragraphs; the content copy action copies their Markdown source. Older stored
+results without this optional projection retain the previous view until reparsed. Table-cell Markdown renders
+its embedded formulas, and formulas without a block anchor remain visible.
+Selected-region JSON includes its associated formula records.
+
+Markdown raw HTML and automatic image loading are disabled. LaTeX trusted
+commands are disabled, with bounded macro expansion and layout size. Unsupported
+LaTeX shows an explicit preview error while retaining the source copy buttons.
+Fonts and rendering libraries are served locally.
+
+Verify against the production server and built workbench:
+
+```sh
+rtk proxy node crates/server/tests/formula_web.mjs /absolute/path/to/formulas.pdf
+```

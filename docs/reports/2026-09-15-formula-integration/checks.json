@@ -1,0 +1,20 @@
+{
+  "regular_rust_tests": {
+    "passed": 347,
+    "ignored": 20
+  },
+  "pre_commit": [
+    "platform boundary",
+    "rustfmt",
+    "clippy"
+  ],
+  "model_provisioning_tests": 10,
+  "sdk_typescript": "passed",
+  "workbench_typescript": "passed",
+  "real_model_batches": [
+    1,
+    2,
+    3
+  ],
+  "native_cancellation_reuse": "passed"
+}

@@ -1,0 +1,10 @@
+{
+  "documents": 3,
+  "pages": 73,
+  "formulas": 45,
+  "failed_formulas": 0,
+  "http_seconds": 185.0796725830296,
+  "source_conservation": "Exact block JSON after excluding derived cell markdown and run-local TSR request IDs",
+  "formula_backend": "cpu compatibility executor",
+  "layout_backend": "coreml"
+}

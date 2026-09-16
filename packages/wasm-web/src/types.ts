@@ -9,17 +9,19 @@ export interface Point { x: number; y: number }
 /** Original region geometry retained when several candidates become one content layout. */
 export interface SourceRegionEvidence { label?: string; model_region_id: string | null; fallback_region_id: string | null; bbox: Bbox; polygon: Point[] | null; geometry_source: string; confidence: number | null; model_order: number | null }
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; [key: string]: unknown }
 /** A non-owning source slice. Byte offsets address UTF-8, not JavaScript UTF-16 strings. */
 export interface TableTextSpan { text_item_id: string; byte_range: { start: number; end: number }; bbox: Bbox }
 /** Cell-local physical line with the original source references. */
 export interface TableCellLine { text: string; bbox: Bbox; spans: TableTextSpan[] }
 /** A zero-based logical cell; covered positions do not appear as duplicate cells. */
-export interface TableCell { row: number; column: number; row_span: number; column_span: number; bbox: Bbox | null; is_header: boolean; text: string; lines: TableCellLine[] }
+export interface TableCell { row: number; column: number; row_span: number; column_span: number; bbox: Bbox | null; is_header: boolean; text: string; markdown?: string; lines: TableCellLine[] }
 /** A recovered table view; source distinguishes local tagged/rule/alignment recovery from external_tsr input. Original TextItems remain owned by the parent block's lines. */
 export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" | "external_tsr" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
-export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; replaced_native_text?: TextItem[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
+export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; formulas?: FormulaResult[]; replaced_native_text?: TextItem[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
+/** Formula output includes both representations; failures retain geometry and an explicit error. */
+export interface FormulaResult { engine: string; id: string; label: "inline_formula" | "display_formula"; bbox: Bbox; crop_bbox?: Bbox; block_id: string | null; line_id: string | null; text_item_range: { start: number; end: number } | null; text_spans?: TableTextSpan[]; table_cell: [number, number] | null; latex: string | null; markdown: string | null; error: string | null }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */
 export interface PageWarning { code: string; stage: string; message: string }
 /** The same JSON-compatible document aggregate emitted by native DocParse. */
@@ -36,6 +38,11 @@ export type ModelSource =
   | { kind: "urls"; model: string; config: string; manifest: string }
   | { kind: "bytes"; model: Uint8Array; config: Uint8Array; manifest: Uint8Array };
 
+/** PP-FormulaNet uses a pinned BPE tokenizer instead of a model YAML configuration. */
+export type FormulaSource =
+  | { kind: "urls"; model: string; tokenizer: string; manifest: string }
+  | { kind: "bytes"; model: Uint8Array; tokenizer: Uint8Array; manifest: Uint8Array };
+
 /** Independently pinned detection, recognition and optional line-orientation models. */
 export interface OcrArtifacts { detection: ModelSource; recognition: ModelSource; orientation?: ModelSource }
 /** Shared OCR settings; model bytes and the runtime backend are supplied separately. */
@@ -50,6 +57,7 @@ export interface OcrOptions {
 
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
+  formula?: { enabled?: boolean; batch_size?: number; timeout_ms?: number };
   layout?: { score_threshold?: number; session_pool_size?: number };
   tsr?: TableOptions & { model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; model?: "wired" | "wireless"; score_threshold?: number } };
   runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
@@ -71,6 +79,8 @@ export interface WebParserOptions {
   tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
+  /** Required when config.formula.enabled is true. */
+  formulaArtifacts?: FormulaSource;
   runtimeBaseUrl?: string;
   /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */
   executionProvider?: ExecutionProvider;
@@ -92,7 +102,7 @@ export type ParserProgress =
  * These observations never enter DocumentResult. A duration is not proof of stage success.
  */
 export interface ParserTiming {
-  stage: "runtime_load" | "model_download" | "model_init" | "pdfium_queue" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "table_cell_preprocess" | "table_cell_inference" | "table_cell_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
+  stage: "formula_queue" | "formula_preprocess" | "formula_inference" | "formula_decode" | "runtime_load" | "model_download" | "model_init" | "pdfium_queue" | "pdf_open" | "text_extract" | "document_context" | "pdf_render" | "layout_preprocess" | "layout_queue" | "layout_inference" | "layout_readback" | "layout_postprocess" | "text_prepare" | "ocr" | "ocr_detection_preprocess" | "ocr_detection_inference" | "ocr_detection_postprocess" | "ocr_queue" | "ocr_orientation_inference" | "ocr_recognition_preprocess" | "ocr_recognition_inference" | "ocr_readback" | "ocr_decode" | "text_finish" | "table_structure" | "table_rules" | "table_external" | "table_fill" | "tsr_preprocess" | "tsr_queue" | "tsr_inference" | "tsr_postprocess" | "table_cell_preprocess" | "table_cell_inference" | "table_cell_postprocess" | "link_validate" | "parse_total" | "result_serialize" | "preview_encode" | "worker_total";
   page_number: number | null;
   duration_ms: number;
 }

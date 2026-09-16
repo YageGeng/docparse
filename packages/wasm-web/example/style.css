@@ -47,6 +47,8 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400
 .engine-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 5px 0; font-size: 11px; color: #697c5e; }
 .engine-bar select { width: auto; max-width: 100%; }
 .engine-bar span { color: #7f8e73; }
+.formula-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.formula-toggle input { accent-color: var(--accent); }
 .status-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 65px; padding: 12px 5px; }
 .status-copy { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .status-symbol { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e8eee0; color: #7c936c; font-size: 15px; flex-shrink: 0; }
@@ -148,6 +150,16 @@ body[data-has-selection="true"] .text-card { border-color: #c7d9b6; }
 .muted { font-size: 10px; color: #879a77; line-height: 1.6; }
 #copy-status { min-height: 16px; margin: 5px 0 0; text-align: center; }
 .inspector-note { font-size: 10px; color: #8a987a; line-height: 1.7; margin: 13px 0 0; }
+.formula-result { padding: 12px 0; border-top: 1px solid var(--line); }
+.formula-result h3 { margin: 0 0 12px; font-size: 13px; }
+.formula-result strong { display: block; margin-top: 10px; font-size: 11px; }
+.formula-preview { min-width: 0; overflow-x: auto; padding: 8px 0; white-space: normal; font-size: 13px; }
+.formula-preview .katex-display { margin: .5em 0; text-align: left; }
+.formula-preview p { margin: 0; }
+.table-view .katex-display { margin: 0; }
+.extracted-text.inline-prose { white-space: normal; }
+.extracted-text.inline-prose p { margin: 0; }
+.formula-details > summary { cursor: pointer; padding: 8px 0; font-size: 11px; color: #697c5e; }
 .page-warnings { color: #a27e4f; font-size: 9px; line-height: 1.7; margin: 9px 0 0; }
 .app-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: 9px; line-height: 1.6; color: #9bab8b; }
 .app-footer .status-dot { margin-right: 5px; width: 4px; height: 4px; }

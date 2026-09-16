@@ -794,6 +794,17 @@ button:disabled {
   color: #53667f;
   tab-size: 2;
 }
+
+.formula-result { margin: 12px 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.formula-result h3 { font-size: 12px; font-weight: 600; }
+.formula-representation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted-foreground); }
+.formula-preview { min-width: 0; overflow-x: auto; padding: 6px 0; white-space: normal; }
+.formula-preview .katex-display { margin: .5em 0; text-align: left; }
+.formula-preview p { margin: 0; }
+.formula-render-error { font-size: 12px; color: #a55b24; }
+.inline-prose { font-size: 12px; line-height: 1.85; }
+.inline-prose .formula-preview { overflow-x: visible; overflow-wrap: anywhere; }
+.formula-details > summary { cursor: pointer; margin-top: 8px; font-size: 11px; color: var(--muted-foreground); }
 .page-warnings {
   padding: 10px 14px;
   margin: 12px;

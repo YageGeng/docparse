@@ -1,0 +1,48 @@
+{
+  "rust_tests": {
+    "passed": 425,
+    "ignored": 33
+  },
+  "provisioning_tests": 10,
+  "pre_commit": "passed",
+  "http": {
+    "status": "passed",
+    "job": "b365a75a-89ac-46dc-9692-2de86b124636",
+    "browser": "153.0.8010.48",
+    "pages": 16,
+    "formulas": 24,
+    "renderedAndCopied": 24,
+    "engines": [
+      "pp-formulanet-plus-s-onnx-cpu"
+    ]
+  },
+  "wasm": {
+    "status": "passed",
+    "browser": "153.0.8010.48",
+    "model": "pp-formulanet-plus-s",
+    "pages": 16,
+    "formulas": 24,
+    "labels": [
+      "display_formula",
+      "inline_formula"
+    ],
+    "formulaRequests": [
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/inference.onnx",
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/tokenizer.json",
+      "http://127.0.0.1:60408/models/pp-formulanet-plus-s/model-manifest.json"
+    ],
+    "checks": [
+      "default-on",
+      "real-webgpu",
+      "latex-markdown-inspector",
+      "clipboard",
+      "narrow-viewport",
+      "warm-output-parity",
+      "off-no-download-or-inference",
+      "setting-change-rebuild"
+    ]
+  },
+  "render_security_checks": "passed",
+  "production_http_build": "passed",
+  "wasm_example_bundle": "passed"
+}

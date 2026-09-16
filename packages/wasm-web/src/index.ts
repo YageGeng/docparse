@@ -78,9 +78,12 @@ class WorkerParser implements DocParser {
       recognition: WorkerParser.transferSource(options.ocrArtifacts.recognition, transfers),
       orientation: options.config?.ocr?.classify_orientation !== false && options.ocrArtifacts.orientation ? WorkerParser.transferSource(options.ocrArtifacts.orientation, transfers) : undefined,
     } : undefined;
+    const formulaSource = options.formulaArtifacts;
+    if (options.config?.formula?.enabled && !formulaSource) throw new DocParseError("FormulaArtifactsRequired", "Formula recognition requires a supported PP-FormulaNet model, tokenizer and manifest artifacts");
+    const formulaArtifacts = options.config?.formula?.enabled && formulaSource ? WorkerParser.transferSource(formulaSource.kind === "urls" ? { ...formulaSource, config: formulaSource.tokenizer } : { ...formulaSource, config: formulaSource.tokenizer }, transfers) : undefined;
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
-    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
+    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, formulaArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
     this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress, onTiming: options.onTiming });
   }
 

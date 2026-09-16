@@ -1,0 +1,778 @@
+{
+  "rustTarget": "wasm32-unknown-unknown",
+  "ort": "2.0.0-rc.13",
+  "ortWeb": "0.3.0+1.27",
+  "onnxruntimeWeb": "1.27.0",
+  "wasmBindgen": "0.2.125",
+  "pdfium": "chromium/8028",
+  "pdfiumLibraries": {
+    "libpdfium.a": "df912cae40f147e238e7fac5e75132ff430620e6620e840080bf0b1010036e1b",
+    "libc.a": "2757f3632939c6d87e5cd17181344759832cbb9c49284bc16965e7c9ed5f4e3b",
+    "libc++.a": "f941aadefc899fa4fb74a4fc6374b4447b7ede0231c7e22d818d3ae993072a99",
+    "libc++abi.a": "09493090cafca999dd5015af064a36e295a15ee8cb70409d08fb025da3e6c667",
+    "libwasi-emulated-mman.a": "e14c521e8e101fdf41e464ca5195db4a839a06e0e44be49ca26f31969fd0d72b",
+    "libwasi-emulated-signal.a": "799adc0ff263a94060036d30304862a4655041f3f6ecd2eab45da24fc2780eae",
+    "libsetjmp.a": "e512904ff325a639ed14196b500b11d0b1302d5c8939e731153ec898452f8454"
+  },
+  "optimization": {
+    "binaryen": "132.0.0",
+    "flags": [
+      "-O4",
+      "--enable-simd",
+      "--enable-reference-types",
+      "--enable-bulk-memory",
+      "--enable-mutable-globals",
+      "--enable-nontrapping-float-to-int",
+      "--enable-sign-ext",
+      "--enable-exception-handling"
+    ],
+    "beforeBytes": 14607806,
+    "afterBytes": 10164339,
+    "durationMs": 146585.52933299998
+  },
+  "imports": [
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_next_0c4066e251d2eff9",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_done_b62d4a7d2286852a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_value_49f783bb59765962",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_length_c6054974c0a6cdb9",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_get_197a3fe98f169e38",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_get_unchecked_54a4374c38e08460",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_instanceof_Map_afa18d5840c04c15",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_call_5575218572ead796",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_initRuntime_e5e6a513f1d18e46",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_webparser_new",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_getData_1b8044301ffc7d79",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_set_dc601f4a69da0bc2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_set_9a1d61e17de7054c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_typed_00a409eb4ec4f2d9",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_resolve_d82363d90af6928a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_then_05edfc8a4fea5106",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_push_f724b5db8acf89d2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_apply_b37ddce350829e95",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_setTimeout_7a77c25e49f3f7fe",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_clearTimeout_07e6aedc792d89d8",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_getRandomValues_3f44b700395062e5",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_sizes_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "clock_time_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_close",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_fdstat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_fdstat_set_flags",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_dir_name",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_read",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_readdir",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_seek",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_write",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_filestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_open",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_remove_directory",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_unlink_file",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "proc_exit",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_dispose_bcc318d96d38e9b7",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_create_8f5a33c6bfe341e8",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_toString_cfdf82d318967c36",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_trackSessionInit_a492d3a59889a1ae",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_create_ab62f00735deac66",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_data_926466624da78512",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_run_625e276ccedc1f23",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_inputNames_379bb0f6b0bbddb0",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_outputNames_e4fd207c684625a6",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_from_buffer_raw_913772a28563e085",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_location_b0c2e70b6a815475",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_slice_a9dfe1d05a7a4016",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_inputMetadata_5ab975ce7a9db793",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_outputMetadata_7800f416aa5ef49d",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_release_7864efd012c5f9d9",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_configureMemory_6bd5565860f6e272",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_stableTensorData_2f9c69c1168c2621",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_type_36ea46c1a40b10d2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_dims_9f13b995a90df835",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_get_with_ref_key_6412cf3094599694",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_set_6be42768c690e380",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_String_8564e559799eccda",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_log_6b5af08dd293697f",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_error_933f449d72fef598",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_performance_3fcf6e32a7e1ed0a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_now_e7c6795a7f81e10f",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_then_591b6b3a75ee817a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_iterator_cc47ba25a2be735a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_get_9a29be2cb383ed9a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_call_8e98ed2f3c86c4b5",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_next_402fa10b59ab20c3",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_2e117a478906f062",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_36e147a8ced3c6e0",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_isArray_145a34fd0a38d37b",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_e66a4b7758dd2e5c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_3444eb7412549f0b",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_isSafeInteger_a3389a198582f5f6",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_entries_c261c3fa1f281256",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_d0622e1df06e71a1",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_length_589238bdcf171f0e",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_prototypesetcall_d721637c7ca66eb8",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_set_0bf1fca872bc6d18",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_793583df958b3ae2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_05efc4acc152457e",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_byteLength_564c2b9b251b8b6c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_byteOffset_10f01f7956bb8fe3",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_81880fb5002cb255",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_9b650f44b5c44a4e",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_from_slice_543b875b27789a8f",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_byte_offset_and_length_f2b65504a914f37a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_buffer_9e4d98d0766fb908",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_ecf42de9ee25651c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_66ae39fdd9da8c1f",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_3f188e379a8c6a4d",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_711111a7d776e50c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_13d615bf4acf5111",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_new_with_length_0ce56ac4a04c4839",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_static_accessor_GLOBAL_THIS_2fee5048bcca5938",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_static_accessor_SELF_44f6e0cb5e67cdad",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_static_accessor_GLOBAL_ce44e66a4935da8c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_static_accessor_WINDOW_168f178805d978fe",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_instanceof_ArrayBuffer_2a7bb09fee70c2da",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_instanceof_Uint8Array_f080092dc70f5d58",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_queueMicrotask_1c9b3800e321a967",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_queueMicrotask_311744e534a929a3",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_get_dddb90ff5d27a080",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_set_4564f7dc44fcb0c9",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_ownKeys_9c0857bab4917919",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_number_get_1cc01dd708740256",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_in_4990f46af709e33c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_throw_ea4887a5f8f9a9db",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_null_6d937fbfb6478470",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_jsval_eq_4e8c38722cb8ff51",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_Number_c4bdf66bb78f7977",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg_Error_fdd633d4bb5dd76a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_bigint_90b5ccfe67c78460",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_object_0beba4a1980d3eea",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_string_1fca8072260dd261",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_string_get_71bb4348194e31f0",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_boolean_get_edaed31a367ce1bd",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_function_acc5528be2b923f2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_is_undefined_721f8decd50c87a3",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_jsval_loose_eq_4b9aba9e5b3c4582",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_bigint_get_as_i64_d9e915702856f831",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_memory_9751d9a3017e7c25",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg__wbg_cb_unref_33c39e13d73b25f6",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbg___wbindgen_debug_string_8a447059637473e2",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_init_externref_table",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000001",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000002",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000003",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000004",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000005",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000006",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000007",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000008",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000009",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000a",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000b",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000c",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000d",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000e",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_000000000000000f",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000010",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000011",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_cast_0000000000000012",
+      "kind": "function"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_jstag",
+      "kind": "tag"
+    },
+    {
+      "module": "./docparse_web_bg.js",
+      "name": "__wbindgen_wrapped_jstag",
+      "kind": "tag"
+    }
+  ],
+  "hashes": {
+    "ort/ort.wasm.min.mjs": "9608e98a3fba9716f0cbd0bca0c94808b71dae2e9265ca3fe742ddc393a53ebc",
+    "ort/ort-wasm-simd-threaded.mjs": "0a1e718d99c41b22c21f2520ff4f9e883a6b5533856e398d21816ee8eb8185d3",
+    "ort/ort-wasm-simd-threaded.wasm": "d1ab1b94b16a65b29d710d0b587b29e7bed336827577623913479b8afe8113e6",
+    "ort/ort.webgpu.min.mjs": "46988a5a025f49449850f39f95eb0d21e40e67b3beb13a0b54efd3ab5d83f60e",
+    "ort/ort-wasm-simd-threaded.jsep.mjs": "3ee381d20a80f51a788a1c4a5872f6f1d047538dd4342f4af00062de5f9ea4c6",
+    "ort/ort-wasm-simd-threaded.jsep.wasm": "78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48",
+    "ort/ort-wasm-simd-threaded.asyncify.mjs": "7236653b8565da4046e459cd0e274123419a1d9f1f8f18fd36c28058346ca655",
+    "ort/ort-wasm-simd-threaded.asyncify.wasm": "7e83cd6cee77e478bc96a7e91b198144fb5e4126287daf1f9b54bb195ebcd55a",
+    "ort/ort-wasm-simd-threaded.jspi.mjs": "47f5232865f07cc6a11e825cac8dfd9b75bdf5f4a0889bde077e753ae93d3913",
+    "ort/ort-wasm-simd-threaded.jspi.wasm": "7c28cdb40958a998f5aa0981d5cb8e57ac1e7e9b4d2f18a7d74e00dd9629d7a3",
+    "pkg/docparse_web_bg.wasm": "3d67592c39150f6ed981cb08d9cb9f4717d129e9ef1311c03d07500aec88c587"
+  }
+}

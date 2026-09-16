@@ -1,0 +1,150 @@
+{
+  "engine": "pp-formulanet-plus-l-onnx-cpu",
+  "first_and_batched": [
+    {
+      "duration_ms": 0.0255,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.619958,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 1748.0864170000002,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.0915,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.017,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 3.392833,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 3105.787875,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.031167,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.009125,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 5.1279580000000005,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 5565.067959,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.163,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 4.5755,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.6267079999999998,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 1520.525333,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.019916,
+      "page_number": null,
+      "stage": "formula_decode"
+    }
+  ],
+  "latex": [
+    "q \\in \\mathit { l i v e } ( Q ) \\quad \\mathit { i f f } \\quad \\exists w \\in \\Sigma ^ { * } \\quad \\mathit { s . t . } \\quad \\delta ^ { * } ( w , q ) \\in F"
+  ],
+  "warm_single_crop": [
+    {
+      "duration_ms": 0.011625,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.893166,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 1497.954292,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.020375,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.009208000000000001,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.765291,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 1481.7437909999999,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.024708,
+      "page_number": null,
+      "stage": "formula_decode"
+    },
+    {
+      "duration_ms": 0.01,
+      "page_number": null,
+      "stage": "formula_queue"
+    },
+    {
+      "duration_ms": 1.642375,
+      "page_number": null,
+      "stage": "formula_preprocess"
+    },
+    {
+      "duration_ms": 1483.1195,
+      "page_number": null,
+      "stage": "formula_inference"
+    },
+    {
+      "duration_ms": 0.019333,
+      "page_number": null,
+      "stage": "formula_decode"
+    }
+  ]
+}

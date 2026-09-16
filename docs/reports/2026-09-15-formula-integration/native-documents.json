@@ -1,0 +1,50 @@
+[
+  {
+    "file": "2410.05779v3.pdf",
+    "job_id": "88ee3d49-1e11-4586-9854-da055739a08a",
+    "pages": 16,
+    "formulas": 24,
+    "inline": 22,
+    "display": 2,
+    "table_formulas": 1,
+    "failed": 0,
+    "source_unchanged": true,
+    "canonical_blocks_sha256": "3f3d088a030014085a1a4191cbb35c2f11c151470558ccc84c27a64d4110d25a",
+    "result_sha256": "6f6089b8a575dd9d907442d70f9e4402c88af1949f3e4a7fa549b29b8574e847",
+    "worker_seconds": 183.735,
+    "json_bytes": 6536895,
+    "markdown_bytes": 67171
+  },
+  {
+    "file": "2606.17056v1.pdf",
+    "job_id": "cd86489f-da5c-4e70-845e-7e598690a10e",
+    "pages": 25,
+    "formulas": 14,
+    "inline": 10,
+    "display": 4,
+    "table_formulas": 0,
+    "failed": 0,
+    "source_unchanged": true,
+    "canonical_blocks_sha256": "edca560d2564ea6c37528a76e4aae0fd037aed724524d82c7fe95afea98fab32",
+    "result_sha256": "43930c8c86e9b31696c651c8d0cd3d4f89aadda8eb23aaca10e5dcbe2358198a",
+    "worker_seconds": 176.41,
+    "json_bytes": 9179388,
+    "markdown_bytes": 82592
+  },
+  {
+    "file": "Terminal-Universe_ Turning Agent Trajectories into Scalable Terminal Environments.pdf",
+    "job_id": "0e02999b-b60d-40a6-8c37-4ae89533ec5f",
+    "pages": 32,
+    "formulas": 7,
+    "inline": 7,
+    "display": 0,
+    "table_formulas": 2,
+    "failed": 0,
+    "source_unchanged": true,
+    "canonical_blocks_sha256": "78ab7fbeca398c399807e0d97af0ceb85b69b4f9ba079eeb5bdf183f97ba79e2",
+    "result_sha256": "a3c0276d54a732d29d314253e7a0185129e50ad78f32d5b78343a6430535be4f",
+    "worker_seconds": 170.407,
+    "json_bytes": 12146828,
+    "markdown_bytes": 111506
+  }
+]

@@ -1,5 +1,7 @@
 import { prepareModels, DocParseError } from "../../dist/index.js";
 import type { Block, DocParser, DocumentResult, PageImageResult, ParserProgress, ParserTiming, Table, TableMode } from "../../dist/index.js";
+import { renderMath } from "./math.js";
+import "katex/dist/katex.min.css";
 
 /** The example owns these fixed elements; PDF text is always inserted with textContent. */
 const ui = {
@@ -12,6 +14,8 @@ const ui = {
   provider: document.querySelector<HTMLSelectElement>("#execution-provider")!,
   tableMode: document.querySelector<HTMLSelectElement>("#table-mode")!,
   ocrPolicy: document.querySelector<HTMLSelectElement>("#ocr-policy")!,
+  formulaEnabled: document.querySelector<HTMLInputElement>("#formula-enabled")!,
+  formulas: document.querySelector<HTMLElement>("#formula-results")!,
   timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
   timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
   timingRows: document.querySelector<HTMLElement>("#timing-rows")!,
@@ -94,6 +98,7 @@ function controls(): void {
   ui.provider.disabled = busy;
   ui.tableMode.disabled = busy;
   ui.ocrPolicy.disabled = busy;
+  ui.formulaEnabled.disabled = busy;
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -140,6 +145,8 @@ function clearDocument(): void {
   ui.selected.textContent = "—"; ui.meta.textContent = "A closer look, one region at a time.";
   ui.text.textContent = "Select an overlay to inspect the extracted text.";
   ui.copy.disabled = true; ui.copyStatus.textContent = ""; ui.warnings.hidden = true;
+  ui.formulas.replaceChildren(); ui.formulas.hidden = true;
+  ui.text.closest<HTMLElement>(".text-card")!.hidden = false; ui.copy.hidden = false;
   ui.characters.textContent = "—"; document.body.dataset.hasSelection = "false";
   zoom = 1; ui.zoomFit.textContent = "100%";
   ui.viewer.classList.remove("overlays-hidden"); ui.overlays.setAttribute("aria-pressed", "true");
@@ -178,7 +185,7 @@ function progress(event: ParserProgress): void {
   switch (event.stage) {
     case "loading_runtime": status("Loading the parser", "Preparing PDFium and WebAssembly…", "busy"); break;
     case "downloading":
-      if (event.artifact === "model") status("Downloading the layout model", `${(event.loaded / 1024 / 1024).toFixed(1)}${event.total ? ` / ${(event.total / 1024 / 1024).toFixed(1)}` : ""} MB`, "busy", event.total ? event.loaded / event.total : undefined);
+      if (event.artifact === "model" || event.artifact === "formula_model") status(event.artifact === "formula_model" ? "Downloading the formula model" : "Downloading the layout model", `${(event.loaded / 1024 / 1024).toFixed(1)}${event.total ? ` / ${(event.total / 1024 / 1024).toFixed(1)}` : ""} MB`, "busy", event.total ? event.loaded / event.total : undefined);
       break;
     case "initializing_model": status("Preparing document models", "Creating the inference session. This can take a moment on the first run.", "busy"); break;
     case "opening": status("Opening your PDF", "Reading the document with PDFium…", "busy"); break;
@@ -214,8 +221,9 @@ function color(label: string): string {
 function selectBlock(id: string): void {
   const page = result?.pages.find(page => page.page_number === pageNumber);
   selectedBlock = page?.blocks.find(block => block.id === id);
-  document.body.dataset.hasSelection = String(Boolean(selectedBlock));
-  ui.select.value = selectedBlock?.id ?? "";
+  const standalone = page?.formulas?.find(formula => !formula.block_id && `formula:${formula.id}` === id);
+  document.body.dataset.hasSelection = String(Boolean(selectedBlock || standalone));
+  ui.select.value = selectedBlock?.id ?? (standalone ? id : "");
   for (const group of Array.from(ui.viewer.querySelectorAll<SVGGElement>(".overlay"))) {
     const selected = group.dataset.blockId === selectedBlock?.id;
     group.classList.toggle("selected", selected); group.setAttribute("aria-pressed", String(selected));
@@ -225,6 +233,11 @@ function selectBlock(id: string): void {
   ui.text.textContent = selectedBlock?.label === "reference"
     ? "Visual reference area. Select a reference content region to read its text."
     : selectedBlock ? selectedBlock.text || "No text was recovered for this region." : "Select an overlay to inspect the extracted text.";
+  ui.text.classList.toggle("inline-prose", Boolean(selectedBlock?.markdown));
+  if (selectedBlock?.markdown) {
+    try { ui.text.innerHTML = renderMath(selectedBlock.markdown, "markdown", false, true); }
+    catch { ui.text.textContent = "Paragraph preview unavailable. Copy the Markdown source to inspect it."; }
+  }
   if (selectedBlock?.table) {
     const source = selectedBlock.table;
     const table = document.createElement("table"); table.className = "table-view";
@@ -236,7 +249,11 @@ function selectBlock(id: string): void {
       for (const cell of source.cells.filter(cell => cell.row === row).sort((a, b) => a.column - b.column)) {
         // Source PDF text is never parsed as markup; spans come from the validated Rust grid.
         const td = document.createElement(cell.is_header ? "th" : "td");
-        td.rowSpan = cell.row_span; td.colSpan = cell.column_span; td.textContent = cell.text;
+        td.rowSpan = cell.row_span; td.colSpan = cell.column_span;
+        if (cell.markdown) {
+          try { td.innerHTML = renderMath(cell.markdown, "markdown", false, true); }
+          catch { td.textContent = "Formula preview unavailable"; }
+        } else td.textContent = cell.text;
         tr.append(td);
       }
       body.append(tr);
@@ -245,7 +262,42 @@ function selectBlock(id: string): void {
     ui.meta.textContent += ` · ${source.row_count} rows × ${source.column_count} columns · Source: ${tableSources[source.source] ?? "Unknown"}`;
   }
   ui.characters.textContent = selectedBlock ? `${Array.from(selectedBlock.text).length} characters` : "—";
-  ui.copy.disabled = !selectedBlock?.text; ui.copyStatus.textContent = "";
+  ui.copy.disabled = !(selectedBlock?.markdown ?? selectedBlock?.text); ui.copyStatus.textContent = "";
+  ui.copy.setAttribute("aria-label", selectedBlock?.markdown ? "Copy paragraph Markdown source" : "Copy text");
+  // Keep prose context, but standalone formula blocks display their recognized representation.
+  const formulas = standalone ? [standalone] : selectedBlock ? page?.formulas?.filter(formula => formula.block_id === id) ?? [] : [];
+  const formulaOnly = Boolean(standalone || (selectedBlock && ["inline_formula", "display_formula"].includes(selectedBlock.label) && formulas.some(formula => formula.latex)));
+  ui.text.closest<HTMLElement>(".text-card")!.hidden = formulaOnly; ui.copy.hidden = formulaOnly;
+  if (standalone) ui.meta.textContent = `${standalone.label.replaceAll("_", " ")} · Page ${pageNumber}`;
+  ui.formulas.replaceChildren(); ui.formulas.hidden = formulas.length === 0;
+  const details = document.createElement("details"); details.className = "formula-details";
+  details.open = !selectedBlock?.markdown;
+  const summary = document.createElement("summary"); summary.textContent = "Formula details and copy";
+  details.append(summary); ui.formulas.append(details);
+  for (const formula of formulas) {
+    const card = document.createElement("article"); card.className = "formula-result";
+    card.dataset.formulaId = formula.id;
+    const heading = document.createElement("h3"); heading.textContent = formula.label === "inline_formula" ? "Inline formula" : "Display formula";
+    card.append(heading);
+    if (formula.error) {
+      const error = document.createElement("p"); error.className = "page-warnings";
+      error.textContent = `Recognition failed: ${formula.error}`; card.append(error);
+    }
+    for (const [format, label, value] of [["latex", "LaTeX", formula.latex], ["markdown", "Markdown", formula.markdown]] as const) {
+      if (!value) continue;
+      const caption = document.createElement("strong"); caption.textContent = label;
+      const preview = document.createElement("div"); preview.className = "formula-preview"; preview.dataset.format = format;
+      try { preview.innerHTML = renderMath(value, format, formula.label === "display_formula"); }
+      catch { preview.textContent = "Formula preview unavailable. Copy the source to inspect it."; preview.setAttribute("role", "status"); }
+      const copy = document.createElement("button"); copy.type = "button"; copy.className = "button small secondary"; copy.textContent = `Copy ${label}`;
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(value); ui.copyStatus.textContent = `${label} copied to clipboard`; }
+        catch { ui.copyStatus.textContent = "Clipboard unavailable. Select the formula to copy it."; }
+      });
+      card.append(caption, preview, copy);
+    }
+    details.append(card);
+  }
 }
 
 /** Fits the raster and overlay to the same viewport; pixel dimensions never become PDF coordinates. */
@@ -264,6 +316,7 @@ function showPage(number: number): void {
   sheet.append(svg("image", { href: preview.url, width: String(width), height: String(height) }));
   ui.select.replaceChildren(new Option("Select a region…", ""));
   for (const block of page?.blocks ?? []) ui.select.add(new Option(`${block.final_order + 1}. ${block.label.replaceAll("_", " ")}`, block.id));
+  for (const formula of page?.formulas ?? []) if (!formula.block_id) ui.select.add(new Option(`Formula · ${formula.label.replaceAll("_", " ")}`, `formula:${formula.id}`));
   // Large boxes go behind smaller ones: a page-spanning watermark must not swallow
   // clicks on body paragraphs. The region menu makes every overlapping block reachable.
   const blocks = [...(page?.blocks ?? [])].sort((a, b) =>
@@ -284,8 +337,8 @@ function showPage(number: number): void {
   ui.viewer.replaceChildren(sheet);
   if (changedPage) { ui.viewer.scrollTop = 0; ui.viewer.scrollLeft = 0; }
   ui.position.textContent = `Page ${number} / ${pageCount}`;
-  ui.regions.textContent = `${page?.blocks.length ?? 0} regions`;
-  ui.select.disabled = !page?.blocks.length;
+  ui.regions.textContent = `${page?.blocks.length ?? 0} regions${page?.formulas?.length ? ` · ${page.formulas.length} formulas` : ""}`;
+  ui.select.disabled = ui.select.options.length <= 1;
   for (const [index, button] of pageButtons) {
     if (index === number) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   }
@@ -346,10 +399,16 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
         detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),
         orientation: modelSource("pp-lcnet-textline-ori"),
       },
+      formulaArtifacts: ui.formulaEnabled.checked ? {
+        kind: "urls",
+        model: new URL("../models/pp-formulanet-plus-s/inference.onnx", location.href).href,
+        tokenizer: new URL("../models/pp-formulanet-plus-s/tokenizer.json", location.href).href,
+        manifest: new URL("../models/pp-formulanet-plus-s/model-manifest.json", location.href).href,
+      } : undefined,
       // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
       executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
       allowCpuFallback: true,
-      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" } },
+      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { enabled: ui.formulaEnabled.checked } },
       signal, onProgress: event => { if (run === generation) progress(event); },
       onTiming: event => { if (run === generation) recordTiming("Preparation", event); },
     });
@@ -375,7 +434,7 @@ async function runOperation(mode: "prepare" | "parse"): Promise<void> {
   try {
     const current = await ensureParser(run, signal);
     if (mode === "prepare") {
-      const models = ["layout", ...(ui.tableMode.value === "rules_only" ? [] : ["TSR"]), ...(ui.ocrPolicy.value === "disabled" ? [] : ["OCR"])];
+      const models = ["layout", ...(ui.tableMode.value === "rules_only" ? [] : ["TSR"]), ...(ui.ocrPolicy.value === "disabled" ? [] : ["OCR"]), ...(ui.formulaEnabled.checked ? ["formulas"] : [])];
       status("Models ready", `${models.join(" + ")} initialized. ${selectedFile ? "Select Parse document to continue." : "Choose a PDF to start parsing."}`, "done");
       return;
     }
@@ -510,6 +569,7 @@ function modelSettingsChanged(): void {
 ui.provider.addEventListener("change", modelSettingsChanged);
 ui.tableMode.addEventListener("change", modelSettingsChanged);
 ui.ocrPolicy.addEventListener("change", modelSettingsChanged);
+ui.formulaEnabled.addEventListener("change", modelSettingsChanged);
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));
 ui.next.addEventListener("click", () => showPage(pageNumber + 1));
 ui.select.addEventListener("change", () => selectBlock(ui.select.value));
@@ -530,8 +590,9 @@ ui.exportDialog.addEventListener("close", () => {
   if (!ui.exportDialog.open) closeExport();
 });
 ui.copy.addEventListener("click", async () => {
-  if (!selectedBlock?.text) return;
-  try { await navigator.clipboard.writeText(selectedBlock.text); ui.copyStatus.textContent = "Copied to clipboard"; }
+  const source = selectedBlock?.markdown ?? selectedBlock?.text;
+  if (!source) return;
+  try { await navigator.clipboard.writeText(source); ui.copyStatus.textContent = "Copied to clipboard"; }
   catch { ui.copyStatus.textContent = "Clipboard unavailable. Select the text above to copy it."; }
 });
 // A cached document keeps its page images when returning through browser history.

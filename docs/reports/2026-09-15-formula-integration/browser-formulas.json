@@ -1,0 +1,566 @@
+[
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p4:m15",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 212.4200675189245,
+      "top": 436.4429826532577,
+      "right": 223.9157417611251,
+      "bottom": 448.9413498540955
+    },
+    "block_id": "p4:b:m2:s0",
+    "line_id": "p4:b:m2:s0:l2",
+    "text_item_range": {
+      "start": 1,
+      "end": 4
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p4:t138",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 214.03799438476562,
+          "top": 439.43798828125,
+          "right": 219.41799926757812,
+          "bottom": 446.35198974609375
+        }
+      },
+      {
+        "text_item_id": "p4:t139",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 214.6510009765625,
+          "top": 436.7030029296875,
+          "right": 220.27999877929688,
+          "bottom": 438.5159912109375
+        }
+      },
+      {
+        "text_item_id": "p4:t140",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 219.9219970703125,
+          "top": 442.8590087890625,
+          "right": 223.22300720214844,
+          "bottom": 448.2200012207031
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "\\widehat { E } _ { 0 }",
+    "markdown": "$\\widehat { E } _ { 0 }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p4:m14",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 70.47348122392553,
+      "top": 482.9369086403745,
+      "right": 81.46934354255221,
+      "bottom": 494.9353411531788
+    },
+    "block_id": "p4:b:m2:s0",
+    "line_id": "p4:b:m2:s0:l6",
+    "text_item_range": {
+      "start": 0,
+      "end": 3
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p4:t153",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 71.43900299072266,
+          "top": 485.5299987792969,
+          "right": 76.81900024414062,
+          "bottom": 492.4440002441406
+        }
+      },
+      {
+        "text_item_id": "p4:t154",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 72.052001953125,
+          "top": 482.7950134277344,
+          "right": 77.68099975585938,
+          "bottom": 484.6080017089844
+        }
+      },
+      {
+        "text_item_id": "p4:t155",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 77.322998046875,
+          "top": 488.95098876953125,
+          "right": 80.6240005493164,
+          "bottom": 494.31201171875
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "\\widehat { E } _ { 0 }",
+    "markdown": "$\\widehat { E } _ { 0 }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p4:m12",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 335.87361264168766,
+      "top": 500.934557409581,
+      "right": 347.36928688388826,
+      "bottom": 513.9328592984524
+    },
+    "block_id": "p4:b:m4:s0",
+    "line_id": "p4:b:m4:s0:l0",
+    "text_item_range": {
+      "start": 3,
+      "end": 6
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p4:t160",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 337.2959899902344,
+          "top": 504.7229919433594,
+          "right": 342.6759948730469,
+          "bottom": 511.6369934082031
+        }
+      },
+      {
+        "text_item_id": "p4:t161",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 337.90899658203125,
+          "top": 501.9880065917969,
+          "right": 343.5379943847656,
+          "bottom": 503.8009948730469
+        }
+      },
+      {
+        "text_item_id": "p4:t162",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 343.17999267578125,
+          "top": 508.1440124511719,
+          "right": 346.4809875488281,
+          "bottom": 513.5050048828125
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "\\widehat { E } _ { 0 }",
+    "markdown": "$\\widehat { E } _ { 0 }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p8:m14",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 137.94809090640743,
+      "top": 415.9456604438836,
+      "right": 175.93379709802687,
+      "bottom": 427.94409295668794
+    },
+    "block_id": "p8:b:m4:s0",
+    "line_id": "p8:b:m4:s0:l1",
+    "text_item_range": {
+      "start": 0,
+      "end": 6
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p8:t140",
+        "byte_range": {
+          "start": 17,
+          "end": 18
+        },
+        "bbox": {
+          "left": 139.25799560546875,
+          "top": 418.5710144042969,
+          "right": 143.68099975585938,
+          "bottom": 425.4549865722656
+        }
+      },
+      {
+        "text_item_id": "p8:t141",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 147.12100219726562,
+          "top": 420.3380126953125,
+          "right": 152.13499450683594,
+          "bottom": 425.3420104980469
+        }
+      },
+      {
+        "text_item_id": "p8:t142",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 156.13400268554688,
+          "top": 418.52099609375,
+          "right": 164.97000122070312,
+          "bottom": 425.6239929199219
+        }
+      },
+      {
+        "text_item_id": "p8:t143",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 166.06100463867188,
+          "top": 419.6889953613281,
+          "right": 170.88099670410156,
+          "bottom": 420.0039978027344
+        }
+      },
+      {
+        "text_item_id": "p8:t144",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 171.86900329589844,
+          "top": 416.60198974609375,
+          "right": 175.17100524902344,
+          "bottom": 421.9630126953125
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "7 \\times 1 0 ^ { - 6 }",
+    "markdown": "$7 \\times 1 0 ^ { - 6 }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p11:m14",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 69.47385737677766,
+      "top": 494.9353411531788,
+      "right": 95.46407740262254,
+      "bottom": 506.4338389779496
+    },
+    "block_id": "p11:b:m0:s0",
+    "line_id": "p11:b:m0:s0:l2",
+    "text_item_range": {
+      "start": 0,
+      "end": 6
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p11:t247",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 70.99800109863281,
+          "top": 496.49700927734375,
+          "right": 80.66200256347656,
+          "bottom": 503.54998779296875
+        }
+      },
+      {
+        "text_item_id": "p11:t248",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 81.70899963378906,
+          "top": 502.2550048828125,
+          "right": 82.88700103759766,
+          "bottom": 503.4010009765625
+        }
+      },
+      {
+        "text_item_id": "p11:t249",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 83.58899688720703,
+          "top": 496.4469909667969,
+          "right": 88.36499786376953,
+          "bottom": 503.3810119628906
+        }
+      },
+      {
+        "text_item_id": "p11:t250",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 88.74500274658203,
+          "top": 500.7359924316406,
+          "right": 91.4469985961914,
+          "bottom": 504.86700439453125
+        }
+      },
+      {
+        "text_item_id": "p11:t251",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 92.03800201416016,
+          "top": 504.1910095214844,
+          "right": 92.73200225830078,
+          "bottom": 504.8789978027344
+        }
+      },
+      {
+        "text_item_id": "p11:t252",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 93.49099731445312,
+          "top": 500.7070007324219,
+          "right": 95.63099670410156,
+          "bottom": 504.86700439453125
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "5 8 . 4 _ { 2 . 1 }",
+    "markdown": "$5 8 . 4 _ { 2 . 1 }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p12:m14",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 348.8687226546101,
+      "top": 622.9186212897583,
+      "right": 373.35950690973317,
+      "bottom": 633.9171844264957
+    },
+    "block_id": "p12:b:m5:s0",
+    "line_id": null,
+    "text_item_range": null,
+    "text_spans": [
+      {
+        "text_item_id": "p12:t238",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 350.3179931640625,
+          "top": 624.9219970703125,
+          "right": 359.239990234375,
+          "bottom": 631.1630249023438
+        }
+      },
+      {
+        "text_item_id": "p12:t239",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 359.86700439453125,
+          "top": 630.1500244140625,
+          "right": 360.9070129394531,
+          "bottom": 631.1810302734375
+        }
+      },
+      {
+        "text_item_id": "p12:t240",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 361.7770080566406,
+          "top": 624.9669799804688,
+          "right": 365.66900634765625,
+          "bottom": 631.3150024414062
+        }
+      },
+      {
+        "text_item_id": "p12:t241",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 366.0690002441406,
+          "top": 629.0579833984375,
+          "right": 368.32000732421875,
+          "bottom": 632.5
+        }
+      },
+      {
+        "text_item_id": "p12:t242",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 368.81298828125,
+          "top": 631.93701171875,
+          "right": 369.3909912109375,
+          "bottom": 632.510009765625
+        }
+      },
+      {
+        "text_item_id": "p12:t243",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 369.8689880371094,
+          "top": 629.0579833984375,
+          "right": 372.0409851074219,
+          "bottom": 632.5850219726562
+        }
+      }
+    ],
+    "table_cell": [
+      1,
+      2
+    ],
+    "latex": "4 7 . 8 _ { ^ { 2 , 0 } }",
+    "markdown": "$4 7 . 8 _ { ^ { 2 , 0 } }$",
+    "error": null
+  },
+  {
+    "engine": "pp-formulanet-plus-l-onnx-webgpu",
+    "id": "p17:m11",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 317.38057146945187,
+      "top": 431.94357046095604,
+      "right": 334.3741768709658,
+      "bottom": 444.44193766179393
+    },
+    "block_id": "p17:b:m1:s0",
+    "line_id": null,
+    "text_item_range": null,
+    "text_spans": [
+      {
+        "text_item_id": "p17:t146",
+        "byte_range": {
+          "start": 9,
+          "end": 10
+        },
+        "bbox": {
+          "left": 318.66900634765625,
+          "top": 435.12298583984375,
+          "right": 320.8210144042969,
+          "bottom": 442.5299987792969
+        }
+      },
+      {
+        "text_item_id": "p17:t147",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 321.5870056152344,
+          "top": 435.4010009765625,
+          "right": 326.4289855957031,
+          "bottom": 441.6239929199219
+        }
+      },
+      {
+        "text_item_id": "p17:t149",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 326.885986328125,
+          "top": 438.4800109863281,
+          "right": 329.927001953125,
+          "bottom": 443.4179992675781
+        }
+      },
+      {
+        "text_item_id": "p17:t148",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 322.13800048828125,
+          "top": 432.94000244140625,
+          "right": 327.2040100097656,
+          "bottom": 434.5719909667969
+        }
+      },
+      {
+        "text_item_id": "p17:t150",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 330.9200134277344,
+          "top": 435.12298583984375,
+          "right": 333.0719909667969,
+          "bottom": 442.5299987792969
+        }
+      }
+    ],
+    "table_cell": [
+      1,
+      1
+    ],
+    "latex": "( \\widehat { E } _ { 0 } )",
+    "markdown": "$( \\widehat { E } _ { 0 } )$",
+    "error": null
+  }
+]

@@ -123,12 +123,16 @@ impl Serialize for ConfiguredPage<'_> {
     {
         let mut state = serializer.serialize_struct(
             "PageResult",
-            7 + usize::from(!self.page.replaced_native_text.is_empty()),
+            7 + usize::from(!self.page.replaced_native_text.is_empty())
+                + usize::from(!self.page.formulas.is_empty()),
         )?;
         state.serialize_field("page_number", &self.page.page_number)?;
         state.serialize_field("width", &self.page.width)?;
         state.serialize_field("height", &self.page.height)?;
         state.serialize_field("rotation", &self.page.rotation)?;
+        if !self.page.formulas.is_empty() {
+            state.serialize_field("formulas", &self.page.formulas)?;
+        }
         state.serialize_field(
             "blocks",
             &ConfiguredBlocks {
@@ -195,11 +199,15 @@ impl Serialize for ConfiguredBlock<'_> {
         let mut state = serializer.serialize_struct(
             "Block",
             15 + usize::from(!self.block.source_regions.is_empty())
+                + usize::from(self.block.markdown.is_some())
                 + usize::from(self.block.table.is_some()),
         )?;
         state.serialize_field("id", &self.block.id)?;
         state.serialize_field("label", &self.block.label)?;
         state.serialize_field("text", &self.block.text)?;
+        if let Some(markdown) = &self.block.markdown {
+            state.serialize_field("markdown", markdown)?;
+        }
         state.serialize_field("raw_label", &self.block.raw_label)?;
         state.serialize_field("label_source", &self.block.label_source)?;
         state.serialize_field("confidence", &self.block.confidence)?;

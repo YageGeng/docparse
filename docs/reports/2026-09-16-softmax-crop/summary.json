@@ -1,0 +1,229 @@
+{
+  "document": "2403.01632v4.pdf",
+  "document_sha256": "8f6df134543b1ff7ca841b4bf266dfe16884ba000d1ee24800b3aae96dad9431",
+  "page": 4,
+  "native": {
+    "formulas": 30,
+    "changed": [
+      {
+        "id": "p4:m13",
+        "before": "1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) )",
+        "after": "1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) ) _ { i }",
+        "detected_bbox": {
+          "left": 177.0,
+          "top": 673.5,
+          "right": 277.5,
+          "bottom": 686.5
+        },
+        "crop_bbox": {
+          "left": 177.0,
+          "top": 673.5,
+          "right": 281.49798583984375,
+          "bottom": 686.5
+        }
+      }
+    ],
+    "canonical_source_unchanged": true
+  },
+  "browser": {
+    "browser": "153.0.8010.48",
+    "provider": "webgpu",
+    "pages": 47,
+    "formulas": 584,
+    "failed_formulas": 0,
+    "page_errors": 0,
+    "target": {
+      "engine": "pp-formulanet-plus-s-onnx-webgpu",
+      "id": "p4:m13",
+      "label": "inline_formula",
+      "bbox": {
+        "left": 177.5,
+        "top": 673,
+        "right": 277.5,
+        "bottom": 685.5
+      },
+      "crop_bbox": {
+        "left": 177.5,
+        "top": 673,
+        "right": 281.49798583984375,
+        "bottom": 685.5
+      },
+      "block_id": "p4:b:m0:s0",
+      "line_id": "p4:b:m0:s0:l13",
+      "text_item_range": {
+        "start": 0,
+        "end": 12
+      },
+      "text_spans": [
+        {
+          "text_item_id": "p4:t363",
+          "byte_range": {
+            "start": 24,
+            "end": 25
+          },
+          "bbox": {
+            "left": 178.83399963378906,
+            "top": 675.406005859375,
+            "right": 182.12100219726562,
+            "bottom": 682.041015625
+          }
+        },
+        {
+          "text_item_id": "p4:t364",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 183.4759979248047,
+            "top": 674.5689697265625,
+            "right": 187.3509979248047,
+            "bottom": 684.52197265625
+          }
+        },
+        {
+          "text_item_id": "p4:t365",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 190.1280059814453,
+            "top": 674.5689697265625,
+            "right": 199.5229949951172,
+            "bottom": 684.52197265625
+          }
+        },
+        {
+          "text_item_id": "p4:t366",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 200.41400146484375,
+            "top": 680.406005859375,
+            "right": 202.52699279785156,
+            "bottom": 685.093017578125
+          }
+        },
+        {
+          "text_item_id": "p4:t367",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 204.38900756835938,
+            "top": 674.5689697265625,
+            "right": 206.7010040283203,
+            "bottom": 684.52197265625
+          }
+        },
+        {
+          "text_item_id": "p4:t368",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 207.5659942626953,
+            "top": 677.6380004882812,
+            "right": 215.72500610351562,
+            "bottom": 682.1409912109375
+          }
+        },
+        {
+          "text_item_id": "p4:t369",
+          "byte_range": {
+            "start": 0,
+            "end": 2
+          },
+          "bbox": {
+            "left": 219.89999389648438,
+            "top": 677.1489868164062,
+            "right": 224.71099853515625,
+            "bottom": 681.9509887695312
+          }
+        },
+        {
+          "text_item_id": "p4:t370",
+          "byte_range": {
+            "start": 0,
+            "end": 7
+          },
+          "bbox": {
+            "left": 229.3520050048828,
+            "top": 675.0170288085938,
+            "right": 262.49798583984375,
+            "bottom": 684.072998046875
+          }
+        },
+        {
+          "text_item_id": "p4:t371",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 262.97198486328125,
+            "top": 674.5689697265625,
+            "right": 265.28399658203125,
+            "bottom": 684.52197265625
+          }
+        },
+        {
+          "text_item_id": "p4:t372",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 266.28900146484375,
+            "top": 677.6380004882812,
+            "right": 270.5140075683594,
+            "bottom": 682.1409912109375
+          }
+        },
+        {
+          "text_item_id": "p4:t373",
+          "byte_range": {
+            "start": 0,
+            "end": 2
+          },
+          "bbox": {
+            "left": 271.5,
+            "top": 674.5689697265625,
+            "right": 277.677001953125,
+            "bottom": 684.52197265625
+          }
+        },
+        {
+          "text_item_id": "p4:t374",
+          "byte_range": {
+            "start": 0,
+            "end": 1
+          },
+          "bbox": {
+            "left": 278.6809997558594,
+            "top": 678.6959838867188,
+            "right": 281.49798583984375,
+            "bottom": 684.8889770507812
+          }
+        }
+      ],
+      "table_cell": null,
+      "latex": "1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) ) _ { i }",
+      "markdown": "$1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) ) _ { i }$",
+      "error": null
+    },
+    "wasm_sha256": "9aa5718fb5def93d1a0196b1ec0982fb1dbb0f7163efab22cac7e9a9d8314fe1"
+  },
+  "validation": {
+    "rust_passed": 428,
+    "rust_ignored": 34,
+    "pre_commit": "passed",
+    "native_release_target_regression": "passed",
+    "webgpu_release_target_regression": "passed"
+  }
+}

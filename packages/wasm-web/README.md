@@ -23,7 +23,7 @@ rtk npm run build
 
 `dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
 
-The SDK build excludes the example. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
+The SDK build excludes the example and its presentation dependencies. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `example/src`, consumes the built public SDK, and emits only to `example/dist`. `rtk npm run check` checks the SDK; `rtk npm run check:example` checks the example after the SDK has been built.
 
 Copy the complete `dist/` directory to any static-site directory while preserving internal relative paths. Deploy the ONNX model, inference.yml, and model-manifest.json separately. Serve correct JavaScript/WASM MIME types and permit CORS for cross-origin model/runtime resources. The explicit single-threaded CPU/WASM path requires no cross-origin isolation. ORT telemetry is disabled. WebGPU additionally requires a supported secure context and compatible browser/device.
 
@@ -88,6 +88,7 @@ the execution provider change. Native callers already prepare their sessions in
 | TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
+| Formula recognition | The example's Formulas switch defaults to on. SDK callers enable `config.formula.enabled` and provide `formulaArtifacts`. |
 
 Disabled models do not require artifact sources and are not downloaded or
 initialized, even if sources are supplied. Preparation accepts `signal`,
@@ -140,7 +141,7 @@ After preparing the model and building the package, run this command in `package
 rtk npm run example
 ```
 
-This compiles `example/src/main.ts` through its own TypeScript configuration and starts the static server. Use `rtk npm run build:example` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM.
+This type-checks `example/src/main.ts`, bundles its presentation libraries and KaTeX fonts locally with esbuild, and starts the static server. Use `rtk npm run build:example` to build the example without starting a server. Changes to the UI do not require rebuilding Rust/WASM.
 
 Open <http://127.0.0.1:8768/example/>. Select **Prepare models** to initialize the selected models before choosing a PDF. Choosing a PDF during preparation keeps that preparation running. **Parse document** also prepares automatically when needed and reuses ready sessions. Changing the engine, table mode, or OCR policy releases those sessions and enables preparation again. The example displays actual model-download, text-extraction, and page-analysis progress. Browse the PDFium page thumbnails, zoom the page, and toggle overlays without changing the parsed geometry. Click an overlay, or use the region menu, to inspect and copy its text. On narrow screens the selected text opens in a dismissible floating inspector.
 
@@ -258,9 +259,9 @@ Short superscripts/subscripts join an unambiguous parent using font size, baseli
 shift and position before model assignment. Upright PDFium baselines keep body rows
 in order; nested indices follow the original typography graph, and adjacent fragments
 on the same body baseline reconnect after scripts fill their inline gap. Nearby rows
-remain separate. This does
-not provide LaTeX or structured formula recognition. Unmatched inline
-formula detections produce diagnostics instead of independent empty content blocks.
+remain separate. Optional PP-FormulaNet_plus-S recognition adds LaTeX and Markdown
+to `pages[].formulas` without changing source text ownership. Unmatched inline
+formula detections retain their diagnostics and independent recognition metadata.
 
 A merged block retains a stable primary identity and `source_region`. Its optional
 `source_regions` array records every contributing model/fallback region, including
@@ -433,3 +434,52 @@ Additional timing stages are `ocr_detection_preprocess`, `ocr_detection_inferenc
 `ocr_recognition_preprocess`, `ocr_recognition_inference`, and `ocr_decode`.
 Inference timings include output readback. Failed OCR produces page warnings;
 initialization failure never masquerades as successful text recovery.
+
+
+## Formula artifacts and output
+
+The example enables formula recognition by default. Turn off **Formulas** before
+preparing models to skip its download and inference. Changing the switch closes
+the prepared parser and clears the previous result; prepare or parse again to
+apply it. Select a formula's containing region to inspect and copy its LaTeX and
+Markdown as typeset previews. Copy LaTeX and Copy Markdown retain the exact source strings; formula-only regions do not repeat raw extracted math as their preview. The example server serves all three
+default Plus-S artifacts from `models/pp-formulanet-plus-s/`.
+
+After building the SDK/example and starting the example server, verify the
+default switch, real recognition, clipboard output, and disabled behavior:
+
+```sh
+rtk proxy node crates/web/tests/formula_ui.mjs /absolute/path/to/formulas.pdf
+```
+
+```ts
+const parser = await createParser({
+  artifacts: layoutArtifacts,
+  config: { tsr: { mode: "rules_only" }, formula: { enabled: true, batch_size: 4, timeout_ms: 120000 } },
+  formulaArtifacts: {
+    kind: "urls",
+    model: "/models/pp-formulanet-plus-s/inference.onnx",
+    tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json",
+    manifest: "/models/pp-formulanet-plus-s/model-manifest.json",
+  },
+});
+const document = await parser.parse(pdfBytes);
+const markdown = await parser.render(document, "markdown");
+```
+
+Formula bytes use `{kind: "bytes", model, tokenizer, manifest}`. Only the detected
+inline/display regions enter recognition; formula numbers remain source text.
+Each `document.pages[].formulas[]` entry contains both representations, its actual
+engine and non-owning source anchors. Empty/failed recognition keeps an error and
+page warning. `formula_queue`, `formula_preprocess`, `formula_inference` and
+`formula_decode` are separate observations. The default Plus-S graph is about 221 MiB,
+before runtime allocations. Plus-L remains supported with explicit artifacts
+from `models/pp-formulanet-plus-l/`; its graph is about 700 MiB. Graph identity
+selects the matching 384-pixel or 768-pixel preprocessing automatically.
+
+Inline formulas are rendered directly inside paragraph text using the optional
+`block.markdown` projection produced by Rust. This preserves native UTF-8 span
+mapping without duplicating byte-offset logic in JavaScript. Paragraph copy
+returns Markdown source; per-formula LaTeX/Markdown copy remains in the collapsed
+formula details. Invalid math leaves the surrounding prose visible. Original
+`block.text` and `text_items[].raw_text` remain unchanged in JSON.

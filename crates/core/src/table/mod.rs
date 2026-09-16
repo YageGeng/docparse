@@ -84,6 +84,10 @@ pub struct TableCell {
     pub is_header: bool,
     #[builder(default)]
     pub text: String,
+    /// Formula-enriched presentation; canonical text and source spans remain unchanged.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<String>,
     #[builder(default)]
     pub lines: Vec<TableCellLine>,
 }

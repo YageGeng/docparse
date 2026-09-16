@@ -40,6 +40,33 @@ impl MarkdownRenderer {
                 if hidden.contains(block.id.as_str()) {
                     continue;
                 }
+                let formulas: Vec<_> = page
+                    .formulas
+                    .iter()
+                    .filter(|formula| {
+                        formula.block_id.as_ref() == Some(&block.id)
+                            && formula.markdown.is_some()
+                    })
+                    .collect();
+                let display: Vec<_> = formulas
+                    .iter()
+                    .filter(|formula| {
+                        formula.line_id.is_none()
+                            && formula.table_cell.is_none()
+                    })
+                    .filter_map(|formula| formula.markdown.as_deref())
+                    .collect();
+                if !display.is_empty()
+                    && matches!(
+                        block.label,
+                        LayoutLabel::DisplayFormula
+                            | LayoutLabel::InlineFormula
+                    )
+                {
+                    output.push(display.join("\n\n"));
+                    previous_prose = false;
+                    continue;
+                }
                 if let Some(table) = &block.table {
                     output.push(table.to_markdown());
                     previous_prose = false;
@@ -47,6 +74,7 @@ impl MarkdownRenderer {
                 }
                 // Prose cleanup is a presentation projection; source lines and table ranges stay unchanged.
                 let prose = self.view == RenderView::Semantic
+                    && formulas.is_empty()
                     && matches!(
                         LabelPolicy::from(&block.label),
                         LabelPolicy::FlowText | LabelPolicy::Title
@@ -56,8 +84,11 @@ impl MarkdownRenderer {
                             && line.direction
                                 != crate::WritingDirection::Vertical
                     });
-                let text = block
-                    .render_markdown_text(&self.formula_placeholder, prose);
+                let text = block.render_markdown_text(
+                    &self.formula_placeholder,
+                    prose,
+                    &formulas,
+                );
                 if text.is_empty() {
                     previous_prose = false;
                     continue;
@@ -86,6 +117,13 @@ impl MarkdownRenderer {
                 }
                 previous_prose = body;
             }
+            // Unmatched model regions remain visible even when they own no native text.
+            output.extend(
+                page.formulas
+                    .iter()
+                    .filter(|formula| formula.block_id.is_none())
+                    .filter_map(|formula| formula.markdown.clone()),
+            );
         }
         output.join("\n\n")
     }
@@ -93,10 +131,16 @@ impl MarkdownRenderer {
 
 impl Block {
     /// Joins prose with LiteParse's whitespace and lowercase continuation rule while retaining list boundaries.
-    fn render_markdown_text(&self, placeholder: &str, prose: bool) -> String {
+    fn render_markdown_text(
+        &self,
+        placeholder: &str,
+        prose: bool,
+        formulas: &[&crate::FormulaResult],
+    ) -> String {
         let mut text = String::new();
         for line in &self.lines {
-            let rendered = render_line(line, placeholder);
+            let rendered =
+                line.render_markdown_formulas(placeholder, formulas, false);
             if rendered.is_empty() {
                 continue;
             }
@@ -124,6 +168,111 @@ impl Block {
             text.push_str(&next);
         }
         text
+    }
+}
+
+impl crate::Line {
+    /// Replaces matched item ranges only in presentation, retaining adjacent text and missing-formula fallbacks.
+    pub(crate) fn render_markdown_formulas(
+        &self,
+        placeholder: &str,
+        formulas: &[&crate::FormulaResult],
+        escape_prose: bool,
+    ) -> String {
+        let source: String = self
+            .text_items
+            .iter()
+            .map(|item| item.raw_text.as_str())
+            .collect();
+        let mut offsets = Vec::with_capacity(self.text_items.len() + 1);
+        offsets.push(0);
+        for item in &self.text_items {
+            offsets.push(
+                offsets.last().copied().unwrap_or(0) + item.raw_text.len(),
+            );
+        }
+        let mut replacements = Vec::new();
+        for formula in
+            formulas.iter().filter(|formula| formula.line_id.is_some())
+        {
+            let Some(markdown) = formula.markdown.as_deref() else {
+                continue;
+            };
+            let insert_here = formula.line_id.as_ref() == Some(&self.id);
+            let ranges = if formula.text_spans.is_empty() {
+                if !insert_here {
+                    continue;
+                }
+                formula
+                    .text_item_range
+                    .and_then(|range| {
+                        let start = *offsets.get(range.start)?;
+                        let safe = self
+                            .text_items
+                            .get(range.start..range.end)?
+                            .iter()
+                            .all(|item| formula.bbox.contains_bbox(item.bbox));
+                        Some(
+                            start..if safe {
+                                *offsets.get(range.end)?
+                            } else {
+                                start
+                            },
+                        )
+                    })
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                formula
+                    .text_spans
+                    .iter()
+                    .filter_map(|span| {
+                        let index = self
+                            .text_items
+                            .iter()
+                            .position(|item| item.id == span.text_item_id)?;
+                        let offset = *offsets.get(index)?;
+                        Some(
+                            offset + span.byte_range.start
+                                ..offset + span.byte_range.end,
+                        )
+                    })
+                    .collect()
+            };
+            if !ranges.is_empty() {
+                // Emit the equation on its anchor line; remove only its measured slices on other lines.
+                replacements
+                    .push((ranges, if insert_here { markdown } else { "" }));
+            }
+        }
+        if replacements.is_empty() {
+            let source = render_line(self, placeholder);
+            return if escape_prose {
+                crate::render::replace_formula_ranges(&source, Vec::new(), true)
+            } else {
+                source
+            };
+        }
+        for span in self.inline_spans.iter().filter(|span| {
+            span.content_status == crate::InlineContentStatus::Missing
+        }) {
+            if !formulas.iter().any(|formula| {
+                formula.line_id.as_ref() == Some(&self.id)
+                    && formula.bbox == span.bbox
+                    && formula.markdown.is_some()
+            }) && let Some(offset) = offsets.get(span.text_item_range.start)
+            {
+                replacements.push((
+                    std::iter::once(*offset..*offset).collect(),
+                    placeholder,
+                ));
+            }
+        }
+        crate::render::replace_formula_ranges(
+            &source,
+            replacements,
+            escape_prose,
+        )
     }
 }
 

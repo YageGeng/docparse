@@ -1,0 +1,1837 @@
+{
+  "page_width": 612.0,
+  "page_height": 792.0,
+  "block": {
+    "id": "p4:b:m0:s0",
+    "label": "text",
+    "text": "tor should be scaled by 1/Pi(m \u00d7 softmax(z))i",
+    "raw_label": "text",
+    "label_source": "Model",
+    "confidence": 0.9664359092712402,
+    "bbox": {
+      "left": 72.0,
+      "top": 519.5999755859375,
+      "right": 281.9830017089844,
+      "bottom": 731.8939819335938
+    },
+    "polygon": null,
+    "source_region": {
+      "label": "text",
+      "model_region_id": "p4:m0",
+      "fallback_region_id": null,
+      "bbox": {
+        "left": 67.5,
+        "top": 519.0,
+        "right": 283.0,
+        "bottom": 735.0
+      },
+      "polygon": null,
+      "geometry_source": "DerivedFromBbox",
+      "confidence": 0.9664359092712402,
+      "model_order": 109
+    },
+    "model_region_id": "p4:m0",
+    "model_order": 109,
+    "final_order": 7,
+    "evidence": [
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      },
+      {
+        "kind": "primary_assignment",
+        "score": 0.9918418975224894,
+        "details": {
+          "alternatives": "0",
+          "coverage": "1"
+        }
+      }
+    ],
+    "semantic_hints": {},
+    "lines": [
+      {
+        "id": "p4:b:m0:s0:l13",
+        "text": "tor should be scaled by 1/Pi(m \u00d7 softmax(z))i",
+        "bbox": {
+          "left": 72.0,
+          "top": 674.1710205078125,
+          "right": 281.49798583984375,
+          "bottom": 686.3829956054688
+        },
+        "baseline": {
+          "start": {
+            "x": 72.0,
+            "y": 682.041015625
+          },
+          "end": {
+            "x": 281.49798583984375,
+            "y": 682.041015625
+          }
+        },
+        "rotation": 0.0,
+        "direction": "LeftToRight",
+        "model_region_coverage": null,
+        "inline_spans": [
+          {
+            "label": "inline_formula",
+            "confidence": 0.7570451498031616,
+            "bbox": {
+              "left": 177.0,
+              "top": 673.5,
+              "right": 277.5,
+              "bottom": 686.5
+            },
+            "polygon": null,
+            "text_item_range": {
+              "start": 0,
+              "end": 11
+            },
+            "extracted_text": "tor should be scaled by 1/Pi(m \u00d7 softmax(z))",
+            "content_status": "Partial"
+          }
+        ],
+        "text_items": [
+          {
+            "id": "p4:t363",
+            "raw_text": "tor should be scaled by 1",
+            "raw_bbox": {
+              "left": 72.0,
+              "top": 675.1270141601562,
+              "right": 182.92799377441406,
+              "bottom": 684.072998046875
+            },
+            "bbox": {
+              "left": 72.0,
+              "top": 675.1270141601562,
+              "right": 182.92799377441406,
+              "bottom": 684.072998046875
+            },
+            "baseline": {
+              "start": {
+                "x": 72.0,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 182.12100219726562,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 363,
+            "final_order": 0,
+            "style": {
+              "font_name": "LMRoman10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.864231586456299,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 345,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                71.99998474121094,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                116,
+                111,
+                114,
+                0,
+                115,
+                104,
+                111,
+                117,
+                108,
+                100,
+                0,
+                98,
+                101,
+                0,
+                115,
+                99,
+                97,
+                108,
+                101,
+                100,
+                0,
+                98,
+                121,
+                0,
+                49
+              ],
+              "mcid": null,
+              "text_object_index": null,
+              "unicode_mapping": "Complete",
+              "generated_space": true,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t364",
+            "raw_text": "/",
+            "raw_bbox": {
+              "left": 182.92799377441406,
+              "top": 674.5689697265625,
+              "right": 187.90899658203125,
+              "bottom": 684.52197265625
+            },
+            "bbox": {
+              "left": 182.92799377441406,
+              "top": 674.5689697265625,
+              "right": 187.90899658203125,
+              "bottom": 684.52197265625
+            },
+            "baseline": {
+              "start": {
+                "x": 182.92799377441406,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 187.3509979248047,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 364,
+            "final_order": 1,
+            "style": {
+              "font_name": "LMMathItalic10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.914044380187988,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 300,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                182.92799377441406,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                61
+              ],
+              "mcid": null,
+              "text_object_index": 296,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t365",
+            "raw_text": "P",
+            "raw_bbox": {
+              "left": 189.57000732421875,
+              "top": 674.1710205078125,
+              "right": 200.08099365234375,
+              "bottom": 684.52197265625
+            },
+            "bbox": {
+              "left": 189.57000732421875,
+              "top": 674.1710205078125,
+              "right": 200.08099365234375,
+              "bottom": 684.52197265625
+            },
+            "baseline": {
+              "start": {
+                "x": 189.57000732421875,
+                "y": 674.5689697265625
+              },
+              "end": {
+                "x": 199.5229949951172,
+                "y": 674.5689697265625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 365,
+            "final_order": 2,
+            "style": {
+              "font_name": "LMMathExtension10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 0.39850398898124695,
+              "font_descent": -5.977560043334961,
+              "font_size_estimated": false,
+              "weight": 345,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                189.5699920654297,
+                117.43099975585938
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                80
+              ],
+              "mcid": null,
+              "text_object_index": 297,
+              "unicode_mapping": "Missing",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t366",
+            "raw_text": "i",
+            "raw_bbox": {
+              "left": 200.08599853515625,
+              "top": 680.1900024414062,
+              "right": 202.9029998779297,
+              "bottom": 686.3829956054688
+            },
+            "bbox": {
+              "left": 200.08599853515625,
+              "top": 680.1900024414062,
+              "right": 202.9029998779297,
+              "bottom": 686.3829956054688
+            },
+            "baseline": {
+              "start": {
+                "x": 200.08599853515625,
+                "y": 685.030029296875
+              },
+              "end": {
+                "x": 202.52699279785156,
+                "y": 685.030029296875
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 366,
+            "final_order": 3,
+            "style": {
+              "font_name": "LMMathItalic7-Regular",
+              "font_size": 6.973800182342529,
+              "font_height": 6.973800182342529,
+              "font_ascent": 4.839817523956299,
+              "font_descent": -1.352917194366455,
+              "font_size_estimated": false,
+              "weight": 360,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                200.08599853515625,
+                106.97000122070312
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                105
+              ],
+              "mcid": null,
+              "text_object_index": 298,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t367",
+            "raw_text": "(",
+            "raw_bbox": {
+              "left": 203.4029998779297,
+              "top": 674.5689697265625,
+              "right": 207.2689971923828,
+              "bottom": 684.52197265625
+            },
+            "bbox": {
+              "left": 203.4029998779297,
+              "top": 674.5689697265625,
+              "right": 207.2689971923828,
+              "bottom": 684.52197265625
+            },
+            "baseline": {
+              "start": {
+                "x": 203.4029998779297,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 206.7010040283203,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 367,
+            "final_order": 4,
+            "style": {
+              "font_name": "LMRoman10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.864231586456299,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 345,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                203.4029998779297,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                40
+              ],
+              "mcid": null,
+              "text_object_index": 299,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t368",
+            "raw_text": "m ",
+            "raw_bbox": {
+              "left": 207.27699279785156,
+              "top": 675.1270141601562,
+              "right": 216.0240020751953,
+              "bottom": 683.9739990234375
+            },
+            "bbox": {
+              "left": 207.27699279785156,
+              "top": 675.1270141601562,
+              "right": 216.0240020751953,
+              "bottom": 683.9739990234375
+            },
+            "baseline": {
+              "start": {
+                "x": 207.27699279785156,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 215.72500610351562,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 368,
+            "final_order": 5,
+            "style": {
+              "font_name": "LMMathItalic10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.914044380187988,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 300,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                207.27699279785156,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                109,
+                0
+              ],
+              "mcid": null,
+              "text_object_index": 300,
+              "unicode_mapping": "Complete",
+              "generated_space": true,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t369",
+            "raw_text": "\u00d7 ",
+            "raw_bbox": {
+              "left": 218.43499755859375,
+              "top": 674.5689697265625,
+              "right": 226.17599487304688,
+              "bottom": 683.9739990234375
+            },
+            "bbox": {
+              "left": 218.43499755859375,
+              "top": 674.5689697265625,
+              "right": 226.17599487304688,
+              "bottom": 683.9739990234375
+            },
+            "baseline": {
+              "start": {
+                "x": 218.43499755859375,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 224.71099853515625,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 369,
+            "final_order": 6,
+            "style": {
+              "font_name": "LMMathSymbols10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 7.471949577331543,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 200,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                218.43499755859375,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                2,
+                0
+              ],
+              "mcid": null,
+              "text_object_index": 301,
+              "unicode_mapping": "Complete",
+              "generated_space": true,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t370",
+            "raw_text": "softmax",
+            "raw_bbox": {
+              "left": 228.59500122070312,
+              "top": 675.0170288085938,
+              "right": 262.49798583984375,
+              "bottom": 684.072998046875
+            },
+            "bbox": {
+              "left": 228.59500122070312,
+              "top": 675.0170288085938,
+              "right": 262.49798583984375,
+              "bottom": 684.072998046875
+            },
+            "baseline": {
+              "start": {
+                "x": 228.59500122070312,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 262.49798583984375,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 370,
+            "final_order": 7,
+            "style": {
+              "font_name": "LMRoman10-Italic",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.864231586456299,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 280,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                228.59500122070312,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                115,
+                111,
+                102,
+                116,
+                109,
+                97,
+                120
+              ],
+              "mcid": null,
+              "text_object_index": 302,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t371",
+            "raw_text": "(",
+            "raw_bbox": {
+              "left": 261.9859924316406,
+              "top": 674.5689697265625,
+              "right": 265.85101318359375,
+              "bottom": 684.52197265625
+            },
+            "bbox": {
+              "left": 261.9859924316406,
+              "top": 674.5689697265625,
+              "right": 265.85101318359375,
+              "bottom": 684.52197265625
+            },
+            "baseline": {
+              "start": {
+                "x": 261.9859924316406,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 265.28399658203125,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 371,
+            "final_order": 8,
+            "style": {
+              "font_name": "LMRoman10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.864231586456299,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 345,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                261.9859924316406,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                40
+              ],
+              "mcid": null,
+              "text_object_index": 303,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t372",
+            "raw_text": "z",
+            "raw_bbox": {
+              "left": 265.8609924316406,
+              "top": 675.1270141601562,
+              "right": 270.5140075683594,
+              "bottom": 683.9739990234375
+            },
+            "bbox": {
+              "left": 265.8609924316406,
+              "top": 675.1270141601562,
+              "right": 270.5140075683594,
+              "bottom": 683.9739990234375
+            },
+            "baseline": {
+              "start": {
+                "x": 265.8609924316406,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 270.5140075683594,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 372,
+            "final_order": 9,
+            "style": {
+              "font_name": "LMMathItalic10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.914044380187988,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 300,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                265.8609924316406,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                122
+              ],
+              "mcid": null,
+              "text_object_index": 304,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t373",
+            "raw_text": "))",
+            "raw_bbox": {
+              "left": 270.9320068359375,
+              "top": 674.5689697265625,
+              "right": 278.6629943847656,
+              "bottom": 684.52197265625
+            },
+            "bbox": {
+              "left": 270.9320068359375,
+              "top": 674.5689697265625,
+              "right": 278.6629943847656,
+              "bottom": 684.52197265625
+            },
+            "baseline": {
+              "start": {
+                "x": 270.9320068359375,
+                "y": 682.041015625
+              },
+              "end": {
+                "x": 277.677001953125,
+                "y": 682.041015625
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 373,
+            "final_order": 10,
+            "style": {
+              "font_name": "LMRoman10-Regular",
+              "font_size": 9.962599754333496,
+              "font_height": 9.962599754333496,
+              "font_ascent": 6.864231586456299,
+              "font_descent": -1.9327443838119507,
+              "font_size_estimated": false,
+              "weight": 345,
+              "flags": 524292,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                270.9320068359375,
+                109.95899963378906
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                41,
+                41
+              ],
+              "mcid": null,
+              "text_object_index": 305,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          },
+          {
+            "id": "p4:t374",
+            "raw_text": "i",
+            "raw_bbox": {
+              "left": 278.6809997558594,
+              "top": 678.6959838867188,
+              "right": 281.49798583984375,
+              "bottom": 684.8889770507812
+            },
+            "bbox": {
+              "left": 278.6809997558594,
+              "top": 678.6959838867188,
+              "right": 281.49798583984375,
+              "bottom": 684.8889770507812
+            },
+            "baseline": {
+              "start": {
+                "x": 278.6809997558594,
+                "y": 683.5360107421875
+              },
+              "end": {
+                "x": 281.12200927734375,
+                "y": 683.5360107421875
+              }
+            },
+            "rotation": 0.0,
+            "source": "Native",
+            "confidence": null,
+            "extraction_order": 374,
+            "final_order": 11,
+            "style": {
+              "font_name": "LMMathItalic7-Regular",
+              "font_size": 6.973800182342529,
+              "font_height": 6.973800182342529,
+              "font_ascent": 4.839817523956299,
+              "font_descent": -1.352917194366455,
+              "font_size_estimated": false,
+              "weight": 360,
+              "flags": 524356,
+              "bold": false,
+              "italic": false,
+              "monospace": false,
+              "fill_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "stroke_color": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "text_matrix": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                278.6809997558594,
+                108.46399688720703
+              ]
+            },
+            "provenance": {
+              "char_codes": [
+                105
+              ],
+              "mcid": null,
+              "text_object_index": 306,
+              "unicode_mapping": "Complete",
+              "generated_space": false,
+              "link": null,
+              "strike": false
+            },
+            "repair_actions": []
+          }
+        ]
+      }
+    ]
+  },
+  "formula": {
+    "engine": "pp-formulanet-plus-s-onnx-cpu",
+    "id": "p4:m13",
+    "label": "inline_formula",
+    "bbox": {
+      "left": 177.0,
+      "top": 673.5,
+      "right": 277.5,
+      "bottom": 686.5
+    },
+    "block_id": "p4:b:m0:s0",
+    "line_id": "p4:b:m0:s0:l13",
+    "text_item_range": {
+      "start": 0,
+      "end": 11
+    },
+    "text_spans": [
+      {
+        "text_item_id": "p4:t363",
+        "byte_range": {
+          "start": 24,
+          "end": 25
+        },
+        "bbox": {
+          "left": 178.83399963378906,
+          "top": 675.406005859375,
+          "right": 182.12100219726562,
+          "bottom": 682.041015625
+        }
+      },
+      {
+        "text_item_id": "p4:t364",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 183.4759979248047,
+          "top": 674.5689697265625,
+          "right": 187.3509979248047,
+          "bottom": 684.52197265625
+        }
+      },
+      {
+        "text_item_id": "p4:t365",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 190.1280059814453,
+          "top": 674.5689697265625,
+          "right": 199.5229949951172,
+          "bottom": 684.52197265625
+        }
+      },
+      {
+        "text_item_id": "p4:t366",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 200.41400146484375,
+          "top": 680.406005859375,
+          "right": 202.52699279785156,
+          "bottom": 685.093017578125
+        }
+      },
+      {
+        "text_item_id": "p4:t367",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 204.38900756835938,
+          "top": 674.5689697265625,
+          "right": 206.7010040283203,
+          "bottom": 684.52197265625
+        }
+      },
+      {
+        "text_item_id": "p4:t368",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 207.5659942626953,
+          "top": 677.6380004882812,
+          "right": 215.72500610351562,
+          "bottom": 682.1409912109375
+        }
+      },
+      {
+        "text_item_id": "p4:t369",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 219.89999389648438,
+          "top": 677.1489868164062,
+          "right": 224.71099853515625,
+          "bottom": 681.9509887695312
+        }
+      },
+      {
+        "text_item_id": "p4:t370",
+        "byte_range": {
+          "start": 0,
+          "end": 7
+        },
+        "bbox": {
+          "left": 229.3520050048828,
+          "top": 675.0170288085938,
+          "right": 262.49798583984375,
+          "bottom": 684.072998046875
+        }
+      },
+      {
+        "text_item_id": "p4:t371",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 262.97198486328125,
+          "top": 674.5689697265625,
+          "right": 265.28399658203125,
+          "bottom": 684.52197265625
+        }
+      },
+      {
+        "text_item_id": "p4:t372",
+        "byte_range": {
+          "start": 0,
+          "end": 1
+        },
+        "bbox": {
+          "left": 266.28900146484375,
+          "top": 677.6380004882812,
+          "right": 270.5140075683594,
+          "bottom": 682.1409912109375
+        }
+      },
+      {
+        "text_item_id": "p4:t373",
+        "byte_range": {
+          "start": 0,
+          "end": 2
+        },
+        "bbox": {
+          "left": 271.5,
+          "top": 674.5689697265625,
+          "right": 277.677001953125,
+          "bottom": 684.52197265625
+        }
+      }
+    ],
+    "table_cell": null,
+    "latex": "1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) )",
+    "markdown": "$1 / \\sum _ { i } ( m \\times \\mathit { s o f t m a x } ( z ) )$",
+    "error": null
+  }
+}

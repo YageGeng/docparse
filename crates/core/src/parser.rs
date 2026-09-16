@@ -21,6 +21,14 @@ use crate::{
 /// Top-level parser failures with source chains preserved across runtime layers.
 #[derive(Debug, thiserror::Error)]
 pub enum DocParseError {
+    /// Formula recognition was enabled without its graph/tokenizer byte set.
+    #[error(
+        "formula recognition requires explicit model and tokenizer artifacts"
+    )]
+    MissingFormulaArtifacts,
+    /// The selected formula graph or tokenizer failed initialization.
+    #[error(transparent)]
+    Formula(#[from] docparse_formula::FormulaError),
     /// A builder cannot construct a parser without validated configuration.
     #[error("DocParserBuilder requires validated configuration")]
     MissingConfiguration,
@@ -136,6 +144,8 @@ pub struct DocParser {
     ocr_engine: Option<Arc<dyn OcrEngine>>,
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
+    #[builder(default)]
+    formula_engine: Option<Arc<dyn docparse_formula::FormulaEngine>>,
     /// Shared outline recovery is consulted only after deterministic font decoding fails.
     #[builder(default)]
     glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
@@ -156,23 +166,24 @@ impl fmt::Debug for DocParser {
 }
 
 /// Explicit model bytes for filesystem-independent parser construction on native and Web.
-#[derive(Clone)]
+#[derive(Clone, TypedBuilder)]
 pub struct ParserArtifacts {
     pub layout: docparse_layout::ModelArtifacts,
     /// Required when table recovery is enabled and no table engine is injected.
+    #[builder(default)]
     pub tsr: Option<docparse_tsr::TsrArtifacts>,
     /// Required for enabled built-in OCR when no external engine is injected.
+    #[builder(default)]
     pub ocr: Option<docparse_ocr::OcrArtifacts>,
+    /// Required when formula recognition is enabled without an injected recognizer.
+    #[builder(default)]
+    pub formula: Option<docparse_formula::FormulaArtifacts>,
 }
 
 impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
     /// Preserves the single-model convenience input for rules-only parsers.
     fn from(layout: docparse_layout::ModelArtifacts) -> Self {
-        Self {
-            layout,
-            tsr: None,
-            ocr: None,
-        }
+        Self::builder().layout(layout).build()
     }
 }
 
@@ -193,6 +204,8 @@ pub struct DocParserBuilder {
     #[builder(default)]
     table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
     #[builder(default)]
+    formula_engine: Option<Arc<dyn docparse_formula::FormulaEngine>>,
+    #[builder(default)]
     glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
@@ -204,6 +217,14 @@ impl Default for DocParserBuilder {
 }
 
 impl DocParserBuilder {
+    /// Injects a formula recognizer while retaining the configured batch and timeout policy.
+    pub fn formula_engine(
+        mut self,
+        engine: Arc<dyn docparse_formula::FormulaEngine>,
+    ) -> Self {
+        self.formula_engine = Some(engine);
+        self
+    }
     /// Uses an externally owned PDFium provider without changing model ownership.
     pub fn pdfium_provider(
         mut self,
@@ -258,6 +279,19 @@ impl DocParserBuilder {
     /// Loads layout and enabled OCR/table models once, preserving explicitly injected engines.
     pub async fn build(self) -> Result<DocParser, DocParseError> {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
+        let formula_enabled = config.formula().enabled;
+        if formula_enabled
+            && self.formula_engine.is_none()
+            && self
+                .artifacts
+                .as_ref()
+                .is_some_and(|artifacts| artifacts.formula.is_none())
+        {
+            tracing::error!(
+                "parser artifact set is missing the enabled formula model/tokenizer"
+            );
+            return Err(DocParseError::MissingFormulaArtifacts);
+        }
         let table_enabled = config.tsr().mode != crate::TableMode::RulesOnly;
         let ocr_enabled =
             config.ocr().policy != docparse_config::OcrPolicy::Disabled;
@@ -282,9 +316,20 @@ impl DocParserBuilder {
             );
             return Err(DocParseError::MissingTsrArtifacts);
         }
-        let (layout_artifacts, table_artifacts, ocr_artifacts) =
-            self.artifacts.map_or((None, None, None), |artifacts| {
-                (Some(artifacts.layout), artifacts.tsr, artifacts.ocr)
+        let (
+            layout_artifacts,
+            table_artifacts,
+            ocr_artifacts,
+            formula_artifacts,
+        ) = self
+            .artifacts
+            .map_or((None, None, None, None), |artifacts| {
+                (
+                    Some(artifacts.layout),
+                    artifacts.tsr,
+                    artifacts.ocr,
+                    artifacts.formula,
+                )
             });
         let layout_engine: Arc<dyn LayoutEngine> =
             match (self.layout_engine, layout_artifacts) {
@@ -338,12 +383,33 @@ impl DocParserBuilder {
             ) as Arc<dyn OcrEngine>),
             (None, false, _) => None,
         };
+        let formula_engine =
+            match (self.formula_engine, formula_enabled, formula_artifacts) {
+                (Some(engine), _, _) => Some(engine),
+                (None, true, Some(artifacts)) => Some(Arc::new(
+                    docparse_formula::PpFormulaNetEngine::from_artifacts(
+                        Arc::clone(&config),
+                        artifacts,
+                    )
+                    .await?,
+                )
+                    as Arc<dyn docparse_formula::FormulaEngine>),
+                (None, true, None) => Some(Arc::new(
+                    docparse_formula::PpFormulaNetEngine::from_config(
+                        Arc::clone(&config),
+                    )
+                    .await?,
+                )
+                    as Arc<dyn docparse_formula::FormulaEngine>),
+                (None, false, _) => None,
+            };
         Ok(DocParser::with_engines()
             .pdfium_provider(self.pdfium_provider)
             .config(config)
             .layout_engine(layout_engine)
             .ocr_engine(ocr_engine)
             .table_engine(table_engine)
+            .formula_engine(formula_engine)
             // Resolve the optional native database once per parser, sharing its shard cache across documents.
             .glyph_resolver(
                 self.glyph_resolver
@@ -492,6 +558,7 @@ impl DocParser {
                 .config(Arc::clone(&self.config))
                 .layout_engine(Arc::clone(&self.layout_engine))
                 .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
+                .formula_engine(self.formula_engine.as_ref().map(Arc::clone))
                 .context(context)
                 .extracted(input.extracted)
                 .rendered(rendered)
@@ -527,6 +594,7 @@ impl DocParser {
             .layout_engine(Arc::clone(&self.layout_engine))
             .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
             .table_engine(self.table_engine.as_ref().map(Arc::clone))
+            .formula_engine(self.formula_engine.as_ref().map(Arc::clone))
             .glyph_resolver(self.glyph_resolver.as_ref().map(Arc::clone))
             .build()
     }
