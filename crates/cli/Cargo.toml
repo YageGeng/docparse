@@ -9,18 +9,11 @@ description = "Command-line interface for docparse"
 
 [features]
 default = []
-ocr-coreml = ["docparse-core/ocr-coreml"]
-ocr-cuda = ["docparse-core/ocr-cuda"]
-ocr-metal = ["docparse-core/ocr-metal"]
-ocr-openvino = ["docparse-core/ocr-openvino"]
-layout-metal = ["docparse-core/layout-metal"]
-tsr-coreml = ["docparse-core/tsr-coreml"]
-tsr-cuda = ["docparse-core/tsr-cuda"]
-tsr-metal = ["docparse-core/tsr-metal"]
-tsr-openvino = ["docparse-core/tsr-openvino"]
-layout-coreml = ["docparse-core/layout-coreml"]
-layout-cuda = ["docparse-core/layout-cuda"]
-layout-openvino = ["docparse-core/layout-openvino"]
+# Forward the unified parser provider without model-specific overrides.
+coreml = ["docparse-core/coreml"]
+cuda = ["docparse-core/cuda"]
+metal = ["docparse-core/metal"]
+openvino = ["docparse-core/openvino"]
 
 [[bin]]
 name = "docparse"

@@ -376,6 +376,8 @@ impl ParseRuntime {
         let mut ocr_tasks: TaskSet<
             Result<PageStage<crate::page::PageTableDraft>, ParseRuntimeError>,
         > = TaskSet::new();
+        // Formula batches can outlive table inference; keep their backpressure out of the table slots.
+        let mut table_tasks = TaskSet::new();
         let mut page_tasks = TaskSet::new();
         let mut pages = Vec::with_capacity(page_count as usize);
         let mut fatal_error = None;
@@ -383,6 +385,7 @@ impl ParseRuntime {
         'processing: while receiver_open
             || !layout_tasks.is_empty()
             || !ocr_tasks.is_empty()
+            || !table_tasks.is_empty()
             || !page_tasks.is_empty()
         {
             tokio::select! {
@@ -397,7 +400,15 @@ impl ParseRuntime {
                         }
                     }
                 }
-                result = ocr_tasks.join_next(), if !ocr_tasks.is_empty() && page_tasks.len() < limit => {
+                result = ocr_tasks.join_next(), if !ocr_tasks.is_empty() && table_tasks.len() < limit => {
+                    if let Some(result) = result {
+                        match Self::collect_task(result) {
+                            Ok(stage) => table_tasks.spawn(async move { stage.resolve_tables().await }),
+                            Err(error) => { fatal_error = Some(error); break 'processing; }
+                        }
+                    }
+                }
+                result = table_tasks.join_next(), if !table_tasks.is_empty() && page_tasks.len() < limit => {
                     if let Some(result) = result {
                         match Self::collect_task(result) {
                             Ok(stage) => page_tasks.spawn(async move { stage.finish().await }),
@@ -490,9 +501,11 @@ impl ParseRuntime {
             render_receiver.close();
             layout_tasks.abort_all();
             ocr_tasks.abort_all();
+            table_tasks.abort_all();
             page_tasks.abort_all();
             while layout_tasks.join_next().await.is_some() {}
             while ocr_tasks.join_next().await.is_some() {}
+            while table_tasks.join_next().await.is_some() {}
             while page_tasks.join_next().await.is_some() {}
         }
         let close_result = match producer.await {

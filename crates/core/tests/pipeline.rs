@@ -12,6 +12,7 @@ use tokio::sync::{Semaphore, mpsc};
 struct ObservedLayout {
     events: mpsc::UnboundedSender<u32>,
     table: bool,
+    formula: bool,
 }
 
 impl LayoutEngine for ObservedLayout {
@@ -30,30 +31,38 @@ impl LayoutEngine for ObservedLayout {
     ) -> WasmBoxedFuture<'_, Result<Vec<LayoutDetection>, LayoutError>> {
         Box::pin(async move {
             let _ = self.events.send(request.page_number);
-            if self.table {
-                let (width, height) = request.transform.viewport_size();
-                return Ok(vec![
-                    LayoutDetection::builder()
-                        .source_detection_index(0)
-                        .raw_label("table".into())
-                        .class_id(0)
-                        .label(docparse_layout::LayoutLabel::Table)
-                        .confidence(0.99)
-                        .bbox(
-                            docparse_layout::Bbox::try_from([
-                                0.0, 0.0, width, height,
-                            ])
-                            .expect("page bounds"),
-                        )
-                        .geometry_source(
-                            docparse_layout::GeometrySource::DerivedFromBbox,
-                        )
-                        .model_order(0)
-                        .metadata(Default::default())
-                        .build(),
-                ]);
-            }
-            Ok(Vec::new())
+            let (width, height) = request.transform.viewport_size();
+            Ok([
+                (self.table, docparse_layout::LayoutLabel::Table),
+                (self.formula, docparse_layout::LayoutLabel::DisplayFormula),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (enabled, _))| *enabled)
+            .map(|(index, (_, label))| {
+                let bounds = if label == docparse_layout::LayoutLabel::Table {
+                    [0.0, 0.0, width, height]
+                } else {
+                    [50.0, 110.0, 100.0, 125.0]
+                };
+                LayoutDetection::builder()
+                    .source_detection_index(index as u32)
+                    .raw_label(label.to_str().into())
+                    .class_id(index as i64)
+                    .label(label)
+                    .confidence(0.99)
+                    .bbox(
+                        docparse_layout::Bbox::try_from(bounds)
+                            .expect("bounds"),
+                    )
+                    .geometry_source(
+                        docparse_layout::GeometrySource::DerivedFromBbox,
+                    )
+                    .model_order(index as i64)
+                    .metadata(Default::default())
+                    .build()
+            })
+            .collect())
         })
     }
 }
@@ -135,6 +144,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
         .layout_engine(Arc::new(ObservedLayout {
             events: sender,
             table: false,
+            formula: false,
         }))
         .ocr_engine(Arc::new(GatedEnrichment(Arc::clone(&gate))))
         .build()
@@ -175,6 +185,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
         .layout_engine(Arc::new(ObservedLayout {
             events: sender,
             table: false,
+            formula: false,
         }))
         .ocr_engine(Arc::new(GatedEnrichment(Arc::clone(&gate))))
         .build()
@@ -226,10 +237,12 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
         .layout_engine(Arc::new(ObservedLayout {
             events: layout_events,
             table: true,
+            formula: false,
         }))
         .ocr_engine(Arc::new(ObservedLayout {
             events: ocr_events,
             table: false,
+            formula: false,
         }))
         .table_engine(Arc::new(GatedEnrichment(Arc::clone(&gate))))
         .build()
@@ -258,4 +271,129 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
         later.expect("OCR must advance while TSR is blocked"),
         Some(2)
     );
+}
+
+impl docparse_formula::FormulaEngine for GatedEnrichment {
+    /// Identifies a deliberately stalled formula provider.
+    fn name(&self) -> &str {
+        "gated-formula"
+    }
+
+    /// Holds a formula batch until the test releases inference.
+    fn recognize(
+        &self,
+        images: Vec<Arc<docparse_layout::PageImage>>,
+        _timings: docparse_layout::timing::Timings,
+    ) -> WasmBoxedFuture<'_, Result<Vec<String>, docparse_formula::FormulaError>>
+    {
+        Box::pin(async move {
+            self.0.acquire().await.expect("open gate").forget();
+            Ok(vec!["x".into(); images.len()])
+        })
+    }
+}
+
+impl docparse_core::TableStructureEngine for ObservedLayout {
+    /// Identifies the independent table scheduling probe.
+    fn name(&self) -> &str {
+        "observed-tsr"
+    }
+
+    /// Reports TSR admission and preserves source lines through the existing fallback path.
+    fn recognize(
+        &self,
+        request: docparse_core::TsrTableRequest,
+    ) -> WasmBoxedFuture<
+        '_,
+        Result<
+            docparse_core::TsrTableInput,
+            docparse_core::TableStructureError,
+        >,
+    > {
+        Box::pin(async move {
+            let _ = self.events.send(request.page_number);
+            Err(docparse_core::TableStructureError::Engine {
+                message: "test table fallback".into(),
+            })
+        })
+    }
+}
+
+/// Slow formulas must release the table stage while preserving page order, source text, and formulas.
+#[tokio::test]
+async fn slow_formulas_allow_later_tables() {
+    let mut raw = RawConfig::default();
+    raw.tsr.mode = TableMode::TsrOnly;
+    raw.ocr.policy = OcrPolicy::Disabled;
+    raw.formula.enabled = true;
+    raw.runtime.page_concurrency = 1;
+    raw.runtime.render_queue_capacity = 1;
+    let gate = Arc::new(Semaphore::new(0));
+    let (layout_events, _) = mpsc::unbounded_channel();
+    let (table_events, mut receiver) = mpsc::unbounded_channel();
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(ObservedLayout {
+            events: layout_events,
+            table: true,
+            formula: true,
+        }))
+        .table_engine(Arc::new(ObservedLayout {
+            events: table_events,
+            table: false,
+            formula: false,
+        }))
+        .formula_engine(Arc::new(GatedEnrichment(Arc::clone(&gate))))
+        .build()
+        .await
+        .expect("parser");
+    let task = tokio::spawn(async move {
+        parser
+            .parse_bytes(Arc::from(
+                include_bytes!("fixtures/pdf/multipage_layout.pdf").as_slice(),
+            ))
+            .await
+    });
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("first table"),
+        Some(1)
+    );
+    let later =
+        tokio::time::timeout(Duration::from_secs(2), receiver.recv()).await;
+    let waiting_for_formula = !task.is_finished();
+    // One completed table may wait behind the single formula slot; the whole document must not be queued.
+    let beyond_capacity =
+        tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await;
+    // Release blocked work before asserting so a regression cannot leave native resources stranded.
+    gate.add_permits(100);
+    let result = task.await.expect("join").expect("document");
+    assert_eq!(
+        later.expect("TSR must advance while formulas are blocked"),
+        Some(2)
+    );
+    assert!(
+        beyond_capacity.is_err(),
+        "table buffering must remain bounded"
+    );
+    assert!(
+        waiting_for_formula,
+        "the document must wait for formula completion"
+    );
+    assert_eq!(
+        result
+            .pages
+            .iter()
+            .map(|page| page.page_number)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    for page in &result.pages {
+        assert_eq!(page.formulas.len(), 1);
+        let formula = page.formulas.first().expect("recognized formula");
+        assert_eq!(formula.latex.as_deref(), Some("x"));
+        assert!(formula.error.is_none());
+    }
+    docparse_core::ResultValidator::validate(&result).expect("valid document");
 }

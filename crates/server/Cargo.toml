@@ -9,11 +9,11 @@ description = "Durable native PDF parsing jobs over HTTP and SSE"
 
 [features]
 default = []
-# A server backend always enables the same provider for layout, OCR, and TSR.
-coreml = ["docparse-core/layout-coreml", "docparse-core/ocr-coreml", "docparse-core/tsr-coreml"]
-cuda = ["docparse-core/layout-cuda", "docparse-core/ocr-cuda", "docparse-core/tsr-cuda"]
-metal = ["docparse-core/layout-metal", "docparse-core/ocr-metal", "docparse-core/tsr-metal"]
-openvino = ["docparse-core/layout-openvino", "docparse-core/ocr-openvino", "docparse-core/tsr-openvino"]
+# Forward the unified parser provider without model-specific overrides.
+coreml = ["docparse-core/coreml"]
+cuda = ["docparse-core/cuda"]
+metal = ["docparse-core/metal"]
+openvino = ["docparse-core/openvino"]
 
 [dependencies]
 # workspace crates

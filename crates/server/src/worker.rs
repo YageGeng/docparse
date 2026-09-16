@@ -71,6 +71,19 @@ impl ParseObserver for ProgressObserver {
     fn on_progress(&self, progress: ParseProgress) {
         self.0.send_replace(Some(progress));
     }
+
+    /// Surfaces slow completed stages at the default log level, retaining the current job correlation.
+    fn on_timing(&self, timing: docparse_core::Timing) {
+        // Short per-crop stages remain DEBUG-only in the shared timer to keep production logs bounded.
+        if timing.duration_ms >= 1000.0 {
+            tracing::info!(
+                "slow parse stage {:?} for page {:?} elapsed {:.3} ms",
+                timing.stage,
+                timing.page_number,
+                timing.duration_ms
+            );
+        }
+    }
 }
 
 impl Worker {
@@ -300,5 +313,47 @@ impl Worker {
         .instrument(span)
         .with_current_subscriber()
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use docparse_core::Timing;
+    use docparse_layout::timing::TimingStage;
+
+    /// HTTP workers expose slow model queues at INFO without logging every short stage.
+    #[test]
+    fn progress_observer_logs_slow_stages() {
+        let log = tempfile::NamedTempFile::new().expect("log");
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(log.reopen().expect("writer"))
+            .finish();
+        let (sender, _) = watch::channel(None);
+        let observer = ProgressObserver(sender);
+        tracing::subscriber::with_default(subscriber, || {
+            for (stage, duration_ms) in [
+                (TimingStage::FormulaQueue, 1500.0),
+                (TimingStage::TsrInference, 2500.0),
+                (TimingStage::FormulaDecode, 5.0),
+            ] {
+                observer.on_timing(Timing {
+                    stage,
+                    page_number: Some(2),
+                    duration_ms,
+                });
+            }
+        });
+        let text = std::fs::read_to_string(log.path()).expect("logs");
+        assert!(
+            text.contains("FormulaQueue for page Some(2) elapsed 1500.000 ms")
+        );
+        assert!(
+            text.contains("TsrInference for page Some(2) elapsed 2500.000 ms")
+        );
+        assert!(!text.contains("FormulaDecode"));
     }
 }

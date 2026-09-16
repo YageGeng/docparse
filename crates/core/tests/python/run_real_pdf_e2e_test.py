@@ -95,7 +95,7 @@ def main() -> None:
         assert "execution_provider" not in config["layout"]
         build_command = runner.cargo_build_command("cuda", "release")
         assert isinstance(build_command, list)
-        assert "layout-cuda" in build_command
+        assert "cuda" in build_command
         assert "--release" in build_command
         assert "--no-run" in build_command
         assert "--message-format=json-render-diagnostics" in build_command

@@ -37,8 +37,8 @@ use `DOCPARSE_SERVER__API_PREFIX`. Examples below use the default `/api` prefix.
 Host names and IPv4/IPv6 addresses are supported. Native backend selection is
 fixed at compilation; model configuration has no `execution_provider` field.
 The server exposes four backend features: `coreml`, `cuda`, `metal`, and
-`openvino`. Each enables that backend for layout, OCR, and TSR together. Select
-one accelerator feature for a build, or none for CPU. CUDA builds use:
+`openvino`. Each forwards core's unified backend for layout, OCR, TSR, and
+formula. Select one accelerator feature for a build, or none for CPU. CUDA builds use:
 
 ```bash
 rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release

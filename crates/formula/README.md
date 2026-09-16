@@ -31,8 +31,11 @@ the vocabulary, so it must not run in the per-token decoding loop.
 
 Features mirror `docparse-tsr`: `default = []`, `metal`, `coreml`, `cuda`,
 `openvino`, and `wasm`. Native provider features forward to `docparse-layout`;
-select one provider per build. `wasm` forwards to config/layout, while the
-WASM-target tokenizer dependency enables `unstable_wasm` for browser support.
+select one provider per build. Core selects one provider for layout, OCR, TSR
+and formula together through `coreml`, `cuda`, `metal`, or `openvino`; CLI and
+server forward those unified features. Model-prefixed core features are not
+supported. `wasm` forwards to config/layout, while the WASM-target tokenizer
+dependency enables `unstable_wasm` for browser support.
 
 CPU batches of 1, 2 and 3 identical real formula crops produced matching outputs.
 In the earlier Plus-L investigation, CoreML's first invocation produced the correct result, but repeated invocations

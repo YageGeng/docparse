@@ -251,7 +251,7 @@ def cargo_build_command(execution_provider: str, cargo_profile: str) -> list[str
         "docparse-core",
     ]
     if execution_provider == "cuda":
-        command.extend(["--features", "layout-cuda"])
+        command.extend(["--features", "cuda"])
     command.extend([
         "--test",
         "real_pdfs",

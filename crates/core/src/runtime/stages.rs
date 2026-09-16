@@ -208,8 +208,10 @@ impl PageStage<crate::page::PageAnalysisDraft> {
 }
 
 impl PageStage<crate::page::PageTableDraft> {
-    /// Resolves tables and validates the page after releasing its upstream OCR slot.
-    pub(crate) async fn finish(self) -> Result<PageResult, ParseRuntimeError> {
+    /// Resolves tables and releases their stage slot before waiting for formula inference.
+    pub(crate) async fn resolve_tables(
+        self,
+    ) -> Result<PageStage<PageFormulaDraft>, ParseRuntimeError> {
         let Self {
             config,
             rendered,
@@ -230,27 +232,63 @@ impl PageStage<crate::page::PageTableDraft> {
                 &timings,
             )
             .await;
-        let formula_config = Arc::clone(&config);
-        let formula_timings = timings.clone();
         // Table assembly has finished; retain its measured source words for exact formula byte ranges.
-        let formula_words =
-            std::mem::take(&mut draft.extracted.table_evidence.words);
-        let mut page = docparse_layout::wasm_compat::run_cpu(move || {
-            let _timer = timings.start(TimingStage::TextFinish);
-            PageAnalyzer::new(config)
-                .with_timings(timings)
+        let words = std::mem::take(&mut draft.extracted.table_evidence.words);
+        let cpu_config = Arc::clone(&config);
+        let cpu_timings = timings.clone();
+        let page = docparse_layout::wasm_compat::run_cpu(move || {
+            let _timer = cpu_timings.start(TimingStage::TextFinish);
+            PageAnalyzer::new(cpu_config)
+                .with_timings(cpu_timings)
                 .complete(draft)
         })
         .await
         .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
-        if formula_config.formula().enabled {
+        tracing::debug!(
+            "completed table stage for page {}; handing off {} formula regions",
+            page.page_number,
+            formulas.len()
+        );
+        Ok(PageStage::builder()
+            .config(config)
+            .formula_engine(formula_engine)
+            .formulas(formulas)
+            .rendered(rendered)
+            .timings(timings)
+            .tables(tables)
+            .layout_warning(layout_warning)
+            .draft(PageFormulaDraft { page, words })
+            .build())
+    }
+}
+
+/// Retains finalized table bindings and measured words until formula projection completes.
+pub(crate) struct PageFormulaDraft {
+    page: PageResult,
+    words: std::collections::BTreeMap<crate::TextItemId, Vec<crate::TableWord>>,
+}
+
+impl PageStage<PageFormulaDraft> {
+    /// Recognizes formulas in a separately bounded stage without holding table capacity.
+    pub(crate) async fn finish(self) -> Result<PageResult, ParseRuntimeError> {
+        let Self {
+            config,
+            rendered,
+            timings,
+            layout_warning,
+            formula_engine,
+            formulas,
+            draft: PageFormulaDraft { mut page, words },
+            ..
+        } = self;
+        if config.formula().enabled {
             page.recognize_formulas(
                 formulas,
                 &rendered,
                 formula_engine.as_deref(),
-                &formula_config,
-                &formula_timings,
-                &formula_words,
+                &config,
+                &timings,
+                &words,
             )
             .await;
         }
@@ -271,5 +309,13 @@ impl PageStage<crate::page::PageTableDraft> {
 pub(crate) async fn analyze_rendered_page(
     input: PageAnalysisInput,
 ) -> Result<PageResult, ParseRuntimeError> {
-    input.prepare().await?.recognize().await?.finish().await
+    input
+        .prepare()
+        .await?
+        .recognize()
+        .await?
+        .resolve_tables()
+        .await?
+        .finish()
+        .await
 }

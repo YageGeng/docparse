@@ -63,11 +63,11 @@ rtk cargo build -p docparse-cli
 NVIDIA CUDA:
 
 ```bash
-rtk cargo build -p docparse-cli --features layout-cuda,tsr-cuda
+rtk cargo build -p docparse-cli --features cuda
 rtk docparse parse input.pdf --config docparse.toml --format json
 ```
 
-Native layout, OCR and TSR use one backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Model-prefixed CLI features forward to the shared backend, so enabling `layout-cuda` also selects CUDA for OCR and TSR. Server builds expose `cuda`, `coreml`, `metal`, and `openvino`; omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
+Native layout, OCR, TSR and formula share a backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Core, CLI and server expose only unified `cuda`, `coreml`, `metal`, and `openvino` provider features. Each core feature enables the same provider for all four model crates; CLI and server forward it unchanged. Model-prefixed provider features are not supported. Omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
 
 CoreML and Metal sessions request `FastPrediction` specialization for their reusable models. The [M4 benchmark report](docs/reports/2026-09-15-coreml-performance/README.md) records warmed real-PDF measurements and the compatibility and output checks for alternative settings.
 
@@ -266,8 +266,9 @@ model_config_path = "models/pp-lcnet-textline-ori/inference.yml"
 model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 ```
 
-The CLI exposes `ocr-cuda`, `ocr-coreml`, `ocr-metal`, and `ocr-openvino`
-features. Select one optional native provider per build, or omit them for CPU.
+Core, CLI and server expose `cuda`, `coreml`, `metal`, and `openvino`
+features shared by layout, OCR, TSR and formula. Select one optional native
+provider per build, or omit them for CPU.
 CoreML requires a compatible macOS runtime; `metal` selects CoreML's CPU/GPU
 compute units. Browser WebGPU/CPU is selected through `executionProvider` for
 all model families. Model contracts reject unknown weights or dictionaries.
