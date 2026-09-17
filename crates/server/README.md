@@ -351,12 +351,20 @@ Configure the default server event filter in `docparse.toml`:
 ```toml
 [log]
 directives = "info,ort=warn,sqlx=warn"
+# Optional: append plain-text logs instead of writing to stdout.
+file = "logs/docparse.log"
 ```
 
 The shared loader also supports profiles and `DOCPARSE_LOG__DIRECTIVES` overrides.
 A valid `RUST_LOG` takes precedence; if it is absent or invalid, the server uses
 `log.directives`. Invalid selected configuration directives stop startup before
 database connections or models are initialized.
+
+`log.file` (or `DOCPARSE_LOG__FILE`) appends to a file and creates missing parent
+directories. Relative paths resolve beside the primary configuration file. File
+output always disables ANSI colors; stdout uses colors only when attached to a
+terminal. Omit `file` to keep stdout logging. Unwritable destinations stop startup
+before database or model initialization.
 
 SQLx query logging has separate database settings with these defaults:
 

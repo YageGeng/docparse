@@ -549,24 +549,34 @@ fn log_directives_follow_configuration_precedence() {
     let path = write_config(
         directory.path(),
         "docparse.toml",
-        "[log]\ndirectives = \"debug,ort=error\"\n",
+        "[log]\ndirectives = \"debug,ort=error\"\nfile = \"logs/server.log\"\n",
     );
     let configured = ConfigLoader::new(&path)
         .load_raw()
         .expect("log configuration");
     assert_eq!(configured.log.directives, "debug,ort=error");
+    // File destinations use the same config-relative resolution as model artifacts.
+    assert_eq!(
+        configured.log.file,
+        Some(directory.path().join("logs/server.log"))
+    );
     let overridden = ConfigLoader::new(&path)
         .with_env_provider(environment_provider(
-            json!({"log": {"directives": "warn,docparse_server=debug"}}),
+            json!({"log": {"directives": "warn,docparse_server=debug", "file": "logs/override.log"}}),
         ))
         .load_raw()
         .expect("environment override");
     assert_eq!(overridden.log.directives, "warn,docparse_server=debug");
+    assert_eq!(
+        overridden.log.file,
+        Some(directory.path().join("logs/override.log"))
+    );
     write_config(directory.path(), "docparse.toml", "");
     let defaults = ConfigLoader::new(path)
         .load_raw()
         .expect("older configuration");
     assert_eq!(defaults.log.directives, "info,ort=warn,sqlx=warn");
+    assert_eq!(defaults.log.file, None);
 }
 
 /// API prefixes follow the same file and environment precedence as other server settings.

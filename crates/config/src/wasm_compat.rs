@@ -188,8 +188,14 @@ mod platform {
     }
 
     impl RawConfig {
-        /// Resolves all relative model artifact paths against the primary configuration directory.
+        /// Resolves model artifacts and file logs beside the primary configuration file, independent of the working directory.
         fn resolve_paths(&mut self, base_directory: &Path) {
+            // File logs follow model path semantics so service launches from other directories remain predictable.
+            if let Some(path) = &mut self.log.file
+                && path.is_relative()
+            {
+                *path = base_directory.join(&*path);
+            }
             if let Some(cells) = &mut self.tsr.cell_detection {
                 for path in [
                     &mut cells.files.model_path,

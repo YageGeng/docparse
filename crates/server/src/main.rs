@@ -17,6 +17,7 @@ use std::{
     error::Error, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration,
 };
 use tokio_util::sync::CancellationToken;
+use tracing_subscriber::util::SubscriberInitExt;
 use typed_builder::TypedBuilder;
 
 /// The same deployment artifact can expose HTTP, consume GPU jobs, or do both.
@@ -75,14 +76,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
     let raw = arguments.load_config()?;
 
-    // Load file/profile overrides first; a valid RUST_LOG retains its precedence over configured directives.
-    let directives = tracing_subscriber::EnvFilter::try_from_default_env()
-        .or_else(|_| {
-            tracing_subscriber::EnvFilter::try_new(&raw.log.directives)
-        })?;
-    tracing_subscriber::fmt()
-        .with_env_filter(logging::filter(directives))
-        .init();
+    // Open the configured destination before connections/models, and retain the standard log bridge.
+    logging::subscriber(&raw.log)
+        .map_err(|error| -> Box<dyn Error> { error })?
+        .try_init()?;
 
     let server = raw.server.clone();
     let mut http_options = arguments.http_options(&server);

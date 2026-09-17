@@ -35,12 +35,15 @@ pub struct RawConfig {
     pub database: DatabaseConfig,
 }
 
-/// Server event-filter defaults; native logging setup parses the tracing directive syntax.
+/// Server event filters and optional file destination; native setup validates logging resources.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogConfig {
     #[builder(default = "info,ort=warn,sqlx=warn".to_owned(), setter(into))]
     pub directives: String,
+    /// Appends plain-text logs here; relative paths resolve beside the primary configuration file.
+    #[builder(default, setter(strip_option))]
+    pub file: Option<PathBuf>,
 }
 
 impl Default for LogConfig {

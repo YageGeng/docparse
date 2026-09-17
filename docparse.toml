@@ -1,5 +1,7 @@
 [log]
 directives = "info,ort=info,sqlx=warn"
+# Append plain-text diagnostics without ANSI colors, including after service restarts.
+file = "logs/docparse.log"
 
 [server]
 max_uploads = 100

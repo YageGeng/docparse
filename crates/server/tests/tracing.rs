@@ -32,6 +32,45 @@ use tower::ServiceExt;
 use tracing::{Instrument, instrument::WithSubscriber};
 use uuid::Uuid;
 
+/// File logging must append across restarts and never emit terminal escape sequences.
+#[test]
+fn file_subscriber_appends_plaintext() {
+    // Isolate RUST_LOG without mutating the environment of concurrently running tests.
+    if std::env::var_os("DOCPARSE_TEST_LOG_SUBPROCESS").is_none() {
+        let status = std::process::Command::new(
+            std::env::current_exe().expect("test executable"),
+        )
+        .args([
+            "--exact",
+            "file_subscriber_appends_plaintext",
+            "--nocapture",
+        ])
+        .env("DOCPARSE_TEST_LOG_SUBPROCESS", "1")
+        .env("RUST_LOG", "info")
+        .status()
+        .expect("isolated logging test");
+        assert!(status.success());
+        return;
+    }
+    let directory = tempfile::tempdir().expect("log directory");
+    let path = directory.path().join("nested/server.log");
+    let config = docparse_config::LogConfig::builder()
+        .directives("info")
+        .file(path.clone())
+        .build();
+    for _ in 0..2 {
+        let subscriber = docparse_server::logging::subscriber(&config)
+            .expect("file subscriber");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!("file-logging-probe");
+        });
+    }
+    let output = std::fs::read_to_string(path).expect("persisted logs");
+    assert_eq!(output.matches("file-logging-probe").count(), 2);
+    assert!(!output.contains('\u{1b}'), "file contains ANSI escapes");
+    assert!(output.contains("INFO"));
+}
+
 /// Database logging must apply both configured levels and the threshold, including independent off switches.
 #[tokio::test]
 #[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
