@@ -161,14 +161,21 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             config.layout.score_threshold,
             "layout.score_threshold",
         )?;
-        if config.layout.session_pool_size == 0 {
+        if config.layout.sessions == 0 {
             return Err(ConfigError::InvalidValue {
-                field: "layout.session_pool_size",
+                field: "layout.sessions",
                 reason: "must be greater than zero",
             });
         }
 
         if let Some(cells) = &config.tsr.cell_detection {
+            // Bound detector batches independently from structure batches and table admission.
+            if !(1..=32).contains(&cells.batch_size) {
+                return Err(ConfigError::InvalidValue {
+                    field: "tsr.cell_detection.batch_size",
+                    reason: "must be between 1 and 32",
+                });
+            }
             Self::validate_unit_interval(
                 cells.score_threshold,
                 "tsr.cell_detection.score_threshold",
@@ -187,9 +194,16 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "SLANeXt requires independent cell detection because its position output is invalid",
             });
         }
-        if !(1..=32).contains(&config.tsr.max_in_flight) {
+        // Batch size bounds one tensor invocation; table_jobs still bounds each document's requests.
+        if !(1..=32).contains(&config.tsr.batch_size) {
             return Err(ConfigError::InvalidValue {
-                field: "tsr.max_in_flight",
+                field: "tsr.batch_size",
+                reason: "must be between 1 and 32",
+            });
+        }
+        if !(1..=32).contains(&config.tsr.table_jobs) {
+            return Err(ConfigError::InvalidValue {
+                field: "tsr.table_jobs",
                 reason: "must be between one and 32",
             });
         }
@@ -199,19 +213,18 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "must be between one and 86400000 milliseconds",
             });
         }
-        if config.runtime.page_concurrency == 0 {
+        if config.runtime.stage_pages == 0 {
             return Err(ConfigError::InvalidValue {
-                field: "runtime.page_concurrency",
+                field: "runtime.stage_pages",
                 reason: "must be greater than zero",
             });
         }
         if config.runtime.render_queue_capacity == 0
-            || config.runtime.render_queue_capacity
-                > config.runtime.page_concurrency
+            || config.runtime.render_queue_capacity > config.runtime.stage_pages
         {
             return Err(ConfigError::InvalidValue {
                 field: "runtime.render_queue_capacity",
-                reason: "must be between one and page_concurrency",
+                reason: "must be between one and stage_pages",
             });
         }
         if config.runtime.blocking_task_limit == 0 {
@@ -342,15 +355,15 @@ impl ServerConfig {
                 reason: "must be between 1 and 1024",
             });
         }
-        if !(1..=128).contains(&self.worker_concurrency) {
+        if !(1..=128).contains(&self.jobs) {
             return Err(ConfigError::InvalidValue {
-                field: "server.worker_concurrency",
+                field: "server.jobs",
                 reason: "must be between 1 and 128",
             });
         }
-        if self.pdfium_max_workers == 0 {
+        if self.pdfium_workers == 0 {
             return Err(ConfigError::InvalidValue {
-                field: "server.pdfium_max_workers",
+                field: "server.pdfium_workers",
                 reason: "must be greater than zero",
             });
         }

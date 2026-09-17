@@ -88,9 +88,15 @@ mod platform {
                 })?;
             let selected_profile = profile.or(environment_profile);
 
-            let mut figment =
-                Figment::from(Serialized::defaults(RawConfig::default()))
-                    .merge(Toml::file(&config_path));
+            let load_error = |source| ConfigError::Load {
+                path: config_path.clone(),
+                source,
+            };
+            let mut figment = Self::merge_source(
+                Figment::from(Serialized::defaults(RawConfig::default())),
+                Toml::file(&config_path),
+            )
+            .map_err(&load_error)?;
 
             if let Some(profile) = selected_profile {
                 Self::validate_profile_name(&profile)?;
@@ -103,12 +109,21 @@ mod platform {
                     });
                 }
 
-                figment = figment.merge(Toml::file(profile_path));
+                figment = Self::merge_source(figment, Toml::file(profile_path))
+                    .map_err(&load_error)?;
             }
 
-            figment = figment.merge(Serialized::defaults(environment_values));
+            figment = Self::merge_source(
+                figment,
+                Serialized::defaults(environment_values),
+            )
+            .map_err(&load_error)?;
             if let Some(overrides) = explicit_overrides {
-                figment = figment.merge(Serialized::defaults(overrides));
+                figment = Self::merge_source(
+                    figment,
+                    Serialized::defaults(overrides),
+                )
+                .map_err(&load_error)?;
             }
 
             let mut config: RawConfig =
@@ -118,6 +133,28 @@ mod platform {
                 })?;
             config.resolve_paths(&base_directory);
             Ok(config)
+        }
+
+        /// Replaces model-specific defaults when a higher-priority layer switches the tagged engine.
+        fn merge_source(
+            mut base: Figment,
+            source: impl figment::Provider,
+        ) -> Result<Figment, Box<figment::Error>> {
+            let source = Figment::from(source);
+            let incoming =
+                source.extract_inner::<String>("formula.engine.type").ok();
+            let previous =
+                base.extract_inner::<String>("formula.engine.type").ok();
+            if incoming.is_some() && incoming != previous {
+                let mut values: Dict = base.extract().map_err(Box::new)?;
+                if let Some(figment::value::Value::Dict(_, formula)) =
+                    values.get_mut("formula")
+                {
+                    formula.remove("engine");
+                }
+                base = Figment::from(Serialized::defaults(values));
+            }
+            Ok(base.merge(source))
         }
 
         /// Reads configuration values and a profile from either the injected or process environment.
@@ -207,13 +244,27 @@ mod platform {
                     }
                 }
             }
+            let formula_paths = match &mut self.formula.engine {
+                crate::FormulaEngineConfig::Pp(paths) => [
+                    &mut paths.model_path,
+                    &mut paths.tokenizer_path,
+                    &mut paths.model_manifest_path,
+                ],
+                crate::FormulaEngineConfig::Texo(paths) => [
+                    &mut paths.encoder_path,
+                    &mut paths.decoder_path,
+                    &mut paths.tokenizer_path,
+                ],
+            };
+            for path in formula_paths {
+                if path.is_relative() {
+                    *path = base_directory.join(&*path);
+                }
+            }
             for path in [
                 &mut self.layout.model_path,
                 &mut self.layout.model_config_path,
                 &mut self.layout.model_manifest_path,
-                &mut self.formula.model_path,
-                &mut self.formula.tokenizer_path,
-                &mut self.formula.model_manifest_path,
                 &mut self.tsr.model_path,
                 &mut self.tsr.model_config_path,
                 &mut self.tsr.model_manifest_path,
@@ -279,8 +330,8 @@ mod platform {
             config: &crate::RawConfig,
         ) -> Result<(), crate::ConfigError> {
             for (field, value) in [
-                ("layout.session_pool_size", config.layout.session_pool_size),
-                ("runtime.page_concurrency", config.runtime.page_concurrency),
+                ("layout.sessions", config.layout.sessions),
+                ("runtime.stage_pages", config.runtime.stage_pages),
                 (
                     "runtime.render_queue_capacity",
                     config.runtime.render_queue_capacity,

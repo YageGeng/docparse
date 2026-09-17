@@ -2,9 +2,11 @@
 use docparse_config::LogConfig;
 use std::{fs::OpenOptions, io::IsTerminal};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::fmt::writer::BoxMakeWriter;
+use tracing_subscriber::field::MakeExt;
+use tracing_subscriber::fmt::format::DefaultFields;
+use tracing_subscriber::layer::SubscriberExt;
 
-/// Builds append-only file logging or terminal output while retaining environment-filter precedence.
+/// Builds terminal output plus optional append-only file logging with a shared environment filter.
 pub fn subscriber(
     config: &LogConfig,
 ) -> Result<
@@ -13,7 +15,7 @@ pub fn subscriber(
 > {
     let environment = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(&config.directives))?;
-    let writer = if let Some(path) = &config.file {
+    let file_layer = if let Some(path) = &config.file {
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -21,18 +23,27 @@ pub fn subscriber(
             std::fs::create_dir_all(parent)?;
         }
         // Append preserves earlier profiling evidence across service restarts.
-        BoxMakeWriter::new(
-            OpenOptions::new().create(true).append(true).open(path)?,
+        Some(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                // A distinct formatter type isolates span caches from stdout without changing field text.
+                .fmt_fields(DefaultFields::new().delimited(""))
+                .with_writer(
+                    OpenOptions::new().create(true).append(true).open(path)?,
+                ),
         )
     } else {
-        BoxMakeWriter::new(std::io::stdout)
+        None
     };
-    Ok(tracing_subscriber::fmt()
-        // ANSI sequences belong only in interactive terminals, never files or redirected stdout.
-        .with_ansi(config.file.is_none() && std::io::stdout().is_terminal())
-        .with_writer(writer)
-        .with_env_filter(filter(environment))
-        .finish())
+    Ok(tracing_subscriber::registry()
+        .with(filter(environment))
+        // Keep stdout active when file logging is configured, with color only on terminals.
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(std::io::stdout().is_terminal())
+                .with_writer(std::io::stdout),
+        )
+        .with(file_layer))
 }
 
 /// Reserved for correlation spans; ordinary events retain their module targets and RUST_LOG levels.

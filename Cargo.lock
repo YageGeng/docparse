@@ -1098,6 +1098,7 @@ dependencies = [
  "blake3",
  "docparse-config",
  "docparse-formula",
+ "docparse-formula-texo",
  "docparse-layout",
  "docparse-ocr",
  "docparse-pdfium",
@@ -1160,6 +1161,27 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "docparse-formula-texo"
+version = "0.1.0"
+dependencies = [
+ "docparse-config",
+ "docparse-formula",
+ "docparse-layout",
+ "image",
+ "ndarray",
+ "ort",
+ "ort-web",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokenizers",
+ "tokio",
+ "tracing",
+ "typed-builder",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
 
@@ -1300,6 +1322,7 @@ dependencies = [
  "docparse-config",
  "docparse-core",
  "docparse-formula",
+ "docparse-formula-texo",
  "docparse-layout",
  "docparse-ocr",
  "docparse-tsr",

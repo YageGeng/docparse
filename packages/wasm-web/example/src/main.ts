@@ -16,6 +16,7 @@ const ui = {
   ocrPolicy: document.querySelector<HTMLSelectElement>("#ocr-policy")!,
   displayFormulaEnabled: document.querySelector<HTMLInputElement>("#display-formula-enabled")!,
   inlineFormulaEnabled: document.querySelector<HTMLInputElement>("#inline-formula-enabled")!,
+  formulaEngine: document.querySelector<HTMLSelectElement>("#formula-engine")!,
   formulas: document.querySelector<HTMLElement>("#formula-results")!,
   timingDetails: document.querySelector<HTMLButtonElement>("#timing-details")!,
   timingDialog: document.querySelector<HTMLDialogElement>("#timing-dialog")!,
@@ -101,6 +102,7 @@ function controls(): void {
   ui.ocrPolicy.disabled = busy;
   ui.displayFormulaEnabled.disabled = busy;
   ui.inlineFormulaEnabled.disabled = busy;
+  ui.formulaEngine.disabled = busy;
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -187,7 +189,7 @@ function progress(event: ParserProgress): void {
   switch (event.stage) {
     case "loading_runtime": status("Loading the parser", "Preparing PDFium and WebAssembly…", "busy"); break;
     case "downloading":
-      if (event.artifact === "model" || event.artifact === "formula_model") status(event.artifact === "formula_model" ? "Downloading the formula model" : "Downloading the layout model", `${(event.loaded / 1024 / 1024).toFixed(1)}${event.total ? ` / ${(event.total / 1024 / 1024).toFixed(1)}` : ""} MB`, "busy", event.total ? event.loaded / event.total : undefined);
+      if (event.artifact === "model" || event.artifact.startsWith("formula_")) status(event.artifact.startsWith("formula_") ? "Downloading the formula model" : "Downloading the layout model", `${(event.loaded / 1024 / 1024).toFixed(1)}${event.total ? ` / ${(event.total / 1024 / 1024).toFixed(1)}` : ""} MB`, "busy", event.total ? event.loaded / event.total : undefined);
       break;
     case "initializing_model": status("Preparing document models", "Creating the inference session. This can take a moment on the first run.", "busy"); break;
     case "opening": status("Opening your PDF", "Reading the document with PDFium…", "busy"); break;
@@ -401,16 +403,10 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
         detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),
         orientation: modelSource("pp-lcnet-textline-ori"),
       },
-      formulaArtifacts: (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked) ? {
-        kind: "urls",
-        model: new URL("../models/pp-formulanet-plus-s/inference.onnx", location.href).href,
-        tokenizer: new URL("../models/pp-formulanet-plus-s/tokenizer.json", location.href).href,
-        manifest: new URL("../models/pp-formulanet-plus-s/model-manifest.json", location.href).href,
-      } : undefined,
       // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
       executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
       allowCpuFallback: true,
-      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { display_enabled: ui.displayFormulaEnabled.checked, inline_enabled: ui.inlineFormulaEnabled.checked } },
+      config: { render: { dpi: 144, max_long_edge_pixels: 2000 }, tsr: { mode: ui.tableMode.value as TableMode }, ocr: { policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { engine: { type: ui.formulaEngine.value === "pp" ? "pp" : "texo" }, display_enabled: ui.displayFormulaEnabled.checked, inline_enabled: ui.inlineFormulaEnabled.checked } },
       signal, onProgress: event => { if (run === generation) progress(event); },
       onTiming: event => { if (run === generation) recordTiming("Preparation", event); },
     });
@@ -573,6 +569,7 @@ ui.tableMode.addEventListener("change", modelSettingsChanged);
 ui.ocrPolicy.addEventListener("change", modelSettingsChanged);
 ui.displayFormulaEnabled.addEventListener("change", modelSettingsChanged);
 ui.inlineFormulaEnabled.addEventListener("change", modelSettingsChanged);
+ui.formulaEngine.addEventListener("change", modelSettingsChanged);
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));
 ui.next.addEventListener("click", () => showPage(pageNumber + 1));
 ui.select.addEventListener("change", () => selectBlock(ui.select.value));

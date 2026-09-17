@@ -179,13 +179,13 @@ def verify_model(workspace: Path, model_dir: Path) -> None:
 def write_config(
     path: Path,
     model_dir: Path,
-    page_concurrency: int,
+    stage_pages: int,
     execution_provider: str,
 ) -> None:
-    """Write model paths and concurrency limits; the provider is selected by the Cargo build."""
-    queue_capacity = max(1, min(2, page_concurrency))
+    """Write session and stage-page limits under the same names accepted by the native config loader."""
+    queue_capacity = max(1, min(2, stage_pages))
     # This 124 MB model reserves roughly 4.2 GB per CUDA session on an 8 GB GPU.
-    session_pool_size = 1 if execution_provider == "cuda" else page_concurrency
+    sessions = 1 if execution_provider == "cuda" else stage_pages
     # The current parser enables TSR by default; temporary run directories cannot supply its code-default relative paths.
     table_dir = model_dir.parent / "slanet-plus"
     cell_dir = model_dir.parent / "rtdetr-table-cell-wireless"
@@ -194,7 +194,7 @@ model_path = "{(model_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(model_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(model_dir / 'model-manifest.json').as_posix()}"
 score_threshold = 0.5
-session_pool_size = {session_pool_size}
+sessions = {sessions}
 
 [tsr]
 model_path = "{(table_dir / 'inference.onnx').as_posix()}"
@@ -209,9 +209,9 @@ model_config_path = "{(cell_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(cell_dir / 'model-manifest.json').as_posix()}"
 
 [runtime]
-page_concurrency = {page_concurrency}
+stage_pages = {stage_pages}
 render_queue_capacity = {queue_capacity}
-blocking_task_limit = {page_concurrency}
+blocking_task_limit = {stage_pages}
 continue_on_page_error = true
 
 [render]
@@ -396,7 +396,7 @@ def update_summary(
     output_dir: Path,
     elapsed_seconds: float,
     peak_rss_bytes: int,
-    page_concurrency: int,
+    stage_pages: int,
     write_overlays: bool,
     execution_provider: str,
     cargo_profile: str,
@@ -410,7 +410,7 @@ def update_summary(
     summary["runtime"] = {
         "elapsed_seconds": elapsed_seconds,
         "peak_rss_bytes": peak_rss_bytes,
-        "page_concurrency": page_concurrency,
+        "stage_pages": stage_pages,
         "execution_provider": execution_provider,
         "cargo_profile": cargo_profile,
         "platform": platform.platform(),
@@ -432,7 +432,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--run-id", default="run")
-    parser.add_argument("--page-concurrency", type=int, default=4)
+    parser.add_argument("--stage-pages", type=int, default=4)
     parser.add_argument(
         "--execution-provider", choices=["cpu", "cuda"], default="cpu"
     )
@@ -451,8 +451,8 @@ def main() -> int:
     pdf_dir = arguments.pdf_dir.expanduser().resolve()
     model_dir = (workspace / arguments.model_dir).resolve() if not arguments.model_dir.is_absolute() else arguments.model_dir.resolve()
     manifest_path = (workspace / arguments.manifest).resolve() if not arguments.manifest.is_absolute() else arguments.manifest.resolve()
-    if arguments.page_concurrency <= 0:
-        print("error: --page-concurrency must be greater than zero", file=sys.stderr)
+    if arguments.stage_pages <= 0:
+        print("error: --stage-pages must be greater than zero", file=sys.stderr)
         return 2
     try:
         documents = load_manifest(manifest_path)
@@ -482,7 +482,7 @@ def main() -> int:
         write_config(
             config_path,
             model_dir,
-            arguments.page_concurrency,
+            arguments.stage_pages,
             arguments.execution_provider,
         )
         environment.update(
@@ -504,7 +504,7 @@ def main() -> int:
             output_dir,
             elapsed,
             peak_rss,
-            arguments.page_concurrency,
+            arguments.stage_pages,
             arguments.write_overlays,
             arguments.execution_provider,
             arguments.cargo_profile,

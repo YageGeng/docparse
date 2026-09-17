@@ -353,7 +353,7 @@ fn comparison_variants_replace_inherited_model_artifacts() {
                     .build(),
             ))
             .mode(docparse_config::TableMode::Fallback)
-            .max_in_flight(3)
+            .table_jobs(3)
             .timeout_ms(1234)
             .build();
         configure_comparison_models(&mut tsr, variant, &root).expect("variant");
@@ -375,7 +375,7 @@ fn comparison_variants_replace_inherited_model_artifacts() {
             "{variant}"
         );
         assert_eq!(tsr.timeout_ms, 1234);
-        assert_eq!(tsr.max_in_flight, 3);
+        assert_eq!(tsr.table_jobs, 3);
         assert_eq!(
             tsr.cell_detection
                 .as_ref()

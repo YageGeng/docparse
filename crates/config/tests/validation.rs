@@ -45,12 +45,12 @@ fn invalid_ranges_are_rejected() {
     assert_invalid_value(config, "layout.score_threshold");
 
     let mut config = defaults.clone();
-    config.layout.session_pool_size = 0;
-    assert_invalid_value(config, "layout.session_pool_size");
+    config.layout.sessions = 0;
+    assert_invalid_value(config, "layout.sessions");
 
     let mut config = defaults.clone();
-    config.runtime.page_concurrency = 0;
-    assert_invalid_value(config, "runtime.page_concurrency");
+    config.runtime.stage_pages = 0;
+    assert_invalid_value(config, "runtime.stage_pages");
 
     let mut config = defaults.clone();
     config.runtime.render_queue_capacity = 0;
@@ -61,7 +61,7 @@ fn invalid_ranges_are_rejected() {
     assert_invalid_value(config, "runtime.blocking_task_limit");
 
     let mut config = defaults.clone();
-    config.runtime.render_queue_capacity = config.runtime.page_concurrency + 1;
+    config.runtime.render_queue_capacity = config.runtime.stage_pages + 1;
     assert_invalid_value(config, "runtime.render_queue_capacity");
 
     let mut config = defaults.clone();
@@ -151,18 +151,18 @@ fn ocr_in_flight_limit_is_validated() {
 #[test]
 fn server_pdfium_process_budget_is_loaded_and_validated() {
     let configured: ServerConfig = serde_json::from_value(serde_json::json!({
-        "pdfium_max_workers": 2
+        "pdfium_workers": 2
     }))
     .expect("server process budget must load");
     configured.validate().expect("positive process budget");
     let zero: ServerConfig = serde_json::from_value(serde_json::json!({
-        "pdfium_max_workers": 0
+        "pdfium_workers": 0
     }))
     .expect("numeric process budget must deserialize before validation");
     assert!(matches!(
         zero.validate(),
         Err(ConfigError::InvalidValue {
-            field: "server.pdfium_max_workers",
+            field: "server.pdfium_workers",
             ..
         })
     ));
@@ -173,7 +173,7 @@ fn server_pdfium_process_budget_is_loaded_and_validated() {
 fn server_concurrency_limits_are_loaded_and_validated() {
     for (field, cases) in [
         (
-            "worker_concurrency",
+            "jobs",
             [(0, false), (1, true), (4, true), (128, true), (129, false)],
         ),
         (

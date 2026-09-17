@@ -1,5 +1,5 @@
 import init, { default_config, WebParser } from "./pkg/docparse_web.js";
-import type { DocumentResult, ModelSource, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
+import type { DocumentResult, FormulaSource, ModelSource, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
 import type { WorkerInbound, WorkerResponse, WorkerSuccess, TsrCropPixels } from "./protocol.js";
 import { artifact } from "./artifacts.js";
 
@@ -39,9 +39,16 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
       if (["layout", "tsr", "ocr", "formula"].includes(group) && ["model_path", "tokenizer_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     const merged = { ...raw[group], ...values };
+    if (group === "formula" && Object.hasOwn(values, "engine")) {
+      const engine = (values as Record<string, unknown>).engine;
+      if (!engine || typeof engine !== "object" || Array.isArray(engine) || Object.keys(engine).some(key => key !== "type") || !["pp", "texo"].includes((engine as { type: string }).type)) throw Object.assign(new Error("Web formula.engine accepts only type: pp or texo"), { code: "InvalidConfig" });
+      // Replace the tagged object; paths belonging to the other default variant must not leak across.
+      merged.engine = engine;
+    }
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
       const cells = (values as Record<string, unknown>).cell_detection;
-      if (!cells || typeof cells !== "object" || Array.isArray(cells) || Object.keys(cells).some(key => !["enabled", "model", "score_threshold"].includes(key))) throw Object.assign(new Error("Web cell detection accepts enabled, model and score_threshold only"), { code: "InvalidConfig" });
+      // Batch size is a model limit validated by Rust; filesystem paths remain native-only.
+      if (!cells || typeof cells !== "object" || Array.isArray(cells) || Object.keys(cells).some(key => !["enabled", "model", "score_threshold", "batch_size"].includes(key))) throw Object.assign(new Error("Web cell detection accepts enabled, model, score_threshold and batch_size only"), { code: "InvalidConfig" });
       // Preserve nested defaults; native paths remain unused with verified Worker artifacts.
       merged.cell_detection = { ...(raw[group].cell_detection as Record<string, unknown>), ...cells };
     }
@@ -56,6 +63,20 @@ async function modelBytes(source: ModelSource, prefix: string, progress?: (value
     ? await Promise.all([artifact(`${prefix}_model`, source.model, progress), artifact(`${prefix}_config`, source.config, progress), artifact(`${prefix}_manifest`, source.manifest, progress)])
     : [source.model, source.config, source.manifest];
   return { model, config, manifest };
+}
+
+/** Loads the selected formula's distinct assets without treating decoder weights as a manifest. */
+async function formulaBytes(source: FormulaSource, progress?: (value: ParserProgress) => void) {
+  if (source.type === "texo") {
+    const encoder = source.kind === "urls" ? await artifact("formula_encoder", source.encoder, progress) : source.encoder;
+    const decoder = source.kind === "urls" ? await artifact("formula_decoder", source.decoder, progress) : source.decoder;
+    const tokenizer = source.kind === "urls" ? await artifact("formula_tokenizer", source.tokenizer, progress) : source.tokenizer;
+    return { texo_formula: { encoder, decoder, tokenizer } };
+  }
+  const model = source.kind === "urls" ? await artifact("formula_model", source.model, progress) : source.model;
+  const config = source.kind === "urls" ? await artifact("formula_tokenizer", source.tokenizer, progress) : source.tokenizer;
+  const manifest = source.kind === "urls" ? await artifact("formula_manifest", source.manifest, progress) : source.manifest;
+  return { formula: { model, config, manifest } };
 }
 
 /** Pending table promises are correlated separately from the enclosing parse operation. */
@@ -143,8 +164,8 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         recognition: await modelBytes(ocrSource.recognition, "ocr_recognition", progress),
         orientation: ocrSource.orientation ? await modelBytes(ocrSource.orientation, "ocr_orientation", progress) : undefined,
       } : undefined;
-      const formulaArtifacts = payload.formulaArtifacts ? await modelBytes(payload.formulaArtifacts, "formula", progress) : undefined;
-      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts, formula: formulaArtifacts };
+      const formulaArtifacts = payload.formulaArtifacts ? await formulaBytes(payload.formulaArtifacts, progress) : {};
+      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts, ...formulaArtifacts };
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();

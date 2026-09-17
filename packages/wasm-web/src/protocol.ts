@@ -1,9 +1,9 @@
-import type { DocumentResult, ExecutionProvider, ModelSource, OcrArtifacts, PageImageResult, ParserProgress, ParserTiming, RenderFormat, WebParseConfig, TableOptions, TsrTableInput, TsrTableRequest } from "./types.js";
+import type { DocumentResult, ExecutionProvider, FormulaSource, ModelSource, OcrArtifacts, PageImageResult, ParserProgress, ParserTiming, RenderFormat, WebParseConfig, TableOptions, TsrTableInput, TsrTableRequest } from "./types.js";
 
 /** Correlates each private Worker operation with its payload and successful result. */
 export interface WorkerOperations {
   init: {
-    payload: { artifacts: ModelSource; tsrArtifacts?: ModelSource; tsrCellArtifacts?: ModelSource; ocrArtifacts?: OcrArtifacts; formulaArtifacts?: ModelSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean; observeTiming: boolean };
+    payload: { artifacts: ModelSource; tsrArtifacts?: ModelSource; tsrCellArtifacts?: ModelSource; ocrArtifacts?: OcrArtifacts; formulaArtifacts?: FormulaSource; config?: WebParseConfig; executionProvider: ExecutionProvider; allowCpuFallback: boolean; runtimeBaseUrl?: string; observeProgress: boolean; observeTiming: boolean };
     result: ExecutionProvider;
   };
   parse: {

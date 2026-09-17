@@ -32,12 +32,12 @@ use tower::ServiceExt;
 use tracing::{Instrument, instrument::WithSubscriber};
 use uuid::Uuid;
 
-/// File logging must append across restarts and never emit terminal escape sequences.
+/// File logging must append plain text across restarts while keeping stdout active.
 #[test]
 fn file_subscriber_appends_plaintext() {
     // Isolate RUST_LOG without mutating the environment of concurrently running tests.
     if std::env::var_os("DOCPARSE_TEST_LOG_SUBPROCESS").is_none() {
-        let status = std::process::Command::new(
+        let output = std::process::Command::new(
             std::env::current_exe().expect("test executable"),
         )
         .args([
@@ -47,9 +47,21 @@ fn file_subscriber_appends_plaintext() {
         ])
         .env("DOCPARSE_TEST_LOG_SUBPROCESS", "1")
         .env("RUST_LOG", "info")
-        .status()
+        // Capture stdout to catch file configuration accidentally replacing console output.
+        .output()
         .expect("isolated logging test");
-        assert!(status.success());
+        assert!(
+            output.status.success(),
+            "logging subprocess failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+        assert_eq!(stdout.matches("file-logging-probe").count(), 2);
+        assert_eq!(stdout.matches("trace_id=").count(), 2);
+        assert!(
+            !stdout.contains('\u{1b}'),
+            "redirected stdout has ANSI escapes"
+        );
         return;
     }
     let directory = tempfile::tempdir().expect("log directory");
@@ -62,11 +74,18 @@ fn file_subscriber_appends_plaintext() {
         let subscriber = docparse_server::logging::subscriber(&config)
             .expect("file subscriber");
         tracing::subscriber::with_default(subscriber, || {
-            tracing::info!("file-logging-probe");
+            // Recording a field later must not duplicate it through both formatters' span caches.
+            let span = tracing::info_span!(
+                "file_logging",
+                trace_id = tracing::field::Empty
+            );
+            span.record("trace_id", "file-trace");
+            span.in_scope(|| tracing::info!("file-logging-probe"));
         });
     }
     let output = std::fs::read_to_string(path).expect("persisted logs");
     assert_eq!(output.matches("file-logging-probe").count(), 2);
+    assert_eq!(output.matches("trace_id=").count(), 2);
     assert!(!output.contains('\u{1b}'), "file contains ANSI escapes");
     assert!(output.contains("INFO"));
 }

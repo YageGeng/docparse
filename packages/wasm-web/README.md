@@ -63,12 +63,7 @@ const parser = await prepareModels({
     config: "/models/rtdetr-table-cell-wireless/inference.yml",
     manifest: "/models/rtdetr-table-cell-wireless/model-manifest.json",
   },
-  formulaArtifacts: {
-    kind: "urls",
-    model: "/models/pp-formulanet-plus-s/inference.onnx",
-    tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json",
-    manifest: "/models/pp-formulanet-plus-s/model-manifest.json",
-  },
+  config: { formula: { engine: { type: "texo" } } },
 });
 
 try {
@@ -105,7 +100,7 @@ the execution provider change. Native callers already prepare their sessions in
 | TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
-| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Supply `formulaArtifacts` unless `config.formula.inline_enabled` and `display_enabled` are both false. |
+| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Choose `config.formula.engine.type` (`texo` by default or `pp`); presets load automatically from same-origin `/models/`. `formulaArtifacts` is an optional custom resource override. |
 
 Disabled models do not require artifact sources and are not downloaded or
 initialized, even if sources are supplied. Preparation accepts `signal`,
@@ -337,6 +332,12 @@ Fixture generators require reportlab, and the Chinese generator also requires py
 
 Final `table` blocks may include a `table` object with zero-based rows/columns, positive `row_span`/`column_span`, header flags, and cell-local lines. Header inference considers explicit tags, separator bands, and available font weight/style evidence. `table.source` identifies tagged PDF structure, vector-rule guidance, or text alignment. Plain text uses row-major tabs/newlines; ordinary single-header tables render as Markdown, while merged or multi-level headers render as escaped HTML. The configured JSON renderer retains the complete table structure even when generic evidence is hidden.
 
+Set `config.tsr.batch_size` and `config.tsr.cell_detection.batch_size` independently
+to cap structure and detector crops per ONNX invocation (1–32, default 1).
+Ready requests from same-page tables can share a batch; partial batches run
+immediately. `table_jobs` remains the admission limit, and the browser inference
+guard still serializes different model runs through output readback.
+
 Original text remains owned once by `block.lines[].text_items`. Cell lines contain non-owning references (`text_item_id`, UTF-8 `byte_range`, measured `bbox`). Do not use JavaScript string offsets directly with these byte ranges. Tagged empty cells may have a null bbox; populated tagged cells expose measured content bounds, while geometry-based cells expose inferred grid bounds. Validation checks occupancy, source coverage, byte boundaries, geometry, and cached text. Existing schema-2 documents without the optional structure remain readable.
 
 The example displays a selected table in the text inspector with its rows and merged cells. Copy uses the table's plain-text projection. The page overlay stays one parent table region. Per-page `table_structure` measures the default local reconstruction stage; `text_finish` covers composition and final validation around that stage. `text_extract` includes the PDFium word, vector, and tag evidence scan.
@@ -352,7 +353,7 @@ artifacts, then select `fallback` or `tsr_only` on the parse call.
 
 ```javascript
 const document = await parser.parse(bytes, {
-  table: { mode: "fallback", max_in_flight: 2, timeout_ms: 60000 },
+  table: { mode: "fallback", table_jobs: 2, timeout_ms: 60000 },
   onTableStructure: async (request, signal) => {
     // Invoke your own adapter, returning the original request ID and crop-pixel boxes.
     const result = await yourTableProvider(request.image.blob, { signal });
@@ -466,46 +467,66 @@ initialization failure never masquerades as successful text recovery.
 
 ## Formula artifacts and output
 
-The example enables formula recognition by default. Turn off **Formulas** before
-preparing models to skip its download and inference. Changing the switch closes
-the prepared parser and clears the previous result; prepare or parse again to
-apply it. Select a formula's containing region to inspect and copy its LaTeX and
-Markdown as typeset previews. Copy LaTeX and Copy Markdown retain the exact source strings; formula-only regions do not repeat raw extracted math as their preview. The example server serves all three
-default Plus-S artifacts from `models/pp-formulanet-plus-s/`.
+The example exposes a **Formula model** selector: **Texo** (default) or
+**PP-FormulaNet**. No formula paths need to be entered. Changing the selection
+closes the prepared parser and clears the previous result; prepare or parse again
+to load the selected model. Independent inline/display switches are retained.
 
-After building the SDK/example and starting the example server, verify the
-default switch, real recognition, clipboard output, and disabled behavior:
-
-```sh
-rtk proxy node crates/web/tests/formula_ui.mjs /absolute/path/to/formulas.pdf
-```
+SDK callers can also select a preset without providing any formula paths:
 
 ```ts
 const parser = await createParser({
   artifacts: layoutArtifacts,
-  config: { tsr: { mode: "rules_only" }, formula: { inline_enabled: true, display_enabled: true, batch_size: 4, timeout_ms: 120000 } },
-  formulaArtifacts: {
-    kind: "urls",
-    model: "/models/pp-formulanet-plus-s/inference.onnx",
-    tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json",
-    manifest: "/models/pp-formulanet-plus-s/model-manifest.json",
+  config: {
+    tsr: { mode: "rules_only" },
+    formula: { engine: { type: "texo" }, batch_size: 4, timeout_ms: 120000 },
   },
 });
+// Select PP with engine: { type: "pp" } when creating the next parser.
 const document = await parser.parse(pdfBytes);
 const markdown = await parser.render(document, "markdown");
 ```
 
-Formula bytes use `{kind: "bytes", model, tokenizer, manifest}`. Only the detected
-inline/display regions enter recognition; formula numbers remain source text.
-Each `document.pages[].formulas[]` entry contains both representations, its actual
-engine and non-owning source anchors. Empty/failed recognition keeps an error and
-page warning. `formula_queue`, `formula_preprocess`, `formula_inference` and
-`formula_decode` are separate observations. The default Plus-S graph is about 221 MiB,
-before runtime allocations. Explicit artifacts from `models/pp-formulanet-plus-m/`
-select Plus-M (about 565 MiB, 384-pixel input); `models/pp-formulanet-plus-l/`
-selects Plus-L (about 700 MiB, 768-pixel input). Graph identity selects preprocessing
-automatically. Native model checks do not establish browser runtime compatibility;
-validate the selected model/provider combination before deployment.
+The fixed presets fetch these same-origin assets:
+
+| Selection | Resource directory | Files |
+|---|---|---|
+| `texo` | `/models/texo/` | `encoder_model.onnx`, `decoder_model_merged.onnx`, `tokenizer.json` |
+| `pp` | `/models/pp-formulanet-plus-s/` | `inference.onnx`, `tokenizer.json`, `model-manifest.json` |
+
+Provision the server-side files once; the example server exposes both routes:
+
+```sh
+rtk python3 crates/formula-texo/examples/download.py models/texo
+rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s
+```
+
+For custom hosting or caller-owned memory, `formulaArtifacts` remains available:
+
+```ts
+formulaArtifacts: { type: "texo", kind: "bytes", encoder, decoder, tokenizer }
+// URL override: { type: "texo", kind: "urls", encoder, decoder, tokenizer }
+// PP override: { type: "pp", kind: "urls", model, tokenizer, manifest }
+```
+
+URLs resolve against the calling page. Byte arrays are copied before Worker
+transfer, so the caller retains its buffers. Omitting `type` in the legacy PP
+artifact shape remains supported. When an explicit `config.formula.engine.type`
+is supplied, it must match the artifact type; mismatches fail with `InvalidConfig`.
+Without explicit selection, a custom artifact's type selects its model. With
+neither, Texo is the default. Filesystem path keys are rejected in Web config.
+
+Only detected inline/display regions enter recognition; formula numbers remain
+source text. Each `document.pages[].formulas[]` entry reports the actual engine,
+LaTeX, Markdown, and source anchors. Failures retain their error and page warning.
+`formula_queue`, `formula_preprocess`, `formula_inference`, and `formula_decode`
+remain separate observations. GPU-resident Texo caches are preserved in WebGPU.
+
+Run the actual SDK/preset/byte-transfer and selector regression with a formula PDF:
+
+```sh
+rtk node packages/wasm-web/tests/formula-engines.e2e.mjs /absolute/path/to/formulas.pdf
+```
 
 Inline formulas are rendered directly inside paragraph text using the optional
 `block.markdown` projection produced by Rust. This preserves native UTF-8 span

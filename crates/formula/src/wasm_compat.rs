@@ -116,7 +116,14 @@ mod platform {
         pub async fn from_config(
             config: Arc<docparse_config::ValidatedConfig>,
         ) -> Result<Self, FormulaError> {
-            let paths = config.formula().clone();
+            let docparse_config::FormulaEngineConfig::Pp(paths) =
+                config.formula().engine.clone()
+            else {
+                tracing::error!("PP loader requires formula.engine.type = pp");
+                return Err(FormulaError::Invalid(
+                    "PP loader requires formula.engine.type = pp".into(),
+                ));
+            };
             let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
                 let read = |path: &std::path::Path| {
                     std::fs::read(path).map(Arc::from).map_err(|error| {

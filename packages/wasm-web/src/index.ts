@@ -1,5 +1,5 @@
 export type * from "./types.js";
-import type { DocParser, DocumentResult, ExecutionProvider, ModelSource, ParseOptions, RenderFormat, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
+import type { DocParser, DocumentResult, ExecutionProvider, FormulaSource, ModelSource, ParseOptions, RenderFormat, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
 import type { WorkerCommand, WorkerMethod, WorkerOperations, WorkerRequest, WorkerResponse, WorkerResult, WorkerSuccess, WorkerTableReply } from "./protocol.js";
 
 /** A request failure that preserves its stable machine-readable category. */
@@ -9,6 +9,12 @@ export class DocParseError extends Error {
 }
 
 type Pending = { id: number; method: WorkerMethod; resolve: (value: WorkerSuccess) => void; reject: (error: Error) => void; cleanup: () => void; initializing: boolean; callbacks: ParseOptions };
+
+/** Self-hosted formula presets share the example server's model routes; custom artifacts remain optional. */
+const formulaPresets: Record<"texo" | "pp", FormulaSource> = {
+  texo: { type: "texo", kind: "urls", encoder: "/models/texo/encoder_model.onnx", decoder: "/models/texo/decoder_model_merged.onnx", tokenizer: "/models/texo/tokenizer.json" },
+  pp: { type: "pp", kind: "urls", model: "/models/pp-formulanet-plus-s/inference.onnx", tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json", manifest: "/models/pp-formulanet-plus-s/model-manifest.json" },
+};
 
 /** Owns exactly one Worker and one outstanding request at a time. */
 class WorkerParser implements DocParser {
@@ -62,6 +68,15 @@ class WorkerParser implements DocParser {
 
   /** Transfers owned initialization data while retaining caller-owned buffers. */
   async initialize(options: WebParserOptions): Promise<void> {
+    const suppliedFormula = options.formulaArtifacts;
+    const formulaEnabled = options.config?.formula?.inline_enabled !== false || options.config?.formula?.display_enabled !== false;
+    const explicitEngine = options.config?.formula?.engine;
+    if (explicitEngine !== undefined && (!explicitEngine || typeof explicitEngine !== "object" || Array.isArray(explicitEngine) || Object.keys(explicitEngine).some(key => key !== "type") || !["pp", "texo"].includes(explicitEngine.type))) throw new DocParseError("InvalidConfig", "formula.engine accepts only type: pp or texo; supply models through formulaArtifacts");
+    const sourceType = suppliedFormula?.type ?? "pp";
+    const selectedType = explicitEngine?.type ?? (suppliedFormula ? sourceType : "texo");
+    if (!["pp", "texo"].includes(selectedType) || (suppliedFormula && !["pp", "texo"].includes(sourceType))) throw new DocParseError("InvalidConfig", "Unknown formula engine type");
+    if (formulaEnabled && suppliedFormula && selectedType !== sourceType) throw new DocParseError("InvalidConfig", "formula.engine.type must match formulaArtifacts.type");
+    const formulaSource = suppliedFormula ?? formulaPresets[selectedType];
     const transfers: Transferable[] = [];
     const artifacts = WorkerParser.transferSource(options.artifacts, transfers);
     const tsrEnabled = options.config?.tsr?.mode !== "rules_only";
@@ -78,13 +93,11 @@ class WorkerParser implements DocParser {
       recognition: WorkerParser.transferSource(options.ocrArtifacts.recognition, transfers),
       orientation: options.config?.ocr?.classify_orientation !== false && options.ocrArtifacts.orientation ? WorkerParser.transferSource(options.ocrArtifacts.orientation, transfers) : undefined,
     } : undefined;
-    const formulaSource = options.formulaArtifacts;
-    const formulaEnabled = options.config?.formula?.inline_enabled !== false || options.config?.formula?.display_enabled !== false;
-    if (formulaEnabled && !formulaSource) throw new DocParseError("FormulaArtifactsRequired", "Formula recognition requires formulaArtifacts; set both formula.inline_enabled and formula.display_enabled to false to disable it");
-    const formulaArtifacts = formulaEnabled && formulaSource ? WorkerParser.transferSource(formulaSource.kind === "urls" ? { ...formulaSource, config: formulaSource.tokenizer } : { ...formulaSource, config: formulaSource.tokenizer }, transfers) : undefined;
+    const formulaArtifacts = formulaEnabled && formulaSource ? WorkerParser.transferFormulaSource(formulaSource, transfers) : undefined;
+    const config = { ...options.config, formula: { ...options.config?.formula, engine: { ...options.config?.formula?.engine, type: selectedType } } };
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
-    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, formulaArtifacts, config: options.config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
+    const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, formulaArtifacts, config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };
     this.provider = await this.request({ method: "init", payload }, transfers, options.signal, { onProgress: options.onProgress, onTiming: options.onTiming });
   }
 
@@ -94,6 +107,27 @@ class WorkerParser implements DocParser {
     const model = new Uint8Array(source.model), config = new Uint8Array(source.config), manifest = new Uint8Array(source.manifest);
     transfers.push(model.buffer, config.buffer, manifest.buffer);
     return { kind: "bytes", model, config, manifest };
+  }
+
+  /** Resolves every formula URL against the page and copies only its declared buffers before transfer. */
+  private static transferFormulaSource(source: FormulaSource, transfers: Transferable[]): FormulaSource {
+    const keys = source.type === "texo" ? ["encoder", "decoder", "tokenizer"] as const : ["model", "tokenizer", "manifest"] as const;
+    const values = source as unknown as Record<string, unknown>;
+    if (source.kind !== "urls" && source.kind !== "bytes") throw new DocParseError("InvalidModelArtifacts", "Formula artifacts kind must be urls or bytes");
+    const result: Record<string, unknown> = { type: source.type ?? "pp", kind: source.kind };
+    for (const key of keys) {
+      const value = values[key];
+      if (source.kind === "urls") {
+        if (typeof value !== "string" || !value.length) throw new DocParseError("InvalidModelArtifacts", `Formula ${key} must be a nonempty URL`);
+        result[key] = new URL(value, location.href).href;
+      } else {
+        if (!(value instanceof Uint8Array) || !value.byteLength) throw new DocParseError("InvalidModelArtifacts", `Formula ${key} must contain bytes`);
+        const copy = new Uint8Array(value);
+        result[key] = copy;
+        transfers.push(copy.buffer);
+      }
+    }
+    return result as unknown as FormulaSource;
   }
 
   /** Reports the backend selected by the Worker after successful model initialization. */

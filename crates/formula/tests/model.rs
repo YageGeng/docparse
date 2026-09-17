@@ -37,11 +37,17 @@ async fn real_formula_batches_preserve_cardinality_and_content() {
         docparse_config::ConfigLoader::new(root.join("docparse.toml"))
             .load_raw()
             .expect("config");
-    if let Ok(model) = std::env::var("FORMULA_TEST_MODEL") {
+    {
+        let model = std::env::var("FORMULA_TEST_MODEL")
+            .unwrap_or_else(|_| "pp-formulanet-plus-s".into());
         let directory = root.join("models").join(model);
-        raw.formula.model_path = directory.join("inference.onnx");
-        raw.formula.tokenizer_path = directory.join("tokenizer.json");
-        raw.formula.model_manifest_path = directory.join("model-manifest.json");
+        raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+            docparse_config::PpFormulaConfig {
+                model_path: directory.join("inference.onnx"),
+                tokenizer_path: directory.join("tokenizer.json"),
+                model_manifest_path: directory.join("model-manifest.json"),
+            },
+        );
     }
     eprintln!("loading real formula engine");
     let engine = PpFormulaNetEngine::from_config(Arc::new(

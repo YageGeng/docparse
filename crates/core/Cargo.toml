@@ -10,17 +10,18 @@ description = "Native PDF extraction and layout-text fusion for docparse"
 [features]
 default = []
 # Select one provider for every native inference model in this parser.
-coreml = ["docparse-formula/coreml", "docparse-layout/coreml", "docparse-ocr/coreml", "docparse-tsr/coreml"]
-cuda = ["docparse-formula/cuda", "docparse-layout/cuda", "docparse-ocr/cuda", "docparse-tsr/cuda"]
-metal = ["docparse-formula/metal", "docparse-layout/metal", "docparse-ocr/metal", "docparse-tsr/metal"]
-openvino = ["docparse-formula/openvino", "docparse-layout/openvino", "docparse-ocr/openvino", "docparse-tsr/openvino"]
+coreml = ["docparse-formula/coreml", "docparse-formula-texo/coreml", "docparse-layout/coreml", "docparse-ocr/coreml", "docparse-tsr/coreml"]
+cuda = ["docparse-formula/cuda", "docparse-formula-texo/cuda", "docparse-layout/cuda", "docparse-ocr/cuda", "docparse-tsr/cuda"]
+metal = ["docparse-formula/metal", "docparse-formula-texo/metal", "docparse-layout/metal", "docparse-ocr/metal", "docparse-tsr/metal"]
+openvino = ["docparse-formula/openvino", "docparse-formula-texo/openvino", "docparse-layout/openvino", "docparse-ocr/openvino", "docparse-tsr/openvino"]
 pdfium-ipc = ["dep:ipc-channel", "dep:tracing-subscriber"]
-wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
+wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-formula-texo/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
 
 [dependencies]
 # workspace crates
 docparse-config.workspace = true
 docparse-formula.workspace = true
+docparse-formula-texo.workspace = true
 docparse-layout.workspace = true
 docparse-ocr.workspace = true
 docparse-tsr.workspace = true
@@ -30,6 +31,7 @@ pdfium.workspace = true
 thiserror.workspace = true
 
 # async
+futures-util.workspace = true
 tokio.workspace = true
 
 # api documentation
@@ -50,9 +52,6 @@ tracing.workspace = true
 web-time.workspace = true
 
 [dev-dependencies]
-# async
-futures-util.workspace = true
-
 # config and serialization
 figment.workspace = true
 
@@ -86,9 +85,6 @@ blake3.workspace = true
 tracing-subscriber = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# async
-futures-util.workspace = true
-
 # browser
 js-sys.workspace = true
 wasm-bindgen.workspace = true

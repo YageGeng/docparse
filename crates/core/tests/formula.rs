@@ -106,7 +106,7 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
         let mut raw = RawConfig::default();
         raw.tsr.mode = docparse_config::TableMode::RulesOnly;
         raw.formula.batch_size = 2;
-        raw.runtime.page_concurrency = 1;
+        raw.runtime.stage_pages = 1;
         raw.runtime.render_queue_capacity = 1;
         raw.runtime.blocking_task_limit = 1;
         let batches = Arc::new(Mutex::new(Vec::new()));
@@ -171,7 +171,7 @@ async fn independent_formula_toggles_preserve_native_source() {
             let mut raw = RawConfig::default();
             raw.tsr.mode = docparse_config::TableMode::RulesOnly;
             raw.formula.batch_size = 2;
-            raw.runtime.page_concurrency = 1;
+            raw.runtime.stage_pages = 1;
             raw.runtime.render_queue_capacity = 1;
             let mut value = serde_json::to_value(raw).expect("config JSON");
             value

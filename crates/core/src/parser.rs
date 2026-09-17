@@ -178,6 +178,9 @@ pub struct ParserArtifacts {
     /// Required when formula recognition is enabled without an injected recognizer.
     #[builder(default)]
     pub formula: Option<docparse_formula::FormulaArtifacts>,
+    /// Alternative Texo encoder/decoder/tokenizer bytes; mutually exclusive with `formula`.
+    #[builder(default)]
+    pub texo_formula: Option<docparse_formula_texo::TexoArtifacts>,
 }
 
 impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
@@ -276,6 +279,63 @@ impl DocParserBuilder {
         self
     }
 
+    /// Loads the prevalidated formula selection, preserving injected engines and disabled recognition.
+    async fn load_formula_engine(
+        config: &Arc<ValidatedConfig>,
+        injected: Option<Arc<dyn docparse_formula::FormulaEngine>>,
+        pp_artifacts: Option<docparse_formula::FormulaArtifacts>,
+        texo_artifacts: Option<docparse_formula_texo::TexoArtifacts>,
+    ) -> Result<Option<Arc<dyn docparse_formula::FormulaEngine>>, DocParseError>
+    {
+        if let Some(engine) = injected {
+            return Ok(Some(engine));
+        }
+        if !config.formula().inline_enabled && !config.formula().display_enabled
+        {
+            return Ok(None);
+        }
+        let engine: Arc<dyn docparse_formula::FormulaEngine> = match &config
+            .formula()
+            .engine
+        {
+            docparse_config::FormulaEngineConfig::Texo(_) => {
+                Arc::new(match texo_artifacts {
+                    Some(artifacts) => {
+                        docparse_formula_texo::TexoEngine::from_artifacts(
+                            Arc::clone(config),
+                            artifacts,
+                        )
+                        .await?
+                    }
+                    None => {
+                        docparse_formula_texo::TexoEngine::from_config(
+                            Arc::clone(config),
+                        )
+                        .await?
+                    }
+                })
+            }
+            docparse_config::FormulaEngineConfig::Pp(_) => {
+                Arc::new(match pp_artifacts {
+                    Some(artifacts) => {
+                        docparse_formula::PpFormulaNetEngine::from_artifacts(
+                            Arc::clone(config),
+                            artifacts,
+                        )
+                        .await?
+                    }
+                    None => {
+                        docparse_formula::PpFormulaNetEngine::from_config(
+                            Arc::clone(config),
+                        )
+                        .await?
+                    }
+                })
+            }
+        };
+        Ok(Some(engine))
+    }
+
     /// Loads layout and enabled OCR/table models once, preserving explicitly injected engines.
     pub async fn build(self) -> Result<DocParser, DocParseError> {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
@@ -283,15 +343,50 @@ impl DocParserBuilder {
             config.formula().inline_enabled || config.formula().display_enabled;
         if formula_enabled
             && self.formula_engine.is_none()
-            && self
-                .artifacts
-                .as_ref()
-                .is_some_and(|artifacts| artifacts.formula.is_none())
+            && self.artifacts.as_ref().is_some_and(|artifacts| {
+                artifacts.formula.is_none() && artifacts.texo_formula.is_none()
+            })
         {
             tracing::error!(
                 "parser artifact set is missing the enabled formula model/tokenizer"
             );
             return Err(DocParseError::MissingFormulaArtifacts);
+        }
+        if self.formula_engine.is_none()
+            && formula_enabled
+            && self.artifacts.as_ref().is_some_and(|artifacts| {
+                artifacts.formula.is_some() && artifacts.texo_formula.is_some()
+            })
+        {
+            tracing::error!(
+                "parser artifact set contains two formula models; select PP-FormulaNet or Texo"
+            );
+            return Err(docparse_formula::FormulaError::Artifacts(
+                "select either formula or texo_formula artifacts".into(),
+            )
+            .into());
+        }
+        if self.formula_engine.is_none()
+            && formula_enabled
+            && let Some(artifacts) = &self.artifacts
+        {
+            let selected_present = match config.formula().engine {
+                docparse_config::FormulaEngineConfig::Pp(_) => {
+                    artifacts.formula.is_some()
+                }
+                docparse_config::FormulaEngineConfig::Texo(_) => {
+                    artifacts.texo_formula.is_some()
+                }
+            };
+            if !selected_present {
+                tracing::error!(
+                    "formula artifacts do not match the explicitly configured engine"
+                );
+                return Err(docparse_formula::FormulaError::Artifacts(
+                    "formula artifacts do not match formula.engine.type".into(),
+                )
+                .into());
+            }
         }
         let table_enabled = config.tsr().mode != crate::TableMode::RulesOnly;
         let ocr_enabled =
@@ -322,16 +417,19 @@ impl DocParserBuilder {
             table_artifacts,
             ocr_artifacts,
             formula_artifacts,
-        ) = self
-            .artifacts
-            .map_or((None, None, None, None), |artifacts| {
+            texo_artifacts,
+        ) = self.artifacts.map_or(
+            (None, None, None, None, None),
+            |artifacts| {
                 (
                     Some(artifacts.layout),
                     artifacts.tsr,
                     artifacts.ocr,
                     artifacts.formula,
+                    artifacts.texo_formula,
                 )
-            });
+            },
+        );
         let layout_engine: Arc<dyn LayoutEngine> =
             match (self.layout_engine, layout_artifacts) {
                 (Some(engine), _) => engine,
@@ -384,26 +482,13 @@ impl DocParserBuilder {
             ) as Arc<dyn OcrEngine>),
             (None, false, _) => None,
         };
-        let formula_engine =
-            match (self.formula_engine, formula_enabled, formula_artifacts) {
-                (Some(engine), _, _) => Some(engine),
-                (None, true, Some(artifacts)) => Some(Arc::new(
-                    docparse_formula::PpFormulaNetEngine::from_artifacts(
-                        Arc::clone(&config),
-                        artifacts,
-                    )
-                    .await?,
-                )
-                    as Arc<dyn docparse_formula::FormulaEngine>),
-                (None, true, None) => Some(Arc::new(
-                    docparse_formula::PpFormulaNetEngine::from_config(
-                        Arc::clone(&config),
-                    )
-                    .await?,
-                )
-                    as Arc<dyn docparse_formula::FormulaEngine>),
-                (None, false, _) => None,
-            };
+        let formula_engine = Self::load_formula_engine(
+            &config,
+            self.formula_engine,
+            formula_artifacts,
+            texo_artifacts,
+        )
+        .await?;
         Ok(DocParser::with_engines()
             .pdfium_provider(self.pdfium_provider)
             .config(config)
@@ -598,5 +683,118 @@ impl DocParser {
             .formula_engine(self.formula_engine.as_ref().map(Arc::clone))
             .glyph_resolver(self.glyph_resolver.as_ref().map(Arc::clone))
             .build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Model loading should not require a real layout graph when a caller injects its engine.
+    struct UnusedLayout;
+    impl LayoutEngine for UnusedLayout {
+        /// Identifies the injected test dependency.
+        fn name(&self) -> &str {
+            "unused-layout"
+        }
+        /// Reports a fixed revision without loading weights.
+        fn model_revision(&self) -> &str {
+            "test"
+        }
+        /// Loading a parser must not invoke inference on this engine.
+        fn detect(
+            &self,
+            _request: docparse_layout::LayoutRequest,
+        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+            '_,
+            Result<
+                Vec<docparse_layout::LayoutDetection>,
+                docparse_layout::LayoutError,
+            >,
+        > {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
+
+    /// Enabled Texo byte artifacts must reach their own verifier, not PP-FormulaNet's verifier.
+    #[tokio::test]
+    async fn texo_artifacts_select_the_texo_loader() {
+        let mut raw = docparse_config::RawConfig::default();
+        raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+            docparse_config::TexoFormulaConfig::default(),
+        );
+        raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+        raw.tsr.mode = crate::TableMode::RulesOnly;
+        let empty: Arc<[u8]> = Arc::from([]);
+        let artifacts = ParserArtifacts::builder()
+            .layout(docparse_layout::ModelArtifacts {
+                model: Arc::clone(&empty),
+                config: Arc::clone(&empty),
+                manifest: Arc::clone(&empty),
+            })
+            .texo_formula(Some(docparse_formula_texo::TexoArtifacts {
+                encoder: Arc::clone(&empty),
+                decoder: Arc::clone(&empty),
+                tokenizer: empty,
+            }))
+            .build();
+        let result = DocParser::builder()
+            .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+            .layout_engine(Arc::new(UnusedLayout))
+            .artifacts(artifacts)
+            .build()
+            .await;
+        assert!(
+            matches!(result, Err(DocParseError::Formula(docparse_formula::FormulaError::Artifacts(message))) if message.contains("Texo encoder_model.onnx"))
+        );
+    }
+
+    /// Native configuration and explicit bytes both initialize the real Texo engine.
+    #[tokio::test]
+    #[ignore = "requires the pinned models/texo assets"]
+    async fn loads_real_texo_from_files_and_bytes() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/texo");
+        let mut raw = docparse_config::RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+        raw.tsr.mode = crate::TableMode::RulesOnly;
+        raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+            docparse_config::TexoFormulaConfig {
+                encoder_path: dir.join("encoder_model.onnx"),
+                decoder_path: dir.join("decoder_model_merged.onnx"),
+                tokenizer_path: dir.join("tokenizer.json"),
+            },
+        );
+        let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
+        for explicit in [false, true] {
+            let mut builder = DocParser::builder()
+                .config(Arc::clone(&config))
+                .layout_engine(Arc::new(UnusedLayout));
+            if explicit {
+                let empty: Arc<[u8]> = Arc::from([]);
+                builder = builder.artifacts(
+                    ParserArtifacts::builder()
+                        .layout(docparse_layout::ModelArtifacts {
+                            model: Arc::clone(&empty),
+                            config: Arc::clone(&empty),
+                            manifest: empty,
+                        })
+                        .texo_formula(Some(
+                            docparse_formula_texo::TexoArtifacts::try_from(match &config.formula().engine { docparse_config::FormulaEngineConfig::Texo(paths) => paths, _ => unreachable!("Texo config") })
+                            .expect("assets"),
+                        ))
+                        .build(),
+                );
+            }
+            let parser = builder.build().await.expect("Texo parser");
+            assert!(
+                parser
+                    .formula_engine
+                    .as_ref()
+                    .expect("formula engine")
+                    .name()
+                    .starts_with("texo-transfer-onnx-")
+            );
+        }
     }
 }

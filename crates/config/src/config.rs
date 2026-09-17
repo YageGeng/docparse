@@ -60,12 +60,12 @@ pub struct ServerConfig {
     /// Maximum concurrent upload requests accepted by one server.
     #[builder(default = 4)]
     pub max_uploads: usize,
-    /// Maximum document jobs processed concurrently by one server.
+    /// Maximum whole-document jobs per server; model-session counts are configured separately.
     #[builder(default = 2)]
-    pub worker_concurrency: usize,
-    /// Hard limit on live PDFium worker processes owned by one server.
+    pub jobs: usize,
+    /// Hard limit on live PDFium child processes per server, independent of document jobs.
     #[builder(default = 1)]
-    pub pdfium_max_workers: usize,
+    pub pdfium_workers: usize,
     #[builder(default = "127.0.0.1".to_owned(), setter(into))]
     pub host: String,
     #[builder(default = 8080)]
@@ -155,7 +155,7 @@ impl Default for RawConfig {
     }
 }
 
-/// Pinned PP-FormulaNet artifacts and bounded formula inference.
+/// Formula engine selection and shared bounded inference policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct FormulaConfig {
@@ -165,15 +165,9 @@ pub struct FormulaConfig {
     /// Recognize detected display formulas independently of inline recognition.
     #[builder(default = true)]
     pub display_enabled: bool,
-    /// ONNX graph with dynamic batches; Plus-S/Plus-M use 384-pixel grayscale inputs and Plus-L uses 768.
-    #[builder(default = PathBuf::from("models/pp-formulanet-plus-s/inference.onnx"))]
-    pub model_path: PathBuf,
-    /// Matching ByteLevel BPE tokenizer; never substitute the OCR character dictionary.
-    #[builder(default = PathBuf::from("models/pp-formulanet-plus-s/tokenizer.json"))]
-    pub tokenizer_path: PathBuf,
-    /// Immutable artifact identity and SHA-256 digests.
-    #[builder(default = PathBuf::from("models/pp-formulanet-plus-s/model-manifest.json"))]
-    pub model_manifest_path: PathBuf,
+    /// Explicit tagged model selection; artifact paths belong to its selected variant.
+    #[builder(default)]
+    pub engine: FormulaEngineConfig,
     /// Maximum formulas per actual ONNX invocation, including the final partial batch.
     #[builder(default = 4)]
     pub batch_size: usize,
@@ -189,6 +183,70 @@ impl Default for FormulaConfig {
     }
 }
 
+/// Explicit formula recognizer and its variant-specific artifact locations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FormulaEngineConfig {
+    /// PP-FormulaNet Plus-S, Plus-M, or Plus-L, identified by its pinned manifest.
+    Pp(PpFormulaConfig),
+    /// Texo's encoder and cached decoder with the matching WordLevel tokenizer.
+    Texo(TexoFormulaConfig),
+}
+
+impl Default for FormulaEngineConfig {
+    /// Uses Texo unless configuration explicitly selects PP-FormulaNet.
+    fn default() -> Self {
+        Self::Texo(TexoFormulaConfig::default())
+    }
+}
+
+/// Files used only by the PP-FormulaNet recognizer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PpFormulaConfig {
+    /// ONNX graph for the selected PP-FormulaNet variant.
+    pub model_path: PathBuf,
+    /// Matching ByteLevel BPE tokenizer.
+    pub tokenizer_path: PathBuf,
+    /// Immutable model identity and SHA-256 digests.
+    pub model_manifest_path: PathBuf,
+}
+
+impl Default for PpFormulaConfig {
+    /// Uses the existing pinned PP-FormulaNet Plus-S artifact set.
+    fn default() -> Self {
+        Self {
+            model_path: "models/pp-formulanet-plus-s/inference.onnx".into(),
+            tokenizer_path: "models/pp-formulanet-plus-s/tokenizer.json".into(),
+            model_manifest_path:
+                "models/pp-formulanet-plus-s/model-manifest.json".into(),
+        }
+    }
+}
+
+/// Files used only by the Texo recognizer; filenames do not select the engine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TexoFormulaConfig {
+    /// Image encoder ONNX graph.
+    pub encoder_path: PathBuf,
+    /// Merged first-step/cached decoder ONNX graph.
+    pub decoder_path: PathBuf,
+    /// Matching WordLevel tokenizer.
+    pub tokenizer_path: PathBuf,
+}
+
+impl Default for TexoFormulaConfig {
+    /// Uses the three author-published artifacts installed by the Texo downloader.
+    fn default() -> Self {
+        Self {
+            encoder_path: "models/texo/encoder_model.onnx".into(),
+            decoder_path: "models/texo/decoder_model_merged.onnx".into(),
+            tokenizer_path: "models/texo/tokenizer.json".into(),
+        }
+    }
+}
+
 /// Configuration for the default PP-DocLayoutV3 engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
@@ -197,7 +255,8 @@ pub struct LayoutConfig {
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub score_threshold: f64,
-    pub session_pool_size: usize,
+    /// Independent ONNX sessions shared by all documents; each executes one layout inference at a time.
+    pub sessions: usize,
 }
 
 impl Default for LayoutConfig {
@@ -212,7 +271,7 @@ impl Default for LayoutConfig {
                 "models/pp-doclayout-v3/model-manifest.json",
             ))
             .score_threshold(0.5)
-            .session_pool_size(1)
+            .sessions(1)
             .build()
     }
 }
@@ -221,8 +280,8 @@ impl Default for LayoutConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
-    /// Bounds owned pages per analysis stage so slow downstream inference cannot occupy every upstream slot.
-    pub page_concurrency: usize,
+    /// Maximum owned pages per document in each analysis stage, including queued and completed pages.
+    pub stage_pages: usize,
     pub render_queue_capacity: usize,
     pub blocking_task_limit: usize,
     pub continue_on_page_error: bool,
@@ -232,7 +291,7 @@ impl Default for RuntimeConfig {
     /// Builds conservative default concurrency limits.
     fn default() -> Self {
         Self::builder()
-            .page_concurrency(4)
+            .stage_pages(4)
             .render_queue_capacity(2)
             .blocking_task_limit(4)
             .continue_on_page_error(true)
@@ -453,6 +512,9 @@ pub struct TableCellConfig {
     #[builder(default = true)]
     pub enabled: bool,
     pub model: TableCellModel,
+    /// Maximum ready crops combined into one detector call; one preserves existing memory usage.
+    #[builder(default = 1)]
+    pub batch_size: usize,
     #[serde(flatten)]
     pub files: ModelFiles,
     pub score_threshold: f64,
@@ -485,11 +547,21 @@ pub struct TsrConfig {
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub mode: TableMode,
-    pub max_in_flight: usize,
+    /// Maximum ready crops combined into one structure call, independently of table-job admission.
+    #[serde(default = "TsrConfig::default_batch_size")]
+    #[builder(default = Self::default_batch_size())]
+    pub batch_size: usize,
+    /// Maximum in-flight table requests per document, including model queue waits; does not create sessions.
+    pub table_jobs: usize,
     pub timeout_ms: u64,
 }
 
 impl TsrConfig {
+    /// Keeps old configurations at singleton inference until batching is explicitly selected.
+    const fn default_batch_size() -> usize {
+        1
+    }
+
     /// Keeps serialized and builder defaults aligned for the recommended model combination.
     fn default_cell_detection() -> Option<TableCellConfig> {
         Some(TableCellConfig::default())
@@ -508,7 +580,7 @@ impl Default for TsrConfig {
                 "models/slanet-plus/model-manifest.json",
             ))
             .mode(TableMode::default())
-            .max_in_flight(2)
+            .table_jobs(2)
             .timeout_ms(60_000)
             .build()
     }

@@ -20,6 +20,8 @@ MODEL_BASE_URL = (
     f"https://huggingface.co/{MODEL_REPOSITORY}/resolve/{MODEL_REVISION}"
 )
 MODEL_NAMES = (
+    # Provision the default formula engine alongside the existing model catalog.
+    "texo",
     "pp-formulanet-plus-s",
     "pp-formulanet-plus-m",
     "pp-formulanet-plus-l",
@@ -66,10 +68,26 @@ class Model:
     repository: str
     revision: str
     artifacts: tuple[Artifact, ...]
+    # Texo carries AGPL provenance; existing models retain their Apache default.
+    license: str = MODEL_LICENSE
 
     @classmethod
     def from_name(cls, name: str) -> Model:
         """Selects a pinned contract for either complete or targeted provisioning."""
+        if name == "texo":
+            # Match the three artifact hashes enforced by docparse-formula-texo.
+            repository = "alephpi/FormulaNet"
+            revision = "63e04c86fc96c2324811114351eeea8118bf6b28"
+            base = f"https://huggingface.co/{repository}/resolve/{revision}/onnx"
+            artifacts = tuple(
+                Artifact(filename, f"{base}/{filename}?download=true", digest)
+                for filename, digest in [
+                    ("encoder_model.onnx", "95cccef463e5ed3623282f1541c0011a00b8a5d0828ea2cd57d6953ad4310b5b"),
+                    ("decoder_model_merged.onnx", "10be29b751f6de5f9900c3658551020dc865257eb2c3034bc4c1e016e4d0e35d"),
+                    ("tokenizer.json", "1240f9d178e1ad2a0076fe95ba62e332871c702accdd5ce3ae3ef33ffd6c3a1e"),
+                ]
+            )
+            return cls(name, repository, revision, artifacts, license="AGPL-3.0")
         if name in ("pp-formulanet-plus-s", "pp-formulanet-plus-m", "pp-formulanet-plus-l"):
             digest = {
                 "pp-formulanet-plus-s": "449d205c8fb2fe0a9b134a5e4a0f2421c2e7812fd902ea67dfda4e9ef4588978",
@@ -160,7 +178,7 @@ def sha256_file(path: Path) -> str:
 
 
 def verify_installation(output: Path, model: Model | None = None) -> dict:
-    """Verifies manifest provenance and all installed artifact digests."""
+    """Verifies model-specific manifest provenance and all installed artifact digests."""
     model = model or Model.from_name("pp-doclayout-v3")
     manifest_path = output / "model-manifest.json"
     if not manifest_path.is_file():
@@ -178,7 +196,7 @@ def verify_installation(output: Path, model: Model | None = None) -> dict:
     expected_identity = {
         "repository": model.repository,
         "revision": model.revision,
-        "license": MODEL_LICENSE,
+        "license": model.license,
         "files": expected_files,
     }
     for field, expected in expected_identity.items():
@@ -215,12 +233,12 @@ def download_artifact(artifact: Artifact, destination: Path) -> None:
 
 
 def write_manifest(directory: Path, model: Model | None = None) -> None:
-    """Writes deterministic provenance plus an informational UTC generation time."""
+    """Writes model-specific provenance plus an informational UTC generation time."""
     model = model or Model.from_name("pp-doclayout-v3")
     manifest = {
         "repository": model.repository,
         "revision": model.revision,
-        "license": MODEL_LICENSE,
+        "license": model.license,
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "files": {artifact.filename: artifact.sha256 for artifact in model.artifacts},
     }

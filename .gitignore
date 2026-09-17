@@ -48,3 +48,4 @@ output.json
 
 # Reproducible visual comparison; compact annotations and measurements stay versioned.
 /docs/reports/2026-09-14-tsr-model-comparison/comparison.html
+logs/

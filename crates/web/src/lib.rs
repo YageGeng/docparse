@@ -66,6 +66,28 @@ struct AuxiliaryArtifacts {
     ocr: Option<OcrArtifactBytes>,
     #[builder(default)]
     formula: Option<ArtifactBytes>,
+    #[builder(default)]
+    texo_formula: Option<TexoArtifactBytes>,
+}
+
+/// Texo's two ONNX graphs and tokenizer are supplied explicitly by the browser host.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TexoArtifactBytes {
+    encoder: Vec<u8>,
+    decoder: Vec<u8>,
+    tokenizer: Vec<u8>,
+}
+
+impl From<TexoArtifactBytes> for docparse_formula_texo::TexoArtifacts {
+    /// Moves host-owned model bytes into core's shared formula artifact container.
+    fn from(value: TexoArtifactBytes) -> Self {
+        Self {
+            encoder: Arc::from(value.encoder),
+            decoder: Arc::from(value.decoder),
+            tokenizer: Arc::from(value.tokenizer),
+        }
+    }
 }
 
 /// The three independently verified PaddleOCR networks supplied by the Worker.
@@ -173,6 +195,7 @@ impl WebParser {
                         manifest: Arc::from(artifact.manifest),
                     }
                 }))
+                .texo_formula(auxiliary.texo_formula.map(Into::into))
                 .build(),
         )
         .await
@@ -214,6 +237,9 @@ impl WebParser {
                 DocParseError::Tsr(_) => "TableModelInitializationFailed",
                 DocParseError::MissingTsrArtifacts => "TableArtifactsRequired",
                 DocParseError::MissingOcrArtifacts => "OcrArtifactsRequired",
+                DocParseError::MissingFormulaArtifacts => {
+                    "FormulaArtifactsRequired"
+                }
                 DocParseError::BuiltinOcr(_) => "OcrModelInitializationFailed",
                 _ => "ModelInitializationFailed",
             };
@@ -417,8 +443,8 @@ impl ParseObserver for BrowserObserver {
 #[wasm_bindgen]
 pub fn default_config() -> Result<JsValue, JsValue> {
     let mut raw = RawConfig::default();
-    raw.layout.session_pool_size = 1;
-    raw.runtime.page_concurrency = 1;
+    raw.layout.sessions = 1;
+    raw.runtime.stage_pages = 1;
     raw.runtime.render_queue_capacity = 1;
     raw.runtime.blocking_task_limit = 1;
     raw.serialize(&serde_wasm_bindgen::Serializer::json_compatible())

@@ -67,6 +67,8 @@ pub enum ExecutionProvider {
 #[derive(Serialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionOptions {
+    /// Optional per-output storage policy; absent preserves ORT's CPU-output default.
+    pub preferred_output_location: Option<HashMap<String, String>>,
 	pub enable_cpu_mem_arena: Option<bool>,
 	pub enable_graph_capture: Option<bool>,
 	pub enable_mem_pattern: Option<bool>,

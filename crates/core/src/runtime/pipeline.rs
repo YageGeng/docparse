@@ -364,9 +364,9 @@ impl ParseRuntime {
             executor.close().await
         });
 
-        // Independent bounded task sets prevent slow enrichment from taking every layout slot.
+        // stage_pages bounds each document's stage tasks, independently of shared model-session counts.
         // Completed upstream tasks retain their pixels until downstream capacity becomes available.
-        let limit = self.config.runtime().page_concurrency;
+        let limit = self.config.runtime().stage_pages;
         let mut layout_tasks: TaskSet<
             Result<
                 PageStage<crate::page::PageAnalysisDraft>,
@@ -751,7 +751,7 @@ mod tests {
         raw.layout.model_config_path = PathBuf::from("/tmp/missing-model.yml");
         raw.layout.model_manifest_path =
             PathBuf::from("/tmp/missing-model.json");
-        raw.runtime.page_concurrency = 1;
+        raw.runtime.stage_pages = 1;
         raw.runtime.render_queue_capacity = 1;
         raw.runtime.blocking_task_limit = 1;
         let config = Arc::new(

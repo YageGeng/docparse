@@ -568,6 +568,45 @@ impl TableStructureEngine for ConcurrentEngine {
     }
 }
 
+/// Tables on the same page overlap up to the same per-document budget used by parallel pages.
+#[tokio::test]
+async fn same_page_tables_share_the_job_budget() {
+    // Two ready tables on one page must reach the model together for batching to be possible.
+    let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::RulesOnly;
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(PartialTables))
+        .build()
+        .await
+        .expect("parser");
+    for limit in [1, 2] {
+        let engine = Arc::new(ConcurrentEngine::default());
+        parser
+            .parse_page_with_options(
+                Fixture::page(true),
+                ParseOptions::builder()
+                    .table(
+                        TableOptions::builder()
+                            .mode(TableMode::TsrOnly)
+                            .table_jobs(limit)
+                            .build(),
+                    )
+                    .table_engine(Some(
+                        Arc::clone(&engine) as Arc<dyn TableStructureEngine>
+                    ))
+                    .build(),
+            )
+            .await
+            .expect("page");
+        assert_eq!(engine.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(engine.maximum.load(Ordering::SeqCst), limit);
+        assert_eq!(engine.active.load(Ordering::SeqCst), 0);
+    }
+}
+
 /// One document's tables share one limit even when several pages execute concurrently.
 #[tokio::test]
 async fn external_budget_is_shared_across_pages() {
@@ -575,7 +614,7 @@ async fn external_budget_is_shared_across_pages() {
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-    raw.runtime.page_concurrency = 4;
+    raw.runtime.stage_pages = 4;
     raw.render.max_long_edge_pixels = 800;
     let parser = DocParser::builder()
         .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
@@ -597,7 +636,7 @@ async fn external_budget_is_shared_across_pages() {
                     .table(
                         TableOptions::builder()
                             .mode(TableMode::TsrOnly)
-                            .max_in_flight(limit)
+                            .table_jobs(limit)
                             .build(),
                     )
                     .table_engine(Some(

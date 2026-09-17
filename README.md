@@ -19,6 +19,7 @@ Models are distributed separately from the repository and crates. Download and v
 ```bash
 rtk uv run --locked scripts/download_models.py
 rtk uv run --locked scripts/download_models.py --verify-only
+rtk python3 crates/formula-texo/examples/download.py models/texo
 ```
 
 The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
@@ -68,25 +69,43 @@ rtk cargo build -p docparse-cli --features cuda
 rtk docparse parse input.pdf --config docparse.toml --format json
 ```
 
-Native layout, OCR, TSR and formula share a backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Core, CLI and server expose only unified `cuda`, `coreml`, `metal`, and `openvino` provider features. Each core feature enables the same provider for all four model crates; CLI and server forward it unchanged. Model-prefixed provider features are not supported. Omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_pool_size` for the device.
+Native layout, OCR, TSR and formula share a backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Core, CLI and server expose only unified `cuda`, `coreml`, `metal`, and `openvino` provider features. Each core feature enables the same provider for all four model crates; CLI and server forward it unchanged. Model-prefixed provider features are not supported. Omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `sessions` for the device.
 
 CoreML and Metal sessions request `FastPrediction` specialization for their reusable models. The [M4 benchmark report](docs/reports/2026-09-15-coreml-performance/README.md) records warmed real-PDF measurements and the compatibility and output checks for alternative settings.
 
 ### Formula recognition
 
-`[formula] inline_enabled = true` and `display_enabled = true` independently enable inline and display formula recognition. Both default to true and use PP-FormulaNet_plus-S. Set both to false to skip formula model loading; the former `formula.enabled` key is no longer accepted. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Install its pinned graph/tokenizer with `rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s`. Formula numbers remain native text. Disabling either kind preserves its native text and layout while skipping recognition and recognized-LaTeX projection.
+`[formula] inline_enabled = true` and `display_enabled = true` independently enable inline and display formula recognition. Both default to true and use Texo. Install its pinned encoder, decoder, and tokenizer with `rtk python3 crates/formula-texo/examples/download.py models/texo`. Set both toggles to false to skip formula model loading; the former `formula.enabled` key is no longer accepted. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Formula numbers remain native text. Disabling either kind preserves its native text and layout while skipping recognition and recognized-LaTeX projection. The browser SDK and example support Texo/PP selection with preset resources; see `packages/wasm-web/README.md`.
 
 To evaluate Plus-M, provision `--model pp-formulanet-plus-m` and update the existing
-`[formula]` section in `docparse.toml`:
+`[formula.engine]` selection in `docparse.toml`:
 
 ```toml
 [formula]
 inline_enabled = true
 display_enabled = true
+
+[formula.engine]
+type = "pp"
 model_path = "models/pp-formulanet-plus-m/inference.onnx"
 tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
 model_manifest_path = "models/pp-formulanet-plus-m/model-manifest.json"
 ```
+
+To select Texo explicitly, keep the shared `[formula]` policy and replace its engine object:
+
+```toml
+[formula.engine]
+type = "texo"
+encoder_path = "models/texo/encoder_model.onnx"
+decoder_path = "models/texo/decoder_model_merged.onnx"
+tokenizer_path = "models/texo/tokenizer.json"
+```
+
+Paths are variant-specific; the former flat `formula.model_path`, `tokenizer_path`,
+and `model_manifest_path` keys are rejected. Engine selection does not depend on
+filenames. Profile/environment switches replace the previous variant's paths.
+See `crates/formula-texo/README.md` for downloads and backend validation.
 
 Start the server or CLI with this configuration. Plus-M uses
 the same 384-pixel input edge as Plus-S; it is an optional quality comparison,
@@ -200,10 +219,10 @@ Real-PDF E2E preflight scans regular, case-insensitive PDF files at the top leve
 ```bash
 rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
-  --execution-provider cuda --page-concurrency 1 --run-id serial
+  --execution-provider cuda --stage-pages 1 --run-id serial
 rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
-  --execution-provider cuda --page-concurrency 4 --run-id parallel \
+  --execution-provider cuda --stage-pages 4 --run-id parallel \
   --write-overlays
 rtk uv run --locked scripts/compare_e2e_runs.py \
   target/docparse-e2e/serial/canonical-hashes.json \

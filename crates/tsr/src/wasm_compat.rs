@@ -1,4 +1,4 @@
-//! One session per model, with owned inputs retained through actual native/JS execution.
+//! Bounded ready-request batching with one session per model and owned native/JS inputs.
 use crate::{
     SlanetPlusEngine, TsrError, artifacts::ModelKind, model::ModelResult,
     preprocess::ModelInput,
@@ -10,72 +10,403 @@ use docparse_layout::{
 };
 use ort::session::builder::SessionBuilder;
 use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
+
+/// Each crop retains its own response and tracing context when batches span pages or documents.
+#[derive(typed_builder::TypedBuilder)]
+struct Request {
+    input: ModelInput,
+    response: oneshot::Sender<Result<ModelResult, TsrError>>,
+    timings: Timings,
+    #[builder(default)]
+    queued: Option<docparse_layout::timing::StageTimer>,
+    /// Native blocking replies outlive a canceled future, so they need a separate caller-lifetime signal.
+    #[builder(default)]
+    caller: Option<oneshot::Sender<()>>,
+    span: tracing::Span,
+    dispatch: tracing::Dispatch,
+}
+
+impl Request {
+    /// Collects only ready work after the first request, independently of how the platform waits for it.
+    fn batch(
+        first: Self,
+        receiver: &mut mpsc::Receiver<Self>,
+        batch_size: usize,
+    ) -> Vec<Self> {
+        // ponytail: batch ready work only; add a coalescing wait only if measurements justify the latency.
+        let mut requests = Vec::with_capacity(batch_size);
+        requests.push(first);
+        while requests.len() < batch_size {
+            let Ok(request) = receiver.try_recv() else {
+                break;
+            };
+            requests.push(request);
+        }
+        requests.retain_mut(|request| {
+            if !request.cancelled() {
+                return true;
+            }
+            let queued = request.queued.take();
+            tracing::dispatcher::with_default(&request.dispatch, || {
+                request.span.in_scope(|| drop(queued))
+            });
+            false
+        });
+        requests
+    }
+
+    /// Recognizes native caller cancellation even while its blocking completion receiver remains alive.
+    fn cancelled(&self) -> bool {
+        self.response.is_closed()
+            || self.caller.as_ref().is_some_and(oneshot::Sender::is_closed)
+    }
+
+    /// Ends each caller's queue interval and starts its share of the batch execution interval.
+    fn start(
+        &mut self,
+        kind: ModelKind,
+    ) -> docparse_layout::timing::StageTimer {
+        let queued = self.queued.take();
+        tracing::dispatcher::with_default(&self.dispatch, || {
+            self.span.in_scope(|| {
+                drop(queued);
+                self.timings.start(kind.timing())
+            })
+        })
+    }
+
+    /// Delivers one ordered result per crop and attributes shared batch time to each original caller.
+    fn complete(
+        requests: Vec<Self>,
+        timers: Vec<docparse_layout::timing::StageTimer>,
+        result: Result<Vec<ModelResult>, TsrError>,
+    ) {
+        let mut results = result.and_then(|outputs| {
+            if outputs.len() != requests.len() {
+                return Err(TsrError::InvalidInput {
+                    reason: "TSR batch result count mismatch".to_owned(),
+                });
+            }
+            Ok(outputs.into_iter())
+        });
+        for (request, timer) in requests.into_iter().zip(timers) {
+            let result = match &mut results {
+                Ok(outputs) => {
+                    outputs.next().ok_or_else(|| TsrError::Inference {
+                        message: "missing TSR batch result".to_owned(),
+                    })
+                }
+                // Preserve the category used by per-crop segmented recovery after a malformed structure result.
+                Err(TsrError::InvalidInput { reason }) => {
+                    Err(TsrError::InvalidInput {
+                        reason: reason.clone(),
+                    })
+                }
+                Err(error) => Err(TsrError::Inference {
+                    message: error.to_string(),
+                }),
+            };
+            tracing::dispatcher::with_default(&request.dispatch, || {
+                request.span.in_scope(|| {
+                    drop(timer);
+                    let _ = request.response.send(result);
+                })
+            });
+        }
+    }
+}
+
+impl SessionRunner {
+    /// Retains each crop until inference finishes while cancellation marks only its original caller.
+    pub(crate) async fn run(
+        self: Arc<Self>,
+        input: ModelInput,
+        timings: Timings,
+    ) -> Result<ModelResult, TsrError> {
+        let queued = timings.start(TimingStage::TsrQueue);
+        let (response, receiver) = oneshot::channel();
+        let request = Request::builder()
+            .input(input)
+            .response(response)
+            .timings(timings)
+            .queued(Some(queued))
+            .span(tracing::Span::current())
+            .dispatch(tracing::dispatcher::get_default(Clone::clone))
+            .build();
+        self.submit(request, receiver).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ready batches honor their cap, skip canceled crops, flush a short tail, and route each result once.
+    #[tokio::test]
+    async fn ready_batches_preserve_replies_and_flush_partial_work() {
+        let (sender, mut receiver) = mpsc::channel(5);
+        let mut replies = Vec::new();
+        for value in 0..5 {
+            let (response, reply) = oneshot::channel();
+            // Native cancellation must work even though its blocking reply receiver is still alive.
+            let caller = if value == 2 {
+                let (caller, lifetime) = oneshot::channel();
+                drop(lifetime);
+                Some(caller)
+            } else {
+                None
+            };
+            sender
+                .try_send(
+                    Request::builder()
+                        .input(ModelInput::Structure(
+                            crate::preprocess::SlanetInput(
+                                ndarray::Array4::from_elem(
+                                    (1, 3, 2, 2),
+                                    value as f32,
+                                ),
+                            ),
+                        ))
+                        .response(response)
+                        .caller(caller)
+                        .timings(Timings::default())
+                        .span(tracing::Span::none())
+                        .dispatch(tracing::dispatcher::get_default(
+                            Clone::clone,
+                        ))
+                        .build(),
+                )
+                .map_err(|error| error.to_string())
+                .expect("ready queue has space for every test request");
+            replies.push(reply);
+        }
+        let cancelled_reply = replies.remove(2);
+        drop(replies.remove(2));
+        drop(sender);
+        let kind = ModelKind::Structure(docparse_config::TsrModel::SlanetPlus);
+        for expected_size in [2, 0, 1] {
+            let first = receiver.recv().await.expect("ready request");
+            let mut requests = Request::batch(first, &mut receiver, 2);
+            assert_eq!(requests.len(), expected_size);
+            if requests.is_empty() {
+                continue;
+            }
+            let timers = requests
+                .iter_mut()
+                .map(|request| request.start(kind))
+                .collect();
+            let input = ModelInput::batch(
+                &requests
+                    .iter()
+                    .map(|request| &request.input)
+                    .collect::<Vec<_>>(),
+            )
+            .expect("batch inputs");
+            let ModelInput::Structure(input) = input else {
+                unreachable!("structure")
+            };
+            let outputs = input
+                .0
+                .outer_iter()
+                .map(|row| {
+                    ModelResult::Cells(ndarray::Array2::from_elem(
+                        (1, 6),
+                        *row.get((0, 0, 0)).expect("pixel"),
+                    ))
+                })
+                .collect();
+            Request::complete(requests, timers, Ok(outputs));
+        }
+        assert!(receiver.recv().await.is_none());
+        assert!(cancelled_reply.await.is_err());
+        for (reply, expected) in replies.into_iter().zip([0.0, 1.0, 4.0]) {
+            let ModelResult::Cells(boxes) =
+                reply.await.expect("response").expect("result")
+            else {
+                unreachable!("cells")
+            };
+            assert_eq!(boxes.get((0, 0)), Some(&expected));
+        }
+        // Invalid structure output must still reach the existing segmented-retry path as InvalidInput.
+        let (response, reply) = oneshot::channel();
+        let mut request = Request::builder()
+            .input(ModelInput::Structure(crate::preprocess::SlanetInput(
+                ndarray::Array4::zeros((1, 3, 2, 2)),
+            )))
+            .response(response)
+            .timings(Timings::default())
+            .span(tracing::Span::none())
+            .dispatch(tracing::dispatcher::get_default(Clone::clone))
+            .build();
+        let timer = request.start(kind);
+        Request::complete(
+            vec![request],
+            vec![timer],
+            Err(TsrError::InvalidInput {
+                reason: "invalid structure output".to_owned(),
+            }),
+        );
+        assert!(matches!(
+            reply.await.expect("failure response"),
+            Err(TsrError::InvalidInput { .. })
+        ));
+    }
+}
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
     use crate::TsrArtifacts;
-    use docparse_layout::wasm_compat::SessionWorker;
-    use ort::session::Session;
+    use docparse_layout::wasm_compat::{TaskError, run_cpu};
 
-    /// Serializes only the TSR session, leaving layout inference independent.
+    /// Owns the model thread independently of every Tokio runtime that submits work.
     pub(crate) struct SessionRunner {
-        session: SessionWorker<Session>,
-        kind: ModelKind,
+        sender: Option<mpsc::Sender<Request>>,
+        thread: Option<std::thread::JoinHandle<()>>,
     }
+
+    impl Drop for SessionRunner {
+        /// Closes the request queue before joining the thread that also destroys the native session.
+        fn drop(&mut self) {
+            drop(self.sender.take());
+            if let Some(thread) = self.thread.take()
+                && thread.join().is_err()
+            {
+                tracing::error!("TSR model thread panicked during shutdown");
+            }
+        }
+    }
+
     impl SessionRunner {
-        /// Initializes the configured graph on its dedicated inference thread.
+        /// Initializes and batches on one native thread so a caller's runtime shutdown cannot stop the model.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
             backend: OnnxBackend,
             kind: ModelKind,
+            batch_size: usize,
         ) -> Result<Arc<Self>, TsrError> {
-            let session = SessionWorker::new(move || {
-                // Only input dimensions are specialized; similarly named output symbols have other meanings.
-                let mut builder = SessionBuilder::try_from(backend)?
-                    .with_intra_threads(1)
-                    .map_err(ort::Error::from)?;
-                let batch_dimension = if matches!(kind, ModelKind::Cells(_)) {
-                    "DynamicDimension.2"
-                } else {
-                    "DynamicDimension.0"
-                };
-                builder = builder
-                    .with_dimension_override(batch_dimension, 1)
-                    .map_err(ort::Error::from)?;
-                if matches!(
-                    kind,
-                    ModelKind::Structure(docparse_config::TsrModel::SlanetPlus)
-                ) {
-                    builder = builder
-                        .with_dimension_override("DynamicDimension.1", 488)
-                        .map_err(ort::Error::from)?
-                        .with_dimension_override("DynamicDimension.2", 488)
-                        .map_err(ort::Error::from)?;
-                }
-                Ok::<_, TsrError>(builder.commit_from_memory(&artifacts.model)?)
+            let span = tracing::Span::current();
+            let dispatch = tracing::dispatcher::get_default(Clone::clone);
+            let initialize = move || {
+                // Consume the initializer so verified bytes and its tracing context are released after loading.
+                let model = artifacts.model;
+                tracing::dispatcher::with_default(&dispatch, || {
+                    span.in_scope(|| {
+                        // Specialize spatial dimensions only; partial batches keep the batch axis dynamic.
+                        let mut builder = SessionBuilder::try_from(backend)?
+                            .with_intra_threads(1)
+                            .map_err(ort::Error::from)?;
+                        if matches!(
+                            kind,
+                            ModelKind::Structure(
+                                docparse_config::TsrModel::SlanetPlus
+                            )
+                        ) {
+                            builder = builder
+                                .with_dimension_override(
+                                    "DynamicDimension.1",
+                                    488,
+                                )
+                                .map_err(ort::Error::from)?
+                                .with_dimension_override(
+                                    "DynamicDimension.2",
+                                    488,
+                                )
+                                .map_err(ort::Error::from)?;
+                        }
+                        Ok::<_, TsrError>(builder.commit_from_memory(&model)?)
+                    })
+                })
+            };
+            run_cpu(move || {
+                let (sender, mut receiver) = mpsc::channel(batch_size);
+                let (ready, initialized) = oneshot::channel();
+                let thread = std::thread::Builder::new()
+                    .name("docparse-tsr".into())
+                    .spawn(move || {
+                        let mut session = match initialize() {
+                            Ok(session) => session,
+                            Err(error) => {
+                                let _ = ready.send(Err(error));
+                                return;
+                            }
+                        };
+                        if ready.send(Ok(())).is_err() {
+                            return;
+                        }
+                        while let Some(first) = receiver.blocking_recv() {
+                            let mut requests = Request::batch(
+                                first,
+                                &mut receiver,
+                                batch_size,
+                            );
+                            if requests.is_empty() {
+                                continue;
+                            }
+                            let timers = requests
+                                .iter_mut()
+                                .map(|request| request.start(kind))
+                                .collect();
+                            let result = (|| {
+                                let input = ModelInput::batch(
+                                    &requests
+                                        .iter()
+                                        .map(|request| &request.input)
+                                        .collect::<Vec<_>>(),
+                                )?;
+                                let outputs = session.run(input.values()?)?;
+                                ModelResult::from_batch(
+                                    kind,
+                                    requests.len(),
+                                    &outputs,
+                                )
+                            })();
+                            Request::complete(requests, timers, result);
+                        }
+                    })
+                    .map_err(|error| {
+                        TaskError::from_message(error.to_string())
+                    })?;
+                // Install the join owner before waiting so failed or canceled initialization also reaps the thread.
+                let runner = Arc::new(Self {
+                    sender: Some(sender),
+                    thread: Some(thread),
+                });
+                initialized.blocking_recv().map_err(|_closed| {
+                    TaskError::from_message("TSR initialization thread stopped")
+                })??;
+                Ok(runner)
             })
-            .await?;
-            // ponytail: one session serializes TSR crops; add a pool only if measured throughput needs it.
-            Ok(Arc::new(Self { session, kind }))
+            .await?
         }
 
-        /// Runs on the same thread for every crop while retaining tensors through actual completion.
-        pub(crate) async fn run(
+        /// Keeps the last model owner off the inference thread until even canceled native work has completed.
+        pub(super) async fn submit(
             self: Arc<Self>,
-            input: ModelInput,
-            timings: Timings,
+            mut request: Request,
+            receiver: oneshot::Receiver<Result<ModelResult, TsrError>>,
         ) -> Result<ModelResult, TsrError> {
-            let queued = timings.start(TimingStage::TsrQueue);
-            let kind = self.kind;
-            self.session
-                .run(move |session| {
-                    drop(queued);
-                    let _timer = timings.start(kind.timing());
-                    let outputs = session.run(input.values()?)?;
-                    ModelResult::try_from((kind, &outputs))
-                })
-                .await?
+            let (caller, _caller_lifetime) = oneshot::channel();
+            request.caller = Some(caller);
+            run_cpu(move || {
+                self.sender
+                    .as_ref()
+                    .ok_or_else(|| TsrError::Inference {
+                        message: "TSR worker stopped".to_owned(),
+                    })?
+                    .blocking_send(request)
+                    .map_err(|_closed| TsrError::Inference {
+                        message: "TSR worker stopped".to_owned(),
+                    })?;
+                // Only finite work occupies the caller's blocking pool; idle models use their own threads.
+                receiver.blocking_recv().map_err(|_closed| {
+                    TsrError::Inference {
+                        message: "TSR response lost".to_owned(),
+                    }
+                })?
+            })
+            .await?
         }
     }
 
@@ -119,46 +450,51 @@ mod platform {
 mod platform {
     use super::*;
     use ort::session::RunOptions;
-    use tokio::sync::{mpsc, oneshot};
 
-    /// A queued crop owns its tensor until the actor finishes or skips canceled work.
-    #[derive(typed_builder::TypedBuilder)]
-    struct Request {
-        input: ModelInput,
-        response: oneshot::Sender<Result<ModelResult, TsrError>>,
-        timings: Timings,
-        queued: docparse_layout::timing::StageTimer,
-    }
+    /// Browser sessions stay on their owning Worker while queued inputs outlive canceled calls.
     pub(crate) struct SessionRunner {
         sender: mpsc::Sender<Request>,
     }
+
     impl SessionRunner {
         /// Creates the selected browser session after the host initializes ort-web.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
             backend: OnnxBackend,
             kind: ModelKind,
+            batch_size: usize,
         ) -> Result<Arc<Self>, TsrError> {
             let mut session = SessionBuilder::try_from(backend)?
                 .commit_from_memory(&artifacts.model)
                 .await?;
             let options = RunOptions::new()?;
-            let (sender, mut receiver) = mpsc::channel::<Request>(1);
+            let (sender, mut receiver) = mpsc::channel(batch_size);
             wasm_bindgen_futures::spawn_local(async move {
-                while let Some(request) = receiver.recv().await {
-                    if request.response.is_closed() {
+                while let Some(first) = receiver.recv().await {
+                    let mut requests =
+                        Request::batch(first, &mut receiver, batch_size);
+                    if requests.is_empty() {
                         continue;
                     }
                     let _inference = OnnxBackend::inference_guard().await;
                     // A deadline may expire while another model owns the browser runtime.
-                    if request.response.is_closed() {
+                    requests.retain(|request| !request.cancelled());
+                    if requests.is_empty() {
                         continue;
                     }
-                    drop(request.queued);
+                    let timers = requests
+                        .iter_mut()
+                        .map(|request| request.start(kind))
+                        .collect();
                     let result = async {
-                        let _timer = request.timings.start(kind.timing());
+                        let input = ModelInput::batch(
+                            &requests
+                                .iter()
+                                .map(|request| &request.input)
+                                .collect::<Vec<_>>(),
+                        )?;
                         let mut outputs = session
-                            .run_async(request.input.values()?, &options)
+                            .run_async(input.values()?, &options)
                             .await?;
                         ort_web::sync_outputs(&mut outputs).await.map_err(
                             |error| TsrError::Inference {
@@ -167,37 +503,27 @@ mod platform {
                                 ),
                             },
                         )?;
-                        ModelResult::try_from((kind, &outputs))
+                        ModelResult::from_batch(kind, requests.len(), &outputs)
                     }
                     .await;
-                    let _ = request.response.send(result);
+                    Request::complete(requests, timers, result);
                 }
                 tracing::debug!("closed browser TSR session");
             });
             Ok(Arc::new(Self { sender }))
         }
 
-        /// Sends owned buffers so a timed-out caller cannot release input memory during a JS Promise.
-        pub(crate) async fn run(
+        /// Uses asynchronous browser channels because the Worker must remain available to drive ORT promises.
+        pub(super) async fn submit(
             self: Arc<Self>,
-            input: ModelInput,
-            timings: Timings,
+            request: Request,
+            receiver: oneshot::Receiver<Result<ModelResult, TsrError>>,
         ) -> Result<ModelResult, TsrError> {
-            let queued = timings.start(TimingStage::TsrQueue);
-            let (response, receiver) = oneshot::channel();
-            self.sender
-                .send(
-                    Request::builder()
-                        .input(input)
-                        .response(response)
-                        .timings(timings)
-                        .queued(queued)
-                        .build(),
-                )
-                .await
-                .map_err(|_closed| TsrError::Inference {
+            self.sender.send(request).await.map_err(|_closed| {
+                TsrError::Inference {
                     message: "TSR worker stopped".to_owned(),
-                })?;
+                }
+            })?;
             receiver.await.map_err(|_closed| TsrError::Inference {
                 message: "TSR response lost".to_owned(),
             })?

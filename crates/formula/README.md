@@ -25,12 +25,15 @@ rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s --ve
 - Tokenizer SHA-256: `2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2`.
 - Reference/export provenance: OAR-OCR `7feb044d74be09e3e2078a89cec0f0f8688e942b`, release v0.3.0 model artifact.
 
-To select Plus-M, update the existing `[formula]` section in `docparse.toml`:
+To select Plus-M, update the existing `[formula.engine]` selection in `docparse.toml`:
 
 ```toml
 [formula]
 inline_enabled = true
 display_enabled = true
+
+[formula.engine]
+type = "pp"
 model_path = "models/pp-formulanet-plus-m/inference.onnx"
 tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
 model_manifest_path = "models/pp-formulanet-plus-m/model-manifest.json"

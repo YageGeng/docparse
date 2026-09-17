@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +28,48 @@ def load_script_module():
 
 class DownloadModelsTest(unittest.TestCase):
     """Exercises downloads without accessing the network."""
+
+    def test_texo_command_installs_and_verifies_its_three_assets(self):
+        """Texo provisioning includes both graphs and its tokenizer with model-specific provenance."""
+        self.assertIn("texo", self.module.MODEL_NAMES)
+        model = self.module.Model.from_name("texo")
+        payloads = {
+            "encoder_model.onnx": b"texo-encoder",
+            "decoder_model_merged.onnx": b"texo-decoder",
+            "tokenizer.json": b"texo-tokenizer",
+        }
+        # Keep the real catalog identity while replacing large remote assets with small payloads.
+        model = replace(model, artifacts=tuple(
+            replace(artifact, sha256=hashlib.sha256(payloads[artifact.filename]).hexdigest())
+            for artifact in model.artifacts
+        ))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(self.module.Model, "from_name", return_value=model),
+            mock.patch.object(sys, "argv", [
+                "download_models.py", "--model", "texo", "--models-dir", directory,
+            ]),
+            mock.patch.object(sys, "stdout", io.StringIO()),
+        ):
+            output = Path(directory) / "texo"
+            with mock.patch.object(self.module, "urlopen", side_effect=[
+                io.BytesIO(payloads[artifact.filename]) for artifact in model.artifacts
+            ]):
+                self.assertEqual(self.module.main(), 0)
+            for filename, payload in payloads.items():
+                self.assertEqual((output / filename).read_bytes(), payload)
+            manifest = self.module.verify_installation(output, model)
+            self.assertEqual(manifest["repository"], "alephpi/FormulaNet")
+            self.assertEqual(manifest["license"], "AGPL-3.0")
+            with mock.patch.object(self.module, "urlopen", side_effect=AssertionError("unexpected download")):
+                self.assertEqual(self.module.main(), 0)
+                sys.argv.append("--verify-only")
+                self.assertEqual(self.module.main(), 0)
+            # A global Apache license must not silently validate a Texo manifest.
+            manifest["license"] = "Apache-2.0"
+            (output / "model-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(self.module.ModelDownloadError, "license"):
+                self.module.verify_installation(output, model)
 
     def test_formula_model_has_matching_pinned_tokenizer(self):
         """All supported formula variants retain their own graph and the matching BPE tokenizer."""

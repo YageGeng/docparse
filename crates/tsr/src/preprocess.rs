@@ -175,6 +175,57 @@ pub(crate) enum ModelInput {
 }
 
 impl ModelInput {
+    /// Concatenates ready crops and keeps detector image sizes/scales in the same sample order.
+    pub(crate) fn batch(inputs: &[&Self]) -> Result<Self, TsrError> {
+        let invalid = || TsrError::InvalidInput {
+            reason: "TSR batches require 1..=32 compatible singleton crops"
+                .to_owned(),
+        };
+        if inputs.is_empty() || inputs.len() > 32 {
+            return Err(invalid());
+        }
+        let mut images = Vec::with_capacity(inputs.len());
+        let mut shapes = Vec::new();
+        let mut scales = Vec::new();
+        for input in inputs {
+            let image = match input {
+                Self::Structure(input) => &input.0,
+                Self::Cells(input) => {
+                    if input.image_shape.dim() != (1, 2)
+                        || input.scale_factor.dim() != (1, 2)
+                    {
+                        return Err(invalid());
+                    }
+                    shapes.push(input.image_shape.view());
+                    scales.push(input.scale_factor.view());
+                    &input.image
+                }
+            };
+            if image.dim().0 != 1 {
+                return Err(invalid());
+            }
+            images.push(image.view());
+        }
+        let shape_error = |error: ndarray::ShapeError| TsrError::InvalidInput {
+            reason: format!("incompatible TSR batch tensors: {error}"),
+        };
+        let image = ndarray::concatenate(ndarray::Axis(0), &images)
+            .map_err(shape_error)?;
+        if shapes.is_empty() {
+            Ok(Self::Structure(SlanetInput(image)))
+        } else if shapes.len() == inputs.len() {
+            Ok(Self::Cells(CellInput {
+                image,
+                image_shape: ndarray::concatenate(ndarray::Axis(0), &shapes)
+                    .map_err(shape_error)?,
+                scale_factor: ndarray::concatenate(ndarray::Axis(0), &scales)
+                    .map_err(shape_error)?,
+            }))
+        } else {
+            Err(invalid())
+        }
+    }
+
     /// Borrows named tensors only for the duration of an actual session run.
     pub(crate) fn values(
         &self,
@@ -202,6 +253,49 @@ mod tests {
     use super::*;
     use docparse_layout::{PageImageInput, PixelFormat};
     use std::sync::Arc;
+
+    /// Batched tensors preserve crop order and keep each detector's resize metadata attached to its image.
+    #[test]
+    fn batches_preserve_sample_order_and_detector_scales() {
+        let structures = [1.0, 2.0].map(|value| {
+            ModelInput::Structure(SlanetInput(Array4::from_elem(
+                (1, 3, 2, 2),
+                value,
+            )))
+        });
+        let ModelInput::Structure(batch) =
+            ModelInput::batch(&[&structures[0], &structures[1]])
+                .expect("structure batch")
+        else {
+            unreachable!("structure")
+        };
+        assert_eq!(batch.0.dim(), (2, 3, 2, 2));
+        assert_eq!(batch.0.get((0, 0, 0, 0)), Some(&1.0));
+        assert_eq!(batch.0.get((1, 0, 0, 0)), Some(&2.0));
+        let cells = [1.0, 2.0].map(|value| {
+            ModelInput::Cells(CellInput {
+                image: Array4::from_elem((1, 3, 2, 2), value),
+                image_shape: ndarray::arr2(&[[100.0 * value, 200.0 * value]]),
+                scale_factor: ndarray::arr2(&[[value, value * 2.0]]),
+            })
+        });
+        let ModelInput::Cells(batch) =
+            ModelInput::batch(&[&cells[0], &cells[1]]).expect("cell batch")
+        else {
+            unreachable!("cells")
+        };
+        assert_eq!(batch.image.dim(), (2, 3, 2, 2));
+        assert_eq!(
+            batch.image_shape,
+            ndarray::arr2(&[[100.0, 200.0], [200.0, 400.0]])
+        );
+        assert_eq!(
+            batch.scale_factor,
+            ndarray::arr2(&[[1.0, 2.0], [2.0, 4.0]])
+        );
+        assert!(ModelInput::batch(&[]).is_err());
+        assert!(ModelInput::batch(&[&structures[0], &cells[0]]).is_err());
+    }
 
     /// Cell detection keeps RGB channels and describes the actual stretched 640-pixel input.
     #[test]

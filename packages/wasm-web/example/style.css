@@ -46,6 +46,7 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400
 .small { font-size: 11px; padding: 7px 10px; }
 .engine-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 5px 0; font-size: 11px; color: #697c5e; }
 .engine-bar select { width: auto; max-width: 100%; }
+.formula-model-control { display: inline-flex; align-items: center; gap: 8px; }
 .engine-bar span { color: #7f8e73; }
 .formula-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .formula-toggle input { accent-color: var(--accent); }

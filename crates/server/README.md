@@ -45,29 +45,48 @@ rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-wor
 rtk cargo build -p docparse-server --release --features cuda
 ```
 
-`server.pdfium_max_workers` defaults to 1 and bounds all PDFium children,
+`server.pdfium_workers` defaults to 1 and bounds all PDFium children,
 including startup and cleanup. For example:
 
 ```toml
 [server]
 max_uploads = 4
-worker_concurrency = 2
-pdfium_max_workers = 2
+jobs = 2
+pdfium_workers = 2
 ```
 
-The equivalent environment override is `DOCPARSE_SERVER__PDFIUM_MAX_WORKERS`.
-`server.worker_concurrency` limits whole document jobs, defaults to 2, and accepts
-values from 1 through 128. `DOCPARSE_SERVER__WORKER_CONCURRENCY` overrides the file;
-an explicitly supplied `--worker-concurrency` overrides both. Omitting the flag
+The equivalent environment override is `DOCPARSE_SERVER__PDFIUM_WORKERS`.
+`server.jobs` limits whole document jobs, defaults to 2, and accepts
+values from 1 through 128. `DOCPARSE_SERVER__JOBS` overrides the file;
+an explicitly supplied `--jobs` overrides both. Omitting the flag
 keeps the configured value. Changes take effect after restarting the server.
 `server.max_uploads` caps upload requests across the entire instance, defaults to
 4, and accepts values from 1 through 1024. `DOCPARSE_SERVER__MAX_UPLOADS` overrides
 the file, and an explicit `--max-uploads` overrides both. This does not change
 the browser's per-page upload queue or the document parsing concurrency.
-The PDFium limit is independent of `server.worker_concurrency` and
-`runtime.page_concurrency` (pages per analysis stage). Layout/OCR/TSR/formula sessions
+The PDFium limit is independent of `server.jobs` and
+`runtime.stage_pages` (pages per analysis stage). Layout/OCR/TSR/formula sessions
 remain shared in the server; workers initialize only PDFium. `PdfiumQueue`
 measures waiting for a process slot separately from `PdfOpen`.
+
+Concurrency names distinguish model sessions from queued work:
+
+| Setting | Scope and unit |
+| --- | --- |
+| `server.jobs` | Whole-document jobs per server |
+| `server.pdfium_workers` | Live PDFium child processes per server |
+| `layout.sessions` | Shared layout ONNX sessions |
+| `runtime.stage_pages` | Owned pages per document in each analysis stage |
+| `tsr.table_jobs` | In-flight table requests per document, including queue waits |
+| `tsr.batch_size` | Ready table crops per structure-model invocation |
+| `tsr.cell_detection.batch_size` | Ready table crops per cell-detector invocation |
+| `formula.batch_size` | Formula crops per batch in the shared formula worker |
+
+The first five settings replace `worker_concurrency`, `pdfium_max_workers`,
+`session_pool_size`, `page_concurrency`, and `tsr.max_in_flight`, respectively;
+old keys are rejected. All batch limits use the name `batch_size`.
+`formula.batch_size` retains its name and behavior. Rename server CLI overrides to
+`--jobs` and E2E page admission overrides to `--stage-pages`.
 
 Install matching `docparse-server` and `docparse-pdfium-worker` executables in the
 same directory. Worker startup fails on missing or incompatible artifacts; there
@@ -291,7 +310,7 @@ attempt progress. PostgreSQL's clock controls all lease checks and deadlines.
 The default lease is 60 seconds, renewed at least every 20 seconds. Old workers
 cannot publish progress or success once the lease expires or another worker owns
 the task. Defaults are two concurrent documents per worker, three attempts, and a
-one-hour deadline per attempt; tune `server.worker_concurrency`, `--lease-seconds`,
+one-hour deadline per attempt; tune `server.jobs`, `--lease-seconds`,
 `--max-attempts`, and `--job-timeout-seconds` for your documents and hardware.
 
 SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/ready` to return 503, close SSE subscriptions,
@@ -351,7 +370,7 @@ Configure the default server event filter in `docparse.toml`:
 ```toml
 [log]
 directives = "info,ort=warn,sqlx=warn"
-# Optional: append plain-text logs instead of writing to stdout.
+# Optional: also append a plain-text copy of stdout logs.
 file = "logs/docparse.log"
 ```
 
@@ -360,11 +379,12 @@ A valid `RUST_LOG` takes precedence; if it is absent or invalid, the server uses
 `log.directives`. Invalid selected configuration directives stop startup before
 database connections or models are initialized.
 
-`log.file` (or `DOCPARSE_LOG__FILE`) appends to a file and creates missing parent
-directories. Relative paths resolve beside the primary configuration file. File
-output always disables ANSI colors; stdout uses colors only when attached to a
-terminal. Omit `file` to keep stdout logging. Unwritable destinations stop startup
-before database or model initialization.
+`log.file` (or `DOCPARSE_LOG__FILE`) adds an append-only file copy alongside stdout
+and creates missing parent directories. Relative paths resolve beside the primary
+configuration file. File output always disables ANSI colors; stdout uses colors
+only when attached to a terminal. Both outputs share the same event filter. Omit
+`file` for stdout-only logging. Unwritable destinations stop startup before
+database or model initialization.
 
 SQLx query logging has separate database settings with these defaults:
 
@@ -403,14 +423,14 @@ the same value. Retries clear it, while historical or interrupted attempts remai
 Full-document native extraction still precedes global watermark/font statistics.
 After this pass, render, layout/preparation, OCR/composition, TSR/page assembly,
 and formula recognition/projection run as separate bounded stages. Each analysis
-stage admits at most `runtime.page_concurrency` pages, including completed results
-waiting for downstream capacity. Up to roughly `4 * page_concurrency +
+stage admits at most `runtime.stage_pages` pages, including completed results
+waiting for downstream capacity. Up to roughly `4 * stage_pages +
 render_queue_capacity + 1` page rasters can be retained per document, plus native
 facts, model tensors, and final results. Queue pressure intentionally stops
 further rasterization instead of growing memory without bound.
 
 Relative to the former combined TSR/formula stage, this allows up to one extra
-`page_concurrency` of owned pages per document. With page concurrency 4 and five
+`stage_pages` of owned pages per document. With page concurrency 4 and five
 concurrent document jobs, budget for up to 20 additional rasters plus page data.
 Formula overload still backpressures the bounded upstream stages; isolating its
 slots allows earlier table work to overlap without unbounded buffering.

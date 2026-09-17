@@ -38,10 +38,15 @@ export type ModelSource =
   | { kind: "urls"; model: string; config: string; manifest: string }
   | { kind: "bytes"; model: Uint8Array; config: Uint8Array; manifest: Uint8Array };
 
-/** PP-FormulaNet uses a pinned BPE tokenizer instead of a model YAML configuration. */
+/** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
+export type FormulaEngineOptions = { type: "pp" } | { type: "texo" };
+
+/** Explicit model resources. Omitted type retains the existing PP-only source shape. */
 export type FormulaSource =
-  | { kind: "urls"; model: string; tokenizer: string; manifest: string }
-  | { kind: "bytes"; model: Uint8Array; tokenizer: Uint8Array; manifest: Uint8Array };
+  | { type?: "pp"; kind: "urls"; model: string; tokenizer: string; manifest: string }
+  | { type?: "pp"; kind: "bytes"; model: Uint8Array; tokenizer: Uint8Array; manifest: Uint8Array }
+  | { type: "texo"; kind: "urls"; encoder: string; decoder: string; tokenizer: string }
+  | { type: "texo"; kind: "bytes"; encoder: Uint8Array; decoder: Uint8Array; tokenizer: Uint8Array };
 
 /** Independently pinned detection, recognition and optional line-orientation models. */
 export interface OcrArtifacts { detection: ModelSource; recognition: ModelSource; orientation?: ModelSource }
@@ -58,6 +63,8 @@ export interface OcrOptions {
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
   formula?: {
+    /** Defaults to Texo; custom formulaArtifacts select their type when this option is omitted. */
+    engine?: FormulaEngineOptions;
     /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
     inline_enabled?: boolean;
     /** Defaults to true; false skips display recognition independently of inline formulas. */
@@ -65,9 +72,12 @@ export interface WebParseConfig {
     batch_size?: number;
     timeout_ms?: number;
   };
-  layout?: { score_threshold?: number; session_pool_size?: number };
-  tsr?: TableOptions & { model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; model?: "wired" | "wireless"; score_threshold?: number } };
-  runtime?: { page_concurrency?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
+  /** Layout model sessions; browser validation currently permits one. */
+  layout?: { score_threshold?: number; sessions?: number };
+  /** Structure and detector batch_size independently cap ready crops per ONNX invocation. */
+  tsr?: TableOptions & { batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
+  /** stage_pages counts owned pages per document in each pipeline stage. */
+  runtime?: { stage_pages?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
   render?: { dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;
   ocr?: OcrOptions;
@@ -86,7 +96,7 @@ export interface WebParserOptions {
   tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
-  /** Required unless both config.formula.inline_enabled and display_enabled are false. */
+  /** Optional custom resources; otherwise the selected model uses the built-in same-origin /models/ preset. */
   formulaArtifacts?: FormulaSource;
   runtimeBaseUrl?: string;
   /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */
@@ -118,7 +128,8 @@ export interface PageImageResult { pageNumber: number; width: number; height: nu
 /** Structural recovery is scoped to regions already labeled table by layout. */
 export type TableMode = "rules_only" | "fallback" | "tsr_only";
 /** Per-parse table overrides; omitted options inherit the parser's configured TSR policy. */
-export interface TableOptions { mode?: TableMode; max_in_flight?: number; timeout_ms?: number }
+/** table_jobs limits in-flight table requests per parse, including shared-session queue waits. */
+export interface TableOptions { mode?: TableMode; table_jobs?: number; timeout_ms?: number }
 /** An affine map from crop pixels to canonical viewport points. */
 export interface AffineTransform { a: number; b: number; c: number; d: number; e: number; f: number }
 /** Owned crop sent to the caller's structure provider; one-based page numbers match DocumentResult. */

@@ -10,9 +10,10 @@ per-script lockfiles are no longer used. Python subprocesses reuse uv's interpre
 rtk uv run --locked scripts/download_models.py
 ```
 
-This checks all nine pinned models under the repository's `models/` directory:
-PP-DocLayoutV3, SLANet_plus, both SLANeXt variants, both RT-DETR table-cell variants,
-PP-OCRv6 detection, PP-OCRv6 recognition, and text-line orientation.
+This checks all pinned models under the repository's `models/` directory:
+Texo, PP-FormulaNet Plus S/M/L, PP-DocLayoutV3, SLANet_plus, both SLANeXt variants,
+both RT-DETR table-cell variants, PP-OCRv6 detection, PP-OCRv6 recognition, and
+text-line orientation.
 Valid files are left untouched, missing or corrupt artifacts are
 downloaded to temporary files and SHA-256 verified, and the manifest is published
 last. A missing manifest is rebuilt from verified local artifacts without fetching
@@ -21,12 +22,19 @@ still attempted. Existing models can be checked without network access:
 
 ```sh
 rtk uv run --locked scripts/download_models.py --verify-only
+rtk uv run --locked scripts/download_models.py --model texo
 rtk uv run --locked scripts/download_models.py --model slanet-plus
 rtk uv run --locked scripts/download_models.py --models-dir /srv/docparse/models
 ```
 
 `--force` downloads every selected artifact again. `--output` is retained only for
 an explicitly selected single model; use `--models-dir` for an alternative root.
+
+Texo installs `encoder_model.onnx`, `decoder_model_merged.onnx`, and `tokenizer.json`
+under `models/texo`, matching the default formula configuration. Its
+[author-published artifacts](https://huggingface.co/alephpi/FormulaNet/tree/63e04c86fc96c2324811114351eeea8118bf6b28/onnx)
+use the revision and SHA-256 hashes pinned by `docparse-formula-texo`; the manifest
+records their AGPL-3.0 license separately from the other models' Apache-2.0 license.
 
 ## Retained tools
 
@@ -36,7 +44,6 @@ an explicitly selected single model; use `--models-dir` for an alternative root.
 | `check_wasm_compat.py` | Enforce Rust platform boundaries; used by pre-commit | Standard library |
 | `compare_e2e_runs.py` | Compare canonical native E2E hashes and document identities | Standard library |
 | `run_real_pdf_e2e.py` | Validate the exact corpus and run production native E2E | `dev` |
-| `benchmark.py` | Compare shared-model document concurrency with GPU/process telemetry | `dev` |
 | `reference_layout.py` | Generate an independent PaddleX/ONNX layout oracle | `reference` |
 
 The native E2E runner verifies layout and the sibling `slanet-plus` installation
@@ -71,38 +78,13 @@ was also removed. Model oracles and fixture generators are retained for reproduc
 
 ## Checks
 
-The native benchmark warms every enabled model, measures every PDF in the input
-directory, and separately records parsing, compact JSON writing, and file sync.
-Stage values are `(count, total_ms, max_ms)`; nested or overlapping stages must not
-be added into wall time. Failed/degraded runs are explicitly marked invalid.
-
-```sh
-rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
-rtk cargo build -p docparse-server --example pdfium_benchmark --release --features cuda
-rtk proxy cp target/release/docparse-pdfium-worker target/release/examples/
-rtk uv run --locked --group dev scripts/benchmark.py --pdf-dir ~/Downloads/docs \
-  --output-dir /tmp/docparse-benchmark --concurrency 4 --pdfium-processes 1 2 4 --repeats 3
-```
-
-The output directory must not already exist. Use an otherwise idle GPU; process
-CPU percentages use 100% per logical CPU, and GPU samples include desktop activity.
-The process CSV includes each worker and the parent, identified by PID and parent
-PID. RSS sums include shared mappings and are not unique physical memory totals;
-the first CPU sample and unavailable platform I/O counters are left empty. GPU
-telemetry is optional on hosts without nvidia-smi; the metrics still record the
-actual compiled inference backend. Each PDFium worker is explicitly warmed.
-The companion executable is copied beside the Cargo example to exercise the same
-installation layout as the server. To retain the local provider baseline, build
-`docparse-core --example benchmark` and pass its path with `--binary`, without
-`--pdfium-processes`.
-
-Temporary serialized results use the output directory's filesystem and are removed
-after measurement. Database/HTTP submission and client download time are excluded.
+The retired native throughput and browser layout benchmarks are no longer
+maintained. Historical reports remain as records; use the model regression tests
+and real-PDF E2E tools for current correctness checks.
 
 ```sh
 rtk uv run --locked crates/layout/tests/python/download_models_test.py
 rtk uv run --locked crates/core/tests/python/wasm_compat_test.py
-rtk uv run --locked --group dev crates/core/tests/python/benchmark_test.py
 rtk uv run --locked crates/core/tests/python/compare_e2e_runs_test.py
 rtk uv run --locked --group dev crates/core/tests/python/run_real_pdf_e2e_test.py
 rtk uv run --locked --group reference crates/layout/tests/python/reference_layout_test.py
@@ -112,7 +94,7 @@ rtk uv run --locked crates/core/tests/python/wasm_types.py
 The last two checks use the real pinned model or compile both Rust targets. Ordinary
 fixture-based Rust tests do not regenerate PDFs, download models, or run the oracle.
 
-Run the discoverable Python checks, including the POSIX benchmark interruption regression, with:
+Run the discoverable Python correctness checks with:
 
 ```sh
 rtk uv run --locked --group dev python -m unittest discover -s crates/core/tests/python -p '*test.py'

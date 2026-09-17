@@ -34,8 +34,20 @@ Artifact: [PaddlePaddle/SLANet_plus_onnx](https://huggingface.co/PaddlePaddle/SL
 Apache-2.0, revision `7dbe640e127602bf506815e822c09758de73c482`. Preprocessing and
 vocabulary follow its inference.yml and the [PaddleX reference implementation](https://github.com/PaddlePaddle/PaddleX/tree/develop/paddlex/inference/models/table_structure_recognition).
 
-Each loaded model owns one serialized session. Native cancellation retains the session
-guard until blocking inference finishes; the browser actor owns inputs until the
+Each loaded model owns one serialized session. `tsr.batch_size` and
+`tsr.cell_detection.batch_size` independently cap ready crops per ONNX invocation
+(1–32, library default 1; the repository config uses 4 for each). Both native and
+WASM runners combine queued requests and immediately run partial batches without
+waiting to fill them. The batch axis stays dynamic; detector box counts split
+outputs back into the original request order and each crop keeps its own scale.
+`tsr.table_jobs` remains the per-document admission limit, including same-page
+tables. It must allow enough concurrent requests for batches to fill; independent
+documents also share the model queues. Per-request inference timings include the
+shared batch interval and must not be summed as distinct model execution time.
+
+Native model threads initialize, batch, and destroy their own sessions independently
+of caller Tokio runtimes. Native cancellation retains the session owner until
+blocking inference finishes; the browser actor owns inputs until the
 ORT Promise settles. Layout and TSR share a browser inference guard through
 output readback because ORT WebGPU reuses download buffers across sessions.
 A caller deadline cannot release the guard before the actual model run finishes.
@@ -55,7 +67,7 @@ SLANeXt uses a 512-pixel input and its invalid position head is discarded.
 Its structure tokens require an independent cell detector.
 
 `[tsr.cell_detection]` accepts `enabled` (default `true`), `model = "wired"` or `"wireless"`, a
-`score_threshold`, and independent `model_path`, `model_config_path`, and
+`score_threshold`, `batch_size`, and independent `model_path`, `model_config_path`, and
 `model_manifest_path` values. RT-DETR reuses layout's OpenCV-compatible cubic
 RGB preprocessing at 640 pixels and returns crop-pixel boxes. The core decoder
 matches those observations to logical cells before source-text filling.
@@ -109,7 +121,7 @@ rtk uv run --locked scripts/download_models.py
 rtk cargo run -p docparse-cli -- parse input.pdf
 ```
 
-The existing benchmark warms the actual table crop twice, exercising every
-enabled table model. Detector preprocessing, inference and postprocessing have
-separate timing stages. The real-PDF comparison test records crops, raw model
+Real-model regression tests exercise structure and detector predictions with
+singleton and batched requests. Detector preprocessing, inference and postprocessing
+have separate timing stages. The real-PDF comparison test records crops, raw model
 outputs, structured tables and warnings; failures remain in its report.

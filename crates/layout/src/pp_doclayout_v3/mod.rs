@@ -73,9 +73,10 @@ impl PpDocLayoutV3Engine {
         .map_err(|source| LayoutError::TaskJoin { source })??;
         let pool =
             LayoutSessionPool::load(artifacts, Arc::clone(&config)).await?;
+        // Report the actual shared session count, independently of document/page admission limits.
         tracing::info!(
             "loaded PP-DocLayoutV3 with {} session(s)",
-            config.layout().session_pool_size
+            config.layout().sessions
         );
         Ok(Self {
             pool,

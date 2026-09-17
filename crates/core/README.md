@@ -123,7 +123,7 @@ are rejected. Explicit external header flags are preserved. Cell text always
 comes from the block's existing Native/OCR facts; external generated text is not
 accepted as native content.
 
-External requests share `max_in_flight` (default 2) across the entire parse.
+External requests share `table_jobs` (default 2) across the entire parse.
 `timeout_ms` (default 60000) includes queue wait; there is no automatic retry.
 Dropping the provider future must release the adapter's outstanding resources.
 An external success uses `source: "external_tsr"`; consumers enabling this mode

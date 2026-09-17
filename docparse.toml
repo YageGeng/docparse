@@ -1,12 +1,13 @@
 [log]
-directives = "info,ort=info,sqlx=warn"
+directives = "info,ort=debug,sqlx=warn"
 # Append plain-text diagnostics without ANSI colors, including after service restarts.
 file = "logs/docparse.log"
 
 [server]
 max_uploads = 100
-worker_concurrency = 5
-pdfium_max_workers = 5
+# Whole-document jobs and PDFium child processes are separate server-wide limits.
+jobs = 5
+pdfium_workers = 5
 host = "127.0.0.1"
 port = 8080
 api_prefix = "/api/v1/docparse"
@@ -27,7 +28,8 @@ model_path = "models/pp-doclayout-v3/inference.onnx"
 model_config_path = "models/pp-doclayout-v3/inference.yml"
 model_manifest_path = "models/pp-doclayout-v3/model-manifest.json"
 score_threshold = 0.5
-session_pool_size = 1
+# Shared ONNX sessions bound concurrent layout inference across all documents.
+sessions = 4
 
 # SLANet+ topology with independent wireless-table cell geometry.
 [tsr]
@@ -36,11 +38,16 @@ model = "slanet_plus"
 model_path = "models/slanet-plus/inference.onnx"
 model_config_path = "models/slanet-plus/inference.yml"
 model_manifest_path = "models/slanet-plus/model-manifest.json"
-max_in_flight = 8
+# Per-document table requests, including queue waits; model sessions remain shared.
+table_jobs = 8
+# Combine ready structure requests without waiting for a full batch.
+batch_size = 4
 timeout_ms = 60000
 
 [tsr.cell_detection]
 enabled = true
+# Detector batching is independent of structure batching.
+batch_size = 4
 model = "wireless"
 score_threshold = 0.3
 model_path = "models/rtdetr-table-cell-wireless/inference.onnx"
@@ -69,18 +76,22 @@ model_config_path = "models/pp-lcnet-textline-ori/inference.yml"
 model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 
 # Recognize every layout-detected inline/display formula. JSON retains LaTeX and Markdown.
-# Formula models use CPU compatibility inference on CoreML/Metal builds.
+# PP uses CPU compatibility on Apple; Texo registers the selected execution provider.
 [formula]
+batch_size = 4
 inline_enabled = true
 display_enabled = true
-batch_size = 4
 timeout_ms = 120000
-model_path = "models/pp-formulanet-plus-s/inference.onnx"
-tokenizer_path = "models/pp-formulanet-plus-s/tokenizer.json"
-model_manifest_path = "models/pp-formulanet-plus-s/model-manifest.json"
+
+[formula.engine]
+type = "texo"
+encoder_path = "models/texo/encoder_model.onnx"
+decoder_path = "models/texo/decoder_model_merged.onnx"
+tokenizer_path = "models/texo/tokenizer.json"
 
 [runtime]
-page_concurrency = 4
+# Owned pages per document in each pipeline stage, including queued work.
+stage_pages = 8
 render_queue_capacity = 2
 blocking_task_limit = 4
 continue_on_page_error = true

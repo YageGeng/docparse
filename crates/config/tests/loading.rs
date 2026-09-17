@@ -7,6 +7,200 @@ use figment::providers::Serialized;
 use figment::value::{Dict, Value};
 use serde_json::json;
 
+/// Structure and cell batch sizes load independently and reject unbounded tensor batches.
+#[test]
+fn table_batch_sizes_are_independent_and_bounded() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[tsr]\nbatch_size = 4\n[tsr.cell_detection]\nbatch_size = 2\n",
+    );
+    let raw = ConfigLoader::new(&path)
+        .load_raw()
+        .expect("table batch configuration");
+    let value = serde_json::to_value(&raw).expect("configuration JSON");
+    assert_eq!(value.pointer("/tsr/batch_size"), Some(&json!(4)));
+    assert_eq!(
+        value.pointer("/tsr/cell_detection/batch_size"),
+        Some(&json!(2))
+    );
+    for (pointer, field) in [
+        ("/tsr/batch_size", "tsr.batch_size"),
+        (
+            "/tsr/cell_detection/batch_size",
+            "tsr.cell_detection.batch_size",
+        ),
+    ] {
+        for size in [0, 33] {
+            let mut invalid = value.clone();
+            *invalid.pointer_mut(pointer).expect("batch size") = json!(size);
+            let config = serde_json::from_value::<RawConfig>(invalid)
+                .expect("numeric configuration");
+            assert!(
+                matches!(docparse_config::ValidatedConfig::try_from(config), Err(ConfigError::InvalidValue { field: actual, .. }) if actual == field)
+            );
+        }
+    }
+}
+
+/// Short concurrency names preserve file/environment precedence and serialize with their actual units.
+#[test]
+fn short_concurrency_names_load_and_override() {
+    let directory = tempfile::tempdir().expect("configuration directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[server]\njobs = 5\npdfium_workers = 5\n[layout]\nsessions = 4\n[runtime]\nstage_pages = 4\n[tsr]\ntable_jobs = 8\n[formula]\nbatch_size = 4\n",
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({
+            "server": {"jobs": 3},
+            "layout": {"sessions": 2},
+            "tsr": {"table_jobs": 6}
+        })))
+        .load_raw()
+        .expect("short concurrency names must load");
+    let values = serde_json::to_value(raw).expect("serialized configuration");
+    for (pointer, expected) in [
+        ("/server/jobs", 3),
+        ("/server/pdfium_workers", 5),
+        ("/layout/sessions", 2),
+        ("/runtime/stage_pages", 4),
+        ("/tsr/table_jobs", 6),
+        ("/formula/batch_size", 4),
+    ] {
+        assert_eq!(
+            values.pointer(pointer),
+            Some(&json!(expected)),
+            "{pointer}"
+        );
+    }
+    // Reject retired names explicitly instead of silently applying a default with a different meaning.
+    for (section, field) in [
+        ("server", "worker_concurrency"),
+        ("server", "pdfium_max_workers"),
+        ("layout", "session_pool_size"),
+        ("runtime", "page_concurrency"),
+        ("tsr", "max_in_flight"),
+    ] {
+        fs::write(&path, format!("[{section}]\n{field} = 2\n"))
+            .expect("old configuration");
+        assert!(
+            matches!(
+                ConfigLoader::new(&path).load_raw(),
+                Err(ConfigError::Load { .. })
+            ),
+            "retired {section}.{field} must be rejected"
+        );
+    }
+}
+
+/// Engine selection is explicit and variant paths resolve beside the primary config.
+#[test]
+fn formula_engine_paths_are_variant_specific() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        r#"
+[formula.engine]
+type = "texo"
+encoder_path = "texo/encoder.onnx"
+decoder_path = "texo/decoder.onnx"
+tokenizer_path = "texo/tokenizer.json"
+"#,
+    );
+    let raw = ConfigLoader::new(path).load_raw().expect("Texo config");
+    let json = serde_json::to_value(raw.formula).expect("formula JSON");
+    let engine = json.get("engine").expect("engine");
+    assert_eq!(engine.get("type"), Some(&json!("texo")));
+    assert_eq!(
+        engine.get("encoder_path"),
+        Some(&json!(
+            directory
+                .path()
+                .canonicalize()
+                .expect("path")
+                .join("texo/encoder.onnx")
+        ))
+    );
+    assert!(engine.get("model_manifest_path").is_none());
+    assert!(json.get("model_path").is_none());
+}
+
+/// Switching variants discards stale paths, while same-variant environment overrides merge normally.
+#[test]
+fn formula_engine_switches_across_profile_and_environment() {
+    let dir = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        dir.path(),
+        "docparse.toml",
+        r#"
+[formula.engine]
+type = "pp"
+model_path = "pp/custom.onnx"
+model_manifest_path = "pp/custom.json"
+"#,
+    );
+    write_config(
+        dir.path(),
+        "docparse.texo.toml",
+        r#"
+[formula.engine]
+type = "texo"
+encoder_path = "texo/renamed-encoder.onnx"
+decoder_path = "texo/renamed-decoder.onnx"
+"#,
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_profile("texo")
+        .with_env_provider(Figment::from(Serialized::defaults(
+            json!({"formula":{"engine":{"tokenizer_path":"texo/env.json"}}}),
+        )))
+        .load_raw()
+        .expect("switched engine");
+    let paths = match raw.formula.engine {
+        docparse_config::FormulaEngineConfig::Texo(paths) => Some(paths),
+        _ => None,
+    }
+    .expect("expected Texo");
+    let base = dir.path().canonicalize().expect("base");
+    assert_eq!(paths.encoder_path, base.join("texo/renamed-encoder.onnx"));
+    assert_eq!(paths.decoder_path, base.join("texo/renamed-decoder.onnx"));
+    assert_eq!(paths.tokenizer_path, base.join("texo/env.json"));
+    let raw = ConfigLoader::new(&path).with_profile("texo")
+        .with_env_provider(Figment::from(Serialized::defaults(json!({"formula":{"engine":{"type":"pp","model_path":"new/model.onnx"}}}))))
+        .load_raw().expect("switch back to PP");
+    let paths = match raw.formula.engine {
+        docparse_config::FormulaEngineConfig::Pp(paths) => Some(paths),
+        _ => None,
+    }
+    .expect("expected PP");
+    assert_eq!(paths.model_path, base.join("new/model.onnx"));
+    assert_eq!(
+        paths.model_manifest_path,
+        base.join("models/pp-formulanet-plus-s/model-manifest.json")
+    );
+}
+
+/// Variant schemas reject each other's fields and the removed flat path layout.
+#[test]
+fn formula_engine_rejects_wrong_variant_fields() {
+    for value in [
+        json!({"type":"texo", "model_manifest_path":"pp.json"}),
+        json!({"type":"pp", "encoder_path":"encoder.onnx"}),
+        json!({"type":"other"}),
+    ] {
+        serde_json::from_value::<docparse_config::FormulaEngineConfig>(value)
+            .expect_err("invalid variant");
+    }
+    serde_json::from_value::<docparse_config::FormulaConfig>(
+        json!({"model_path":"old.onnx"}),
+    )
+    .expect_err("legacy paths must not be silently ignored");
+}
+
 /// TSR-only experiments resolve independently selected structure and cell artifacts.
 #[test]
 fn tsr_only_loads_independent_cell_model_paths() {
@@ -199,7 +393,7 @@ model_path = "tables/model.onnx"
 mode = "tsr_only"
 
 [runtime]
-page_concurrency = 2
+stage_pages = 2
 "#,
     );
     write_config(
@@ -213,7 +407,7 @@ score_threshold = 0.6
 mode = "fallback"
 
 [runtime]
-page_concurrency = 3
+stage_pages = 3
 "#,
     );
 
@@ -223,7 +417,7 @@ page_concurrency = 3
         .expect("the layered configuration must load");
 
     assert!((config.layout.score_threshold - 0.6).abs() < f64::EPSILON);
-    assert_eq!(config.runtime.page_concurrency, 3);
+    assert_eq!(config.runtime.stage_pages, 3);
     assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
     assert_eq!(
         config.tsr.model_path,
@@ -375,17 +569,17 @@ fn explicit_profile_and_overrides_have_expected_precedence() {
     let main_path = write_config(
         directory.path(),
         "docparse.toml",
-        "[runtime]\npage_concurrency = 2\n",
+        "[runtime]\nstage_pages = 2\n",
     );
     write_config(
         directory.path(),
         "docparse.dev.toml",
-        "[runtime]\npage_concurrency = 6\n",
+        "[runtime]\nstage_pages = 6\n",
     );
     write_config(
         directory.path(),
         "docparse.prod.toml",
-        "[runtime]\npage_concurrency = 7\n",
+        "[runtime]\nstage_pages = 7\n",
     );
     let environment = environment_provider(json!({
         "profile": "dev",
@@ -399,7 +593,7 @@ fn explicit_profile_and_overrides_have_expected_precedence() {
         .load_raw()
         .expect("all configuration layers must merge");
 
-    assert_eq!(config.runtime.page_concurrency, 7);
+    assert_eq!(config.runtime.stage_pages, 7);
     assert!((config.layout.score_threshold - 0.9).abs() < f64::EPSILON);
 }
 
@@ -412,7 +606,7 @@ fn environment_profile_selects_file_without_entering_raw_config() {
     write_config(
         directory.path(),
         "docparse.dev.toml",
-        "[runtime]\npage_concurrency = 6\n",
+        "[runtime]\nstage_pages = 6\n",
     );
     let environment = environment_provider(json!({ "profile": "dev" }));
 
@@ -421,7 +615,7 @@ fn environment_profile_selects_file_without_entering_raw_config() {
         .load_raw()
         .expect("the environment-selected profile must load");
 
-    assert_eq!(config.runtime.page_concurrency, 6);
+    assert_eq!(config.runtime.stage_pages, 6);
 }
 
 /// Verifies that a missing main configuration file has a dedicated error.
@@ -512,8 +706,19 @@ fn repository_default_config_matches_documented_defaults() {
         .load_raw()
         .expect("the repository default config must remain valid");
 
+    assert!(matches!(
+        RawConfig::default().formula.engine,
+        docparse_config::FormulaEngineConfig::Texo(_)
+    ));
+    assert!(matches!(
+        config.formula.engine,
+        docparse_config::FormulaEngineConfig::Texo(_)
+    ));
+
     assert!((config.layout.score_threshold - 0.5).abs() < f64::EPSILON);
-    assert_eq!(config.runtime.page_concurrency, 4);
+    // Per-host stage tuning must not invalidate the documented library default.
+    assert_eq!(RawConfig::default().runtime.stage_pages, 4);
+    assert!(config.runtime.stage_pages > 0);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
     assert_eq!(config.tsr.mode, docparse_config::TableMode::TsrOnly);
@@ -558,7 +763,13 @@ fn log_directives_follow_configuration_precedence() {
     // File destinations use the same config-relative resolution as model artifacts.
     assert_eq!(
         configured.log.file,
-        Some(directory.path().join("logs/server.log"))
+        Some(
+            directory
+                .path()
+                .canonicalize()
+                .expect("canonical config directory")
+                .join("logs/server.log")
+        )
     );
     let overridden = ConfigLoader::new(&path)
         .with_env_provider(environment_provider(
@@ -569,7 +780,13 @@ fn log_directives_follow_configuration_precedence() {
     assert_eq!(overridden.log.directives, "warn,docparse_server=debug");
     assert_eq!(
         overridden.log.file,
-        Some(directory.path().join("logs/override.log"))
+        Some(
+            directory
+                .path()
+                .canonicalize()
+                .expect("canonical config directory")
+                .join("logs/override.log")
+        )
     );
     write_config(directory.path(), "docparse.toml", "");
     let defaults = ConfigLoader::new(path)

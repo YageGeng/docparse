@@ -50,10 +50,10 @@ struct Arguments {
     storage_dir: PathBuf,
     #[arg(long, default_value = "docparse.toml")]
     config: PathBuf,
-    /// Overrides server.worker_concurrency from the shared configuration.
+    /// Overrides whole-document admission through server.jobs; model-session counts remain independent.
     #[builder(default)]
     #[arg(long)]
-    worker_concurrency: Option<usize>,
+    jobs: Option<usize>,
     #[arg(long, default_value_t = 536870912)]
     max_upload_bytes: usize,
     /// Overrides server.max_uploads from the shared configuration.
@@ -105,8 +105,8 @@ impl Arguments {
         if let Some(url) = &self.database_url {
             raw.database.url = url.clone();
         }
-        if let Some(concurrency) = self.worker_concurrency {
-            raw.server.worker_concurrency = concurrency;
+        if let Some(concurrency) = self.jobs {
+            raw.server.jobs = concurrency;
         }
         if let Some(max_uploads) = self.max_uploads {
             raw.server.max_uploads = max_uploads;
@@ -127,7 +127,7 @@ impl Arguments {
     /// Uses resolved document concurrency alongside the existing CLI lease and timeout policy.
     fn worker_options(&self, server: &ServerConfig) -> WorkerOptions {
         WorkerOptions::builder()
-            .concurrency(server.worker_concurrency)
+            .concurrency(server.jobs)
             .lease_seconds(self.lease_seconds)
             .max_attempts(self.max_attempts)
             .job_timeout(Duration::from_secs(self.job_timeout_seconds))
@@ -144,7 +144,7 @@ impl Arguments {
         if matches!(self.role, Role::Api) {
             return Ok(None);
         }
-        let max_processes = raw.server.pdfium_max_workers;
+        let max_processes = raw.server.pdfium_workers;
         let options = self.worker_options(&raw.server);
         tracing::info!(
             "starting parser with document concurrency {} and at most {} PDFium workers",
@@ -291,10 +291,9 @@ mod tests {
     fn concurrency_uses_configuration_unless_cli_overrides_it() {
         let directory = tempfile::tempdir().expect("configuration directory");
         let path = directory.path().join("docparse.toml");
-        for (field, flag, default) in [
-            ("worker_concurrency", "--worker-concurrency", 2),
-            ("max_uploads", "--max-uploads", 4),
-        ] {
+        for (field, flag, default) in
+            [("jobs", "--jobs", 2), ("max_uploads", "--max-uploads", 4)]
+        {
             for (configured, override_value, expected) in [
                 (None, None, default),
                 (Some(8), None, 8),
@@ -340,7 +339,7 @@ mod tests {
         let path = directory.path().join("docparse.toml");
         std::fs::write(&path, "").expect("configuration file");
         for (field, flag, limits) in [
-            ("worker_concurrency", "--worker-concurrency", [0, 129]),
+            ("jobs", "--jobs", [0, 129]),
             ("max_uploads", "--max-uploads", [0, 1025]),
         ] {
             for limit in limits {

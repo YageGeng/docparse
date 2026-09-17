@@ -137,7 +137,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Always;
-    raw.runtime.page_concurrency = 1;
+    raw.runtime.stage_pages = 1;
     raw.runtime.render_queue_capacity = 1;
     let gate = Arc::new(Semaphore::new(0));
     let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -234,7 +234,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::TsrOnly;
     raw.ocr.policy = OcrPolicy::Always;
-    raw.runtime.page_concurrency = 1;
+    raw.runtime.stage_pages = 1;
     raw.runtime.render_queue_capacity = 1;
     let (layout_events, _) = mpsc::unbounded_channel();
     let (ocr_events, mut receiver) = mpsc::unbounded_channel();
@@ -333,7 +333,7 @@ async fn slow_formulas_allow_later_tables() {
     raw.ocr.policy = OcrPolicy::Disabled;
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;
-    raw.runtime.page_concurrency = 1;
+    raw.runtime.stage_pages = 1;
     raw.runtime.render_queue_capacity = 1;
     let gate = Arc::new(Semaphore::new(0));
     let (layout_events, _) = mpsc::unbounded_channel();

@@ -65,12 +65,12 @@ mod platform {
     }
 
     impl LayoutSessionPool {
-        /// Creates the configured native sessions outside the async executor.
+        /// Creates layout.sessions model owners shared by every document using this pool.
         pub(crate) async fn load(
             artifacts: ModelArtifacts,
             config: Arc<ValidatedConfig>,
         ) -> Result<Arc<Self>, LayoutError> {
-            let size = config.layout().session_pool_size;
+            let size = config.layout().sessions;
             let backend =
                 crate::wasm_compat::OnnxBackend::from(config.as_ref());
             let mut sessions = Vec::with_capacity(size);

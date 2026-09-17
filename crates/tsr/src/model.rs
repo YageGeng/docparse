@@ -9,7 +9,7 @@ use docparse_layout::{
     PageImage,
     timing::{TimingStage, Timings},
 };
-use ndarray::{Array2, Array3, Ix2, Ix3};
+use ndarray::{Array2, Array3, Axis, Ix1, Ix2, Ix3};
 use ort::session::SessionOutputs;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -55,16 +55,41 @@ pub(crate) enum ModelResult {
     Cells(Array2<f32>),
 }
 
-impl TryFrom<(ModelKind, &SessionOutputs<'_>)> for ModelResult {
-    type Error = TsrError;
-
-    /// Validates each pinned graph's output ranks before the inference lease ends.
-    fn try_from(
-        (kind, outputs): (ModelKind, &SessionOutputs<'_>),
-    ) -> Result<Self, Self::Error> {
+impl ModelResult {
+    /// Splits model outputs by sample, using detector counts rather than assuming equal box counts.
+    pub(crate) fn from_batch(
+        kind: ModelKind,
+        batch: usize,
+        outputs: &SessionOutputs<'_>,
+    ) -> Result<Vec<Self>, TsrError> {
+        let invalid = |reason: &str| TsrError::InvalidInput {
+            reason: reason.to_owned(),
+        };
+        if !(1..=32).contains(&batch) {
+            return Err(invalid("invalid TSR output batch size"));
+        }
         match kind {
             ModelKind::Structure(_) => {
-                Ok(Self::Structure(ModelOutputs::try_from(outputs)?))
+                let outputs = ModelOutputs::try_from(outputs)?;
+                if outputs.locations.len_of(Axis(0)) != batch {
+                    return Err(invalid(
+                        "TSR output batch does not match its input",
+                    ));
+                }
+                Ok((0..batch)
+                    .map(|index| {
+                        Self::Structure(ModelOutputs {
+                            locations: outputs
+                                .locations
+                                .slice_axis(Axis(0), (index..index + 1).into())
+                                .to_owned(),
+                            probabilities: outputs
+                                .probabilities
+                                .slice_axis(Axis(0), (index..index + 1).into())
+                                .to_owned(),
+                        })
+                    })
+                    .collect())
             }
             ModelKind::Cells(_) => {
                 let boxes = outputs
@@ -78,12 +103,55 @@ impl TryFrom<(ModelKind, &SessionOutputs<'_>)> for ModelResult {
                         reason: e.to_string(),
                     })?;
                 if boxes.ncols() != 6
-                    || boxes.nrows() > 300
+                    || boxes.nrows() > 300 * batch
                     || boxes.iter().any(|v| !v.is_finite())
                 {
-                    return Err(TsrError::InvalidInput { reason: "cell detector requires finite [N,6] output with at most 300 cells".to_owned() });
+                    return Err(invalid(
+                        "cell detector requires finite [N,6] output with at most 300 cells per image",
+                    ));
                 }
-                Ok(Self::Cells(boxes.to_owned()))
+                let counts = outputs
+                    .get("fetch_name_1")
+                    .ok_or_else(|| invalid("missing detector box counts"))?
+                    .try_extract_array::<i32>()?
+                    .into_dimensionality::<Ix1>()
+                    .map_err(|error| {
+                        invalid(&format!(
+                            "detector counts must have shape [B]: {error}"
+                        ))
+                    })?;
+                if counts.len() != batch {
+                    return Err(invalid(
+                        "detector count batch does not match its input",
+                    ));
+                }
+                let mut offset = 0;
+                let mut results = Vec::with_capacity(batch);
+                for &count in &counts {
+                    let count = usize::try_from(count).map_err(|error| {
+                        invalid(&format!(
+                            "invalid detector box count {count}: {error}"
+                        ))
+                    })?;
+                    if count > 300 || count > boxes.nrows() - offset {
+                        return Err(invalid(
+                            "detector box count exceeds the output tensor",
+                        ));
+                    }
+                    let end = offset + count;
+                    results.push(Self::Cells(
+                        boxes
+                            .slice_axis(Axis(0), (offset..end).into())
+                            .to_owned(),
+                    ));
+                    offset = end;
+                }
+                if offset != boxes.nrows() {
+                    return Err(invalid(
+                        "detector counts do not cover the output tensor",
+                    ));
+                }
+                Ok(results)
             }
         }
     }
@@ -119,9 +187,11 @@ impl TryFrom<&SessionOutputs<'_>> for ModelOutputs {
             .map_err(|error| TsrError::InvalidInput {
                 reason: error.to_string(),
             })?;
-        if locations.shape().first() != Some(&1)
+        // Preserve the singleton decoder contract after validating and splitting this batched tensor.
+        let batch = locations.len_of(Axis(0));
+        if !(1..=32).contains(&batch)
             || locations.shape().get(2) != Some(&8)
-            || probabilities.shape().first() != Some(&1)
+            || probabilities.len_of(Axis(0)) != batch
             || probabilities.shape().get(2) != Some(&50)
             || locations.shape().get(1) != probabilities.shape().get(1)
             || locations
@@ -129,7 +199,7 @@ impl TryFrom<&SessionOutputs<'_>> for ModelOutputs {
                 .get(1)
                 .is_none_or(|&steps| steps == 0 || steps > 512)
         {
-            return Err(TsrError::InvalidInput { reason: "expected [1,T,8] cell boxes and [1,T,50] probabilities with 1..=512 steps".to_owned() });
+            return Err(TsrError::InvalidInput { reason: "expected [B,T,8] cell boxes and [B,T,50] probabilities with 1..=32 crops and 1..=512 steps".to_owned() });
         }
         Ok(Self {
             locations: locations.to_owned(),
@@ -372,16 +442,21 @@ impl SlanetPlusEngine {
             docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
         let provider = backend.execution_provider();
         tracing::info!("initializing TSR ONNX with provider {}", provider);
-        let runner = SessionRunner::load(artifacts, backend, kind)
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    "TSR provider {} initialization failed: {}",
-                    provider,
-                    error
-                );
+        let runner = SessionRunner::load(
+            artifacts,
+            backend,
+            kind,
+            config.tsr().batch_size,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(
+                "TSR provider {} initialization failed: {}",
+                provider,
                 error
-            })?;
+            );
+            error
+        })?;
         tracing::info!("loaded TSR ONNX with provider {}", provider);
         let model_label = match model {
             docparse_config::TsrModel::SlanetPlus => "slanet-plus",
@@ -422,6 +497,7 @@ impl SlanetPlusEngine {
                         config.as_ref(),
                     ),
                     kind,
+                    cells.batch_size,
                 )
                 .await?,
                 cells.score_threshold,

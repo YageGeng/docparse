@@ -11,6 +11,7 @@ default-members = [
   "crates/core",
   "crates/layout",
   "crates/formula",
+  "crates/formula-texo",
   "crates/ocr",
   "crates/server",
   "crates/tsr",
@@ -72,6 +73,7 @@ docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-database = { version = "0.1.0", path = "crates/database" }
 docparse-formula = { version = "0.1.0", path = "crates/formula" }
+docparse-formula-texo = { version = "0.1.0", path = "crates/formula-texo" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
 docparse-migration = { version = "0.1.0", path = "crates/migration" }
 docparse-ocr = { version = "0.1.0", path = "crates/ocr" }

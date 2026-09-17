@@ -11,6 +11,7 @@ use docparse_layout::{
     AffineTransform, Bbox, LayoutLabel, PageImage, PageImageInput,
     PageTransform, Point,
 };
+use futures_util::{StreamExt, stream};
 use tokio::sync::Semaphore;
 use typed_builder::TypedBuilder;
 
@@ -31,7 +32,7 @@ pub(crate) struct TableRuntime {
 }
 
 impl TableRuntime {
-    /// Validates the optional engine and creates a bounded per-parse budget.
+    /// Applies the per-document table-job budget without allocating additional model sessions.
     #[allow(
         clippy::arc_with_non_send_sync,
         reason = "browser trait objects stay in one Worker; native bounds require Send and Sync"
@@ -42,13 +43,13 @@ impl TableRuntime {
     ) -> Result<Arc<Self>, TableStructureError> {
         options.validate(engine.is_some())?;
         Ok(Arc::new(Self {
-            permits: Semaphore::new(options.max_in_flight),
+            permits: Semaphore::new(options.table_jobs),
             options,
             engine,
         }))
     }
 
-    /// Resolves only layout table blocks, preserving source ownership on every failed attempt.
+    /// Admits same-page tables concurrently for model batching while preserving ordered results and failures.
     pub(crate) async fn resolve(
         &self,
         draft: &mut PageTableDraft,
@@ -70,16 +71,18 @@ impl TableRuntime {
             &draft.extracted.table_evidence,
             &draft.formula_regions,
         );
-        for block in draft
+        let assembler = &assembler;
+        // Multiple ready crops can share a model batch; the existing per-document permit still owns admission.
+        let requests: Vec<_> = draft
             .blocks
             .iter_mut()
             .filter(|b| b.label == LayoutLabel::Table)
-        {
+            .map(|block| async move {
             let reason = if self.options.mode == TableMode::Fallback {
                 let _timer =
                     timings.for_page(page).start(TimingStage::TableRules);
                 match assembler.reconstruct(block) {
-                    Ok(()) => continue,
+                    Ok(()) => return Vec::new(),
                     Err(message) => {
                         tracing::debug!(
                             "local table {} requires external structure: {}",
@@ -157,12 +160,11 @@ impl TableRuntime {
                     error.code(),
                     error
                 );
-                draft.warnings.push(PageWarning {
+                vec![PageWarning {
                     code: error.code().to_owned(),
                     stage: "table".to_owned(),
                     message: format!("table {}: {}", block.id.as_str(), error),
-                });
-                draft.warnings.push(PageWarning {
+                }, PageWarning {
                     code: "TableStructureUnavailable".to_owned(),
                     stage: "table".to_owned(),
                     message: format!(
@@ -170,8 +172,15 @@ impl TableRuntime {
                         block.id.as_str(),
                         error
                     ),
-                });
+                }]
+            } else {
+                Vec::new()
             }
+        }).collect();
+        let requests = stream::iter(requests).buffered(self.options.table_jobs);
+        tokio::pin!(requests);
+        while let Some(warnings) = requests.next().await {
+            draft.warnings.extend(warnings);
         }
     }
 

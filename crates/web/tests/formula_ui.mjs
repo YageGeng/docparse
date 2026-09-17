@@ -57,6 +57,9 @@ try {
   assert(await page.getByRole("switch", { name: "Inline formulas", exact: true }).isChecked());
   assert(await page.getByRole("switch", { name: "Display formulas", exact: true }).isChecked());
   await inspectViewport(page);
+  assert.equal(await page.locator("#formula-engine").inputValue(), "texo");
+  // This existing regression pins PP outputs; Texo/default switching has its own SDK regression.
+  await page.locator("#formula-engine").selectOption("pp");
   await page.locator("#prepare").click();
   assert(await page.locator("#inline-formula-enabled").isDisabled());
   assert(await page.locator("#display-formula-enabled").isDisabled());

@@ -1,0 +1,65 @@
+[package]
+name = "docparse-formula-texo"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-only"
+repository.workspace = true
+readme = "README.md"
+description = "Batched Texo formula recognition through native and browser ONNX Runtime"
+
+[features]
+default = []
+metal = ["docparse-layout/metal"]
+coreml = ["docparse-layout/coreml"]
+cuda = ["docparse-layout/cuda"]
+openvino = ["docparse-layout/openvino"]
+wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-formula/wasm"]
+
+[dependencies]
+# workspace crates
+docparse-config.workspace = true
+docparse-formula.workspace = true
+docparse-layout.workspace = true
+
+# async
+tokio.workspace = true
+
+# config and serialization
+serde_json.workspace = true
+
+# builder
+typed-builder.workspace = true
+
+# hashing
+sha2.workspace = true
+
+# inference and image
+image.workspace = true
+ndarray.workspace = true
+ort.workspace = true
+tokenizers.workspace = true
+
+# cli and diagnostics
+tracing.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# inference and image
+tokenizers = { workspace = true, features = ["unstable_wasm"] }
+
+# browser
+ort-web.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[[example]]
+name = "browser"
+path = "examples/browser/main.rs"
+crate-type = ["cdylib"]
+required-features = ["wasm"]

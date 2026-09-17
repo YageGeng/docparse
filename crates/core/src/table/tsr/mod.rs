@@ -19,8 +19,9 @@ pub use docparse_config::TableMode;
 pub struct TableOptions {
     #[builder(default)]
     pub mode: TableMode,
+    /// Bounds in-flight table requests per parse, including waits for shared model sessions.
     #[builder(default = 2)]
-    pub max_in_flight: usize,
+    pub table_jobs: usize,
     #[builder(default = 60_000)]
     pub timeout_ms: u64,
 }
@@ -38,15 +39,14 @@ impl TableOptions {
         &self,
         has_engine: bool,
     ) -> Result<(), TableStructureError> {
-        if self.max_in_flight == 0
-            || self.max_in_flight > 32
+        if self.table_jobs == 0
+            || self.table_jobs > 32
             || self.timeout_ms == 0
             || self.timeout_ms > 86_400_000
         {
             return Err(TableStructureError::InvalidOptions {
-                reason:
-                    "max_in_flight must be 1..=32 and timeout_ms 1..=86400000"
-                        .to_owned(),
+                reason: "table_jobs must be 1..=32 and timeout_ms 1..=86400000"
+                    .to_owned(),
             });
         }
         if self.mode != TableMode::RulesOnly && !has_engine {
@@ -164,7 +164,7 @@ impl From<&docparse_config::TsrConfig> for TableOptions {
     fn from(config: &docparse_config::TsrConfig) -> Self {
         Self::builder()
             .mode(config.mode)
-            .max_in_flight(config.max_in_flight)
+            .table_jobs(config.table_jobs)
             .timeout_ms(config.timeout_ms)
             .build()
     }

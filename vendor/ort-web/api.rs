@@ -218,6 +218,39 @@ unsafe extern "system" fn CreateSessionOptions(
     OrtStatusPtr::default()
 }
 
+/// Accepts explicit per-output placement without mutating any other session's policy.
+unsafe extern "system" fn AddSessionConfigEntry(
+    options: *mut OrtSessionOptions,
+    key: *const ffi::c_char,
+    value: *const ffi::c_char,
+) -> OrtStatusPtr {
+    // SAFETY: ORT passes its live options handle and NUL-terminated config strings.
+    let key = unsafe { CStr::from_ptr(key) }.to_string_lossy();
+    // SAFETY: The config value has the same call lifetime as the key.
+    let value = unsafe { CStr::from_ptr(value) }.to_string_lossy();
+    let Some(name) = key.strip_prefix("ort_web.preferred_output_location.")
+    else {
+        return Error::new_sys(
+            OrtErrorCode::ORT_INVALID_ARGUMENT,
+            "unsupported ort-web session config entry",
+        );
+    };
+    if name.is_empty() || !matches!(value.as_ref(), "cpu" | "gpu-buffer") {
+        return Error::new_sys(
+            OrtErrorCode::ORT_INVALID_ARGUMENT,
+            "invalid preferred output location",
+        );
+    }
+    // SAFETY: This API owns all SessionOptions allocated by CreateSessionOptions.
+    let options = unsafe { &mut *options.cast::<SessionOptions>() };
+    options
+        .js
+        .preferred_output_location
+        .get_or_insert_with(HashMap::new)
+        .insert(name.into(), value.into_owned());
+    OrtStatusPtr::default()
+}
+
 unsafe extern "system" fn SessionOptionsAppendExecutionProvider(
     options: *mut OrtSessionOptions,
     provider_name: *const ::core::ffi::c_char,
@@ -866,6 +899,7 @@ pub const fn api() -> OrtApi {
         Run,
         RunAsync,
         CreateSessionOptions,
+        AddSessionConfigEntry,
         CloneSessionOptions,
         SessionGetInputCount,
         SessionGetOutputCount,
