@@ -362,16 +362,37 @@ impl Default for LayoutConfig {
     }
 }
 
-/// Page failure policy; shared render delivery capacity is configured under RenderConfig.
+/// Graph optimization policy shared by all ONNX sessions, independent of execution provider.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum OptimizationLevel {
+    #[default]
+    Level1,
+    Level2,
+    Level3,
+    All,
+}
+
+/// Shared inference and page failure policies; render capacity is configured under RenderConfig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
+    /// One setting governs every model; omitted values use basic graph rewrites.
+    #[serde(default)]
+    #[builder(default)]
+    pub optimization_level: OptimizationLevel,
+    /// Shared memory-plan switch; disabled by default for variable batches and decoder caches.
+    #[serde(default)]
+    #[builder(default)]
+    pub memory_pattern: bool,
     /// The shorter key retains continuation after recoverable page failures, not fatal document errors.
     pub continue_on_error: bool,
 }
 
 impl Default for RuntimeConfig {
-    /// Preserves native fallback when an individual page cannot be rendered.
+    /// Defaults every session to level1 and preserves fallback after recoverable page errors.
     fn default() -> Self {
         Self::builder().continue_on_error(true).build()
     }

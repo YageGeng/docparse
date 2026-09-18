@@ -1,6 +1,104 @@
 use docparse_config::{RawConfig, ValidatedConfig};
 use serde_json::json;
 
+/// One runtime setting accepts only the four graph levels and defaults to level1 when omitted.
+#[test]
+fn global_optimization_levels_are_strict_and_default_to_level1() {
+    let defaults =
+        serde_json::to_value(RawConfig::default()).expect("defaults");
+    let mut missing = defaults.clone();
+    missing
+        .get_mut("runtime")
+        .expect("runtime")
+        .as_object_mut()
+        .expect("runtime")
+        .remove("optimization_level");
+    let omitted: RawConfig =
+        serde_json::from_value(missing).expect("optional optimization level");
+    assert_eq!(
+        serde_json::to_value(omitted)
+            .expect("round trip")
+            .pointer("/runtime/optimization_level"),
+        Some(&json!("level1"))
+    );
+    for level in ["level1", "level2", "level3", "all"] {
+        let mut value = defaults.clone();
+        *value
+            .pointer_mut("/runtime/optimization_level")
+            .expect("level") = json!(level);
+        let raw: RawConfig =
+            serde_json::from_value(value).expect("supported level");
+        let validated =
+            ValidatedConfig::try_from(raw).expect("valid configuration");
+        assert_eq!(
+            serde_json::to_value(validated.runtime())
+                .expect("runtime")
+                .get("optimization_level"),
+            Some(&json!(level))
+        );
+    }
+    for level in [
+        json!("level0"),
+        json!("disable"),
+        json!("ALL"),
+        json!(1),
+        json!(null),
+    ] {
+        let mut value = defaults.clone();
+        *value
+            .pointer_mut("/runtime/optimization_level")
+            .expect("level") = level;
+        serde_json::from_value::<RawConfig>(value)
+            .expect_err("unsupported optimization level");
+    }
+}
+
+/// Memory patterns are a global boolean and must not accept strings or numeric substitutes.
+#[test]
+fn global_memory_pattern_accepts_only_booleans() {
+    let defaults =
+        serde_json::to_value(RawConfig::default()).expect("defaults");
+    let mut missing = defaults.clone();
+    missing
+        .get_mut("runtime")
+        .expect("runtime")
+        .as_object_mut()
+        .expect("object")
+        .remove("memory_pattern");
+    let omitted: RawConfig =
+        serde_json::from_value(missing).expect("default memory setting");
+    assert!(!omitted.runtime.memory_pattern);
+    for enabled in [true, false] {
+        let mut value = defaults.clone();
+        value
+            .get_mut("runtime")
+            .expect("runtime")
+            .as_object_mut()
+            .expect("object")
+            .insert("memory_pattern".into(), json!(enabled));
+        let raw: RawConfig =
+            serde_json::from_value(value).expect("boolean setting");
+        let validated = ValidatedConfig::try_from(raw).expect("configuration");
+        assert_eq!(
+            serde_json::to_value(validated.runtime())
+                .expect("runtime")
+                .get("memory_pattern"),
+            Some(&json!(enabled))
+        );
+    }
+    for invalid in [json!("true"), json!(1), json!(null)] {
+        let mut value = defaults.clone();
+        value
+            .get_mut("runtime")
+            .expect("runtime")
+            .as_object_mut()
+            .expect("object")
+            .insert("memory_pattern".into(), invalid);
+        serde_json::from_value::<RawConfig>(value)
+            .expect_err("invalid boolean");
+    }
+}
+
 /// Every model queue requires an explicit positive capacity, independently of sessions and batches.
 #[test]
 fn queue_sizes_are_required_and_independent() {

@@ -56,16 +56,11 @@ mod platform {
                 let session = SessionWorker::new(move || {
                     // A stable CPU batch is required on Apple; register other compiled accelerators normally.
                     let mut builder = if coreml_incompatible {
-                        ort::session::Session::builder()?
-                            // This CPU compatibility path bypasses the shared backend defaults.
-                            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::All)
-                            .map_err(ort::Error::from)?
+                        // Preserve the configured optimization level while selecting the compatibility executor.
+                        backend.cpu_builder()?
                     } else {
                         SessionBuilder::try_from(backend)?
                     }
-                    // Formula decoding has changing intermediate shapes; disable cached memory patterns.
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?
                     .with_intra_threads(1)
                     .map_err(ort::Error::from)?;
                     let session = builder.commit_from_memory(&model)?;
@@ -227,10 +222,8 @@ mod platform {
                 workers: Vec::with_capacity(session_size),
             };
             for _ in 0..session_size {
-                // Browser formula sessions use the same memory policy as the native decoder.
+                // Browser formula sessions inherit the global graph and memory settings.
                 let mut session = SessionBuilder::try_from(backend)?
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?
                     .commit_from_memory(&artifacts.model)
                     .await?;
                 let decoder = FormulaDecoder::new(&artifacts.tokenizer)?;

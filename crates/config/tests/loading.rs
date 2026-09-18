@@ -7,6 +7,37 @@ use figment::providers::Serialized;
 use figment::value::{Dict, Value};
 use serde_json::json;
 
+/// Global session options follow file and environment precedence without per-model overrides.
+#[test]
+fn global_optimization_level_loads_from_file_and_environment() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[runtime]\noptimization_level = \"all\"\nmemory_pattern = true\n",
+    );
+    for (environment, expected, memory) in [
+        (json!({}), "all", true),
+        (
+            json!({"runtime": {"optimization_level": "level2", "memory_pattern": false}}),
+            "level2",
+            false,
+        ),
+    ] {
+        let raw = ConfigLoader::new(&path)
+            .with_env_provider(environment_provider(environment))
+            .load_raw()
+            .expect("optimization setting");
+        assert_eq!(raw.runtime.memory_pattern, memory);
+        assert_eq!(
+            serde_json::to_value(raw)
+                .expect("configuration")
+                .pointer("/runtime/optimization_level"),
+            Some(&json!(expected))
+        );
+    }
+}
+
 /// Structure and cell batch sizes load independently and reject unbounded tensor batches.
 #[test]
 fn table_batch_sizes_are_independent_and_bounded() {

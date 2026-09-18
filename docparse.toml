@@ -21,6 +21,10 @@ sqlx_slow_statements_logging_level = "warn"
 sqlx_slow_statements_threshold_ms = 1000
 
 [runtime]
+# Shared by every ONNX session: level1, level2, level3, or all.
+optimization_level = "level1"
+# Applied to every model; disable cached memory plans for variable shapes.
+memory_pattern = false
 continue_on_error = true
 
 [render]

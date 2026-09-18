@@ -84,7 +84,13 @@ export interface WebParseConfig {
   /** Structure and detector batch_size independently cap ready crops per ONNX invocation. */
   tsr: TableOptions & { queue_size: number; session_size?: number; batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection: { queue_size: number; enabled?: boolean; session_size?: number; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
   /** Page failures may preserve native content; render controls all scheduling capacity. */
-  runtime?: { continue_on_error?: boolean };
+  runtime?: {
+    continue_on_error?: boolean;
+    /** Shared by every model session; omitted values use level1. */
+    optimization_level?: "level1" | "level2" | "level3" | "all";
+    /** Shared memory-plan switch; defaults to false. ORT Web disables it for WebGPU. */
+    memory_pattern?: boolean;
+  };
   /** One browser PDFium Worker; queue_size counts pages until actual processing finishes. */
   render: { workers: 1; queue_size: number; dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;

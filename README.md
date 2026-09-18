@@ -88,6 +88,15 @@ its slot. `server.jobs`, `server.pdfium_workers`, `runtime.stage_pages`,
 Use `--render-workers` for a server override. WASM requires `render.workers = 1`
 and accepts `render.queue_size > 1` without removing ORT Web's global guard.
 
+`runtime.optimization_level` sets graph optimization for every ONNX session,
+including CPU compatibility and model inspection. It accepts `level1` (default),
+`level2`, `level3`, and `all`; native configuration overrides can use
+`DOCPARSE_RUNTIME__OPTIMIZATION_LEVEL`. Each parser retains its own setting.
+`runtime.memory_pattern` is one boolean for every session, defaulting to `false`
+for variable batches and decoder caches. `true` enables it globally on native
+and WASM CPU; ORT Web independently forces it off for WebGPU. Environment
+overrides can use `DOCPARSE_RUNTIME__MEMORY_PATTERN`.
+
 `runtime.continue_on_error` controls continuation after recoverable page failures
 (default `true`). The CLI override is `--continue-on-error true|false`; the former
 `continue_on_page_error` key is rejected. Fatal document/transport errors still stop parsing.

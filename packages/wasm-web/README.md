@@ -115,6 +115,14 @@ can still include provider-specific lazy kernel compilation.
 
 `config` uses native business groups and snake_case fields; render settings include `{workers: 1, queue_size: 2, dpi: 144}` alongside the required model queues. Filesystem paths (including the nested `ocr.detection`, `ocr.recognition`, and `ocr.orientation` groups), profiles, environment variables, and per-model `execution_provider` fields are excluded. Use the Worker's `executionProvider` option for all browser models together. `render.workers` must be 1 in this single-Worker implementation. Required `render.queue_size` may exceed 1 and counts unfinished pages through actual resource cleanup. Retired runtime capacity settings fail explicitly.
 
+`runtime.optimization_level` applies to every model session and accepts `level1`
+(default), `level2`, `level3`, or `all`. These map to ORT Web's `basic`, `extended`,
+`layout`, and `all` graph levels respectively. For example, use
+`config: { runtime: { optimization_level: "level2" }, ... }` alongside the required
+render and model queue settings. `runtime.memory_pattern` is a global boolean,
+defaulting to `false`; no model overrides it. WASM CPU honors both values, while
+ORT Web independently forces memory patterns off for WebGPU.
+
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
 ## Stage timings

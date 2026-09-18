@@ -170,10 +170,11 @@ fn inspect_model_command(
         &layout.model_config_path,
         &layout.model_manifest_path,
     )?;
-    let schema = inspect_model(&layout.model_path)?;
+    // Inspection sessions inherit the same runtime policy as parser sessions.
+    let backend = docparse_layout::OnnxBackend::from(&config);
+    let schema = inspect_model(&layout.model_path, backend)?;
     schema.validate_pp_doclayout_v3()?;
     // Diagnostics report the compiled backend, which no longer has a configuration field.
-    let backend = docparse_layout::OnnxBackend::compiled();
     serde_json::to_string_pretty(&serde_json::json!({
         "model_path": layout.model_path,
         "execution_provider": backend.execution_provider(),

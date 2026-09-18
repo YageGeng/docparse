@@ -3,7 +3,7 @@ use super::run_cpu;
 use crate::model_manifest::{ModelContract, lowercase_hex};
 use crate::{
     LayoutError, ModelArtifacts, ModelManifest, ModelManifestError,
-    ModelMetadataSchema, ModelSchema,
+    ModelMetadataSchema, ModelSchema, OnnxBackend,
 };
 use ort::session::Session;
 use sha2::{Digest, Sha256};
@@ -206,9 +206,10 @@ impl ModelManifest {
         Ok(lowercase_hex(digest.as_ref()))
     }
 }
-/// Loads one ONNX file and returns only neutral schema information.
+/// Inspects one ONNX file on CPU using the supplied parser-wide optimization policy.
 pub fn inspect_model(
     path: impl AsRef<Path>,
+    backend: OnnxBackend,
 ) -> Result<ModelSchema, LayoutError> {
     let path = path.as_ref();
     if !path.is_file() {
@@ -216,7 +217,8 @@ pub fn inspect_model(
             path: path.to_path_buf(),
         });
     }
-    let session = Session::builder()?.commit_from_file(path)?;
+    // Metadata inspection stays on CPU while sharing the parser's graph optimization setting.
+    let session = backend.cpu_builder()?.commit_from_file(path)?;
     ModelSchema::from_session(&session)
 }
 

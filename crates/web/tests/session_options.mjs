@@ -36,11 +36,18 @@ try {
     };
   });
   await page.goto(`${origin}/example/`);
-  for (const [kind, patterns] of [
-    ["layout", [true]], ["tsr", [true, true, true]],
-    ["ocr", [true, false, false, false]], ["pp", [true, false]], ["texo", [true, false, false]],
+  for (const [kind, level, memoryPattern, expected, count] of [
+    ["layout", undefined, undefined, "basic", 1],
+    ["layout", "level1", true, "basic", 1],
+    ["layout", "level2", false, "extended", 1],
+    ["layout", "level3", true, "layout", 1],
+    ["layout", "all", false, "all", 1],
+    ["tsr", "level2", false, "extended", 3],
+    ["ocr", "level3", true, "layout", 4],
+    ["pp", "level1", true, "basic", 2],
+    ["texo", "all", true, "all", 3],
   ]) {
-    const models = await page.evaluate(async kind => {
+    const models = await page.evaluate(async ({kind, level, memoryPattern}) => {
       const { createParser } = await import("/dist/index.js");
       /** Uses the same verified artifact triplet for each production Paddle model. */
       const artifacts = name => ({ kind: "urls", model: `/models/${name}inference.onnx`, config: `/models/${name}inference.yml`, manifest: `/models/${name}model-manifest.json` });
@@ -50,6 +57,7 @@ try {
         ...(kind === "tsr" ? { tsrArtifacts: artifacts("slanet-plus/"), tsrCellArtifacts: artifacts("rtdetr-table-cell-wireless/") } : {}),
         ...(kind === "ocr" ? { ocrArtifacts: { detection: artifacts("pp-ocrv6-medium-det/"), recognition: artifacts("pp-ocrv6-medium-rec/"), orientation: artifacts("pp-lcnet-textline-ori/") } } : {}),
         config: {
+          ...(level === undefined ? {} : { runtime: { optimization_level: level, memory_pattern: memoryPattern } }),
           render: { workers: 1, queue_size: 1 }, layout: { session_size: 1, queue_size: 1 },
           tsr: { session_size: 1, queue_size: 1, mode: kind === "tsr" ? "tsr_only" : "rules_only", cell_detection: { session_size: 1, queue_size: 1 } },
           ocr: { policy: kind === "ocr" ? "always" : "disabled", classify_orientation: true, detection: { session_size: 1, queue_size: 1 }, recognition: { session_size: 1, queue_size: 1 }, orientation: { session_size: 1, queue_size: 1 } },
@@ -58,11 +66,35 @@ try {
       });
       try { return window.sessionMetrics.models; }
       finally { await parser.close(); }
-    }, kind);
-    assert.deepEqual(models.map(model => model.graphOptimizationLevel), patterns.map(() => "all"), `${kind}: graph optimizations were not forwarded`);
-    assert.deepEqual(models.map(model => model.enableMemPattern), patterns, `${kind}: incorrect memory pattern policy`);
-    console.log(JSON.stringify({ kind, graphOptimizationLevel: "all", memoryPatterns: patterns }));
+    }, {kind, level, memoryPattern});
+    assert.deepEqual(models.map(model => model.graphOptimizationLevel), Array(count).fill(expected), `${kind}: graph optimizations were not forwarded`);
+    assert.deepEqual(models.map(model => model.enableMemPattern), Array(count).fill(memoryPattern ?? false), `${kind}: incorrect memory pattern policy`);
+    console.log(JSON.stringify({ kind, level: level ?? "default", graphOptimizationLevel: expected, memoryPattern: memoryPattern ?? false, sessions: count }));
   }
+  const rejected = await page.evaluate(async () => {
+    const { createParser } = await import("/dist/index.js");
+    const codes = [];
+    for (const runtime of [
+      ...["level0", "disabled", "ALL", 1, null].map(optimization_level => ({optimization_level})),
+      ...["true", 1, null].map(memory_pattern => ({memory_pattern})),
+    ]) {
+      try {
+        const parser = await createParser({
+          artifacts: { kind: "urls", model: "/unused", config: "/unused", manifest: "/unused" },
+          config: {
+            runtime, render: { workers: 1, queue_size: 1 },
+            layout: { queue_size: 1 }, tsr: { queue_size: 1, mode: "rules_only", cell_detection: { queue_size: 1 } },
+            ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 1 }, orientation: { queue_size: 1 } },
+            formula: { queue_size: 1, inline_enabled: false, display_enabled: false },
+          },
+        });
+        await parser.close();
+        codes.push("unexpected success");
+      } catch (error) { codes.push(error.code); }
+    }
+    return codes;
+  });
+  assert.deepEqual(rejected, Array(8).fill("InvalidConfig"));
 } finally {
   await browser?.close();
   if (server.exitCode === null) {

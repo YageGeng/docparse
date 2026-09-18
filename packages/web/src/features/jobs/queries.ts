@@ -18,7 +18,7 @@ import {
 export const terminal = (job?: Job | null) =>
   job === null || job?.status === "succeeded" || job?.status === "failed";
 
-/** Retrieves server-owned history pages; periodic refresh runs only while this screen is mounted. */
+/** Retrieves history in 50-item pages to reduce load-more requests; refresh runs only while mounted. */
 export function useJobs(status: JobStatus | undefined, search: string) {
   return useInfiniteQuery({
     queryKey: ["jobs", status, search],
@@ -26,7 +26,7 @@ export function useJobs(status: JobStatus | undefined, search: string) {
     queryFn: ({ pageParam, signal }) =>
       request<JobList>(
         "jobs/list",
-        { cursor: pageParam, limit: 20, status, search: search || undefined },
+        { cursor: pageParam, limit: 50, status, search: search || undefined },
         signal,
       ),
     getNextPageParam: (last) => last.next_cursor ?? undefined,

@@ -79,9 +79,17 @@ hidden during recovery. Offline deletion fails immediately instead of queuing an
 action that runs silently on reconnect. Missing task responses clear cached success
 snapshots and release the PDF/result readers, including after deletion in another tab.
 
+- Accepted uploads disappear from the upload queue immediately and remain in task
+  history. Restored pending submissions are checked automatically: saved jobs are
+  cleared, confirmed missing jobs offer file reselection, and transport failures
+  retain the status-check action without treating an unknown outcome as a failed upload.
 - History comes from `GET /jobs/list`, ordered by creation time and UUID. Filename
   search, status filters and cursor pagination run on the server. Older jobs can
   have unknown filenames or sizes.
+- Directory selection includes PDFs from every nested subdirectory and ignores other
+  files. It uses the existing upload queue, cancellation, and retry behavior. Relative
+  paths distinguish same-named files in the upload queue and survive pending-upload
+  recovery; the server still receives each PDF's original basename.
 - File selection and drag-and-drop accept multiple PDFs. HTTP/2 and HTTP/3 allow
   up to 100 concurrent uploads; HTTP/1.x and unknown transports send four at a time
   so status reads and SSE can use the remaining browser connections. Selection size
@@ -151,6 +159,12 @@ explicit environment variable takes precedence.
 Browser acceptance uses the production release CUDA server with isolated
 PostgreSQL/storage and real PDFs. Frontend unit tests are not required by this
 repository; backend contract and persistence regressions live in crate `tests/`.
+
+Verify directory selection and upload recovery against the configured real backend (creates four test jobs):
+
+```sh
+rtk proxy node crates/server/tests/directory_upload.mjs http://127.0.0.1:5173
+```
 
 ## Formula previews
 

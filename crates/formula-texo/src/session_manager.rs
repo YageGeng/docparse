@@ -117,17 +117,13 @@ impl SessionManager {
             .then_some(ort::memory::AllocationDevice::CUDA);
         run_cpu(move || {
             Self::start(sessions, batch_size, queue_size, move || {
-                // Both graphs handle varying batches and the decoder grows its cache at each step.
+                // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_memory_pattern(false)
-                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_memory_pattern(false)
-                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
@@ -836,14 +832,10 @@ mod tests {
                 // Match production memory policy while exercising the I/O-binding path.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_memory_pattern(false)
-                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_memory_pattern(false)
-                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,

@@ -119,13 +119,9 @@ mod platform {
             let batch_size = config.batch_size;
             let (queue, receiver) = FormulaQueue::new(config.queue_size);
             for _ in 0..texo.session_size {
-                // Match native Texo's variable-batch and growing-cache memory policy on both graphs.
-                let mut encoder_builder = SessionBuilder::try_from(backend)?
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?;
-                let mut decoder_builder = SessionBuilder::try_from(backend)?
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?;
+                // Apply the shared runtime settings to both graphs, including their memory policy.
+                let mut encoder_builder = SessionBuilder::try_from(backend)?;
+                let mut decoder_builder = SessionBuilder::try_from(backend)?;
                 if backend.execution_provider()
                     == docparse_layout::ExecutionProvider::WebGpu
                 {

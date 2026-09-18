@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use docparse_layout::{
-    LayoutError, ModelSchema, SchemaDimension, inspect_model,
+    LayoutError, ModelSchema, OnnxBackend, SchemaDimension, inspect_model,
 };
 
 /// Rejects backend-specific symbolic names as a prerequisite for an otherwise valid graph.
@@ -42,7 +42,7 @@ fn repository_path(relative: &str) -> PathBuf {
         .join(relative)
 }
 
-/// Verifies the fixed ONNX artifact exactly matches the tracked neutral schema.
+/// Inspection keeps its schema contract under every configured graph optimization level.
 #[test]
 #[ignore = "requires fixed PP-DocLayoutV3 model"]
 fn fixed_model_schema_matches_fixture() {
@@ -55,10 +55,20 @@ fn fixed_model_schema_matches_fixture() {
     )
     .expect("the schema fixture must deserialize");
 
-    let actual =
-        inspect_model(model_path).expect("the fixed model must inspect");
-
-    assert_eq!(actual, expected);
+    for level in [
+        docparse_config::OptimizationLevel::Level1,
+        docparse_config::OptimizationLevel::Level2,
+        docparse_config::OptimizationLevel::Level3,
+        docparse_config::OptimizationLevel::All,
+    ] {
+        let mut raw = docparse_config::RawConfig::default();
+        raw.runtime.optimization_level = level;
+        let config =
+            docparse_config::ValidatedConfig::try_from(raw).expect("config");
+        let actual = inspect_model(&model_path, OnnxBackend::from(&config))
+            .expect("the fixed model must inspect");
+        assert_eq!(actual, expected, "{level:?}");
+    }
 }
 
 /// Verifies missing models fail before ONNX Runtime initialization.
@@ -66,7 +76,8 @@ fn fixed_model_schema_matches_fixture() {
 fn missing_model_has_a_structured_error() {
     let path = repository_path("models/pp-doclayout-v3/missing.onnx");
 
-    let error = inspect_model(&path).expect_err("a missing model must fail");
+    let error = inspect_model(&path, OnnxBackend::compiled())
+        .expect_err("a missing model must fail");
 
     assert!(
         matches!(error, LayoutError::ModelNotFound { path: actual } if actual == path)

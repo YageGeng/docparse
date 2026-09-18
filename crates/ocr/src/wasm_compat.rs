@@ -141,10 +141,8 @@ mod platform {
             queue_size: usize,
         ) -> Result<Arc<Self>, OcrError> {
             let manager = SessionManager::load(session_size, batch_size, queue_size, move || {
-                // OCR crop dimensions and ready batch sizes vary between runs; do not cache memory patterns.
+                // Inherit the global session policy instead of overriding memory patterns per model.
                 let mut session = SessionBuilder::try_from(backend)?
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?
                     .with_intra_threads(1)
                     .map_err(ort::Error::from)?
                     .commit_from_memory(&bytes)?;
@@ -233,10 +231,8 @@ mod platform {
             let (sender, receiver) =
                 docparse_common::Queue::<Request>::new(queue_size);
             for _ in 0..session_size {
-                // Keep the same dynamic-input memory policy as native OCR for all three models.
+                // All three OCR stages inherit the same native/browser session policy.
                 let mut session = SessionBuilder::try_from(backend)?
-                    .with_memory_pattern(false)
-                    .map_err(ort::Error::from)?
                     .commit_from_memory(&bytes)
                     .await?;
                 kind.validate_session(&session)?;

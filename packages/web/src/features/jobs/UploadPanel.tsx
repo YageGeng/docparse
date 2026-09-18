@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Link } from "react-router";
 import {
   ArrowUpFromLine,
-  CheckCircle2,
   FileText,
+  FolderOpen,
   LoaderCircle,
   RotateCcw,
   Upload,
@@ -21,7 +20,12 @@ import { Progress } from "@/components/ui/progress";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { fileSize } from "@/lib/format";
 
-type PendingUpload = { id: string; name: string; size: number };
+type PendingUpload = {
+  id: string;
+  name: string;
+  size: number;
+  relativePath?: string;
+};
 type UploadEntry = PendingUpload & {
   file?: File;
   status:
@@ -29,7 +33,6 @@ type UploadEntry = PendingUpload & {
   percent: number;
   retries?: number;
   error?: unknown;
-  job?: Job;
 };
 const storageKey = `docparse.pending-upload:${apiPrefix}`;
 const navigation = performance.getEntriesByType("navigation")[0] as
@@ -57,10 +60,13 @@ function readPending(): UploadEntry[] {
           Number.isSafeInteger(entry.size) &&
           entry.size > 0,
       )
-      .map(({ id, name, size }) => ({
+      .map(({ id, name, size, relativePath }) => ({
         id,
         name,
         size,
+        // Older pending records have no directory path; keep their existing retry identities.
+        relativePath:
+          typeof relativePath === "string" ? relativePath : undefined,
         status: "pending",
         percent: 0,
       }));
@@ -82,14 +88,26 @@ export function UploadPanel({
   const current = useRef(uploads);
   const [busy, setBusy] = useState<"upload" | "check" | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [emptyDirectory, setEmptyDirectory] = useState(false);
   const active = useRef<AbortController | null>(null);
+  const directoryInput = useRef<HTMLInputElement | null>(null);
   const retryInput = useRef<HTMLInputElement | null>(null);
   const retryTarget = useRef<string | null>(null);
   const mounted = useRef(true);
   const persisted = useRef<string | undefined>(undefined);
   useEffect(() => {
     mounted.current = true;
+    // Defer restoration until mount settles so StrictMode cleanup cannot strand an aborted check.
+    const restore = window.setTimeout(() => {
+      void run(
+        current.current.filter(
+          (entry) => !entry.file && entry.status === "pending",
+        ),
+        "check",
+      );
+    }, 0);
     return () => {
+      window.clearTimeout(restore);
       mounted.current = false;
       active.current?.abort();
     };
@@ -103,7 +121,9 @@ export function UploadPanel({
     setUploads(entries);
     const pending = entries
       .filter((entry) => entry.status !== "accepted")
-      .map(({ id, name, size }) => ({ id, name, size }));
+      .map(({ id, name, size, relativePath }) => ({
+        id, name, size, relativePath,
+      }));
     const serialized = JSON.stringify(pending);
     // Progress events do not rewrite unchanged local-storage metadata.
     if (serialized === persisted.current) return;
@@ -150,7 +170,11 @@ export function UploadPanel({
             job = await request<Job>(
               "jobs/status",
               { id: entry.id },
-              controller.signal,
+              // An unreachable server must not keep restored uploads locked in checking forever.
+              AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(15000),
+              ]),
             );
           } else {
             if (
@@ -201,16 +225,27 @@ export function UploadPanel({
               }
             }
           }
-          if (controller.signal.aborted) return;
+          // A server acknowledgement remains valid even if cancellation races with its response.
+          if (!mounted.current) return;
           change(entry.id, {
             status: "accepted",
             percent: 100,
             file: undefined,
-            job,
           });
           onUploaded(job);
         } catch (error) {
-          change(entry.id, { status: "failed", error });
+          // Only an authoritative missing-job response proves a restored upload needs its file again.
+          const unconfirmed =
+            mode === "check" &&
+            !(
+              error instanceof ApiError &&
+              error.status === 404 &&
+              error.code === 4041001
+            );
+          change(entry.id, {
+            status: unconfirmed ? "pending" : "failed",
+            error,
+          });
         }
       }
     }
@@ -244,6 +279,7 @@ export function UploadPanel({
   /** New selections get fresh identities; reselection can reuse only the explicitly chosen pending row. */
   function select(files: File[], retryId?: string) {
     if (active.current || !files.length) return;
+    setEmptyDirectory(false);
     const pending = retryId
       ? current.current.find(
           (entry) => entry.id === retryId && entry.status !== "accepted",
@@ -271,6 +307,8 @@ export function UploadPanel({
         id,
         name: file.name,
         size: file.size,
+        // Paths distinguish files in different subdirectories; uploads and retry matching retain basenames.
+        relativePath: file.webkitRelativePath || pending?.relativePath,
         file,
         status: "pending",
         percent: 0,
@@ -287,9 +325,9 @@ export function UploadPanel({
   const accepted = uploads.filter(
     (entry) => entry.status === "accepted",
   ).length;
-  const retryable = uploads.filter(
-    (entry) => entry.status !== "accepted" && entry.file,
-  );
+  // Acknowledged files belong in server history, not in the actionable upload queue.
+  const outstanding = uploads.filter((entry) => entry.status !== "accepted");
+  const retryable = outstanding.filter((entry) => entry.file);
 
   return (
     <section aria-label="上传文档" className="space-y-3">
@@ -333,6 +371,27 @@ export function UploadPanel({
           className="sr-only"
           onChange={(event) => select(Array.from(event.target.files ?? []))}
         />
+        {/* Native directory selection supplies all descendants; React's input typings omit this attribute. */}
+        <input
+          ref={directoryInput}
+          type="file"
+          {...{ webkitdirectory: "" }}
+          multiple
+          disabled={busy != null}
+          aria-label="选择包含 PDF 的目录"
+          tabIndex={-1}
+          className="sr-only"
+          onChange={(event) => {
+            // Directory pickers do not reliably honor accept; filter before entering the shared upload queue.
+            const files = Array.from(event.currentTarget.files ?? []).filter(
+              (file) =>
+                /\.pdf$/i.test(file.name) || file.type === "application/pdf",
+            );
+            event.currentTarget.value = "";
+            if (files.length) select(files);
+            else setEmptyDirectory(true);
+          }}
+        />
         <div className="upload-emblem">
           {busy ? (
             <LoaderCircle className="animate-spin" size={25} />
@@ -348,7 +407,9 @@ export function UploadPanel({
                 ? "正在提交文档…"
                 : "让每一页文档，都有清晰的结构"}
           </h2>
-          <p>支持一次选择或拖拽多个 PDF，每份文档独立上传、排队解析。</p>
+          <p>
+            支持选择或拖拽多个 PDF，也可选择目录，自动上传目录及所有子目录中的 PDF。
+          </p>
           {!!uploads.length && (
             <p role="status">
               已创建 {accepted}/{uploads.length} 项任务
@@ -360,13 +421,31 @@ export function UploadPanel({
             {busy === "check" ? "取消检查" : "取消剩余上传"}
           </Button>
         ) : (
-          <Button onClick={() => inputRef.current?.click()}>
-            <Upload size={16} />
-            选择 PDF
-          </Button>
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none"
+              onClick={() => directoryInput.current?.click()}
+            >
+              <FolderOpen size={16} aria-hidden="true" />
+              选择目录
+            </Button>
+            <Button
+              className="flex-1 sm:flex-none"
+              onClick={() => inputRef.current?.click()}
+            >
+              <Upload size={16} aria-hidden="true" />
+              选择 PDF
+            </Button>
+          </div>
         )}
       </div>
-      {!!uploads.length && (
+      {emptyDirectory && (
+        <p role="status" className="text-sm text-muted-foreground">
+          此目录及其子目录中没有 PDF 文件。
+        </p>
+      )}
+      {!!outstanding.length && (
         <div
           className="space-y-3 rounded-xl border bg-background p-4"
           aria-label="上传队列"
@@ -382,114 +461,95 @@ export function UploadPanel({
             </Button>
           )}
           <ul className="space-y-3">
-            {uploads.map((entry) => (
+            {outstanding.map((entry) => (
               <li
                 key={entry.id}
                 className="space-y-2 rounded-lg border p-3"
-                aria-label={`上传 ${entry.name}`}
+                aria-label={`上传 ${entry.relativePath || entry.name}`}
               >
                 <div className="flex flex-wrap items-center gap-3">
-                  {entry.status === "accepted" ? (
-                    <CheckCircle2
-                      size={18}
-                      className="shrink-0 text-emerald-600"
-                      aria-hidden="true"
-                    />
-                  ) : (
-                    <FileText
-                      size={18}
-                      className="shrink-0"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
+                  <FileText
+                    size={18}
+                    className="shrink-0"
+                    aria-hidden="true"
+                  />
+                  {/* Keep paths readable on narrow screens by wrapping actions before squeezing filenames. */}
+                  <div className="min-w-0 flex-[1_1_10rem]">
                     <p className="break-all text-sm font-medium">
-                      {entry.name}
+                      {entry.relativePath || entry.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {fileSize(entry.size)} ·{" "}
-                      {entry.status === "accepted"
-                        ? "任务已创建"
-                        : entry.status === "checking"
-                          ? "正在检查任务…"
-                          : entry.status === "retrying"
-                            ? `服务器繁忙，等待第 ${entry.retries} 次重试…`
-                            : entry.status === "uploading"
-                              ? entry.percent === 100
-                                ? "正在确认任务…"
-                                : `正在上传 ${entry.percent}%`
-                              : entry.status === "failed"
-                                ? "提交未完成"
-                                : busy
-                                  ? "等待上传"
-                                  : "提交待确认"}
+                      {entry.status === "checking"
+                        ? "正在检查任务…"
+                        : entry.status === "retrying"
+                          ? `服务器繁忙，等待第 ${entry.retries} 次重试…`
+                          : entry.status === "uploading"
+                            ? entry.percent === 100
+                              ? "正在确认任务…"
+                              : `正在上传 ${entry.percent}%`
+                            : entry.status === "failed"
+                              ? "提交未完成"
+                              : busy
+                                ? "等待上传"
+                                : "提交待确认"}
                     </p>
                   </div>
-                  {entry.job ? (
-                    <Button asChild variant="outline" size="sm">
-                      <Link
-                        to={`/document?job=${encodeURIComponent(entry.job.id)}`}
+                  {!busy && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void run([entry], "check")}
                       >
-                        打开任务
-                      </Link>
-                    </Button>
-                  ) : (
-                    !busy && (
-                      <div className="flex flex-wrap gap-2">
+                        检查任务
+                      </Button>
+                      {entry.file &&
+                      entry.error instanceof ApiError &&
+                      entry.error.code === 4091001 ? (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => void run([entry], "check")}
+                          onClick={() => {
+                            const file = entry.file;
+                            if (!file) return;
+                            update(
+                              current.current.filter(
+                                (item) => item.id !== entry.id,
+                              ),
+                            );
+                            select([file]);
+                          }}
                         >
-                          检查任务
+                          新建上传
                         </Button>
-                        {entry.file &&
-                        entry.error instanceof ApiError &&
-                        entry.error.code === 4091001 ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const file = entry.file;
-                              if (!file) return;
-                              update(
-                                current.current.filter(
-                                  (item) => item.id !== entry.id,
-                                ),
-                              );
-                              select([file]);
-                            }}
-                          >
-                            新建上传
-                          </Button>
-                        ) : entry.file ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void run([entry], "upload")}
-                          >
-                            重试上传
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              retryTarget.current = entry.id;
-                              retryInput.current?.click();
-                            }}
-                          >
-                            重新选择文件
-                          </Button>
-                        )}
-                      </div>
-                    )
+                      ) : entry.file ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void run([entry], "upload")}
+                        >
+                          重试上传
+                        </Button>
+                      ) : entry.status === "failed" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            retryTarget.current = entry.id;
+                            retryInput.current?.click();
+                          }}
+                        >
+                          重新选择文件
+                        </Button>
+                      ) : null}
+                    </div>
                   )}
                   {!busy && (
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`移除 ${entry.name} 的上传记录`}
+                      aria-label={`移除 ${entry.relativePath || entry.name} 的上传记录`}
                       onClick={() =>
                         update(
                           current.current.filter(
@@ -505,7 +565,7 @@ export function UploadPanel({
                 {entry.status === "uploading" && (
                   <Progress
                     value={entry.percent}
-                    aria-label={`${entry.name} 上传进度`}
+                    aria-label={`${entry.relativePath || entry.name} 上传进度`}
                     className="h-1.5"
                   />
                 )}
@@ -518,9 +578,9 @@ export function UploadPanel({
                       已自动重试 {maxRateLimitRetries} 次，请稍后手动重试。
                     </p>
                   )}
-                {!entry.file && entry.status !== "accepted" && (
+                {!entry.file && entry.status === "failed" && (
                   <p className="text-xs text-muted-foreground">
-                    可先检查任务是否已保存，或使用本条记录的“重新选择文件”继续提交。
+                    上传未完成，请重新选择原 PDF 文件后重试。
                   </p>
                 )}
               </li>

@@ -359,7 +359,7 @@ mod platform {
             use ort::ep::coreml::{
                 ComputeUnits, ModelFormat, SpecializationStrategy,
             };
-            use ort::session::{OutputSelector, RunOptions, Session};
+            use ort::session::{OutputSelector, RunOptions};
             use std::{sync::Arc, time::Instant};
 
             let oracle: serde_json::Value =
@@ -464,7 +464,9 @@ mod platform {
                     provider =
                         provider.with_low_precision_accumulation_on_gpu(true);
                 }
-                let mut builder = Session::builder()?
+                // The probe varies provider options while retaining the shared default session policy.
+                let mut builder = OnnxBackend::compiled()
+                    .cpu_builder()?
                     .with_execution_providers([provider
                         .build()
                         .error_on_failure()])?;

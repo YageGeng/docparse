@@ -1,6 +1,6 @@
 //! Shared execution-provider registration for layout, OCR and table structure models.
 use crate::LayoutError;
-use docparse_config::ValidatedConfig;
+use docparse_config::{OptimizationLevel, ValidatedConfig};
 use ort::session::{
     Session,
     builder::{GraphOptimizationLevel, SessionBuilder},
@@ -42,48 +42,81 @@ impl std::fmt::Display for ExecutionProvider {
     }
 }
 
-/// Opaque backend selection prevents model callers from bypassing the compiled native provider.
+/// Carries the provider and parser-wide graph and memory policies to every session constructor.
 #[derive(Debug, Clone, Copy)]
-pub struct OnnxBackend(ExecutionProvider);
+pub struct OnnxBackend {
+    provider: ExecutionProvider,
+    optimization_level: OptimizationLevel,
+    memory_pattern: bool,
+}
 
 impl OnnxBackend {
     /// Reports the selected backend without exposing a runtime mutation mechanism.
     pub const fn execution_provider(self) -> ExecutionProvider {
-        self.0
+        self.provider
     }
 
-    /// Chooses the single native backend enabled for the shared inference crate.
+    /// Chooses the compiled native provider with the shared configuration's default graph level.
     #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
-    pub const fn compiled() -> Self {
-        if cfg!(feature = "cuda") {
-            Self(ExecutionProvider::Cuda)
+    pub fn compiled() -> Self {
+        let provider = if cfg!(feature = "cuda") {
+            ExecutionProvider::Cuda
         } else if cfg!(feature = "metal") {
-            Self(ExecutionProvider::Metal)
+            ExecutionProvider::Metal
         } else if cfg!(feature = "coreml") {
-            Self(ExecutionProvider::CoreMl)
+            ExecutionProvider::CoreMl
         } else if cfg!(feature = "openvino") {
-            Self(ExecutionProvider::Openvino)
+            ExecutionProvider::Openvino
         } else {
-            Self(ExecutionProvider::Cpu)
+            ExecutionProvider::Cpu
+        };
+        let runtime = docparse_config::RuntimeConfig::default();
+        Self {
+            provider,
+            optimization_level: runtime.optimization_level,
+            memory_pattern: runtime.memory_pattern,
         }
+    }
+
+    /// Applies global graph and memory settings to inspection, compatibility sessions, and accelerated builders.
+    pub fn cpu_builder(self) -> Result<SessionBuilder, LayoutError> {
+        let level = match self.optimization_level {
+            OptimizationLevel::Level1 => GraphOptimizationLevel::Level1,
+            OptimizationLevel::Level2 => GraphOptimizationLevel::Level2,
+            OptimizationLevel::Level3 => GraphOptimizationLevel::Level3,
+            OptimizationLevel::All => GraphOptimizationLevel::All,
+        };
+        // Every model inherits this switch; ORT Web independently forces it off for WebGPU.
+        Ok(Session::builder()?
+            .with_optimization_level(level)
+            .map_err(ort::Error::from)?
+            .with_memory_pattern(self.memory_pattern)
+            .map_err(ort::Error::from)?)
     }
 }
 
 impl From<&ValidatedConfig> for OnnxBackend {
-    /// Native selection is compile-time; browser selection comes from the host-only platform capability.
+    /// Combines parser-wide graph settings with the compiled native or host-selected browser provider.
     fn from(config: &ValidatedConfig) -> Self {
         #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
         {
-            let _ = config;
-            Self::compiled()
+            Self {
+                optimization_level: config.runtime().optimization_level,
+                memory_pattern: config.runtime().memory_pattern,
+                ..Self::compiled()
+            }
         }
         #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
         {
-            Self(if config.webgpu_enabled() {
-                ExecutionProvider::WebGpu
-            } else {
-                ExecutionProvider::Cpu
-            })
+            Self {
+                provider: if config.webgpu_enabled() {
+                    ExecutionProvider::WebGpu
+                } else {
+                    ExecutionProvider::Cpu
+                },
+                optimization_level: config.runtime().optimization_level,
+                memory_pattern: config.runtime().memory_pattern,
+            }
         }
     }
 }
@@ -104,16 +137,10 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
     type Error = LayoutError;
 
     /// Registers requested accelerators strictly; unsupported builds never silently select CPU.
-    fn try_from(
-        OnnxBackend(provider): OnnxBackend,
-    ) -> Result<Self, Self::Error> {
-        // Enable every graph rewrite and default to reusable memory plans; OCR and formula override the latter.
-        // ORT Web's WebGPU provider independently forces memory patterns off in its runtime.
-        let builder = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::All)
-            .map_err(ort::Error::from)?
-            .with_memory_pattern(true)
-            .map_err(ort::Error::from)?;
+    fn try_from(backend: OnnxBackend) -> Result<Self, Self::Error> {
+        // Register the selected provider only after applying the shared per-parser session options.
+        let builder = backend.cpu_builder()?;
+        let provider = backend.provider;
         let dispatch = match provider {
             ExecutionProvider::Cpu => return Ok(builder),
             ExecutionProvider::Cuda => {
@@ -264,7 +291,7 @@ mod tests {
         ] {
             if !enabled {
                 assert!(
-                    matches!(SessionBuilder::try_from(OnnxBackend(provider)),
+                    matches!(SessionBuilder::try_from(OnnxBackend { provider, optimization_level: OptimizationLevel::default(), memory_pattern: false }),
                     Err(LayoutError::ExecutionProviderUnavailable { provider: name }) if name == provider.as_str())
                 );
             }
