@@ -11,6 +11,7 @@ default-members = [
   "crates/core",
   "crates/layout",
   "crates/formula",
+  "crates/formula-mineru",
   "crates/formula-texo",
   "crates/ocr",
   "crates/server",
@@ -73,6 +74,7 @@ docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-database = { version = "0.1.0", path = "crates/database" }
 docparse-formula = { version = "0.1.0", path = "crates/formula" }
+docparse-formula-mineru = { version = "0.1.0", path = "crates/formula-mineru" }
 docparse-formula-texo = { version = "0.1.0", path = "crates/formula-texo" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
 docparse-migration = { version = "0.1.0", path = "crates/migration" }
@@ -97,8 +99,10 @@ tokio-util = { version = "0.7", features = ["io", "rt"] }
 # http
 axum = { version = "0.8", features = ["http2", "multipart"] }
 http-body = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "fs"] } # CORS is handled at ingress.
+url = "2"
 
 # api documentation
 utoipa = { version = "5", features = ["uuid"] }
@@ -114,6 +118,7 @@ tempfile = "3"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # config and serialization
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 rmp = "0.8"

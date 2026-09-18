@@ -1,6 +1,7 @@
 export type * from "./types.js";
-import type { DocParser, DocumentResult, ExecutionProvider, FormulaSource, ModelSource, ParseOptions, RenderFormat, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
+import type { DocParser, DocumentResult, ExecutionProvider, FormulaSource, ModelSource, ParseOptions, RenderFormat, WebParseConfig, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
 import type { WorkerCommand, WorkerMethod, WorkerOperations, WorkerRequest, WorkerResponse, WorkerResult, WorkerSuccess, WorkerTableReply } from "./protocol.js";
+import { formulaEngineError } from "./configuration.js";
 
 /** A request failure that preserves its stable machine-readable category. */
 export class DocParseError extends Error {
@@ -71,12 +72,13 @@ class WorkerParser implements DocParser {
     const suppliedFormula = options.formulaArtifacts;
     const formulaEnabled = options.config?.formula?.inline_enabled !== false || options.config?.formula?.display_enabled !== false;
     const explicitEngine = options.config?.formula?.engine;
-    if (explicitEngine !== undefined && (!explicitEngine || typeof explicitEngine !== "object" || Array.isArray(explicitEngine) || Object.keys(explicitEngine).some(key => key !== "type") || !["pp", "texo"].includes(explicitEngine.type))) throw new DocParseError("InvalidConfig", "formula.engine accepts only type: pp or texo; supply models through formulaArtifacts");
+    const invalidEngine = formulaEngineError(explicitEngine, formulaEnabled);
+    if (invalidEngine) throw new DocParseError("InvalidConfig", invalidEngine);
     const sourceType = suppliedFormula?.type ?? "pp";
     const selectedType = explicitEngine?.type ?? (suppliedFormula ? sourceType : "texo");
-    if (!["pp", "texo"].includes(selectedType) || (suppliedFormula && !["pp", "texo"].includes(sourceType))) throw new DocParseError("InvalidConfig", "Unknown formula engine type");
+    if (!["pp", "texo", "mineru"].includes(selectedType) || (suppliedFormula && !["pp", "texo"].includes(sourceType))) throw new DocParseError("InvalidConfig", "Unknown formula engine type");
     if (formulaEnabled && suppliedFormula && selectedType !== sourceType) throw new DocParseError("InvalidConfig", "formula.engine.type must match formulaArtifacts.type");
-    const formulaSource = suppliedFormula ?? formulaPresets[selectedType];
+    const formulaSource = selectedType === "mineru" ? undefined : suppliedFormula ?? formulaPresets[selectedType];
     const transfers: Transferable[] = [];
     const artifacts = WorkerParser.transferSource(options.artifacts, transfers);
     const tsrEnabled = options.config?.tsr?.mode !== "rules_only";
@@ -94,7 +96,7 @@ class WorkerParser implements DocParser {
       orientation: options.config?.ocr?.classify_orientation !== false && options.ocrArtifacts.orientation ? WorkerParser.transferSource(options.ocrArtifacts.orientation, transfers) : undefined,
     } : undefined;
     const formulaArtifacts = formulaEnabled && formulaSource ? WorkerParser.transferFormulaSource(formulaSource, transfers) : undefined;
-    const config = { ...options.config, formula: { ...options.config?.formula, engine: { ...options.config?.formula?.engine, type: selectedType } } };
+    const config: WebParseConfig = { ...options.config, formula: { ...options.config?.formula, engine: explicitEngine ?? { type: suppliedFormula ? sourceType : "texo" } } };
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
     const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, formulaArtifacts, config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };

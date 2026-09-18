@@ -332,6 +332,12 @@ impl DocParserBuilder {
                     }
                 })
             }
+            docparse_config::FormulaEngineConfig::Mineru(_) => Arc::new(
+                docparse_formula_mineru::MineruEngine::try_from(
+                    config.as_ref(),
+                )
+                .map_err(docparse_formula::FormulaError::from)?,
+            ),
         };
         Ok(Some(engine))
     }
@@ -341,7 +347,13 @@ impl DocParserBuilder {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
         let formula_enabled =
             config.formula().inline_enabled || config.formula().display_enabled;
-        if formula_enabled
+        // Remote formula recognition consumes crops only; byte-backed parsers need no local formula artifacts.
+        let local_formula_enabled = formula_enabled
+            && !matches!(
+                config.formula().engine,
+                docparse_config::FormulaEngineConfig::Mineru(_)
+            );
+        if local_formula_enabled
             && self.formula_engine.is_none()
             && self.artifacts.as_ref().is_some_and(|artifacts| {
                 artifacts.formula.is_none() && artifacts.texo_formula.is_none()
@@ -353,7 +365,7 @@ impl DocParserBuilder {
             return Err(DocParseError::MissingFormulaArtifacts);
         }
         if self.formula_engine.is_none()
-            && formula_enabled
+            && local_formula_enabled
             && self.artifacts.as_ref().is_some_and(|artifacts| {
                 artifacts.formula.is_some() && artifacts.texo_formula.is_some()
             })
@@ -367,7 +379,7 @@ impl DocParserBuilder {
             .into());
         }
         if self.formula_engine.is_none()
-            && formula_enabled
+            && local_formula_enabled
             && let Some(artifacts) = &self.artifacts
         {
             let selected_present = match config.formula().engine {
@@ -377,6 +389,7 @@ impl DocParserBuilder {
                 docparse_config::FormulaEngineConfig::Texo(_) => {
                     artifacts.texo_formula.is_some()
                 }
+                docparse_config::FormulaEngineConfig::Mineru(_) => true,
             };
             if !selected_present {
                 tracing::error!(
@@ -747,6 +760,45 @@ mod tests {
         assert!(
             matches!(result, Err(DocParseError::Formula(docparse_formula::FormulaError::Artifacts(message))) if message.contains("Texo encoder_model.onnx"))
         );
+    }
+
+    /// An external formula engine needs neither model files nor formula bytes in an explicit artifact set.
+    #[tokio::test]
+    async fn mineru_loads_without_formula_artifacts() {
+        for explicit in [false, true] {
+            let mut raw = docparse_config::RawConfig::default();
+            raw.formula.engine = docparse_config::FormulaEngineConfig::Mineru(
+                docparse_config::MineruFormulaConfig::default(),
+            );
+            raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+            raw.tsr.mode = crate::TableMode::RulesOnly;
+            let mut builder = DocParser::builder()
+                .config(Arc::new(
+                    ValidatedConfig::try_from(raw).expect("config"),
+                ))
+                .layout_engine(Arc::new(UnusedLayout));
+            if explicit {
+                let empty: Arc<[u8]> = Arc::from([]);
+                builder = builder.artifacts(
+                    ParserArtifacts::builder()
+                        .layout(docparse_layout::ModelArtifacts {
+                            model: Arc::clone(&empty),
+                            config: Arc::clone(&empty),
+                            manifest: empty,
+                        })
+                        .build(),
+                );
+            }
+            let parser = builder.build().await.expect("remote formula parser");
+            assert_eq!(
+                parser
+                    .formula_engine
+                    .as_ref()
+                    .expect("formula engine")
+                    .name(),
+                "mineru-2.5-vllm"
+            );
+        }
     }
 
     /// Native configuration and explicit bytes both initialize the real Texo engine.

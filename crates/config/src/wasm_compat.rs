@@ -244,21 +244,22 @@ mod platform {
                     }
                 }
             }
-            let formula_paths = match &mut self.formula.engine {
-                crate::FormulaEngineConfig::Pp(paths) => [
+            let formula_paths: &mut [_] = match &mut self.formula.engine {
+                crate::FormulaEngineConfig::Pp(paths) => &mut [
                     &mut paths.model_path,
                     &mut paths.tokenizer_path,
                     &mut paths.model_manifest_path,
                 ],
-                crate::FormulaEngineConfig::Texo(paths) => [
+                crate::FormulaEngineConfig::Texo(paths) => &mut [
                     &mut paths.encoder_path,
                     &mut paths.decoder_path,
                     &mut paths.tokenizer_path,
                 ],
+                crate::FormulaEngineConfig::Mineru(_) => &mut [],
             };
             for path in formula_paths {
                 if path.is_relative() {
-                    *path = base_directory.join(&*path);
+                    **path = base_directory.join(&**path);
                 }
             }
             for path in [

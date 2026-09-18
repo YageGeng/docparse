@@ -39,7 +39,10 @@ export type ModelSource =
   | { kind: "bytes"; model: Uint8Array; config: Uint8Array; manifest: Uint8Array };
 
 /** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
-export type FormulaEngineOptions = { type: "pp" } | { type: "texo"; sessions?: 1 };
+export type FormulaEngineOptions =
+  | { type: "pp" }
+  | { type: "texo"; sessions?: 1 }
+  | { type: "mineru"; server_url: string; concurrency?: number };
 
 /** Explicit model resources. Omitted type retains the existing PP-only source shape. */
 export type FormulaSource =
@@ -96,7 +99,7 @@ export interface WebParserOptions {
   tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
-  /** Optional custom resources; otherwise the selected model uses the built-in same-origin /models/ preset. */
+  /** Optional local model resources; MinerU uses server_url and does not download formula artifacts. */
   formulaArtifacts?: FormulaSource;
   runtimeBaseUrl?: string;
   /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */

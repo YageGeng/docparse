@@ -2,6 +2,11 @@
 use std::future::Future;
 use std::time::Duration;
 
+/// An operation did not complete before its native or browser deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("operation deadline elapsed")]
+pub struct Elapsed;
+
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
@@ -92,16 +97,16 @@ mod platform {
 }
 
 /// Rejects late-ready results even if synchronous CPU work delayed the platform timer callback.
-pub(crate) async fn timeout<F: Future>(
+pub async fn timeout<F: Future>(
     duration: Duration,
     future: F,
-) -> Result<F::Output, ()> {
+) -> Result<F::Output, Elapsed> {
     let started = web_time::Instant::now();
     let result = platform::timeout(duration, future).await;
     if started.elapsed() >= duration {
-        Err(())
+        Err(Elapsed)
     } else {
-        result
+        result.map_err(|_elapsed| Elapsed)
     }
 }
 
@@ -117,6 +122,6 @@ mod tests {
             42
         })
         .await;
-        assert_eq!(result, Err(()));
+        assert_eq!(result, Err(Elapsed));
     }
 }

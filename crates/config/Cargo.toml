@@ -15,6 +15,9 @@ wasm = []
 # error
 thiserror.workspace = true
 
+# http
+url.workspace = true
+
 # config and serialization
 figment.workspace = true
 serde.workspace = true

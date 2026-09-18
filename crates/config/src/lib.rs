@@ -7,10 +7,10 @@ mod wasm_compat;
 
 pub use config::{
     DatabaseConfig, FormulaConfig, FormulaEngineConfig, FusionConfig,
-    LayoutConfig, LogConfig, ModelFiles, OcrConfig, OcrPolicy, OutputConfig,
-    PpFormulaConfig, RawConfig, RenderConfig, RuntimeConfig, ServerConfig,
-    TableCellConfig, TableCellModel, TableMode, TexoFormulaConfig, TsrConfig,
-    TsrModel,
+    LayoutConfig, LogConfig, MineruFormulaConfig, ModelFiles, OcrConfig,
+    OcrPolicy, OutputConfig, PpFormulaConfig, RawConfig, RenderConfig,
+    RuntimeConfig, ServerConfig, TableCellConfig, TableCellModel, TableMode,
+    TexoFormulaConfig, TsrConfig, TsrModel,
 };
 pub use error::ConfigError;
 

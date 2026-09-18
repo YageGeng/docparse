@@ -309,6 +309,12 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             "fusion.estimated_font_size_tolerance_points",
         )?;
 
+        if let crate::FormulaEngineConfig::Mineru(mineru) =
+            &config.formula.engine
+            && (config.formula.inline_enabled || config.formula.display_enabled)
+        {
+            mineru.endpoint()?;
+        }
         if let crate::FormulaEngineConfig::Texo(texo) = &config.formula.engine
             && !(1..=8).contains(&texo.sessions)
         {

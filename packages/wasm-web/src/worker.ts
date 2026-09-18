@@ -2,6 +2,7 @@ import init, { default_config, WebParser } from "./pkg/docparse_web.js";
 import type { DocumentResult, FormulaSource, ModelSource, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
 import type { WorkerInbound, WorkerResponse, WorkerSuccess, TsrCropPixels } from "./protocol.js";
 import { artifact } from "./artifacts.js";
+import { formulaEngineError } from "./configuration.js";
 
 const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
 let parser: WebParser | undefined;
@@ -41,9 +42,12 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
     const merged = { ...raw[group], ...values };
     if (group === "formula" && Object.hasOwn(values, "engine")) {
       const engine = (values as Record<string, unknown>).engine;
-      if (!engine || typeof engine !== "object" || Array.isArray(engine) || Object.keys(engine).some(key => key !== "type") || !["pp", "texo"].includes((engine as { type: string }).type)) throw Object.assign(new Error("Web formula.engine accepts only type: pp or texo"), { code: "InvalidConfig" });
+      const formulaEnabled = merged.inline_enabled !== false || merged.display_enabled !== false;
+      const invalidEngine = formulaEngineError(engine, formulaEnabled);
+      if (engine === undefined || invalidEngine) throw Object.assign(new Error(invalidEngine ?? "formula.engine must be an object"), { code: "InvalidConfig" });
       // Replace the tagged object; paths belonging to the other default variant must not leak across.
-      merged.engine = engine;
+      // Omit inactive service settings, including NaN from a cleared input, before Rust deserialization.
+      merged.engine = !formulaEnabled && (engine as { type: string }).type === "mineru" ? { type: "mineru" } : engine;
     }
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
       const cells = (values as Record<string, unknown>).cell_detection;

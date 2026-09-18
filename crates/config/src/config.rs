@@ -165,10 +165,10 @@ pub struct FormulaConfig {
     /// Recognize detected display formulas independently of inline recognition.
     #[builder(default = true)]
     pub display_enabled: bool,
-    /// Explicit tagged model selection; artifact paths belong to its selected variant.
+    /// Explicit recognizer selection; model paths or service settings belong to its variant.
     #[builder(default)]
     pub engine: FormulaEngineConfig,
-    /// Maximum formulas per actual ONNX invocation, including the final partial batch.
+    /// Maximum crops per engine call; remote engines issue one request per crop.
     #[builder(default = 4)]
     pub batch_size: usize,
     /// Per-call deadline including queue admission and every model batch containing its crops.
@@ -183,7 +183,7 @@ impl Default for FormulaConfig {
     }
 }
 
-/// Explicit formula recognizer and its variant-specific artifact locations.
+/// Explicit formula recognizer and its variant-specific artifacts or service settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FormulaEngineConfig {
@@ -191,6 +191,63 @@ pub enum FormulaEngineConfig {
     Pp(PpFormulaConfig),
     /// Texo's encoder and cached decoder with the matching WordLevel tokenizer.
     Texo(TexoFormulaConfig),
+    /// External MinerU vLLM service; no local formula model files are required.
+    Mineru(MineruFormulaConfig),
+}
+
+/// Native MinerU service address and the shared limit on in-flight crop requests.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MineruFormulaConfig {
+    /// HTTP(S) service root or OpenAI API base ending in `/v1`.
+    pub server_url: String,
+    /// Maximum concurrent HTTP requests across all pages using one engine.
+    pub concurrency: usize,
+}
+
+impl Default for MineruFormulaConfig {
+    /// Matches the separately deployed MinerU vLLM service without selecting it by default.
+    fn default() -> Self {
+        Self {
+            server_url: "http://127.0.0.1:8000".into(),
+            concurrency: 8,
+        }
+    }
+}
+
+impl MineruFormulaConfig {
+    /// Validates service settings and preserves reverse-proxy prefixes when building the endpoint.
+    pub fn endpoint(&self) -> Result<url::Url, crate::ConfigError> {
+        if !(1..=1024).contains(&self.concurrency) {
+            return Err(crate::ConfigError::InvalidValue {
+                field: "formula.engine.concurrency",
+                reason: "must be between 1 and 1024",
+            });
+        }
+        let invalid_url = || crate::ConfigError::InvalidValue {
+            field: "formula.engine.server_url",
+            reason: "must be an HTTP(S) base URL without credentials, query, or fragment",
+        };
+        let mut endpoint = url::Url::parse(&self.server_url)
+            .map_err(|_parse_error| invalid_url())?;
+        if !matches!(endpoint.scheme(), "http" | "https")
+            || endpoint.host_str().is_none()
+            || !endpoint.username().is_empty()
+            || endpoint.password().is_some()
+            || endpoint.query().is_some()
+            || endpoint.fragment().is_some()
+        {
+            return Err(invalid_url());
+        }
+        let base = endpoint.path().trim_end_matches('/');
+        let path = if base.ends_with("/v1") {
+            format!("{base}/chat/completions")
+        } else {
+            format!("{base}/v1/chat/completions")
+        };
+        endpoint.set_path(&path);
+        Ok(endpoint)
+    }
 }
 
 impl Default for FormulaEngineConfig {

@@ -7,14 +7,14 @@ import os
 import re
 from pathlib import Path
 
-ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout", "ocr", "formula", "formula-texo", "tsr", "core", "pdfium", "pdfium-sys")}
+ALLOWED = {f"crates/{crate}/src/wasm_compat.rs" for crate in ("config", "layout", "ocr", "formula", "formula-mineru", "formula-texo", "tsr", "core", "pdfium", "pdfium-sys")}
 # Keep the extracted adapters explicit instead of allowing their entire directories.
 ALLOWED.update({
     # The standalone Texo browser example keeps native/browser gating in its adapter.
     "crates/formula-texo/examples/browser/wasm_compat.rs",
     "crates/core/src/pdfium/input.rs",
     "crates/core/src/wasm_compat/task_set/mod.rs",
-    "crates/core/src/wasm_compat/timeout.rs",
+    "crates/layout/src/wasm_compat/timeout.rs",
     "crates/core/src/pdfium/worker.rs",
     # This declaration-only module selects the optional native IPC implementation.
     "crates/core/src/pdfium/mod.rs",

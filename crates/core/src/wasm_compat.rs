@@ -1,7 +1,6 @@
 //! Native and browser runtime boundaries with explicitly scoped compatibility submodules.
 mod task_set;
-mod timeout;
-pub(crate) use timeout::timeout;
+pub(crate) use docparse_layout::wasm_compat::timeout;
 
 pub use crate::pdfium::PdfInput;
 pub(crate) use task_set::{TaskSet, spawn};

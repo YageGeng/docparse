@@ -107,6 +107,22 @@ and `model_manifest_path` keys are rejected. Engine selection does not depend on
 filenames. Profile/environment switches replace the previous variant's paths.
 See `crates/formula-texo/README.md` for downloads and backend validation.
 
+Native CLI/server and WASM builds can instead call an external MinerU vLLM service without
+local formula weights. Replace the engine section with:
+
+```toml
+[formula.engine]
+type = "mineru"
+server_url = "http://127.0.0.1:8000"
+concurrency = 8
+```
+
+`concurrency` limits in-flight HTTP requests across all pages and documents sharing
+one parser engine. The existing `formula.batch_size` still limits crops submitted
+per page at a time; `formula.timeout_ms` includes queueing and HTTP inference.
+See [the MinerU crate](crates/formula-mineru/README.md) for address formats,
+environment overrides, and a direct formula-image example.
+
 Start the server or CLI with this configuration. Plus-M uses
 the same 384-pixel input edge as Plus-S; it is an optional quality comparison,
 not a verified accuracy upgrade for every formula. See `crates/formula/README.md`.

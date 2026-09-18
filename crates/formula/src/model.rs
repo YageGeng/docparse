@@ -11,6 +11,9 @@ use std::sync::Arc;
 /// Formula failures preserve the cause without pretending that source text is recognized LaTeX.
 #[derive(Debug, thiserror::Error)]
 pub enum FormulaError {
+    /// External recognizers retain transport and protocol causes without coupling local engines to HTTP.
+    #[error("external formula recognition failed: {0}")]
+    External(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("invalid formula artifacts: {0}")]
     Artifacts(String),
     #[error("formula input/output is invalid: {0}")]

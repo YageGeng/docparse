@@ -100,7 +100,7 @@ the execution provider change. Native callers already prepare their sessions in
 | TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
-| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Choose `config.formula.engine.type` (`texo` by default or `pp`); presets load automatically from same-origin `/models/`. `formulaArtifacts` is an optional custom resource override. |
+| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Choose `config.formula.engine.type`: local `texo` (default) or `pp` loads same-origin `/models/` presets; `mineru` sends formula crops to the configured `server_url`. `formulaArtifacts` overrides local resources only. |
 
 Disabled models do not require artifact sources and are not downloaded or
 initialized, even if sources are supplied. Preparation accepts `signal`,
@@ -467,10 +467,50 @@ initialization failure never masquerades as successful text recovery.
 
 ## Formula artifacts and output
 
-The example exposes a **Formula model** selector: **Texo** (default) or
-**PP-FormulaNet**. No formula paths need to be entered. Changing the selection
+The example exposes a **Formula model** selector: **Texo** (default),
+**PP-FormulaNet**, or **MinerU · external service**. No local formula paths need to be entered. Changing the selection
 closes the prepared parser and clears the previous result; prepare or parse again
 to load the selected model. Independent inline/display switches are retained.
+
+Selecting MinerU reveals **MinerU server URL** and **Concurrency** fields.
+Changing either setting disposes the prepared parser so the next preparation
+uses the new values. Formula crops are sent to the selected service; the PDF,
+layout processing, and other local stages stay in the Worker. Local formula
+models are neither downloaded nor loaded for MinerU.
+
+```ts
+const parser = await createParser({
+  artifacts: layoutArtifacts,
+  config: {
+    tsr: { mode: "rules_only" },
+    formula: {
+      engine: { type: "mineru", server_url: "https://mineru.example.com/v1", concurrency: 8 },
+      batch_size: 8,
+      timeout_ms: 120000,
+    },
+  },
+});
+```
+
+Use an absolute HTTP(S) service root or `/v1` base without credentials, query,
+or fragment. Concurrency defaults to 8 (range 1–1024), shared by all calls through
+the engine; it is independent of browser-local ONNX session limits.
+The existing batch deadline includes admission and network time, aborts Fetch
+on timeout, and releases request permits. The service must permit CORS from
+the page origin; HTTPS pages need a service compatible with the browser's
+mixed-content rules. For gpuhub, forward port 8000 over SSH and enter the local
+forwarded URL when using the local example page.
+
+Turning off both formula switches skips unused MinerU service settings, even if
+the address or concurrency input was cleared. No formula requests or local
+formula model downloads occur. Enabling either switch requires valid settings
+again.
+
+Validate the production browser UI and external service with a formula PDF:
+
+```sh
+rtk node crates/web/tests/mineru.mjs /absolute/path/to/formulas.pdf http://127.0.0.1:18000/v1
+```
 
 SDK callers can also select a preset without providing any formula paths:
 

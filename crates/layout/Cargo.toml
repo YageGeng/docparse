@@ -23,6 +23,7 @@ docparse-config.workspace = true
 thiserror.workspace = true
 
 # async
+futures-util.workspace = true
 tokio.workspace = true
 
 # api documentation
@@ -73,5 +74,7 @@ ort = { workspace = true, features = ["api-28", "copy-dylibs", "download-binarie
 ort = { workspace = true, features = ["api-17", "alternative-backend", "webgpu"] }
 
 # browser
+js-sys.workspace = true
 ort-web.workspace = true
+wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

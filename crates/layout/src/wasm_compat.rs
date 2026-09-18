@@ -1,7 +1,9 @@
 //! Platform-specific execution and thread bounds with explicitly scoped compatibility submodules.
 mod backend;
 mod session_pool;
+mod timeout;
 pub use backend::{ExecutionProvider, OnnxBackend};
+pub use timeout::{Elapsed, timeout};
 
 pub(crate) use session_pool::LayoutSessionPool;
 
