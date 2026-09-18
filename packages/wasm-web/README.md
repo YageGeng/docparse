@@ -334,8 +334,9 @@ Final `table` blocks may include a `table` object with zero-based rows/columns, 
 
 Set `config.tsr.batch_size` and `config.tsr.cell_detection.batch_size` independently
 to cap structure and detector crops per ONNX invocation (1–32, default 1).
-Ready requests from same-page tables can share a batch; partial batches run
-immediately. `table_jobs` remains the admission limit, and the browser inference
+Ready requests can share a batch; partial batches run immediately and canceled
+requests do not occupy batch slots. The table submission window refills in
+completion order so a slow earlier table cannot hold up unrelated work. `table_jobs` remains the admission limit, and the browser inference
 guard still serializes different model runs through output readback.
 
 Original text remains owned once by `block.lines[].text_items`. Cell lines contain non-owning references (`text_item_id`, UTF-8 `byte_range`, measured `bbox`). Do not use JavaScript string offsets directly with these byte ranges. Tagged empty cells may have a null bbox; populated tagged cells expose measured content bounds, while geometry-based cells expose inferred grid bounds. Validation checks occupancy, source coverage, byte boundaries, geometry, and cached text. Existing schema-2 documents without the optional structure remain readable.
@@ -495,7 +496,7 @@ const parser = await createParser({
 Use an absolute HTTP(S) service root or `/v1` base without credentials, query,
 or fragment. Concurrency defaults to 8 (range 1–1024), shared by all calls through
 the engine; it is independent of browser-local ONNX session limits.
-The existing batch deadline includes admission and network time, aborts Fetch
+The per-crop parser deadline includes admission and network time, aborts Fetch
 on timeout, and releases request permits. The service must permit CORS from
 the page origin; HTTPS pages need a service compatible with the browser's
 mixed-content rules. For gpuhub, forward port 8000 over SSH and enter the local
@@ -555,6 +556,12 @@ artifact shape remains supported. When an explicit `config.formula.engine.type`
 is supplied, it must match the artifact type; mismatches fail with `InvalidConfig`.
 Without explicit selection, a custom artifact's type selects its model. With
 neither, Texo is the default. Filesystem path keys are rejected in Web config.
+
+Both local formula engines use a bounded ready-crop queue in the Worker. The
+parser submits crops independently under a shared admission budget and refills
+its window as each result completes. Local model batches use at most
+`formula.batch_size` crops and never wait to fill; MinerU continuously fills
+HTTP slots according to `concurrency` instead.
 
 Only detected inline/display regions enter recognition; formula numbers remain
 source text. Each `document.pages[].formulas[]` entry reports the actual engine,

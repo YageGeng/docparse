@@ -75,7 +75,15 @@ CoreML and Metal sessions request `FastPrediction` specialization for their reus
 
 ### Formula recognition
 
-`[formula] inline_enabled = true` and `display_enabled = true` independently enable inline and display formula recognition. Both default to true and use Texo. Install its pinned encoder, decoder, and tokenizer with `rtk python3 crates/formula-texo/examples/download.py models/texo`. Set both toggles to false to skip formula model loading; the former `formula.enabled` key is no longer accepted. `batch_size` defaults to 4 and `timeout_ms` to 120000 per batch, including queueing. Formula numbers remain native text. Disabling either kind preserves its native text and layout while skipping recognition and recognized-LaTeX projection. The browser SDK and example support Texo/PP selection with preset resources; see `packages/wasm-web/README.md`.
+`[formula] inline_enabled = true` and `display_enabled = true` independently enable inline and display formula recognition. Both default to true and use Texo. Install its pinned encoder, decoder, and tokenizer with `rtk python3 crates/formula-texo/examples/download.py models/texo`. Set both toggles to false to skip formula model loading; the former `formula.enabled` key is no longer accepted. `batch_size` defaults to 4 and `timeout_ms` to 120000 per crop, including admission and queueing. Formula numbers remain native text. Disabling either kind preserves its native text and layout while skipping recognition and recognized-LaTeX projection. The browser SDK and example support Texo/PP selection with preset resources; see `packages/wasm-web/README.md`.
+
+Every formula engine shares a bounded queue across its callers. Idle model owners
+consume already-ready crops up to the configured batch limit without waiting for
+more arrivals. Parser submission is a sliding window with a shared pre-crop
+admission budget, so one slow formula does not block subsequent crops from the
+same page or cause unrelated formulas to fail. Table requests also refill their
+admission window in completion order; structure and cell detectors retain their
+separate ready-only queues.
 
 To evaluate Plus-M, provision `--model pp-formulanet-plus-m` and update the existing
 `[formula.engine]` selection in `docparse.toml`:
@@ -118,8 +126,8 @@ concurrency = 8
 ```
 
 `concurrency` limits in-flight HTTP requests across all pages and documents sharing
-one parser engine. The existing `formula.batch_size` still limits crops submitted
-per page at a time; `formula.timeout_ms` includes queueing and HTTP inference.
+one parser engine. `formula.batch_size` caps local-model batches; MinerU continuously fills its
+HTTP concurrency budget. `formula.timeout_ms` includes admission and HTTP inference.
 See [the MinerU crate](crates/formula-mineru/README.md) for address formats,
 environment overrides, and a direct formula-image example.
 

@@ -29,9 +29,13 @@ between 1 and 1024. Overrides use `DOCPARSE_FORMULA__ENGINE__SERVER_URL` and
 `DOCPARSE_FORMULA__ENGINE__CONCURRENCY`.
 
 Concurrency limits all requests sharing one engine, across pages and documents.
-`formula.batch_size` remains the per-page crop submission size (1–32), so increase
-it if a single page should use more parallel requests. `formula.timeout_ms`
-covers the whole batch, including admission, PNG encoding, HTTP, and decoding.
+A bounded crop queue feeds HTTP slots continuously: as one request finishes,
+ready work can start without waiting for its original caller batch. Core uses a
+shared pre-crop admission budget of twice the HTTP concurrency and preserves
+per-formula errors. `formula.batch_size` governs local model batching and does
+not limit this HTTP queue. `formula.timeout_ms` covers each parser crop, including
+admission, PNG encoding, HTTP, and decoding; direct multi-image `recognize` calls
+retain their whole-call deadline and ordered result contract.
 Canceling a caller drops its requests and releases permits; already-started
 blocking PNG encoding retains its permit until it finishes. No automatic retries
 or local-engine fallback are performed.

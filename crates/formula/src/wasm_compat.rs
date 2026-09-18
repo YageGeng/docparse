@@ -1,7 +1,10 @@
 //! Platform ownership keeps inference buffers alive until native calls or browser promises finish.
 use crate::{
-    FormulaArtifacts, FormulaError, PpFormulaNetEngine, artifacts::ModelKind,
-    model::FormulaDecoder, preprocess::FormulaInput,
+    FormulaArtifacts, FormulaError, PpFormulaNetEngine,
+    artifacts::ModelKind,
+    model::FormulaDecoder,
+    preprocess::FormulaInput,
+    queue::{BatchTimings, FormulaQueue, FormulaRequest},
 };
 use docparse_layout::{
     PageImage,
@@ -18,8 +21,7 @@ mod platform {
 
     /// One thread owns model construction, all batches and destruction.
     pub(crate) struct SessionRunner {
-        session: SessionWorker<(ort::session::Session, FormulaDecoder)>,
-        kind: ModelKind,
+        queue: FormulaQueue,
     }
 
     impl SessionRunner {
@@ -28,6 +30,7 @@ mod platform {
             artifacts: FormulaArtifacts,
             backend: OnnxBackend,
             kind: ModelKind,
+            batch_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
@@ -57,41 +60,83 @@ mod platform {
                 ))
             })
             .await?;
-            Ok(Arc::new(Self { session, kind }))
+            let (queue, mut receiver) = FormulaQueue::new(batch_size);
+            crate::spawn_worker(Box::pin(async move {
+                while let Some(first) = receiver.recv().await {
+                    let mut requests =
+                        FormulaRequest::ready(first, &mut receiver, batch_size);
+                    if requests.is_empty() {
+                        continue;
+                    }
+                    for request in &mut requests {
+                        request.end_queue();
+                    }
+                    let images = requests
+                        .iter()
+                        .map(|request| Arc::clone(&request.image))
+                        .collect::<Vec<_>>();
+                    let timings = BatchTimings::from(requests.as_slice());
+                    tracing::debug!(
+                        "PP formula session running {} ready crops",
+                        images.len()
+                    );
+                    let options = match ort::session::RunOptions::new() {
+                        Ok(options) => Arc::new(options),
+                        Err(error) => {
+                            FormulaRequest::complete_batch(
+                                requests,
+                                Err(error.into()),
+                            );
+                            continue;
+                        }
+                    };
+                    let mut cancel = CancelRun(Some(Arc::clone(&options)));
+                    let work = session.run(move |(session, decoder)| {
+                        let batch = images.len();
+                        let preprocessing =
+                            timings.start(TimingStage::FormulaPreprocess);
+                        let input = FormulaInput::try_from((images, kind))?;
+                        drop(preprocessing);
+                        let inference =
+                            timings.start(TimingStage::FormulaInference);
+                        let outputs = session.run_with_options(
+                            ort::inputs!["x" => Tensor::from_array(input.0)?],
+                            &options,
+                        )?;
+                        drop(inference);
+                        let _decoding =
+                            timings.start(TimingStage::FormulaDecode);
+                        decoder.decode(&outputs, batch)
+                    });
+                    tokio::pin!(work);
+                    // A merged batch may terminate only after every original caller has canceled.
+                    let result = tokio::select! {
+                        result = &mut work => result,
+                        _ = futures_util::future::join_all(requests.iter_mut().map(FormulaRequest::closed)) => {
+                            drop(CancelRun(cancel.0.take()));
+                            work.await
+                        }
+                    };
+                    cancel.0.take();
+                    FormulaRequest::complete_batch(
+                        requests,
+                        result
+                            .map_err(FormulaError::from)
+                            .and_then(|result| result),
+                    );
+                }
+                tracing::debug!("closed native PP formula queue");
+            }))?;
+            Ok(Arc::new(Self { queue }))
         }
 
-        /// Keeps pixels and run options alive until execution finishes, terminating canceled autoregressive work.
+        /// Enqueues independent crops into the shared session queue.
         pub(crate) async fn run(
             self: Arc<Self>,
             images: Vec<Arc<PageImage>>,
             timings: Timings,
         ) -> Result<Vec<String>, FormulaError> {
-            let queued = timings.start(TimingStage::FormulaQueue);
-            let options = Arc::new(ort::session::RunOptions::new()?);
-            let mut cancel = CancelRun(Some(Arc::clone(&options)));
-            let kind = self.kind;
-            let result = self
-                .session
-                .run(move |(session, decoder)| {
-                    drop(queued);
-                    let batch = images.len();
-                    let preprocessing =
-                        timings.start(TimingStage::FormulaPreprocess);
-                    let input = FormulaInput::try_from((images, kind))?;
-                    drop(preprocessing);
-                    let inference =
-                        timings.start(TimingStage::FormulaInference);
-                    let outputs = session.run_with_options(
-                        ort::inputs!["x" => Tensor::from_array(input.0)?],
-                        &options,
-                    )?;
-                    drop(inference);
-                    let _decoding = timings.start(TimingStage::FormulaDecode);
-                    decoder.decode(&outputs, batch)
-                })
-                .await?;
-            cancel.0.take();
-            result
+            self.queue.run(images, timings).await
         }
     }
 
@@ -148,17 +193,8 @@ mod platform {
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod platform {
     use super::*;
-    use tokio::sync::{mpsc, oneshot};
-
-    /// Channel ownership outlives canceled callers until the JS operation has completed.
-    type Request = (
-        Vec<Arc<PageImage>>,
-        Timings,
-        docparse_layout::timing::StageTimer,
-        oneshot::Sender<Result<Vec<String>, FormulaError>>,
-    );
     pub(crate) struct SessionRunner {
-        sender: mpsc::Sender<Request>,
+        queue: FormulaQueue,
     }
 
     impl SessionRunner {
@@ -167,25 +203,34 @@ mod platform {
             artifacts: FormulaArtifacts,
             backend: OnnxBackend,
             kind: ModelKind,
+            batch_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
             let mut session = SessionBuilder::try_from(backend)?
                 .commit_from_memory(&artifacts.model)
                 .await?;
             let decoder = FormulaDecoder::new(&artifacts.tokenizer)?;
             let options = ort::session::RunOptions::new()?;
-            let (sender, mut receiver) = mpsc::channel::<Request>(1);
-            wasm_bindgen_futures::spawn_local(async move {
-                while let Some((images, timings, queued, response)) =
-                    receiver.recv().await
-                {
-                    if response.is_closed() {
-                        continue;
-                    }
+            let (queue, mut receiver) = FormulaQueue::new(batch_size);
+            crate::spawn_worker(Box::pin(async move {
+                while let Some(first) = receiver.recv().await {
                     let _guard = OnnxBackend::inference_guard().await;
-                    if response.is_closed() {
+                    let mut requests =
+                        FormulaRequest::ready(first, &mut receiver, batch_size);
+                    if requests.is_empty() {
                         continue;
                     }
-                    drop(queued);
+                    for request in &mut requests {
+                        request.end_queue();
+                    }
+                    let images = requests
+                        .iter()
+                        .map(|request| Arc::clone(&request.image))
+                        .collect::<Vec<_>>();
+                    let timings = BatchTimings::from(requests.as_slice());
+                    tracing::debug!(
+                        "browser PP formula session running {} ready crops",
+                        images.len()
+                    );
                     let result = async {
                         let batch = images.len();
                         let preprocessing = timings.start(TimingStage::FormulaPreprocess);
@@ -198,32 +243,20 @@ mod platform {
                         let _decoding = timings.start(TimingStage::FormulaDecode);
                         decoder.decode(&outputs, batch)
                     }.await;
-                    let _ = response.send(result);
+                    FormulaRequest::complete_batch(requests, result);
                 }
-                tracing::debug!("closed browser formula session");
-            });
-            Ok(Arc::new(Self { sender }))
+                tracing::debug!("closed browser PP formula queue");
+            }))?;
+            Ok(Arc::new(Self { queue }))
         }
 
-        /// Queues owned crop pixels and preserves the final partial batch.
+        /// Enqueues owned pixels and preserves each caller's cancellation and result order.
         pub(crate) async fn run(
             self: Arc<Self>,
             images: Vec<Arc<PageImage>>,
             timings: Timings,
         ) -> Result<Vec<String>, FormulaError> {
-            let queued = timings.start(TimingStage::FormulaQueue);
-            let (response, receiver) = oneshot::channel();
-            self.sender
-                .send((images, timings, queued, response))
-                .await
-                .map_err(|error| {
-                    FormulaError::Invalid(format!(
-                        "formula actor stopped: {error}"
-                    ))
-                })?;
-            receiver.await.map_err(|error| {
-                FormulaError::Invalid(format!("formula response lost: {error}"))
-            })?
+            self.queue.run(images, timings).await
         }
     }
 
@@ -238,3 +271,22 @@ mod platform {
 }
 
 pub(crate) use platform::SessionRunner;
+
+/// Starts an engine-owned actor on the current native runtime or browser Worker.
+pub fn spawn_worker(
+    future: docparse_layout::wasm_compat::WasmBoxedFuture<'static, ()>,
+) -> Result<(), FormulaError> {
+    #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+    {
+        let runtime =
+            tokio::runtime::Handle::try_current().map_err(|error| {
+                FormulaError::Invalid(format!(
+                    "formula queue requires a Tokio runtime: {error}"
+                ))
+            })?;
+        runtime.spawn(future);
+    }
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+    wasm_bindgen_futures::spawn_local(future);
+    Ok(())
+}

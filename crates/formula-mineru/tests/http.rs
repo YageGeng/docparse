@@ -169,6 +169,38 @@ async fn bounds_concurrency_across_batches_and_preserves_order() {
     server.abort();
 }
 
+/// An available HTTP slot takes another caller's crop while an earlier slow crop is still running.
+#[tokio::test]
+async fn shared_http_queue_refills_before_slow_caller_finishes() {
+    let (url, counts, server) = service().await;
+    let engine = Arc::new(engine(url, 2, 5000));
+    let slow_engine = Arc::clone(&engine);
+    let slow = tokio::spawn(async move {
+        slow_engine
+            .recognize(vec![crop(249), crop(1)], Timings::default())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while counts.calls.load(Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first caller admitted");
+    let output = tokio::time::timeout(
+        Duration::from_millis(500),
+        engine.recognize(vec![crop(2)], Timings::default()),
+    )
+    .await
+    .expect("refill without waiting for the slow crop")
+    .expect("second caller");
+    assert_eq!(output, ["x_{2}"]);
+    assert!(!slow.is_finished());
+    slow.abort();
+    let _ = slow.await;
+    server.abort();
+}
+
 /// Empty, truncated, malformed, and HTTP failures cannot become recognized LaTeX.
 #[tokio::test]
 async fn rejects_invalid_responses_and_recovers() {

@@ -91,6 +91,7 @@ mod platform {
 mod platform {
     use super::*;
     use crate::preprocess::FormulaInput;
+    use docparse_formula::queue::{BatchTimings, FormulaQueue, FormulaRequest};
     use docparse_layout::{
         PageImage,
         timing::{TimingStage, Timings},
@@ -98,17 +99,10 @@ mod platform {
     };
     use ort::{session::builder::SessionBuilder, value::Tensor};
     use ort_web::{SyncDirection, ValueExt};
-    use tokio::sync::{mpsc, oneshot};
 
-    /// Bounded actor messages own all pixels until promises and tensor readback finish.
-    type Request = (
-        Vec<Arc<PageImage>>,
-        Timings,
-        docparse_layout::timing::StageTimer,
-        oneshot::Sender<Result<Vec<String>, FormulaError>>,
-    );
+    /// One bounded crop queue is shared by all callers in the browser Worker.
     pub(crate) struct SessionRunner {
-        sender: mpsc::Sender<Request>,
+        queue: FormulaQueue,
     }
 
     impl SessionRunner {
@@ -116,7 +110,7 @@ mod platform {
         pub(crate) async fn load(
             artifacts: TexoArtifacts,
             backend: OnnxBackend,
-            _config: &docparse_config::FormulaConfig,
+            config: &docparse_config::FormulaConfig,
         ) -> Result<Arc<Self>, FormulaError> {
             let mut encoder_builder = SessionBuilder::try_from(backend)?;
             let mut decoder_builder = SessionBuilder::try_from(backend)?;
@@ -156,20 +150,29 @@ mod platform {
                 tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
             };
             let options = ort::session::RunOptions::new()?;
-            let (sender, mut receiver) = mpsc::channel::<Request>(1);
-            wasm_bindgen_futures::spawn_local(async move {
-                while let Some((images, timings, queued, response)) =
-                    receiver.recv().await
-                {
-                    if response.is_closed() {
-                        continue;
-                    }
-                    // Retain the shared exclusion boundary through logits readback and cache replacement.
+            let batch_size = config.batch_size;
+            let (queue, mut receiver) = FormulaQueue::new(batch_size);
+            docparse_formula::spawn_worker(Box::pin(async move {
+                while let Some(first) = receiver.recv().await {
+                    // Drain after acquiring the browser runtime so ready requests can accumulate during another model's work.
                     let _guard = OnnxBackend::inference_guard().await;
-                    if response.is_closed() {
+                    let mut requests =
+                        FormulaRequest::ready(first, &mut receiver, batch_size);
+                    if requests.is_empty() {
                         continue;
                     }
-                    drop(queued);
+                    for request in &mut requests {
+                        request.end_queue();
+                    }
+                    let images = requests
+                        .iter()
+                        .map(|request| Arc::clone(&request.image))
+                        .collect::<Vec<_>>();
+                    let timings = BatchTimings::from(requests.as_slice());
+                    tracing::debug!(
+                        "browser Texo session running {} ready crops",
+                        images.len()
+                    );
                     let result = async {
                         let batch = images.len();
                         let preprocessing = timings.start(TimingStage::FormulaPreprocess);
@@ -181,43 +184,31 @@ mod platform {
                         drop(outputs);
                         let mut generation = Generation::new(hidden, batch)?;
                         for _ in 1..MAX_LENGTH {
-                            if generation.cancel(std::iter::repeat_n(response.is_closed(), batch)) { return Err(FormulaError::Invalid("Texo request canceled".into())); }
+                            if generation.cancel(requests.iter().map(FormulaRequest::cancelled)) { return Err(FormulaError::Invalid("Texo batch canceled".into())); }
                             let outputs = sessions.decoder.run_async(generation.inputs()?, &options).await?;
                             let mut output = StepOutput::try_from(outputs)?;
-                            // KV caches stay in ORT Web; downloading them every token would dominate generation.
+                            // KV caches remain on the device throughout merged browser requests.
                             output.logits.sync(SyncDirection::Rust).await.map_err(|error| FormulaError::Invalid(format!("Texo logits readback failed: {error}")))?;
                             if generation.advance(output)? { break; }
                         }
                         drop(inference);
                         let _decoding = timings.start(TimingStage::FormulaDecode);
-                        generation.decode(&sessions.tokenizer).into_iter().collect()
+                        Ok(generation.decode(&sessions.tokenizer))
                     }.await;
-                    let _ = response.send(result);
+                    FormulaRequest::complete_batch(requests, result);
                 }
-                tracing::debug!("closed browser Texo sessions");
-            });
-            Ok(Arc::new(Self { sender }))
+                tracing::debug!("closed browser Texo queue");
+            }))?;
+            Ok(Arc::new(Self { queue }))
         }
 
-        /// Queues a real batch and lets dropping its receiver cancel queued or iterative work.
+        /// Publishes crops independently while preserving the caller's original output order.
         pub(crate) async fn run(
             self: Arc<Self>,
             images: Vec<Arc<PageImage>>,
             timings: Timings,
         ) -> Result<Vec<String>, FormulaError> {
-            let queued = timings.start(TimingStage::FormulaQueue);
-            let (response, receiver) = oneshot::channel();
-            self.sender
-                .send((images, timings, queued, response))
-                .await
-                .map_err(|error| {
-                    FormulaError::Invalid(format!(
-                        "Texo actor stopped: {error}"
-                    ))
-                })?;
-            receiver.await.map_err(|error| {
-                FormulaError::Invalid(format!("Texo response lost: {error}"))
-            })?
+            self.queue.run(images, timings).await
         }
     }
 

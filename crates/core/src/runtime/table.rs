@@ -177,11 +177,20 @@ impl TableRuntime {
                 Vec::new()
             }
         }).collect();
-        let requests = stream::iter(requests).buffered(self.options.table_jobs);
+        let requests =
+            stream::iter(requests).buffer_unordered(self.options.table_jobs);
         tokio::pin!(requests);
         while let Some(warnings) = requests.next().await {
             draft.warnings.extend(warnings);
         }
+        // Completion order must not change deterministic page diagnostics.
+        draft.warnings.sort_by(|left, right| {
+            (&left.stage, &left.code, &left.message).cmp(&(
+                &right.stage,
+                &right.code,
+                &right.message,
+            ))
+        });
     }
 
     /// Includes queue wait in the deadline and releases the permit and provider future on cancellation.

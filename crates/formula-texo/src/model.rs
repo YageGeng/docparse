@@ -58,6 +58,7 @@ impl TryFrom<SessionOutputs<'_>> for StepOutput {
 pub struct TexoEngine {
     runner: Arc<SessionRunner>,
     name: String,
+    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl TexoEngine {
@@ -89,6 +90,16 @@ impl TexoEngine {
         );
         Ok(Self {
             runner,
+            admission: Arc::new(tokio::sync::Semaphore::new(
+                config.formula().batch_size
+                    * 2
+                    * match &config.formula().engine {
+                        docparse_config::FormulaEngineConfig::Texo(texo) => {
+                            texo.sessions
+                        }
+                        _ => 1,
+                    },
+            )),
             name: format!(
                 "texo-transfer-onnx-{}",
                 backend.execution_provider()
@@ -101,6 +112,11 @@ impl FormulaEngine for TexoEngine {
     /// Reports the selected model and registered execution provider.
     fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Bounds pre-crop admission globally instead of allocating one ready window per page.
+    fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        Some(Arc::clone(&self.admission))
     }
 
     /// Preserves input order, propagates cancellation, and refuses truncated output.

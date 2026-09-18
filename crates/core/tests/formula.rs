@@ -129,7 +129,7 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
             )
             .await
             .expect("document");
-        assert_eq!(*batches.lock().expect("batches"), [2, 1, 2, 1, 2, 1]);
+        assert_eq!(*batches.lock().expect("batches"), [1; 9]);
         for page in result.pages {
             assert_eq!(page.formulas.len(), 3);
             for formula in &page.formulas {
@@ -158,6 +158,83 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
             );
         }
     }
+}
+
+/// A slow first crop must not prevent later crops from entering the shared engine.
+struct RefillingRecognizer {
+    started: std::sync::atomic::AtomicUsize,
+    ready: tokio::sync::Notify,
+    admission: Arc<tokio::sync::Semaphore>,
+}
+
+impl FormulaEngine for RefillingRecognizer {
+    /// Allows two prepared crops so the second request can release the first.
+    fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        Some(Arc::clone(&self.admission))
+    }
+    /// Identifies the admission regression independently of model artifacts.
+    fn name(&self) -> &str {
+        "refilling-formulas"
+    }
+
+    /// The first crop can finish only after a second crop reaches the engine.
+    fn recognize(
+        &self,
+        images: Vec<Arc<PageImage>>,
+        _timings: Timings,
+    ) -> WasmBoxedFuture<'_, Result<Vec<String>, FormulaError>> {
+        Box::pin(async move {
+            if self
+                .started
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                == 0
+            {
+                self.ready.notified().await;
+            } else {
+                self.ready.notify_one();
+            }
+            Ok(vec!["x".into(); images.len()])
+        })
+    }
+}
+
+/// Per-page submission continuously replenishes work instead of awaiting an entire chunk.
+#[tokio::test]
+async fn slow_crop_does_not_block_subsequent_submission() {
+    let mut raw = RawConfig::default();
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+    raw.formula.batch_size = 1;
+    raw.formula.timeout_ms = 500;
+    raw.runtime.stage_pages = 1;
+    raw.runtime.render_queue_capacity = 1;
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(Layout {
+            display_formulas: true,
+        }))
+        .formula_engine(Arc::new(RefillingRecognizer {
+            started: Default::default(),
+            ready: Default::default(),
+            admission: Arc::new(tokio::sync::Semaphore::new(2)),
+        }))
+        .build()
+        .await
+        .expect("parser");
+    let result = parser
+        .parse_path(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/pdf/multipage_layout.pdf"),
+        )
+        .await
+        .expect("document");
+    assert!(
+        result
+            .pages
+            .iter()
+            .flat_map(|page| &page.formulas)
+            .all(|formula| formula.error.is_none()),
+        "later crops must release the first crop before its deadline"
+    );
 }
 
 /// Independent toggles cover all combinations, skipping disabled crops while preserving native facts.

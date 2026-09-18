@@ -168,10 +168,10 @@ pub struct FormulaConfig {
     /// Explicit recognizer selection; model paths or service settings belong to its variant.
     #[builder(default)]
     pub engine: FormulaEngineConfig,
-    /// Maximum crops per engine call; remote engines issue one request per crop.
+    /// Maximum ready crops per local model invocation; MinerU uses its HTTP concurrency limit.
     #[builder(default = 4)]
     pub batch_size: usize,
-    /// Per-call deadline including queue admission and every model batch containing its crops.
+    /// Per-crop parser deadline including pre-crop admission and shared model queue time.
     #[builder(default = 120_000)]
     pub timeout_ms: u64,
 }

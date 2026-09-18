@@ -24,10 +24,14 @@ docparse-layout.workspace = true
 thiserror.workspace = true
 
 # async
+futures-util.workspace = true
 tokio.workspace = true
 
 # config and serialization
 serde_json.workspace = true
+
+# builder
+typed-builder.workspace = true
 
 # hashing
 sha2.workspace = true

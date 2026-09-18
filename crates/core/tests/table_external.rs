@@ -523,6 +523,135 @@ struct ConcurrentEngine {
     maximum: AtomicUsize,
     calls: AtomicUsize,
 }
+
+/// Three disjoint tables expose whether a completed second request admits the third.
+struct RefillTables;
+
+impl LayoutEngine for RefillTables {
+    /// Identifies geometry supplied only for the scheduler regression.
+    fn name(&self) -> &str {
+        "refill-tables"
+    }
+    /// Keeps the controlled layout revision stable.
+    fn model_revision(&self) -> &str {
+        "1"
+    }
+    /// Splits the real fixture viewport into three nonoverlapping table regions.
+    fn detect(
+        &self,
+        request: LayoutRequest,
+    ) -> docparse_core::WasmBoxedFuture<
+        '_,
+        Result<Vec<LayoutDetection>, LayoutError>,
+    > {
+        Box::pin(async move {
+            let (width, height) = request.transform.viewport_size();
+            Ok((0..3)
+                .map(|index| {
+                    LayoutDetection::builder()
+                        .source_detection_index(index)
+                        .raw_label("table".into())
+                        .class_id(21)
+                        .label(LayoutLabel::Table)
+                        .confidence(0.99)
+                        .bbox(
+                            Bbox::try_from([
+                                0.0,
+                                f64::from(index) * height / 3.0,
+                                width,
+                                (f64::from(index) + 0.8) * height / 3.0,
+                            ])
+                            .expect("table bounds"),
+                        )
+                        .geometry_source(GeometrySource::DerivedFromBbox)
+                        .model_order(i64::from(index))
+                        .metadata(BTreeMap::new())
+                        .build()
+                })
+                .collect())
+        })
+    }
+}
+
+/// The first request needs the third to arrive while the second completes immediately.
+#[derive(Default)]
+struct RefillingTableEngine {
+    calls: AtomicUsize,
+    third: tokio::sync::Notify,
+    stalled: AtomicBool,
+}
+
+impl TableStructureEngine for RefillingTableEngine {
+    /// Identifies the controlled external-table scheduler.
+    fn name(&self) -> &str {
+        "refilling-tables"
+    }
+    /// Records progress without requiring a model or fabricated table reconstruction output.
+    fn recognize(
+        &self,
+        _request: TsrTableRequest,
+    ) -> docparse_core::WasmBoxedFuture<
+        '_,
+        Result<TsrTableInput, TableStructureError>,
+    > {
+        Box::pin(async move {
+            match self.calls.fetch_add(1, Ordering::SeqCst) {
+                0 => self.stalled.store(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(500),
+                        self.third.notified(),
+                    )
+                    .await
+                    .is_err(),
+                    Ordering::SeqCst,
+                ),
+                2 => self.third.notify_one(),
+                _ => {}
+            }
+            Err(TableStructureError::Engine {
+                message: "scheduler probe completed".into(),
+            })
+        })
+    }
+}
+
+/// Completion-order refill avoids a head-of-line stall within one page's table budget.
+#[tokio::test]
+async fn slow_first_table_does_not_block_ready_work() {
+    let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::RulesOnly;
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(RefillTables))
+        .build()
+        .await
+        .expect("parser");
+    let engine = Arc::new(RefillingTableEngine::default());
+    parser
+        .parse_page_with_options(
+            Fixture::page(true),
+            ParseOptions::builder()
+                .table(
+                    TableOptions::builder()
+                        .mode(TableMode::TsrOnly)
+                        .table_jobs(2)
+                        .build(),
+                )
+                .table_engine(Some(
+                    Arc::clone(&engine) as Arc<dyn TableStructureEngine>
+                ))
+                .build(),
+        )
+        .await
+        .expect("page");
+    assert_eq!(engine.calls.load(Ordering::SeqCst), 3);
+    assert!(
+        !engine.stalled.load(Ordering::SeqCst),
+        "the second completion must admit the third table before the first completes"
+    );
+}
 struct Active<'a>(&'a AtomicUsize);
 impl Drop for Active<'_> {
     /// Releases the active counter on completion or timeout.

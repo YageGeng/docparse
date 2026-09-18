@@ -11,6 +11,9 @@ use std::sync::Arc;
 /// Formula failures preserve the cause without pretending that source text is recognized LaTeX.
 #[derive(Debug, thiserror::Error)]
 pub enum FormulaError {
+    /// Multiple callers retain the original cause of a shared model-wide failure.
+    #[error("shared formula batch failed: {0}")]
+    Shared(#[source] Arc<FormulaError>),
     /// External recognizers retain transport and protocol causes without coupling local engines to HTTP.
     #[error("external formula recognition failed: {0}")]
     External(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -34,6 +37,10 @@ pub enum FormulaError {
 pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
     /// Identifies the actual recognizer in lifecycle logs.
     fn name(&self) -> &str;
+    /// Shares admission before the parser allocates crops; custom engines may retain their own policy.
+    fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        None
+    }
     /// Owns crop pixels through completion, including cancellation of the caller.
     fn recognize(
         &self,
@@ -46,6 +53,7 @@ pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
 pub struct PpFormulaNetEngine {
     runner: Arc<SessionRunner>,
     name: String,
+    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl PpFormulaNetEngine {
@@ -68,15 +76,17 @@ impl PpFormulaNetEngine {
             backend.execution_provider(),
             config.formula().batch_size
         );
-        let runner = SessionRunner::load(artifacts, backend, kind)
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    "formula model initialization failed: {}",
-                    error
-                );
-                error
-            })?;
+        let runner = SessionRunner::load(
+            artifacts,
+            backend,
+            kind,
+            config.formula().batch_size,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!("formula model initialization failed: {}", error);
+            error
+        })?;
         let provider = match backend.execution_provider() {
             docparse_layout::ExecutionProvider::CoreMl
             | docparse_layout::ExecutionProvider::Metal => "cpu",
@@ -91,6 +101,9 @@ impl PpFormulaNetEngine {
         Ok(Self {
             runner,
             name: format!("{}-onnx-{provider}", kind.as_str()),
+            admission: Arc::new(tokio::sync::Semaphore::new(
+                config.formula().batch_size * 2,
+            )),
         })
     }
 }
@@ -101,7 +114,12 @@ impl FormulaEngine for PpFormulaNetEngine {
         &self.name
     }
 
-    /// Sends one real batch to the model owner; no per-crop pseudo-batching is used.
+    /// Bounds executing and ready crop pixels across every page sharing this engine.
+    fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        Some(Arc::clone(&self.admission))
+    }
+
+    /// Shares individual crop requests across callers; the session forms actual model batches.
     fn recognize(
         &self,
         images: Vec<Arc<PageImage>>,
@@ -154,7 +172,7 @@ impl FormulaDecoder {
         &self,
         outputs: &ort::session::SessionOutputs<'_>,
         batch: usize,
-    ) -> Result<Vec<String>, FormulaError> {
+    ) -> Result<Vec<Result<String, FormulaError>>, FormulaError> {
         let output = outputs.get("fetch_name_0").ok_or_else(|| {
             FormulaError::Invalid("missing token output".into())
         })?;
@@ -189,13 +207,15 @@ impl FormulaDecoder {
                 }
             }
             if !terminated {
-                return Err(FormulaError::Invalid("formula generation ended without EOS/padding; refusing truncated LaTeX".into()));
+                formulas.push(Err(FormulaError::Invalid("formula generation ended without EOS/padding; refusing truncated LaTeX".into())));
+                continue;
             }
             let latex = self
                 .tokenizer
                 .decode(&tokens, true)
-                .map_err(|error| FormulaError::Tokenizer(error.to_string()))?;
-            formulas.push(latex.trim().to_owned());
+                .map(|latex| latex.trim().to_owned())
+                .map_err(|error| FormulaError::Tokenizer(error.to_string()));
+            formulas.push(latex);
         }
         Ok(formulas)
     }

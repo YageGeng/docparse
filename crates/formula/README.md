@@ -112,3 +112,14 @@ Image preprocessing is adapted from Apache-2.0 OAR-OCR
 foreground margin cropping, triangular resizing, centered black padding and
 normalized grayscale. The root and upstream projects retain their respective
 Apache-2.0 license notices.
+
+## Shared queue
+
+Native and browser sessions use one bounded per-crop queue shared by all callers.
+Each idle owner drains only ready work up to `formula.batch_size`; short tails
+run immediately. The parser reserves crop admission before raster allocation,
+keeps a bounded sliding window, and maps independently completed results back to
+original regions. Canceled requests do not use batch slots. Native PP execution
+is terminated only when all callers sharing the physical batch have canceled;
+one caller cannot terminate a neighbor's inference. Decoder failures remain
+specific to the affected crop.

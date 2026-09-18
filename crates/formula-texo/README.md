@@ -76,14 +76,16 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   `formula.engine.sessions` independent owners holds its own encoder, decoder,
   tokenizer, and execution thread. An idle owner drains ready crops up to
   `formula.batch_size`; it never waits to fill a batch. Queue capacity is
-  `sessions * batch_size` crops, in addition to active batches and the callers'
-  existing bounded page tasks. Results return in each caller's original order.
+  `sessions * batch_size` crops, in addition to active batches. Parser crop admission is shared across pages
+  and bounded to twice the total model batch capacity. Results return in each caller's original order.
   Caller batches enter atomically. Full batches stay intact; ready partial tails
   may be combined or split to fill a model batch. Canceled crops do not consume
   its batch slots, and unconsumed tails still count toward queue capacity.
 - Session count defaults to one and accepts 1..8 on native targets. Every extra
   session duplicates model/runtime resources. Browser workers require one session
-  and retain their existing actor and global inference guard.
+  and use a bounded per-crop ready queue under the global inference guard.
+- Core submits crops independently with a shared pre-crop admission budget and
+  replenishes work as each crop completes, instead of waiting for page chunks.
 - Cancellation skips queued crops and pads canceled rows at decoder boundaries.
   It cannot terminate another caller sharing the batch; a fully canceled batch
   stops before its next decoder invocation. Initialization failures close and join

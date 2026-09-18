@@ -6,6 +6,7 @@ use docparse_formula::{FormulaEngine, FormulaError};
 use docparse_layout::{
     Bbox, LayoutDetection, LayoutLabel, PageImage, timing::Timings,
 };
+use futures_util::{StreamExt, stream};
 use std::sync::Arc;
 
 mod crop;
@@ -427,7 +428,7 @@ impl FormulaResult {
 }
 
 impl PageResult {
-    /// Recognizes actual batches and records crop, inference and empty-output failures for each affected region.
+    /// Continuously submits independent crops to shared engines and isolates failures by region.
     pub(crate) async fn recognize_formulas(
         &mut self,
         mut detections: Vec<LayoutDetection>,
@@ -481,134 +482,78 @@ impl PageResult {
             })
             .collect();
         let batch_size = config.formula().batch_size;
+        let parallelism = match &config.formula().engine {
+            docparse_config::FormulaEngineConfig::Texo(texo) => {
+                batch_size * texo.sessions
+            }
+            docparse_config::FormulaEngineConfig::Pp(_) => batch_size,
+            docparse_config::FormulaEngineConfig::Mineru(mineru) => {
+                mineru.concurrency
+            }
+        };
+        // Keep one executing window and one ready window, without retaining every page crop at once.
+        let window = (parallelism * 2).min(formulas.len()).max(1);
         tracing::info!(
-            "recognizing {} formula regions on page {} with batch size {}",
+            "submitting {} formula regions on page {} to shared queues with window {}",
             formulas.len(),
             self.page_number,
-            batch_size
+            window
         );
-        for chunk in formulas.chunks_mut(batch_size) {
-            let mut images = Vec::new();
-            let mut positions = Vec::new();
-            for (index, formula) in chunk.iter_mut().enumerate() {
+        {
+            let page = &*self;
+            let requests: Vec<_> = formulas.iter_mut().map(|formula| async move {
+                let result = crate::wasm_compat::timeout(std::time::Duration::from_millis(config.formula().timeout_ms), async {
+                let engine = engine.ok_or_else(|| FormulaError::Invalid("formula recognizer unavailable".into()))?;
+                let _admission = if let Some(admission) = engine.admission() {
+                    let queued = timings.start(docparse_layout::timing::TimingStage::FormulaQueue);
+                    let permit = admission.acquire_owned().await.map_err(|error| FormulaError::Invalid(format!("formula admission closed: {error}")))?;
+                    drop(queued);
+                    Some(permit)
+                } else { None };
                 let initial = formula.crop_bbox.unwrap_or(formula.bbox);
-                let mut crop = FormulaCrop {
-                    bbox: initial,
-                    rendered,
-                    expansion: formula.background_limits(self),
-                };
-                match PageImage::try_from(&mut crop) {
+                let mut crop = FormulaCrop { bbox: initial, rendered, expansion: formula.background_limits(page) };
+                let image = match PageImage::try_from(&mut crop) {
                     Ok(image) => {
                         if crop.bbox != initial {
-                            tracing::debug!(
-                                "aligned inline formula {} crop from {:?} to background boundaries {:?}",
-                                formula.id.as_str(),
-                                initial,
-                                crop.bbox
-                            );
+                            tracing::debug!("aligned inline formula {} crop from {:?} to background boundaries {:?}", formula.id.as_str(), initial, crop.bbox);
                         }
-                        formula.crop_bbox =
-                            (crop.bbox != formula.bbox).then_some(crop.bbox);
-                        images.push(Arc::new(image));
-                        positions.push(index);
+                        formula.crop_bbox = (crop.bbox != formula.bbox).then_some(crop.bbox);
+                        Arc::new(image)
                     }
                     Err(error) => {
-                        tracing::warn!(
-                            "formula {} crop failed: {}",
-                            formula.id.as_str(),
-                            error
-                        );
+                        tracing::warn!("formula {} crop failed: {}", formula.id.as_str(), error);
+                        return Err(error);
+                    }
+                };
+                engine.recognize(vec![image], timings.clone()).await
+                }).await.unwrap_or_else(|_elapsed| Err(FormulaError::Invalid(format!("formula request exceeded {} ms", config.formula().timeout_ms))));
+                let result = result.and_then(|output| {
+                    let [latex]: [String; 1] = output.try_into().map_err(|output: Vec<String>| FormulaError::Invalid(format!("request returned {} formulas for one crop", output.len())))?;
+                    Ok(latex)
+                });
+                match result {
+                    Ok(latex) => {
+                        let latex = latex.trim();
+                        let latex = latex.strip_prefix("$$").and_then(|s| s.strip_suffix("$$"))
+                            .or_else(|| latex.strip_prefix('$').and_then(|s| s.strip_suffix('$'))).unwrap_or(latex).trim();
+                        if latex.is_empty() {
+                            formula.error = Some("formula model returned empty LaTeX".into());
+                            tracing::warn!("formula {} returned empty LaTeX", formula.id.as_str());
+                        } else {
+                            formula.latex = Some(latex.to_owned());
+                            formula.markdown = Some(if formula.label == LayoutLabel::InlineFormula { format!("${latex}$") } else { format!("$$\n{latex}\n$$") });
+                            formula.retain_unrecognized_punctuation(page);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!("formula {} failed on page {}: {}", formula.id.as_str(), page.page_number, error);
                         formula.error = Some(error.to_string());
                     }
                 }
-            }
-            if images.is_empty() {
-                continue;
-            }
-            let count = images.len();
-            let result = if let Some(engine) = engine {
-                match crate::wasm_compat::timeout(
-                    std::time::Duration::from_millis(
-                        config.formula().timeout_ms,
-                    ),
-                    engine.recognize(images, timings.clone()),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => Err(FormulaError::Invalid(format!(
-                        "formula batch exceeded {} ms",
-                        config.formula().timeout_ms
-                    ))),
-                }
-            } else {
-                Err(FormulaError::Invalid(
-                    "formula recognizer unavailable".into(),
-                ))
-            };
-            let result = result.and_then(|output| {
-                if output.len() == count {
-                    Ok(output)
-                } else {
-                    Err(FormulaError::Invalid(format!(
-                        "batch returned {} formulas for {count} crops",
-                        output.len()
-                    )))
-                }
-            });
-            match result {
-                Ok(output) => {
-                    for (index, latex) in positions.into_iter().zip(output) {
-                        if let Some(formula) = chunk.get_mut(index) {
-                            let latex = latex.trim();
-                            let latex = latex
-                                .strip_prefix("$$")
-                                .and_then(|s| s.strip_suffix("$$"))
-                                .or_else(|| {
-                                    latex
-                                        .strip_prefix('$')
-                                        .and_then(|s| s.strip_suffix('$'))
-                                })
-                                .unwrap_or(latex)
-                                .trim();
-                            if latex.is_empty() {
-                                formula.error = Some(
-                                    "formula model returned empty LaTeX".into(),
-                                );
-                                tracing::warn!(
-                                    "formula {} returned empty LaTeX",
-                                    formula.id.as_str()
-                                );
-                            } else {
-                                formula.latex = Some(latex.to_owned());
-                                formula.markdown = Some(
-                                    if formula.label
-                                        == LayoutLabel::InlineFormula
-                                    {
-                                        format!("${latex}$")
-                                    } else {
-                                        format!("$$\n{latex}\n$$")
-                                    },
-                                );
-                                formula.retain_unrecognized_punctuation(self);
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "formula batch failed on page {} for {} regions: {}",
-                        self.page_number,
-                        count,
-                        error
-                    );
-                    for index in positions {
-                        if let Some(formula) = chunk.get_mut(index) {
-                            formula.error = Some(error.to_string());
-                        }
-                    }
-                }
-            }
+            }).collect();
+            let requests = stream::iter(requests).buffer_unordered(window);
+            tokio::pin!(requests);
+            while requests.next().await.is_some() {}
         }
         for formula in &formulas {
             if let Some(error) = &formula.error {

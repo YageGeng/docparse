@@ -1180,6 +1180,7 @@ version = "0.1.0"
 dependencies = [
  "docparse-config",
  "docparse-layout",
+ "futures-util",
  "image",
  "ndarray",
  "ort",
@@ -1192,6 +1193,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "typed-builder",
  "wasm-bindgen-futures",
 ]
 

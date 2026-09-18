@@ -36,23 +36,21 @@ impl Request {
     ) -> Vec<Self> {
         // ponytail: batch ready work only; add a coalescing wait only if measurements justify the latency.
         let mut requests = Vec::with_capacity(batch_size);
-        requests.push(first);
-        while requests.len() < batch_size {
-            let Ok(request) = receiver.try_recv() else {
-                break;
-            };
-            requests.push(request);
-        }
-        requests.retain_mut(|request| {
-            if !request.cancelled() {
-                return true;
+        let mut next = Some(first);
+        while let Some(mut request) = next {
+            if request.cancelled() {
+                let queued = request.queued.take();
+                tracing::dispatcher::with_default(&request.dispatch, || {
+                    request.span.in_scope(|| drop(queued))
+                });
+            } else {
+                requests.push(request);
             }
-            let queued = request.queued.take();
-            tracing::dispatcher::with_default(&request.dispatch, || {
-                request.span.in_scope(|| drop(queued))
-            });
-            false
-        });
+            if requests.len() == batch_size {
+                break;
+            }
+            next = receiver.try_recv().ok();
+        }
         requests
     }
 
@@ -185,7 +183,7 @@ mod tests {
         drop(replies.remove(2));
         drop(sender);
         let kind = ModelKind::Structure(docparse_config::TsrModel::SlanetPlus);
-        for expected_size in [2, 0, 1] {
+        for expected_size in [2, 1] {
             let first = receiver.recv().await.expect("ready request");
             let mut requests = Request::batch(first, &mut receiver, 2);
             assert_eq!(requests.len(), expected_size);

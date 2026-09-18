@@ -3,18 +3,21 @@ mod wasm_compat;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use docparse_config::{FormulaEngineConfig, ValidatedConfig};
-use docparse_formula::{FormulaEngine, FormulaError};
+use docparse_formula::{FormulaEngine, FormulaError, queue::FormulaQueue};
 use docparse_layout::{
     PageImage,
     timing::{TimingStage, Timings},
     wasm_compat::{WasmBoxedFuture, run_cpu, timeout},
 };
-use futures_util::StreamExt;
+use futures_util::{
+    StreamExt,
+    future::{Either, select},
+    stream,
+};
 use image::ImageEncoder;
 use serde::Deserialize;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
-use typed_builder::TypedBuilder;
 
 /// The served model name configured by the MinerU deployment.
 pub const MODEL_NAME: &str = "MinerU2.5-2509-1.2B";
@@ -22,6 +25,8 @@ pub const MODEL_NAME: &str = "MinerU2.5-2509-1.2B";
 /// HTTP, image, and protocol failures remain distinguishable in the formula error source chain.
 #[derive(Debug, thiserror::Error)]
 pub enum MineruError {
+    #[error(transparent)]
+    Queue(#[from] FormulaError),
     #[error(transparent)]
     Config(#[from] docparse_config::ConfigError),
     #[error("MinerU HTTP request failed: {0}")]
@@ -47,13 +52,18 @@ impl From<MineruError> for FormulaError {
     }
 }
 
-/// A reusable HTTP client with one admission budget shared by every page and document.
-#[derive(TypedBuilder)]
+/// A bounded shared crop queue that continuously replenishes HTTP inference slots.
 pub struct MineruEngine {
+    queue: FormulaQueue,
+    timeout: Duration,
+    admission: Arc<Semaphore>,
+}
+
+/// The actor owns transport resources independently of producer lifetimes.
+struct HttpService {
     client: reqwest::Client,
     endpoint: reqwest::Url,
     permits: Arc<Semaphore>,
-    timeout: Duration,
 }
 
 impl TryFrom<&ValidatedConfig> for MineruEngine {
@@ -77,12 +87,61 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
                 service.concurrency,
                 timeout.as_millis()
             );
-            Ok(Self::builder()
-                .client(client)
-                .endpoint(endpoint)
-                .permits(Arc::new(Semaphore::new(service.concurrency)))
-                .timeout(timeout)
-                .build())
+            let transport = Arc::new(HttpService {
+                client,
+                endpoint,
+                permits: Arc::new(Semaphore::new(service.concurrency)),
+            });
+            let (queue, receiver) = FormulaQueue::new(service.concurrency);
+            let concurrency = service.concurrency;
+            docparse_formula::spawn_worker(Box::pin(async move {
+                let incoming =
+                    stream::unfold(receiver, |mut receiver| async move {
+                        receiver.recv().await.map(|request| (request, receiver))
+                    });
+                incoming
+                    .for_each_concurrent(concurrency, |mut request| {
+                        let transport = Arc::clone(&transport);
+                        async move {
+                            request.end_queue();
+                            if request.cancelled() {
+                                return;
+                            }
+                            let image = Arc::clone(&request.image);
+                            let timings = request.timings.clone();
+                            // Canceling one caller aborts only its request, immediately making room for other queued work.
+                            let result = match select(
+                                Box::pin(
+                                    transport.recognize_image(image, timings),
+                                ),
+                                Box::pin(request.closed()),
+                            )
+                            .await
+                            {
+                                Either::Left((result, cancellation)) => {
+                                    drop(cancellation);
+                                    Some(result)
+                                }
+                                Either::Right(((), work)) => {
+                                    drop(work);
+                                    None
+                                }
+                            };
+                            if let Some(result) = result {
+                                request.complete(
+                                    result.map_err(FormulaError::from),
+                                );
+                            }
+                        }
+                    })
+                    .await;
+                tracing::debug!("closed MinerU formula request queue");
+            }))?;
+            Ok(Self {
+                queue,
+                timeout,
+                admission: Arc::new(Semaphore::new(concurrency * 2)),
+            })
         })();
         result.inspect_err(|error| {
             tracing::error!("MinerU formula initialization failed: {}", error)
@@ -90,7 +149,7 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
     }
 }
 
-impl MineruEngine {
+impl HttpService {
     /// Holds admission through encoding and response decoding; cancellation drops the HTTP future and permit.
     async fn recognize_image(
         &self,
@@ -209,6 +268,11 @@ impl FormulaEngine for MineruEngine {
         "mineru-2.5-vllm"
     }
 
+    /// Limits retained crop pixels globally before requests reach the HTTP queue.
+    fn admission(&self) -> Option<Arc<Semaphore>> {
+        Some(Arc::clone(&self.admission))
+    }
+
     /// Runs bounded crop requests concurrently while preserving order and a single batch deadline.
     fn recognize(
         &self,
@@ -217,44 +281,33 @@ impl FormulaEngine for MineruEngine {
     ) -> WasmBoxedFuture<'_, Result<Vec<String>, FormulaError>> {
         Box::pin(async move {
             let count = images.len();
-            let result = async {
-                if !(1..=32).contains(&count) {
-                    return Err(MineruError::Invalid(
-                        "batch size must be 1..32",
-                    ));
-                }
-                tracing::debug!(
-                    "sending MinerU formula batch with {} crops to {}",
-                    count,
-                    self.endpoint
+            if !(1..=32).contains(&count) {
+                tracing::warn!("invalid MinerU caller batch size {}", count);
+                return Err(
+                    MineruError::Invalid("batch size must be 1..32").into()
                 );
-                timeout(
-                    self.timeout,
-                    futures_util::future::try_join_all(images.into_iter().map(
-                        |image| self.recognize_image(image, timings.clone()),
-                    )),
-                )
-                .await
-                .map_err(|_elapsed| {
-                    MineruError::Timeout(self.timeout.as_millis())
-                })?
             }
-            .await;
+            tracing::debug!("queuing {} MinerU formula crops", count);
+            let result = timeout(self.timeout, self.queue.run(images, timings))
+                .await
+                .unwrap_or_else(|_elapsed| {
+                    Err(MineruError::Timeout(self.timeout.as_millis()).into())
+                });
             match result {
                 Ok(latex) => {
                     tracing::debug!(
-                        "completed MinerU formula batch with {} crops",
+                        "completed {} queued MinerU formula crops",
                         count
                     );
                     Ok(latex)
                 }
                 Err(error) => {
                     tracing::warn!(
-                        "MinerU formula batch with {} crops failed: {}",
+                        "MinerU caller with {} crops failed: {}",
                         count,
                         error
                     );
-                    Err(error.into())
+                    Err(error)
                 }
             }
         })
