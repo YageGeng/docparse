@@ -8,7 +8,7 @@ Its README attributes those images to [alephpi/Texo](https://github.com/alephpi/
 
 The model is the author's ONNX export from
 [alephpi/FormulaNet](https://huggingface.co/alephpi/FormulaNet), revision
-`63e04c86fc96c2324811114351eeea8118bf6b28`, under AGPL-3.0.
+`b2668efe5112082846fde4d446b9bfaab3989533`, under AGPL-3.0.
 This is the 687-token vocabulary-transfer checkpoint. It is not the 1264-token
 GGUF checkpoint used by best-ocr-rust. Weights are downloaded explicitly and are
 not embedded in this crate or checked into this repository.

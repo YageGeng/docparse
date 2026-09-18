@@ -1,9 +1,8 @@
 //! Shared admission and ready-only batching independent of model artifacts.
+use docparse_common::timing::Timings;
 use docparse_formula::FormulaError;
 use docparse_formula::queue::{FormulaQueue, FormulaRequest};
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::sync::Arc;
 
 /// One crop keeps the test independent of local model resources.
@@ -21,30 +20,39 @@ fn image() -> Arc<PageImage> {
     )
 }
 
+/// A model-owned request retains render capacity after its caller is canceled, even for a preexisting crop.
+#[tokio::test]
+async fn canceled_model_request_retains_page_delivery() {
+    let pages = docparse_common::PageQueue::new(1);
+    let lease = pages.reserve().await.expect("page slot");
+    let (queue, receiver) = FormulaQueue::new(1);
+    let crop = image();
+    let caller = tokio::spawn(async move {
+        lease.scope(queue.run(vec![crop], Timings::default())).await
+    });
+    let batch = receiver.recv().await.expect("model request").take_ready(1);
+    caller.abort();
+    caller.await.expect_err("canceled caller");
+    tokio::time::timeout(std::time::Duration::from_millis(30), pages.reserve())
+        .await
+        .expect_err("model request still owns the delivery");
+    drop(batch);
+    tokio::time::timeout(std::time::Duration::from_secs(1), pages.reserve())
+        .await
+        .expect("model released resources")
+        .expect("queue");
+}
+
 /// A bad crop in a merged batch cannot discard another caller's completed formula.
 #[tokio::test]
 async fn merged_callers_keep_independent_results() {
-    let (queue, mut receiver) = FormulaQueue::new(2);
-    let queue = Arc::new(queue);
-    let first = Arc::clone(&queue);
-    let first = tokio::spawn(async move {
-        first.run(vec![image()], Timings::default()).await
-    });
-    while receiver.is_empty() {
-        tokio::task::yield_now().await;
-    }
-    let second = Arc::clone(&queue);
-    let second = tokio::spawn(async move {
-        second.run(vec![image()], Timings::default()).await
-    });
-    while receiver.len() < 2 {
-        tokio::task::yield_now().await;
-    }
-    let batch = FormulaRequest::ready(
-        receiver.recv().await.expect("first"),
-        &mut receiver,
-        2,
-    );
+    let (queue, receiver) = FormulaQueue::new(2);
+    let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
+    let mut second = Box::pin(queue.run(vec![image()], Timings::default()));
+    // Polling once publishes each request before awaiting its response; no scheduler sleep is needed.
+    assert!(futures_util::poll!(&mut first).is_pending());
+    assert!(futures_util::poll!(&mut second).is_pending());
+    let batch = receiver.recv().await.expect("first").take_ready(2);
     FormulaRequest::complete_batch(
         batch,
         Ok(vec![
@@ -52,48 +60,27 @@ async fn merged_callers_keep_independent_results() {
             Ok("healthy".into()),
         ]),
     );
-    first
-        .await
-        .expect("first task")
-        .expect_err("first crop failed");
-    assert_eq!(
-        second
-            .await
-            .expect("second task")
-            .expect("unrelated crop survives"),
-        ["healthy"]
-    );
+    first.await.expect_err("first crop failed");
+    assert_eq!(second.await.expect("unrelated crop survives"), ["healthy"]);
 }
 
 /// A partial ready batch is immediately usable and canceled crops do not consume its limit.
 #[tokio::test]
 async fn shared_queue_flushes_ready_work_and_routes_results() {
-    let (queue, mut receiver) = FormulaQueue::new(4);
-    let queue = Arc::new(queue);
-    let first = Arc::clone(&queue);
-    let first = tokio::spawn(async move {
-        first.run(vec![image()], Timings::default()).await
-    });
-    let request = receiver.recv().await.expect("request");
-    let batch = FormulaRequest::ready(request, &mut receiver, 4);
+    let (queue, receiver) = FormulaQueue::new(4);
+    let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
+    assert!(futures_util::poll!(&mut first).is_pending());
+    let batch = receiver.recv().await.expect("first").take_ready(4);
     assert_eq!(batch.len(), 1, "do not wait for a full batch");
     FormulaRequest::complete_batch(batch, Ok(vec![Ok("first".into())]));
-    assert_eq!(first.await.expect("task").expect("result"), ["first"]);
-    let other = Arc::clone(&queue);
-    let canceled = tokio::spawn(async move {
-        other.run(vec![image()], Timings::default()).await
-    });
-    let request = receiver.recv().await.expect("canceled request");
-    canceled.abort();
-    let _ = canceled.await;
-    let other = Arc::clone(&queue);
-    let live = tokio::spawn(async move {
-        other.run(vec![image(), image()], Timings::default()).await
-    });
-    while receiver.len() < 2 {
-        tokio::task::yield_now().await;
-    }
-    let batch = FormulaRequest::ready(request, &mut receiver, 2);
+    assert_eq!(first.await.expect("result"), ["first"]);
+    let mut canceled = Box::pin(queue.run(vec![image()], Timings::default()));
+    assert!(futures_util::poll!(&mut canceled).is_pending());
+    drop(canceled);
+    let mut live =
+        Box::pin(queue.run(vec![image(), image()], Timings::default()));
+    assert!(futures_util::poll!(&mut live).is_pending());
+    let batch = receiver.recv().await.expect("ready work").take_ready(2);
     assert_eq!(
         batch.len(),
         2,
@@ -103,5 +90,5 @@ async fn shared_queue_flushes_ready_work_and_routes_results() {
         batch,
         Ok(vec![Ok("a".into()), Ok("b".into())]),
     );
-    assert_eq!(live.await.expect("task").expect("result"), ["a", "b"]);
+    assert_eq!(live.await.expect("result"), ["a", "b"]);
 }

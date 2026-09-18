@@ -56,7 +56,20 @@ class CompatibilityBoundaryTest(unittest.TestCase):
         """Allow the extracted adapters without opening their directory to arbitrary cfgs."""
         source = '#[cfg(target_arch = "wasm32")]\nfn run() {}'
         for path, expected in (
-            ("crates/core/src/wasm_compat/task_set/mod.rs", 0),
+            # Common owns the extracted adapters; neighboring files and former paths remain restricted.
+            ("crates/common/src/lib.rs", 0),
+            ("crates/common/src/queue.rs", 0),
+            ("crates/common/src/runtime.rs", 0),
+            ("crates/common/src/task_set/mod.rs", 0),
+            ("crates/common/src/thread.rs", 0),
+            ("crates/common/src/timeout.rs", 0),
+            ("crates/common/tests/thread_startup.rs", 0),
+            ("crates/common/src/session/manager.rs", 1),
+            ("crates/common/src/task_set/native.rs", 1),
+            ("crates/common/src/task_set/web.rs", 1),
+            ("crates/common/src/extra.rs", 1),
+            ("crates/core/src/wasm_compat/task_set/mod.rs", 1),
+            ("crates/layout/src/wasm_compat/timeout.rs", 1),
             ("crates/core/src/wasm_compat/task_set.rs", 1),
             ("crates/core/src/wasm_compat/task_set/native.rs", 1),
             ("crates/core/src/wasm_compat/task_set/web.rs", 1),

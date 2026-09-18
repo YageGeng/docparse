@@ -13,10 +13,7 @@ impl OcrEngine for docparse_ocr::PaddleOcrEngine {
     fn recognize(
         &self,
         request: OcrRequest,
-    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
-        '_,
-        Result<OcrResult, OcrError>,
-    > {
+    ) -> docparse_common::WasmBoxedFuture<'_, Result<OcrResult, OcrError>> {
         Box::pin(async move {
             let regions = request
                 .missing_regions

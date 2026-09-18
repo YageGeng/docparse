@@ -21,7 +21,7 @@ try {
     const { createParser } = await import('/dist/index.js');
     const options = {
       // Omitted provider must select WebGPU; explicitly request model work for lifecycle checks.
-      config: { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: 'tsr_only' } },
+      config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, formula: { queue_size: 1, inline_enabled: false, display_enabled: false }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: 'tsr_only' }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 1 }, orientation: { queue_size: 1 } } },
       artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
       tsrArtifacts: { kind: 'urls', model: '/models/slanet-plus/inference.onnx', config: '/models/slanet-plus/inference.yml', manifest: '/models/slanet-plus/model-manifest.json' },
       tsrCellArtifacts: { kind: 'urls', model: '/models/rtdetr-table-cell-wireless/inference.onnx', config: '/models/rtdetr-table-cell-wireless/inference.yml', manifest: '/models/rtdetr-table-cell-wireless/model-manifest.json' },

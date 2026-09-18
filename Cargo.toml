@@ -5,6 +5,7 @@ members = [
 # Browser bindings are built explicitly for wasm32-unknown-unknown.
 default-members = [
   "crates/cli",
+  "crates/common",
   "crates/config",
   "crates/database",
   "crates/migration",
@@ -70,6 +71,7 @@ mem_forget = "warn"
 
 [workspace.dependencies]
 # workspace crates
+docparse-common = { version = "0.1.0", path = "crates/common" }
 docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-database = { version = "0.1.0", path = "crates/database" }

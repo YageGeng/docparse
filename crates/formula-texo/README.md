@@ -18,6 +18,7 @@ Configure the existing formula section:
 
 ```toml
 [formula]
+queue_size = 8
 inline_enabled = true
 display_enabled = true
 batch_size = 8
@@ -25,7 +26,7 @@ timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
-sessions = 2
+session_size = 2
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
@@ -73,17 +74,17 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   to CPU. Dynamic cache outputs receive fresh bindings at each step to avoid
   overwriting still-live inputs. Their allocation device is validated at runtime.
 - Native calls share a bounded crop queue across pages and documents. Each of
-  `formula.engine.sessions` independent owners holds its own encoder, decoder,
+  `formula.engine.session_size` independent owners holds its own encoder, decoder,
   tokenizer, and execution thread. An idle owner drains ready crops up to
   `formula.batch_size`; it never waits to fill a batch. Queue capacity is
-  `sessions * batch_size` crops, in addition to active batches. Parser crop admission is shared across pages
-  and bounded to twice the total model batch capacity. Results return in each caller's original order.
-  Caller batches enter atomically. Full batches stay intact; ready partial tails
-  may be combined or split to fill a model batch. Canceled crops do not consume
+  `formula.queue_size` crops, in addition to active batches. Parser crop admission is shared across pages
+  and bounded to `queue_size + session_size * batch_size`. Results return in each caller's original order.
+  Caller packets of at most `min(batch_size, queue_size)` enter atomically. Ready packets may be combined or split to fill
+  a model batch, regardless of their original caller boundaries. Canceled crops do not consume
   its batch slots, and unconsumed tails still count toward queue capacity.
 - Session count defaults to one and accepts 1..8 on native targets. Every extra
-  session duplicates model/runtime resources. Browser workers require one session
-  and use a bounded per-crop ready queue under the global inference guard.
+  session duplicates model/runtime resources. Browser sessions share a bounded
+  per-crop ready queue under the global inference guard.
 - Core submits crops independently with a shared pre-crop admission budget and
   replenishes work as each crop completes, instead of waiting for page chunks.
 - Cancellation skips queued crops and pads canceled rows at decoder boundaries.

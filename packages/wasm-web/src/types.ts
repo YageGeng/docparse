@@ -40,8 +40,8 @@ export type ModelSource =
 
 /** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
 export type FormulaEngineOptions =
-  | { type: "pp" }
-  | { type: "texo"; sessions?: 1 }
+  | { type: "pp"; session_size?: number }
+  | { type: "texo"; session_size?: number }
   | { type: "mineru"; server_url: string; concurrency?: number };
 
 /** Explicit model resources. Omitted type retains the existing PP-only source shape. */
@@ -57,15 +57,19 @@ export interface OcrArtifacts { detection: ModelSource; recognition: ModelSource
 export interface OcrOptions {
   policy?: "disabled" | "missing_regions" | "always";
   detection_max_side?: number; detection_threshold?: number; box_threshold?: number; unclip_ratio?: number;
-  /** Native line batch bound; browser inference currently uses one line per call. */
-  batch_size?: number;
+  /** Each model owns its own shared queue and independently configured consumers. */
+  detection: { queue_size: number; session_size?: number; batch_size?: number };
+  recognition: { queue_size: number; session_size?: number; batch_size?: number };
+  orientation: { queue_size: number; session_size?: number; batch_size?: number };
   max_candidates?: number; recognition_max_width?: number; recognition_threshold?: number;
   classify_orientation?: boolean; orientation_threshold?: number; timeout_ms?: number;
 }
 
 /** Business settings retain the native configuration's field names. */
 export interface WebParseConfig {
-  formula?: {
+  formula: {
+    /** Required pending-crop capacity, shared by the selected formula engine. */
+    queue_size: number;
     /** Defaults to Texo; custom formulaArtifacts select their type when this option is omitted. */
     engine?: FormulaEngineOptions;
     /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
@@ -75,15 +79,16 @@ export interface WebParseConfig {
     batch_size?: number;
     timeout_ms?: number;
   };
-  /** Layout model sessions; browser validation currently permits one. */
-  layout?: { score_threshold?: number; sessions?: number };
+  /** Independent layout sessions share one ready-page queue; ORT Web calls remain globally guarded. */
+  layout: { queue_size: number; score_threshold?: number; session_size?: number; batch_size?: number };
   /** Structure and detector batch_size independently cap ready crops per ONNX invocation. */
-  tsr?: TableOptions & { batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection?: { enabled?: boolean; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
-  /** stage_pages counts owned pages per document in each pipeline stage. */
-  runtime?: { stage_pages?: number; render_queue_capacity?: number; blocking_task_limit?: number; continue_on_page_error?: boolean };
-  render?: { dpi?: number; max_long_edge_pixels?: number };
+  tsr: TableOptions & { queue_size: number; session_size?: number; batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection: { queue_size: number; enabled?: boolean; session_size?: number; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
+  /** Page failures may preserve native content; render controls all scheduling capacity. */
+  runtime?: { continue_on_error?: boolean };
+  /** One browser PDFium Worker; queue_size counts pages until actual processing finishes. */
+  render: { workers: 1; queue_size: number; dpi?: number; max_long_edge_pixels?: number };
   fusion?: Partial<Record<"minimum_line_coverage" | "center_minimum_line_coverage" | "assignment_coverage_weight" | "assignment_center_weight" | "assignment_baseline_weight" | "assignment_confidence_weight" | "assignment_specificity_weight" | "paragraph_gap_multiplier" | "indent_tolerance_points" | "font_size_tolerance_points" | "estimated_font_size_tolerance_points", number>>;
-  ocr?: OcrOptions;
+  ocr: OcrOptions;
   output?: { formula_placeholder?: string; include_evidence?: boolean; include_diagnostics?: boolean };
 }
 
@@ -106,7 +111,8 @@ export interface WebParserOptions {
   executionProvider?: ExecutionProvider;
   /** Allows CPU initialization only when the requested GPU is unavailable; defaults to false. */
   allowCpuFallback?: boolean;
-  config?: WebParseConfig;
+  /** Explicit queue capacities are required even when other model settings use defaults. */
+  config: WebParseConfig;
   signal?: AbortSignal;
   onProgress?: (progress: ParserProgress) => void;
   onTiming?: (timing: ParserTiming) => void;
@@ -131,8 +137,8 @@ export interface PageImageResult { pageNumber: number; width: number; height: nu
 /** Structural recovery is scoped to regions already labeled table by layout. */
 export type TableMode = "rules_only" | "fallback" | "tsr_only";
 /** Per-parse table overrides; omitted options inherit the parser's configured TSR policy. */
-/** table_jobs limits in-flight table requests per parse, including shared-session queue waits. */
-export interface TableOptions { mode?: TableMode; table_jobs?: number; timeout_ms?: number }
+/** Table requests use provider-owned queue backpressure and a deadline that includes queue waiting. */
+export interface TableOptions { mode?: TableMode; timeout_ms?: number }
 /** An affine map from crop pixels to canonical viewport points. */
 export interface AffineTransform { a: number; b: number; c: number; d: number; e: number; f: number }
 /** Owned crop sent to the caller's structure provider; one-based page numbers match DocumentResult. */

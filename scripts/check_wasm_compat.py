@@ -13,8 +13,15 @@ ALLOWED.update({
     # The standalone Texo browser example keeps native/browser gating in its adapter.
     "crates/formula-texo/examples/browser/wasm_compat.rs",
     "crates/core/src/pdfium/input.rs",
-    "crates/core/src/wasm_compat/task_set/mod.rs",
-    "crates/layout/src/wasm_compat/timeout.rs",
+    # Shared native/browser adapters moved into common; keep their boundaries explicit.
+    "crates/common/src/lib.rs",
+    "crates/common/src/queue.rs",
+    "crates/common/src/runtime.rs",
+    "crates/common/src/task_set/mod.rs",
+    "crates/common/src/thread.rs",
+    "crates/common/src/timeout.rs",
+    # The thread-quota regression relies on Linux resource-limit enforcement.
+    "crates/common/tests/thread_startup.rs",
     "crates/core/src/pdfium/worker.rs",
     # This declaration-only module selects the optional native IPC implementation.
     "crates/core/src/pdfium/mod.rs",

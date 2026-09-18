@@ -1,4 +1,4 @@
-use docparse_layout::timing::{TimingStage, Timings};
+use docparse_common::timing::{TimingStage, Timings};
 
 /// Concurrent page scopes retain attribution and report elapsed time even on early returns.
 #[test]

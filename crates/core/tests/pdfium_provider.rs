@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
+use docparse_common::timing::Timings;
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_core::{LocalPdfiumProvider, PdfInput, PdfiumProvider};
-use docparse_layout::timing::Timings;
 
 /// The public provider must preserve owned text and raster data across its document session.
 #[tokio::test]

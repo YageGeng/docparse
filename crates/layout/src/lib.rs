@@ -1,6 +1,6 @@
 //! Layout detection interfaces and PP-DocLayoutV3 inference for docparse.
+//! Shared timing types are imported directly from docparse-common.
 
-pub mod timing;
 pub mod wasm_compat;
 pub use wasm_compat::*;
 

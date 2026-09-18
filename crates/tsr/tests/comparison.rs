@@ -1,10 +1,9 @@
+use docparse_common::timing::Timings;
 use docparse_config::{
     ConfigLoader, ModelFiles, TableCellConfig, TableCellModel, TsrModel,
     ValidatedConfig,
 };
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::{path::Path, sync::Arc};
 
 /// Both upgraded structure variants use real independent detections instead of invalid location heads.
@@ -48,6 +47,7 @@ async fn upgraded_models_produce_independent_cell_geometry() {
         let directory = root.join(format!("models/rtdetr-table-cell-{suffix}"));
         raw.tsr.cell_detection = Some(
             TableCellConfig::builder()
+                .queue_size(1)
                 .model(cell_model)
                 .score_threshold(0.3)
                 .files(

@@ -11,6 +11,9 @@ pub use engine::{OcrArtifacts, PaddleOcrEngine, RecognizedText};
 /// Typed failures from OCR artifacts, preprocessing and ONNX execution.
 #[derive(Debug, thiserror::Error)]
 pub enum OcrError {
+    /// Retains the original error when one physical model failure affects several callers.
+    #[error("shared OCR batch failed: {0}")]
+    Shared(#[source] std::sync::Arc<OcrError>),
     #[error("OCR artifact verification failed: {0}")]
     Artifacts(#[from] docparse_layout::ModelManifestError),
     #[error("OCR backend failed: {0}")]
@@ -18,7 +21,7 @@ pub enum OcrError {
     #[error("OCR runtime failed: {0}")]
     Runtime(#[from] ort::Error),
     #[error("OCR worker failed: {0}")]
-    Task(#[from] docparse_layout::wasm_compat::TaskError),
+    Task(#[from] docparse_common::TaskError),
     #[error("OCR geometry failed: {0}")]
     Geometry(#[from] docparse_layout::GeometryError),
     #[error("invalid OCR data: {0}")]

@@ -237,7 +237,7 @@ fn startup_uses_configured_log_directives() {
         ),
     ] {
         // An empty database URL stops valid logging setups immediately, keeping this test independent of services and models.
-        std::fs::write(&path, format!("[log]\ndirectives = {configured:?}\n"))
+        std::fs::write(&path, format!("render.workers = 1\nrender.queue_size = 2\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 1\nocr.orientation.queue_size = 1\nformula.queue_size = 1\n[log]\ndirectives = {configured:?}\n"))
             .expect("configuration");
         let mut command =
             std::process::Command::new(env!("CARGO_BIN_EXE_docparse-server"));

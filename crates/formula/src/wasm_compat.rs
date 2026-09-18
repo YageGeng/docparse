@@ -6,11 +6,8 @@ use crate::{
     preprocess::FormulaInput,
     queue::{BatchTimings, FormulaQueue, FormulaRequest},
 };
-use docparse_layout::{
-    PageImage,
-    timing::{TimingStage, Timings},
-    wasm_compat::OnnxBackend,
-};
+use docparse_common::timing::{TimingStage, Timings};
+use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
 use ort::{session::builder::SessionBuilder, value::Tensor};
 use std::sync::Arc;
 
@@ -21,16 +18,20 @@ mod platform {
 
     /// One thread owns model construction, all batches and destruction.
     pub(crate) struct SessionRunner {
+        // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
+        workers: Vec<docparse_common::ThreadManager>,
     }
 
     impl SessionRunner {
-        /// Loads the selected provider, using the validated CPU compatibility executor on Apple.
+        /// Loads consumers over an explicitly sized queue, using the CPU compatibility executor on Apple.
         pub(crate) async fn load(
             artifacts: FormulaArtifacts,
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
+            session_size: usize,
+            queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
@@ -44,38 +45,48 @@ mod platform {
                     kind.as_str()
                 );
             }
-            let session = SessionWorker::new(move || {
-                // A stable CPU batch is required on Apple; register other compiled accelerators normally.
-                let mut builder = if coreml_incompatible {
-                    ort::session::Session::builder()?
-                } else {
-                    SessionBuilder::try_from(backend)?
-                }
-                .with_intra_threads(1)
-                .map_err(ort::Error::from)?;
-                let session = builder.commit_from_memory(&artifacts.model)?;
-                Ok::<_, FormulaError>((
-                    session,
-                    FormulaDecoder::new(&artifacts.tokenizer)?,
-                ))
-            })
-            .await?;
-            let (queue, mut receiver) = FormulaQueue::new(batch_size);
-            crate::spawn_worker(Box::pin(async move {
-                while let Some(first) = receiver.recv().await {
-                    let mut requests =
-                        FormulaRequest::ready(first, &mut receiver, batch_size);
+            let (queue, receiver) = FormulaQueue::new(queue_size);
+            let mut runner = Self {
+                queue,
+                workers: Vec::with_capacity(session_size),
+            };
+            for _ in 0..session_size {
+                let model = Arc::clone(&artifacts.model);
+                let tokenizer = Arc::clone(&artifacts.tokenizer);
+                let session = SessionWorker::new(move || {
+                    // A stable CPU batch is required on Apple; register other compiled accelerators normally.
+                    let mut builder = if coreml_incompatible {
+                        ort::session::Session::builder()?
+                            // This CPU compatibility path bypasses the shared backend defaults.
+                            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::All)
+                            .map_err(ort::Error::from)?
+                    } else {
+                        SessionBuilder::try_from(backend)?
+                    }
+                    // Formula decoding has changing intermediate shapes; disable cached memory patterns.
+                    .with_memory_pattern(false)
+                    .map_err(ort::Error::from)?
+                    .with_intra_threads(1)
+                    .map_err(ort::Error::from)?;
+                    let session = builder.commit_from_memory(&model)?;
+                    Ok::<_, FormulaError>((
+                        session,
+                        FormulaDecoder::new(&tokenizer)?,
+                    ))
+                })
+                .await?;
+                let receiver = receiver.clone();
+                runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                while let Some(batch) = receiver.recv().await {
+                    let mut requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
-                    }
-                    for request in &mut requests {
-                        request.end_queue();
                     }
                     let images = requests
                         .iter()
                         .map(|request| Arc::clone(&request.image))
                         .collect::<Vec<_>>();
-                    let timings = BatchTimings::from(requests.as_slice());
+                    let timings: BatchTimings = requests.iter().map(|request| &request.context).collect();
                     tracing::debug!(
                         "PP formula session running {} ready crops",
                         images.len()
@@ -126,8 +137,9 @@ mod platform {
                     );
                 }
                 tracing::debug!("closed native PP formula queue");
-            }))?;
-            Ok(Arc::new(Self { queue }))
+            }))?);
+            }
+            Ok(Arc::new(runner))
         }
 
         /// Enqueues independent crops into the shared session queue.
@@ -169,7 +181,7 @@ mod platform {
                     "PP loader requires formula.engine.type = pp".into(),
                 ));
             };
-            let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
+            let artifacts = docparse_common::run_cpu(move || {
                 let read = |path: &std::path::Path| {
                     std::fs::read(path).map(Arc::from).map_err(|error| {
                         FormulaError::Artifacts(format!(
@@ -194,7 +206,9 @@ mod platform {
 mod platform {
     use super::*;
     pub(crate) struct SessionRunner {
+        // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
+        workers: Vec<docparse_common::ThreadManager>,
     }
 
     impl SessionRunner {
@@ -204,29 +218,36 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
+            session_size: usize,
+            queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
-            let mut session = SessionBuilder::try_from(backend)?
-                .commit_from_memory(&artifacts.model)
-                .await?;
-            let decoder = FormulaDecoder::new(&artifacts.tokenizer)?;
-            let options = ort::session::RunOptions::new()?;
-            let (queue, mut receiver) = FormulaQueue::new(batch_size);
-            crate::spawn_worker(Box::pin(async move {
-                while let Some(first) = receiver.recv().await {
+            let (queue, receiver) = FormulaQueue::new(queue_size);
+            let mut runner = Self {
+                queue,
+                workers: Vec::with_capacity(session_size),
+            };
+            for _ in 0..session_size {
+                // Browser formula sessions use the same memory policy as the native decoder.
+                let mut session = SessionBuilder::try_from(backend)?
+                    .with_memory_pattern(false)
+                    .map_err(ort::Error::from)?
+                    .commit_from_memory(&artifacts.model)
+                    .await?;
+                let decoder = FormulaDecoder::new(&artifacts.tokenizer)?;
+                let options = ort::session::RunOptions::new()?;
+                let receiver = receiver.clone();
+                runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                while let Some(batch) = receiver.recv().await {
                     let _guard = OnnxBackend::inference_guard().await;
-                    let mut requests =
-                        FormulaRequest::ready(first, &mut receiver, batch_size);
+                    let requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
-                    }
-                    for request in &mut requests {
-                        request.end_queue();
                     }
                     let images = requests
                         .iter()
                         .map(|request| Arc::clone(&request.image))
                         .collect::<Vec<_>>();
-                    let timings = BatchTimings::from(requests.as_slice());
+                    let timings: BatchTimings = requests.iter().map(|request| &request.context).collect();
                     tracing::debug!(
                         "browser PP formula session running {} ready crops",
                         images.len()
@@ -246,8 +267,9 @@ mod platform {
                     FormulaRequest::complete_batch(requests, result);
                 }
                 tracing::debug!("closed browser PP formula queue");
-            }))?;
-            Ok(Arc::new(Self { queue }))
+            }))?);
+            }
+            Ok(Arc::new(runner))
         }
 
         /// Enqueues owned pixels and preserves each caller's cancellation and result order.
@@ -271,22 +293,3 @@ mod platform {
 }
 
 pub(crate) use platform::SessionRunner;
-
-/// Starts an engine-owned actor on the current native runtime or browser Worker.
-pub fn spawn_worker(
-    future: docparse_layout::wasm_compat::WasmBoxedFuture<'static, ()>,
-) -> Result<(), FormulaError> {
-    #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
-    {
-        let runtime =
-            tokio::runtime::Handle::try_current().map_err(|error| {
-                FormulaError::Invalid(format!(
-                    "formula queue requires a Tokio runtime: {error}"
-                ))
-            })?;
-        runtime.spawn(future);
-    }
-    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-    wasm_bindgen_futures::spawn_local(future);
-    Ok(())
-}

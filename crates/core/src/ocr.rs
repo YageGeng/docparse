@@ -24,7 +24,7 @@ pub struct OcrRequest {
     pub native_text_coverage: f64,
     /// Shared stage observations remain separate from deterministic OCR results.
     #[builder(default)]
-    pub timings: docparse_layout::timing::Timings,
+    pub timings: docparse_common::timing::Timings,
 }
 
 /// One raw OCR fact before DocParse assigns stable source-result indices.
@@ -59,8 +59,7 @@ pub enum OcrError {
 
 /// Public asynchronous extension point for caller-provided OCR implementations.
 pub trait OcrEngine:
-    docparse_layout::wasm_compat::WasmCompatSend
-    + docparse_layout::wasm_compat::WasmCompatSync
+    docparse_common::WasmCompatSend + docparse_common::WasmCompatSync
 {
     /// Returns a stable human-readable engine name for diagnostics.
     fn name(&self) -> &str;
@@ -69,10 +68,7 @@ pub trait OcrEngine:
     fn recognize(
         &self,
         request: OcrRequest,
-    ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
-        '_,
-        Result<OcrResult, OcrError>,
-    >;
+    ) -> docparse_common::WasmBoxedFuture<'_, Result<OcrResult, OcrError>>;
 }
 mod builtin;
 mod index;

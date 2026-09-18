@@ -1,9 +1,10 @@
 //! Bounded per-crop admission and ready-only batching shared by formula engines.
 use crate::FormulaError;
-use docparse_layout::{
-    PageImage,
-    timing::{StageTimer, TimingStage, Timings},
-};
+pub use docparse_common::timing::BatchTimings;
+use docparse_common::timing::TimingContext;
+use docparse_common::timing::{StageTimer, TimingStage, Timings};
+use docparse_common::{Queue, SessionRequest};
+use docparse_layout::PageImage;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use typed_builder::TypedBuilder;
@@ -16,8 +17,8 @@ pub struct FormulaQueue {
 
 impl FormulaQueue {
     /// Creates a bounded crop queue; capacity must be positive, as with Tokio channels.
-    pub fn new(capacity: usize) -> (Self, mpsc::Receiver<FormulaRequest>) {
-        let (sender, receiver) = mpsc::channel(capacity);
+    pub fn new(capacity: usize) -> (Self, Queue<FormulaRequest>) {
+        let (sender, receiver) = Queue::new(capacity);
         (Self { sender }, receiver)
     }
 
@@ -44,9 +45,7 @@ impl FormulaQueue {
                 .image(image)
                 .response(response)
                 .queued(Some(timings.start(TimingStage::FormulaQueue)))
-                .timings(timings.clone())
-                .span(tracing::Span::current())
-                .dispatch(tracing::dispatcher::get_default(Clone::clone))
+                .context(TimingContext::new(timings.clone()))
                 .build();
             async move {
                 self.sender.send(request).await.map_err(|_closed| {
@@ -64,13 +63,14 @@ impl FormulaQueue {
 /// Owned input, reply, and timing context for a single independently cancelable crop.
 #[derive(TypedBuilder)]
 pub struct FormulaRequest {
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
     pub image: Arc<PageImage>,
-    pub timings: Timings,
+    pub context: TimingContext,
     response: oneshot::Sender<Result<String, FormulaError>>,
     #[builder(default)]
     queued: Option<StageTimer>,
-    span: tracing::Span,
-    dispatch: tracing::Dispatch,
 }
 
 impl FormulaRequest {
@@ -87,48 +87,19 @@ impl FormulaRequest {
     /// Finishes admission timing under the original caller's tracing context.
     pub fn end_queue(&mut self) {
         let timer = self.queued.take();
-        tracing::dispatcher::with_default(&self.dispatch, || {
-            self.span.in_scope(|| drop(timer))
-        });
-    }
-
-    /// Drains only already-ready crops; canceled entries never use a model batch slot.
-    pub fn ready(
-        first: Self,
-        receiver: &mut mpsc::Receiver<Self>,
-        limit: usize,
-    ) -> Vec<Self> {
-        let mut batch = Vec::with_capacity(limit);
-        let mut next = Some(first);
-        while let Some(mut request) = next {
-            if request.cancelled() {
-                request.end_queue();
-            } else {
-                batch.push(request);
-            }
-            if batch.len() == limit {
-                break;
-            }
-            next = receiver.try_recv().ok();
-        }
-        batch
+        self.context.in_scope(|| drop(timer));
     }
 
     /// Completes one crop without letting a canceled caller affect its neighbors.
     pub fn complete(mut self, result: Result<String, FormulaError>) {
         self.end_queue();
-        tracing::dispatcher::with_default(&self.dispatch, || {
-            self.span.in_scope(|| {
-                if !self.response.is_closed()
-                    && let Err(error) = &result
-                {
-                    tracing::warn!(
-                        "queued formula recognition failed: {}",
-                        error
-                    );
-                }
-                let _ = self.response.send(result);
-            })
+        self.context.in_scope(|| {
+            if !self.response.is_closed()
+                && let Err(error) = &result
+            {
+                tracing::warn!("queued formula recognition failed: {}", error);
+            }
+            let _ = self.response.send(result);
         });
     }
 
@@ -163,51 +134,13 @@ impl FormulaRequest {
     }
 }
 
-/// Copies only attribution metadata into blocking model operations, never response ownership.
-pub struct BatchTimings(Vec<(Timings, tracing::Span, tracing::Dispatch)>);
-
-impl From<&[FormulaRequest]> for BatchTimings {
-    /// Preserves each crop's page, observer, and trace when a model batch spans callers.
-    fn from(requests: &[FormulaRequest]) -> Self {
-        Self(
-            requests
-                .iter()
-                .map(|request| {
-                    (
-                        request.timings.clone(),
-                        request.span.clone(),
-                        request.dispatch.clone(),
-                    )
-                })
-                .collect(),
-        )
+impl SessionRequest for FormulaRequest {
+    /// Uses original response ownership to cancel shared-queue work.
+    fn cancelled(&self) -> bool {
+        self.cancelled()
     }
-}
-
-impl BatchTimings {
-    /// Starts the same physical stage for every participating crop's observer.
-    pub fn start(&self, stage: TimingStage) -> BatchTimer {
-        BatchTimer(
-            self.0
-                .iter()
-                .map(|(timings, span, dispatch)| {
-                    (timings.start(stage), span.clone(), dispatch.clone())
-                })
-                .collect(),
-        )
-    }
-}
-
-/// Stage guards restore original tracing contexts before recording their elapsed intervals.
-pub struct BatchTimer(Vec<(StageTimer, tracing::Span, tracing::Dispatch)>);
-
-impl Drop for BatchTimer {
-    /// Emits timing records even when a model fails or an operation is canceled.
-    fn drop(&mut self) {
-        for (timer, span, dispatch) in self.0.drain(..) {
-            tracing::dispatcher::with_default(&dispatch, || {
-                span.in_scope(|| drop(timer))
-            });
-        }
+    /// Restores original timing attribution after the common queue releases its lock.
+    fn end_queue(&mut self) {
+        self.end_queue();
     }
 }

@@ -42,7 +42,7 @@ mod platform {
         }
         /// Waits off the async executor until all PDFium handles have been dropped.
         pub(crate) async fn join(self) -> Result<(), PdfiumRuntimeError> {
-            docparse_layout::wasm_compat::run_cpu(move || self.thread.join())
+            docparse_common::run_cpu(move || self.thread.join())
                 .await
                 .map_err(|_error| PdfiumRuntimeError::WorkerPanicked)?
                 .map_err(|_error| PdfiumRuntimeError::WorkerPanicked)

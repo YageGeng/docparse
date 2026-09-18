@@ -10,11 +10,9 @@ use typed_builder::TypedBuilder;
 pub struct RawConfig {
     pub layout: LayoutConfig,
     #[builder(default)]
-    #[serde(default)]
     pub tsr: TsrConfig,
     /// Optional formula recognition over existing layout detections.
     #[builder(default)]
-    #[serde(default)]
     pub formula: FormulaConfig,
     pub runtime: RuntimeConfig,
     pub render: RenderConfig,
@@ -60,12 +58,6 @@ pub struct ServerConfig {
     /// Maximum concurrent upload requests accepted by one server.
     #[builder(default = 4)]
     pub max_uploads: usize,
-    /// Maximum whole-document jobs per server; model-session counts are configured separately.
-    #[builder(default = 2)]
-    pub jobs: usize,
-    /// Hard limit on live PDFium child processes per server, independent of document jobs.
-    #[builder(default = 1)]
-    pub pdfium_workers: usize,
     #[builder(default = "127.0.0.1".to_owned(), setter(into))]
     pub host: String,
     #[builder(default = 8080)]
@@ -157,29 +149,51 @@ impl Default for RawConfig {
 
 /// Formula engine selection and shared bounded inference policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct FormulaConfig {
+    /// Required pending-crop capacity, independent of model sessions and batch size.
+    pub queue_size: usize,
     /// Recognize detected inline formulas; false preserves their native text and layout.
+    #[serde(default = "FormulaConfig::default_enabled")]
     #[builder(default = true)]
     pub inline_enabled: bool,
     /// Recognize detected display formulas independently of inline recognition.
+    #[serde(default = "FormulaConfig::default_enabled")]
     #[builder(default = true)]
     pub display_enabled: bool,
     /// Explicit recognizer selection; model paths or service settings belong to its variant.
+    #[serde(default)]
     #[builder(default)]
     pub engine: FormulaEngineConfig,
     /// Maximum ready crops per local model invocation; MinerU uses its HTTP concurrency limit.
+    #[serde(default = "FormulaConfig::default_batch_size")]
     #[builder(default = 4)]
     pub batch_size: usize,
     /// Per-crop parser deadline including pre-crop admission and shared model queue time.
+    #[serde(default = "FormulaConfig::default_timeout_ms")]
     #[builder(default = 120_000)]
     pub timeout_ms: u64,
+}
+
+impl FormulaConfig {
+    /// Preserves optional recognition switches while keeping queue_size required during deserialization.
+    const fn default_enabled() -> bool {
+        true
+    }
+    /// Preserves the existing batch default independently of the required queue capacity.
+    const fn default_batch_size() -> usize {
+        4
+    }
+    /// Preserves the existing deadline for partial serialized formula options.
+    const fn default_timeout_ms() -> u64 {
+        120_000
+    }
 }
 
 impl Default for FormulaConfig {
     /// Enables both formula kinds unless the caller explicitly disables either one.
     fn default() -> Self {
-        Self::builder().build()
+        Self::builder().queue_size(4).build()
     }
 }
 
@@ -257,10 +271,14 @@ impl Default for FormulaEngineConfig {
     }
 }
 
-/// Files used only by the PP-FormulaNet recognizer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Files and session count used only by the PP-FormulaNet recognizer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct PpFormulaConfig {
+    /// Independent model consumers sharing one crop queue, matching Texo's session policy.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub session_size: usize,
     /// ONNX graph for the selected PP-FormulaNet variant.
     pub model_path: PathBuf,
     /// Matching ByteLevel BPE tokenizer.
@@ -272,12 +290,13 @@ pub struct PpFormulaConfig {
 impl Default for PpFormulaConfig {
     /// Uses the existing pinned PP-FormulaNet Plus-S artifact set.
     fn default() -> Self {
-        Self {
-            model_path: "models/pp-formulanet-plus-s/inference.onnx".into(),
-            tokenizer_path: "models/pp-formulanet-plus-s/tokenizer.json".into(),
-            model_manifest_path:
+        Self::builder()
+            .model_path("models/pp-formulanet-plus-s/inference.onnx".into())
+            .tokenizer_path("models/pp-formulanet-plus-s/tokenizer.json".into())
+            .model_manifest_path(
                 "models/pp-formulanet-plus-s/model-manifest.json".into(),
-        }
+            )
+            .build()
     }
 }
 
@@ -285,9 +304,9 @@ impl Default for PpFormulaConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TexoFormulaConfig {
-    /// Shared native session pairs; browser workers support exactly one.
+    /// Independent encoder/decoder owners consuming the same crop queue.
     #[builder(default = 1)]
-    pub sessions: usize,
+    pub session_size: usize,
     /// Image encoder ONNX graph.
     pub encoder_path: PathBuf,
     /// Merged first-step/cached decoder ONNX graph.
@@ -311,12 +330,18 @@ impl Default for TexoFormulaConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutConfig {
+    /// Required pending-page capacity shared by all layout sessions.
+    pub queue_size: usize,
     pub model_path: PathBuf,
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub score_threshold: f64,
     /// Independent ONNX sessions shared by all documents; each executes one layout inference at a time.
-    pub sessions: usize,
+    pub session_size: usize,
+    /// Maximum ready pages per physical layout inference; short batches run immediately.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub batch_size: usize,
 }
 
 impl Default for LayoutConfig {
@@ -331,31 +356,24 @@ impl Default for LayoutConfig {
                 "models/pp-doclayout-v3/model-manifest.json",
             ))
             .score_threshold(0.5)
-            .sessions(1)
+            .session_size(1)
+            .queue_size(1)
             .build()
     }
 }
 
-/// Bounds for document-level asynchronous and blocking work.
+/// Page failure policy; shared render delivery capacity is configured under RenderConfig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
-    /// Maximum owned pages per document in each analysis stage, including queued and completed pages.
-    pub stage_pages: usize,
-    pub render_queue_capacity: usize,
-    pub blocking_task_limit: usize,
-    pub continue_on_page_error: bool,
+    /// The shorter key retains continuation after recoverable page failures, not fatal document errors.
+    pub continue_on_error: bool,
 }
 
 impl Default for RuntimeConfig {
-    /// Builds conservative default concurrency limits.
+    /// Preserves native fallback when an individual page cannot be rendered.
     fn default() -> Self {
-        Self::builder()
-            .stage_pages(4)
-            .render_queue_capacity(2)
-            .blocking_task_limit(4)
-            .continue_on_page_error(true)
-            .build()
+        Self::builder().continue_on_error(true).build()
     }
 }
 
@@ -363,6 +381,10 @@ impl Default for RuntimeConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct RenderConfig {
+    /// Required process count; idle PDFium workers alone admit new documents.
+    pub workers: usize,
+    /// Required shared capacity for pages reserved through actual processing completion.
+    pub queue_size: usize,
     pub dpi: u32,
     pub max_long_edge_pixels: u32,
 }
@@ -370,7 +392,12 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     /// Builds the default rasterization quality limits.
     fn default() -> Self {
-        Self::builder().dpi(144).max_long_edge_pixels(2400).build()
+        Self::builder()
+            .workers(1)
+            .queue_size(16)
+            .dpi(144)
+            .max_long_edge_pixels(2400)
+            .build()
     }
 }
 
@@ -448,22 +475,38 @@ impl ModelFiles {
     }
 }
 
+/// Preserves a single session and singleton batch for newly introduced inference settings.
+const fn default_session_size() -> usize {
+    1
+}
+
+/// One OCR model owns its own sessions, ready queue, and model batch limit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(deny_unknown_fields)]
+pub struct OcrModelConfig {
+    /// Required pending-input capacity shared by this model's consumers.
+    pub queue_size: usize,
+    #[serde(flatten)]
+    pub files: ModelFiles,
+    /// Number of independently owned ONNX sessions consuming the same queue.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub session_size: usize,
+    /// Maximum ready inputs; incompatible tensor shapes remain separate physical batches.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub batch_size: usize,
+}
+
 /// Built-in PaddleOCR artifacts, inference limits and native-text enrichment policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct OcrConfig {
     pub policy: OcrPolicy,
-    /// Bounds overlapping page pipelines independently of individual model-session locks.
-    #[builder(default = Self::default_max_in_flight())]
-    #[serde(default = "OcrConfig::default_max_in_flight")]
-    pub max_in_flight: usize,
-    /// Bounds text lines per model call; exact-width groups retain single-line padding semantics.
-    #[builder(default = Self::default_batch_size())]
-    #[serde(default = "OcrConfig::default_batch_size")]
-    pub batch_size: usize,
-    pub detection: ModelFiles,
-    pub recognition: ModelFiles,
-    pub orientation: ModelFiles,
+    /// Model-specific limits replace the ambiguous shared OCR batch size.
+    pub detection: OcrModelConfig,
+    pub recognition: OcrModelConfig,
+    pub orientation: OcrModelConfig,
     pub detection_max_side: u32,
     pub detection_threshold: f64,
     pub box_threshold: f64,
@@ -476,28 +519,37 @@ pub struct OcrConfig {
     pub timeout_ms: u64,
 }
 
-impl OcrConfig {
-    /// Amortizes native inference calls without duplicating model sessions.
-    const fn default_batch_size() -> usize {
-        16
-    }
-
-    /// Allows detection for one page to overlap recognition for another on native backends.
-    const fn default_max_in_flight() -> usize {
-        2
-    }
-}
-
 impl Default for OcrConfig {
     /// Builds the default disabled OCR policy.
     fn default() -> Self {
         Self::builder()
             .policy(OcrPolicy::default())
-            .detection(ModelFiles::in_directory("models/pp-ocrv6-medium-det"))
-            .recognition(ModelFiles::in_directory("models/pp-ocrv6-medium-rec"))
-            .orientation(ModelFiles::in_directory(
-                "models/pp-lcnet-textline-ori",
-            ))
+            .detection(
+                OcrModelConfig::builder()
+                    .queue_size(1)
+                    .files(ModelFiles::in_directory(
+                        "models/pp-ocrv6-medium-det",
+                    ))
+                    .build(),
+            )
+            .recognition(
+                OcrModelConfig::builder()
+                    .queue_size(16)
+                    .files(ModelFiles::in_directory(
+                        "models/pp-ocrv6-medium-rec",
+                    ))
+                    .batch_size(16)
+                    .build(),
+            )
+            .orientation(
+                OcrModelConfig::builder()
+                    .queue_size(16)
+                    .files(ModelFiles::in_directory(
+                        "models/pp-lcnet-textline-ori",
+                    ))
+                    .batch_size(16)
+                    .build(),
+            )
             .detection_max_side(2048)
             .detection_threshold(0.2)
             .box_threshold(0.45)
@@ -566,8 +618,13 @@ pub enum TableCellModel {
 
 /// Independently verified detection artifacts and the acceptance threshold for cells.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
-#[serde(default)]
 pub struct TableCellConfig {
+    /// Required pending-crop capacity independent of structure-model admission.
+    pub queue_size: usize,
+    /// Independent detector sessions consume the same ready crop queue.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub session_size: usize,
     /// Allows layered profiles to disable the default detector without removing its paths.
     #[builder(default = true)]
     pub enabled: bool,
@@ -585,6 +642,7 @@ impl Default for TableCellConfig {
     fn default() -> Self {
         Self::builder()
             .model(TableCellModel::Wireless)
+            .queue_size(1)
             .files(ModelFiles::in_directory(
                 "models/rtdetr-table-cell-wireless",
             ))
@@ -597,22 +655,27 @@ impl Default for TableCellConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct TsrConfig {
+    /// Required pending-crop capacity shared by all structure sessions.
+    pub queue_size: usize,
+    /// Independent structure sessions consume the same ready crop queue.
+    #[serde(default = "default_session_size")]
+    #[builder(default = 1)]
+    pub session_size: usize,
     #[serde(default)]
     #[builder(default)]
     pub model: TsrModel,
-    #[serde(default = "TsrConfig::default_cell_detection")]
+    // A missing section must not silently enable a detector with an implicit capacity; explicit null still disables it.
+    #[serde(deserialize_with = "Option::deserialize")]
     #[builder(default = TsrConfig::default_cell_detection())]
     pub cell_detection: Option<TableCellConfig>,
     pub model_path: PathBuf,
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub mode: TableMode,
-    /// Maximum ready crops combined into one structure call, independently of table-job admission.
+    /// Maximum ready crops combined into one structure call; the model queue provides backpressure.
     #[serde(default = "TsrConfig::default_batch_size")]
     #[builder(default = Self::default_batch_size())]
     pub batch_size: usize,
-    /// Maximum in-flight table requests per document, including model queue waits; does not create sessions.
-    pub table_jobs: usize,
     pub timeout_ms: u64,
 }
 
@@ -633,6 +696,7 @@ impl Default for TsrConfig {
     fn default() -> Self {
         Self::builder()
             .model_path(PathBuf::from("models/slanet-plus/inference.onnx"))
+            .queue_size(1)
             .model_config_path(PathBuf::from(
                 "models/slanet-plus/inference.yml",
             ))
@@ -640,7 +704,6 @@ impl Default for TsrConfig {
                 "models/slanet-plus/model-manifest.json",
             ))
             .mode(TableMode::default())
-            .table_jobs(2)
             .timeout_ms(60_000)
             .build()
     }

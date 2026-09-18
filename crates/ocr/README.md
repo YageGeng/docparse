@@ -14,13 +14,23 @@ backends. Browser sessions use the configured WebGPU or CPU WASM backend. Model
 outputs are validated before decoding, and cancelled callers cannot release
 buffers still used by ONNX Runtime.
 
-Native OCR groups equal-width text lines for recognition, preserving each line's
-single-input padding and restoring detection order after inference. Orientation
-uses fixed-size inputs and fills its batches across recognition-width boundaries. Set
-`ocr.batch_size` (1–32, default 16) to bound both recognition and orientation
-calls independently of `ocr.max_in_flight`, which controls overlapping pages.
-Batch 1 retains the previous line scheduling for comparisons. Only the current
-batch's crops are allocated; browser inference remains capped at one line.
+Detection, recognition, and orientation each own a shared queue with independently
+configured `session_size` (1–8, default 1), `batch_size` (1–32), and required
+`queue_size` (pending inputs) under
+`ocr.detection`, `ocr.recognition`, and `ocr.orientation`. Detection defaults to
+batch 1; recognition and orientation default to 16. The former top-level
+`ocr.batch_size` is rejected.
+
+Callers submit individual pages or text lines. Each idle consumer drains only
+ready inputs, runs short batches immediately, and groups equal tensor dimensions
+without changing a line's original padding. Results return in detection order.
+The retired `ocr.max_in_flight` setting is rejected. Pages enter the model
+queues without an extra page semaphore on either native or browser builds.
+Line crop preparation retains a window derived from active batch capacity plus
+`queue_size`; queued model work is consumed by `session_size` owners. Native
+sessions outlive their construction runtime.
+Browser sessions share the same queue and retain the global ORT execution guard.
+
 Recognition probabilities use an eight-lane CPU validation/max reduction before
 CTC decoding. This retains exact first-index ties and rejects non-finite or
 out-of-range values, without copying the full vocabulary tensor or adding threads.

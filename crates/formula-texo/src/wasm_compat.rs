@@ -30,7 +30,7 @@ mod platform {
                     "Texo loader requires formula.engine.type = texo".into(),
                 ));
             };
-            let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
+            let artifacts = docparse_common::run_cpu(move || {
                 TexoArtifacts::try_from(&paths)
             })
             .await??;
@@ -91,12 +91,9 @@ mod platform {
 mod platform {
     use super::*;
     use crate::preprocess::FormulaInput;
+    use docparse_common::timing::{TimingStage, Timings};
     use docparse_formula::queue::{BatchTimings, FormulaQueue, FormulaRequest};
-    use docparse_layout::{
-        PageImage,
-        timing::{TimingStage, Timings},
-        wasm_compat::OnnxBackend,
-    };
+    use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
     use ort::{session::builder::SessionBuilder, value::Tensor};
     use ort_web::{SyncDirection, ValueExt};
 
@@ -112,68 +109,84 @@ mod platform {
             backend: OnnxBackend,
             config: &docparse_config::FormulaConfig,
         ) -> Result<Arc<Self>, FormulaError> {
-            let mut encoder_builder = SessionBuilder::try_from(backend)?;
-            let mut decoder_builder = SessionBuilder::try_from(backend)?;
-            if backend.execution_provider()
-                == docparse_layout::ExecutionProvider::WebGpu
-            {
-                encoder_builder = encoder_builder
+            let docparse_config::FormulaEngineConfig::Texo(texo) =
+                &config.engine
+            else {
+                return Err(FormulaError::Invalid(
+                    "Texo session manager requires the Texo engine".into(),
+                ));
+            };
+            let batch_size = config.batch_size;
+            let (queue, receiver) = FormulaQueue::new(config.queue_size);
+            for _ in 0..texo.session_size {
+                // Match native Texo's variable-batch and growing-cache memory policy on both graphs.
+                let mut encoder_builder = SessionBuilder::try_from(backend)?
+                    .with_memory_pattern(false)
+                    .map_err(ort::Error::from)?;
+                let mut decoder_builder = SessionBuilder::try_from(backend)?
+                    .with_memory_pattern(false)
+                    .map_err(ort::Error::from)?;
+                if backend.execution_provider()
+                    == docparse_layout::ExecutionProvider::WebGpu
+                {
+                    encoder_builder = encoder_builder
                     .with_config_entry(
                         "ort_web.preferred_output_location.last_hidden_state",
                         "gpu-buffer",
                     )
                     .map_err(ort::Error::from)?;
-                for name in crate::model::PRESENT_NAMES {
+                    for name in crate::model::PRESENT_NAMES {
+                        decoder_builder = decoder_builder
+                            .with_config_entry(
+                                format!(
+                                    "ort_web.preferred_output_location.{name}"
+                                ),
+                                "gpu-buffer",
+                            )
+                            .map_err(ort::Error::from)?;
+                    }
                     decoder_builder = decoder_builder
                         .with_config_entry(
-                            format!("ort_web.preferred_output_location.{name}"),
-                            "gpu-buffer",
+                            "ort_web.preferred_output_location.logits",
+                            "cpu",
                         )
                         .map_err(ort::Error::from)?;
                 }
-                decoder_builder = decoder_builder
-                    .with_config_entry(
-                        "ort_web.preferred_output_location.logits",
-                        "cpu",
-                    )
-                    .map_err(ort::Error::from)?;
-            }
-            let encoder = encoder_builder
-                .commit_from_memory(&artifacts.encoder)
-                .await?;
-            let decoder = decoder_builder
-                .commit_from_memory(&artifacts.decoder)
-                .await?;
-            let mut sessions = ModelSessions {
-                encoder,
-                decoder,
-                tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
-            };
-            let options = ort::session::RunOptions::new()?;
-            let batch_size = config.batch_size;
-            let (queue, mut receiver) = FormulaQueue::new(batch_size);
-            docparse_formula::spawn_worker(Box::pin(async move {
-                while let Some(first) = receiver.recv().await {
-                    // Drain after acquiring the browser runtime so ready requests can accumulate during another model's work.
-                    let _guard = OnnxBackend::inference_guard().await;
-                    let mut requests =
-                        FormulaRequest::ready(first, &mut receiver, batch_size);
-                    if requests.is_empty() {
-                        continue;
-                    }
-                    for request in &mut requests {
-                        request.end_queue();
-                    }
-                    let images = requests
-                        .iter()
-                        .map(|request| Arc::clone(&request.image))
-                        .collect::<Vec<_>>();
-                    let timings = BatchTimings::from(requests.as_slice());
-                    tracing::debug!(
-                        "browser Texo session running {} ready crops",
-                        images.len()
-                    );
-                    let result = async {
+                let encoder = encoder_builder
+                    .commit_from_memory(&artifacts.encoder)
+                    .await?;
+                let decoder = decoder_builder
+                    .commit_from_memory(&artifacts.decoder)
+                    .await?;
+                let mut sessions = ModelSessions {
+                    encoder,
+                    decoder,
+                    tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
+                };
+                let options = ort::session::RunOptions::new()?;
+                let receiver = receiver.clone();
+                docparse_common::ThreadManager::spawn_async(Box::pin(
+                    async move {
+                        while let Some(batch) = receiver.recv().await {
+                            // Drain after acquiring the browser runtime so ready requests can accumulate during another model's work.
+                            let _guard = OnnxBackend::inference_guard().await;
+                            let requests = batch.take_ready(batch_size);
+                            if requests.is_empty() {
+                                continue;
+                            }
+                            let images = requests
+                                .iter()
+                                .map(|request| Arc::clone(&request.image))
+                                .collect::<Vec<_>>();
+                            let timings: BatchTimings = requests
+                                .iter()
+                                .map(|request| &request.context)
+                                .collect();
+                            tracing::debug!(
+                                "browser Texo session running {} ready crops",
+                                images.len()
+                            );
+                            let result = async {
                         let batch = images.len();
                         let preprocessing = timings.start(TimingStage::FormulaPreprocess);
                         let input = FormulaInput::try_from(images)?;
@@ -195,10 +208,12 @@ mod platform {
                         let _decoding = timings.start(TimingStage::FormulaDecode);
                         Ok(generation.decode(&sessions.tokenizer))
                     }.await;
-                    FormulaRequest::complete_batch(requests, result);
-                }
-                tracing::debug!("closed browser Texo queue");
-            }))?;
+                            FormulaRequest::complete_batch(requests, result);
+                        }
+                        tracing::debug!("closed browser Texo queue");
+                    },
+                ))?;
+            }
             Ok(Arc::new(Self { queue }))
         }
 

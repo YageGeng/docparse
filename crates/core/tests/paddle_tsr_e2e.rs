@@ -1,11 +1,11 @@
 //! Real-model acceptance driven by explicit local PDF paths, never a fixture provider.
+use docparse_common::timing::TimingStage;
 use docparse_config::{ConfigLoader, TableMode, ValidatedConfig};
 use docparse_core::{
     DocParser, ParseObserver, ParseProgress, TableStructureEngine,
     TableStructureError, TableStructureSource, Timing, TsrGeometryPolicy,
     TsrTableInput, TsrTableRequest,
 };
-use docparse_layout::timing::TimingStage;
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -144,7 +144,7 @@ async fn refresh_tsr_captured_predictions() {
         value["prediction"] = match engine
             .predict(
                 Arc::new(input),
-                docparse_layout::timing::Timings::default(),
+                docparse_common::timing::Timings::default(),
             )
             .await
         {
@@ -328,7 +328,7 @@ async fn real_pdfs_use_configured_table_model() {
     std::fs::write(output.join("report.json"), serde_json::to_vec_pretty(&json!({"status":overall_status,"mode":mode,"model":model_manifest.as_ref().map(|manifest| manifest.repository.as_str()),"revision":model_manifest.as_ref().map(|manifest| manifest.revision.as_str()),"initialization_ms":initialized_ms,"runs":runs})).expect("report")).expect("write report");
 }
 
-/// All default models must initialize from owned bytes even when every configured path is absent.
+/// Layout and table models use owned bytes, and a single render delivery is reused across real pages.
 #[tokio::test]
 #[ignore = "requires installed pinned layout and TSR artifacts"]
 async fn explicit_parser_artifacts_never_load_configured_paths() {
@@ -353,6 +353,10 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
     .expect("cell bytes");
     let absent = tempfile::tempdir().expect("empty model directory");
     let mut raw = docparse_config::RawConfig::default();
+    // This byte-artifact test supplies layout and tables only; one delivery also checks repeated capacity release.
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.render.queue_size = 1;
     let cell_files = &mut raw
         .tsr
         .cell_detection
@@ -389,7 +393,7 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
     .await
     .expect("byte-only construction");
     let bytes = std::fs::read(
-        root.join("crates/core/tests/fixtures/pdf/extraction_metadata.pdf"),
+        root.join("crates/core/tests/fixtures/pdf/multipage_layout.pdf"),
     )
     .expect("real PDF");
     let document = parser
@@ -397,5 +401,5 @@ async fn explicit_parser_artifacts_never_load_configured_paths() {
         .await
         .expect("real inference");
     assert!(document.errors.is_empty());
-    assert_eq!(document.pages.len(), 1);
+    assert_eq!(document.pages.len(), 3);
 }

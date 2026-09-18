@@ -1,52 +1,68 @@
 //! Native task scheduling with owned cancellation and tracing context.
-use crate::wasm_compat::{TaskError, WasmBoxedFuture, WasmCompatSend};
+use crate::{TaskError, WasmBoxedFuture, WasmCompatSend};
 use std::future::Future;
 use tracing::{Instrument, instrument::WithSubscriber};
 
 /// Native task collection retaining Tokio scheduling and cancellation semantics.
-pub(crate) struct TaskSet<T: WasmCompatSend + 'static> {
+pub struct TaskSet<T: WasmCompatSend + 'static> {
     tasks: tokio::task::JoinSet<T>,
+}
+
+impl<T: WasmCompatSend + 'static> Default for TaskSet<T> {
+    /// Creates the same empty owned task collection as the explicit constructor.
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: WasmCompatSend + 'static> TaskSet<T> {
     /// Creates an empty bounded-by-caller task group.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tasks: tokio::task::JoinSet::new(),
         }
     }
     /// Returns the number of tasks awaiting collection.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.tasks.len()
     }
     /// Reports whether every task has been collected.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.tasks.is_empty()
     }
     /// Starts native work immediately using the active Tokio runtime.
-    pub(crate) fn spawn<F: Future<Output = T> + WasmCompatSend + 'static>(
+    pub fn spawn<F: Future<Output = T> + WasmCompatSend + 'static>(
         &mut self,
         future: F,
     ) {
         // Span identity and the caller's dispatcher must both survive a scheduler hop.
-        self.tasks
-            .spawn(future.in_current_span().with_current_subscriber());
+        let lease = crate::PageLease::current();
+        self.tasks.spawn(
+            async move {
+                match lease {
+                    Some(lease) => lease.scope(future).await,
+                    None => future.await,
+                }
+            }
+            .in_current_span()
+            .with_current_subscriber(),
+        );
     }
     /// Collects one completion with a platform-neutral failure.
-    pub(crate) async fn join_next(&mut self) -> Option<Result<T, TaskError>> {
+    pub async fn join_next(&mut self) -> Option<Result<T, TaskError>> {
         self.tasks
             .join_next()
             .await
             .map(|result| result.map_err(TaskError::from))
     }
     /// Cancels async callers without pretending to stop an already-running blocking closure.
-    pub(crate) fn abort_all(&mut self) {
+    pub fn abort_all(&mut self) {
         self.tasks.abort_all();
     }
 }
 
 /// Starts an owned native task; dropping its completion future aborts pending work.
-pub(crate) fn spawn<F>(
+pub fn spawn<F>(
     future: F,
 ) -> WasmBoxedFuture<'static, Result<F::Output, TaskError>>
 where

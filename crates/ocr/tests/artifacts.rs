@@ -7,9 +7,9 @@ async fn configured_files_are_loaded_without_directory_conventions() {
     let directory = tempfile::tempdir().expect("artifact directory");
     let mut config = OcrConfig::default();
     for (name, files) in [
-        ("detect", &mut config.detection),
-        ("recognize", &mut config.recognition),
-        ("orient", &mut config.orientation),
+        ("detect", &mut config.detection.files),
+        ("recognize", &mut config.recognition.files),
+        ("orient", &mut config.orientation.files),
     ] {
         files.model_path = directory.path().join(format!("{name}.onnx"));
         files.model_config_path = directory.path().join(format!("{name}.yaml"));
@@ -36,12 +36,12 @@ async fn configured_files_are_loaded_without_directory_conventions() {
         assert_eq!(&*files.config, format!("{name}-config").as_bytes());
         assert_eq!(&*files.manifest, format!("{name}-manifest").as_bytes());
     }
-    std::fs::remove_file(&config.orientation.model_path)
+    std::fs::remove_file(&config.orientation.files.model_path)
         .expect("remove orientation");
     assert!(matches!(
         OcrArtifacts::from_config(&config).await,
         Err(docparse_ocr::OcrError::Artifacts(docparse_layout::ModelManifestError::Read { path, .. }))
-            if path == config.orientation.model_path
+            if path == config.orientation.files.model_path
     ));
     config.classify_orientation = false;
     assert!(

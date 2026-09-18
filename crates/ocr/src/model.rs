@@ -1,6 +1,7 @@
 //! Pinned OCR contracts and bounded output readback shared by every execution provider.
 use crate::{OcrError, decode::CtcSteps, detect::DetectionMap};
-use docparse_layout::{ModelContract, timing::TimingStage};
+use docparse_common::timing::TimingStage;
+use docparse_layout::ModelContract;
 use ndarray::{Ix2, Ix3, Ix4};
 use ort::session::{Session, SessionOutputs};
 
@@ -87,7 +88,7 @@ impl ModelKind {
         self,
         outputs: &SessionOutputs<'_>,
         batch_size: usize,
-    ) -> Result<ModelOutput, OcrError> {
+    ) -> Result<Vec<ModelOutput>, OcrError> {
         let (_, output) = outputs.iter().next().ok_or_else(|| {
             OcrError::InvalidData("OCR returned no output".into())
         })?;
@@ -106,35 +107,39 @@ impl ModelKind {
             Self::Detection => {
                 let array =
                     array.into_dimensionality::<Ix4>().map_err(shape_error)?;
-                let (batch, channels, height, width) = array.dim();
-                if batch != 1
-                    || channels != 1
+                let (_batch, channels, height, width) = array.dim();
+                if channels != 1
                     || height == 0
                     || width == 0
                     || height > 4096
                     || width > 4096
                 {
                     return Err(OcrError::InvalidData(
-                        "invalid [1,1,H,W] detector output".into(),
+                        "invalid [B,1,H,W] detector output".into(),
                     ));
                 }
-                Ok(ModelOutput::Detection(DetectionMap(
-                    array
-                        .index_axis(ndarray::Axis(0), 0)
-                        .index_axis(ndarray::Axis(0), 0)
-                        .to_owned(),
-                )))
+                Ok(array
+                    .outer_iter()
+                    .map(|page| {
+                        ModelOutput::Detection(DetectionMap(
+                            page.index_axis(ndarray::Axis(0), 0).to_owned(),
+                        ))
+                    })
+                    .collect())
             }
+
             Self::Recognition => {
                 let array =
                     array.into_dimensionality::<Ix3>().map_err(shape_error)?;
-                Ok(ModelOutput::Recognition(
-                    array
-                        .outer_iter()
-                        .map(CtcSteps::try_from)
-                        .collect::<Result<_, _>>()?,
-                ))
+                array
+                    .outer_iter()
+                    .map(|row| {
+                        CtcSteps::try_from(row)
+                            .map(|steps| ModelOutput::Recognition(vec![steps]))
+                    })
+                    .collect()
             }
+
             Self::Orientation => {
                 let array =
                     array.into_dimensionality::<Ix2>().map_err(shape_error)?;
@@ -149,16 +154,16 @@ impl ModelKind {
                 }
                 let normal = array.column(0);
                 let rotated = array.column(1);
-                Ok(ModelOutput::Orientation(
-                    normal
-                        .iter()
-                        .zip(rotated.iter())
-                        .map(|(&normal, &rotated)| Orientation {
+                Ok(normal
+                    .iter()
+                    .zip(rotated.iter())
+                    .map(|(&normal, &rotated)| {
+                        ModelOutput::Orientation(vec![Orientation {
                             rotated: rotated > normal,
                             confidence: f64::from(normal.max(rotated)),
-                        })
-                        .collect(),
-                ))
+                        }])
+                    })
+                    .collect())
             }
         }
     }

@@ -1,11 +1,10 @@
 //! Formula enrichment retains native ownership and one result for every original model region.
 use super::RenderedPage;
 use crate::{FormulaResult, ModelRegionId, PageResult, PageWarning};
+use docparse_common::timing::Timings;
 use docparse_config::ValidatedConfig;
 use docparse_formula::{FormulaEngine, FormulaError};
-use docparse_layout::{
-    Bbox, LayoutDetection, LayoutLabel, PageImage, timing::Timings,
-};
+use docparse_layout::{Bbox, LayoutDetection, LayoutLabel, PageImage};
 use futures_util::{StreamExt, stream};
 use std::sync::Arc;
 
@@ -484,15 +483,19 @@ impl PageResult {
         let batch_size = config.formula().batch_size;
         let parallelism = match &config.formula().engine {
             docparse_config::FormulaEngineConfig::Texo(texo) => {
-                batch_size * texo.sessions
+                batch_size * texo.session_size
             }
-            docparse_config::FormulaEngineConfig::Pp(_) => batch_size,
+            docparse_config::FormulaEngineConfig::Pp(pp) => {
+                batch_size * pp.session_size
+            }
             docparse_config::FormulaEngineConfig::Mineru(mineru) => {
                 mineru.concurrency
             }
         };
-        // Keep one executing window and one ready window, without retaining every page crop at once.
-        let window = (parallelism * 2).min(formulas.len()).max(1);
+        // Bound crop preparation by active execution plus the explicitly configured pending queue.
+        let window = (parallelism + config.formula().queue_size)
+            .min(formulas.len())
+            .max(1);
         tracing::info!(
             "submitting {} formula regions on page {} to shared queues with window {}",
             formulas.len(),
@@ -505,7 +508,7 @@ impl PageResult {
                 let result = crate::wasm_compat::timeout(std::time::Duration::from_millis(config.formula().timeout_ms), async {
                 let engine = engine.ok_or_else(|| FormulaError::Invalid("formula recognizer unavailable".into()))?;
                 let _admission = if let Some(admission) = engine.admission() {
-                    let queued = timings.start(docparse_layout::timing::TimingStage::FormulaQueue);
+                    let queued = timings.start(docparse_common::timing::TimingStage::FormulaQueue);
                     let permit = admission.acquire_owned().await.map_err(|error| FormulaError::Invalid(format!("formula admission closed: {error}")))?;
                     drop(queued);
                     Some(permit)
@@ -875,7 +878,7 @@ mod tests {
             &self,
             images: Vec<Arc<PageImage>>,
             _timings: Timings,
-        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        ) -> docparse_common::WasmBoxedFuture<
             '_,
             Result<Vec<String>, FormulaError>,
         > {

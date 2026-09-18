@@ -32,7 +32,7 @@ an explicitly selected single model; use `--models-dir` for an alternative root.
 
 Texo installs `encoder_model.onnx`, `decoder_model_merged.onnx`, and `tokenizer.json`
 under `models/texo`, matching the default formula configuration. Its
-[author-published artifacts](https://huggingface.co/alephpi/FormulaNet/tree/63e04c86fc96c2324811114351eeea8118bf6b28/onnx)
+[author-published artifacts](https://huggingface.co/alephpi/FormulaNet/tree/b2668efe5112082846fde4d446b9bfaab3989533/onnx)
 use the revision and SHA-256 hashes pinned by `docparse-formula-texo`; the manifest
 records their AGPL-3.0 license separately from the other models' Apache-2.0 license.
 

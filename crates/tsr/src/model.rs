@@ -5,10 +5,8 @@ use crate::{
     preprocess::{CellInput, ModelInput, SlanetInput},
     wasm_compat::SessionRunner,
 };
-use docparse_layout::{
-    PageImage,
-    timing::{TimingStage, Timings},
-};
+use docparse_common::timing::{TimingStage, Timings};
+use docparse_layout::PageImage;
 use ndarray::{Array2, Array3, Axis, Ix1, Ix2, Ix3};
 use ort::session::SessionOutputs;
 use serde::Deserialize;
@@ -27,7 +25,7 @@ pub enum TsrError {
     #[error("TSR ONNX Runtime failed: {0}")]
     Ort(#[from] ort::Error),
     #[error("TSR worker failed: {0}")]
-    Task(#[from] docparse_layout::wasm_compat::TaskError),
+    Task(#[from] docparse_common::TaskError),
     #[error("invalid TSR model configuration: {reason}")]
     InvalidModel { reason: String },
     #[error("invalid TSR input or output: {reason}")]
@@ -408,36 +406,35 @@ impl SlanetPlusEngine {
             model,
             artifacts.model.len()
         );
-        let (artifacts, dictionary) =
-            docparse_layout::wasm_compat::run_cpu(move || {
-                let contract = kind.contract();
-                artifacts.verify_against(&contract)?;
-                let config: InferenceConfig = serde_yml::from_slice(
-                    &artifacts.config,
-                )
-                .map_err(|error| TsrError::InvalidModel {
-                    reason: error.to_string(),
+        let (artifacts, dictionary) = docparse_common::run_cpu(move || {
+            let contract = kind.contract();
+            artifacts.verify_against(&contract)?;
+            let config: InferenceConfig =
+                serde_yml::from_slice(&artifacts.config).map_err(|error| {
+                    TsrError::InvalidModel {
+                        reason: error.to_string(),
+                    }
                 })?;
-                if format!("PaddlePaddle/{}_onnx", config.global.model_name)
-                    != contract.repository
-                {
-                    return Err(TsrError::InvalidModel {
-                        reason: "TSR YAML does not match the selected model"
-                            .to_owned(),
-                    });
-                }
-                let mut dictionary = config.postprocess.character_dict;
-                dictionary.retain(|token| token != "<td>");
-                dictionary.insert(0, "sos".to_owned());
-                dictionary.extend(["<td></td>".to_owned(), "eos".to_owned()]);
-                if dictionary.len() != 50 {
-                    return Err(TsrError::InvalidModel {
-                        reason: "SLANet_plus needs 50 token classes".to_owned(),
-                    });
-                }
-                Ok::<_, TsrError>((artifacts, dictionary))
-            })
-            .await??;
+            if format!("PaddlePaddle/{}_onnx", config.global.model_name)
+                != contract.repository
+            {
+                return Err(TsrError::InvalidModel {
+                    reason: "TSR YAML does not match the selected model"
+                        .to_owned(),
+                });
+            }
+            let mut dictionary = config.postprocess.character_dict;
+            dictionary.retain(|token| token != "<td>");
+            dictionary.insert(0, "sos".to_owned());
+            dictionary.extend(["<td></td>".to_owned(), "eos".to_owned()]);
+            if dictionary.len() != 50 {
+                return Err(TsrError::InvalidModel {
+                    reason: "SLANet_plus needs 50 token classes".to_owned(),
+                });
+            }
+            Ok::<_, TsrError>((artifacts, dictionary))
+        })
+        .await??;
         let backend =
             docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
         let provider = backend.execution_provider();
@@ -447,6 +444,8 @@ impl SlanetPlusEngine {
             backend,
             kind,
             config.tsr().batch_size,
+            config.tsr().session_size,
+            config.tsr().queue_size,
         )
         .await
         .map_err(|error| {
@@ -480,7 +479,7 @@ impl SlanetPlusEngine {
                         .to_owned(),
                 })?;
             let kind = ModelKind::Cells(cells.model);
-            let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
+            let artifacts = docparse_common::run_cpu(move || {
                 artifacts.verify_against(&kind.contract())?;
                 Ok::<_, TsrError>(artifacts)
             })
@@ -498,6 +497,8 @@ impl SlanetPlusEngine {
                     ),
                     kind,
                     cells.batch_size,
+                    cells.session_size,
+                    cells.queue_size,
                 )
                 .await?,
                 cells.score_threshold,
@@ -578,7 +579,7 @@ impl SlanetPlusEngine {
         if let Some((detector, threshold)) = &self.detector {
             let timer = timings.start(TimingStage::TableCellPreprocess);
             let crop = Arc::clone(&original);
-            let input = docparse_layout::wasm_compat::run_cpu(move || {
+            let input = docparse_common::run_cpu(move || {
                 CellInput::try_from(crop.as_ref())
             })
             .await??;
@@ -638,7 +639,7 @@ impl SlanetPlusEngine {
         let (width, height) = (image.width(), image.height());
         let preparing = timings.clone();
         let edge = ModelKind::Structure(self.model).edge();
-        let input = docparse_layout::wasm_compat::run_cpu(move || {
+        let input = docparse_common::run_cpu(move || {
             let _timer = preparing.start(TimingStage::TsrPreprocess);
             SlanetInput::try_from((image.as_ref(), edge))
         })

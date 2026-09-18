@@ -8,6 +8,7 @@ Local changes:
 
 - `_loader.js`: use `globalThis` and load the ESM runtime in module Workers without DOM shims.
 - `api.rs`: forward requested output names through the existing `run_with_fetches` binding.
+- `api.rs`: forward graph optimization and memory pattern options instead of silently accepting the upstream no-op stubs. `crates/web/tests/session_options.mjs` checks the real SDK-to-ORT boundary for Layout, TSR, cell detection, OCR, PP formula, and Texo sessions.
 - `session.rs` and `tensor.rs`: invoke JavaScript `release`/`dispose` when Rust owners drop; session release runs asynchronously on the local executor.
 - `_memory.js`, `binding/mod.rs`, `lib.rs`, and `tensor.rs`: enable resizable WASM buffers before runtime initialization and borrow stable input views. Engines without that capability retain safe input snapshots because asynchronous inference may overlap parser heap growth. The host must declare a memory maximum and adapt its wasm-bindgen text codec glue for resizable buffers; DocParse does this in its Web build. Explicit synchronization remains available. ORT still copies CPU inputs into its own WASM heap.
 - `binding/tensor.rs`: suppress existing dead-code warnings for optional binding descriptors.

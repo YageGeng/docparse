@@ -21,11 +21,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, instrument::WithSubscriber};
 use typed_builder::TypedBuilder;
 
-/// Worker limits bound parser memory separately from HTTP concurrency and persisted queue length.
+/// Durable attempt supervision remains independent of PDFium-owned document admission.
 #[derive(Clone, TypedBuilder)]
 pub struct WorkerOptions {
-    #[builder(default = 2)]
-    pub concurrency: usize,
     #[builder(default = 60)]
     pub lease_seconds: i32,
     #[builder(default = 3)]
@@ -37,9 +35,7 @@ pub struct WorkerOptions {
 impl WorkerOptions {
     /// Validates supervision budgets for both queue workers and explicitly invoked attempts.
     pub fn validate(&self) -> ApiResult<()> {
-        if self.concurrency == 0
-            || self.concurrency > 128
-            || !(3..=86400).contains(&self.lease_seconds)
+        if !(3..=86400).contains(&self.lease_seconds)
             || !(1..=100).contains(&self.max_attempts)
             || self.job_timeout.is_zero()
         {
@@ -88,54 +84,61 @@ impl ParseObserver for ProgressObserver {
 
 impl Worker {
     /// Stops claiming on shutdown and drains already accepted attempts; forced exits recover by lease expiry.
-    pub async fn run(self, shutdown: CancellationToken) -> ApiResult<()> {
+    pub async fn run(
+        self,
+        pool: Arc<crate::pdfium_pool::PdfiumPool>,
+        shutdown: CancellationToken,
+    ) -> ApiResult<()> {
         self.options.validate()?;
         let mut tasks = JoinSet::new();
+        let mut next_poll = tokio::time::Instant::now();
         loop {
             if shutdown.is_cancelled() && tasks.is_empty() {
                 return Ok(());
             }
-            if !shutdown.is_cancelled()
-                && tasks.len() < self.options.concurrency
-            {
-                match Jobs::claim(
-                    &self.db,
-                    self.options.lease_seconds,
-                    self.options.max_attempts,
-                )
-                .await
-                {
-                    Ok(Some(lease)) => {
-                        let worker = self.clone();
-                        tasks.spawn(
-                            async move { worker.process(lease).await }
-                                .with_current_subscriber(),
-                        );
-                        continue;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        tracing::warn!("task claim failed; retrying: {}", error)
-                    }
-                }
-            }
             tokio::select! {
                 result = tasks.join_next(), if !tasks.is_empty() => {
-                    // Ordinary attempt failures are logged inside their PDF span before returning here.
-                    if let Some(Err(_)) = result {
-                        tracing::error!("worker task panicked or was cancelled; its lease will expire");
+                    if let Some(Err(_)) = result { tracing::error!("worker task panicked or was cancelled; its lease will expire"); }
+                }
+                reservation = async { tokio::time::sleep_until(next_poll).await; pool.reserve().await }, if !shutdown.is_cancelled() => {
+                    let reservation = reservation.map_err(|error| docparse_core::DocParseError::Runtime { source: Box::new(error) })
+                        .context(ParseSnafu { stage: "worker-reserve-pdfium", code: ApiCode::service_unavailable(5031003) })?;
+                    // Only idle PDFium ownership permits a claim; unfinished post-render tasks never gate this branch.
+                    let claimed = tokio::select! {
+                        _ = shutdown.cancelled() => { drop(reservation); continue; }
+                        result = Jobs::claim(&self.db, self.options.lease_seconds, self.options.max_attempts) => result,
+                    };
+                    match claimed {
+                        Ok(Some(lease)) => {
+                            let worker = self.clone();
+                            tasks.spawn(async move { worker.process_with_reservation(lease, Some(reservation)).await }.with_current_subscriber());
+                            next_poll = tokio::time::Instant::now();
+                        }
+                        outcome => {
+                            drop(reservation);
+                            if let Err(error) = outcome { tracing::warn!("task claim failed; retrying: {}", error); }
+                            next_poll = tokio::time::Instant::now() + Duration::from_millis(500);
+                        }
                     }
                 }
                 _ = shutdown.cancelled(), if !shutdown.is_cancelled() => {
                     tracing::info!("worker is draining {} in-flight jobs", tasks.len());
                 }
-                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
         }
     }
 
     /// Parses one fenced attempt while renewing its lease through PDF, inference, and result publication.
     pub async fn process(&self, lease: Lease) -> ApiResult<()> {
+        self.process_with_reservation(lease, None).await
+    }
+
+    /// Supervises a claimed job using its reserved process, while retaining the direct attempt API for callers.
+    async fn process_with_reservation(
+        &self,
+        lease: Lease,
+        reservation: Option<crate::pdfium_pool::PdfiumReservation>,
+    ) -> ApiResult<()> {
         // Recreate a local span from durable fields for every attempt; no process-local Span ID is persisted.
         let span = tracing::info_span!(target: crate::logging::CONTEXT_TARGET, parent: None, "pdf_parse",
             job_id = %lease.job.id, pdf_hash = %lease.job.input_hash, attempt = lease.job.attempts);
@@ -157,16 +160,16 @@ impl Worker {
             let mut operation = JoinSet::new();
             operation.spawn(async move {
                 let input = storage.path(&format!("{input_hash}.pdf"))?;
-                let result = parser
-                    .parse_path_with_options(
-                        input,
-                        ParseOptions::builder().observer(Some(&observer)).build(),
-                    )
-                    .await
-                    .context(ParseSnafu {
-                        stage: "document-parse-pdf",
-                        code: ApiCode::unprocessable_entity(4221001),
-                    })?;
+                let options = ParseOptions::builder().observer(Some(&observer)).build();
+                let result = if let Some(reservation) = reservation {
+                    observer.on_progress(ParseProgress::Opening);
+                    let session = reservation.open(docparse_core::PdfInput::Path(input), docparse_common::timing::Timings::default()).await
+                        .map_err(|error| docparse_core::DocParseError::Runtime { source: Box::new(error) })
+                        .context(ParseSnafu { stage: "document-open-pdf", code: ApiCode::unprocessable_entity(4221001) })?;
+                    parser.parse_session_with_options(session, options).await
+                } else {
+                    parser.parse_path_with_options(input, options).await
+                }.context(ParseSnafu { stage: "document-parse-pdf", code: ApiCode::unprocessable_entity(4221001) })?;
                 let mut temporary = storage.temporary().await?;
                 let writer_span = tracing::Span::current();
                 let writer_dispatcher = tracing::dispatcher::get_default(Clone::clone);
@@ -319,8 +322,8 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use docparse_common::timing::TimingStage;
     use docparse_core::Timing;
-    use docparse_layout::timing::TimingStage;
 
     /// HTTP workers expose slow model queues at INFO without logging every short stage.
     #[test]

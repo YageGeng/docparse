@@ -1,17 +1,15 @@
 //! Native Texo owners share a bounded ready-crop queue across pages and documents.
 use super::{Generation, MAX_LENGTH, ModelSessions, StepOutput};
 use crate::TexoArtifacts;
+use docparse_common::timing::TimingContext;
+use docparse_common::timing::{StageTimer, TimingStage, Timings};
+use docparse_common::{
+    SessionManager as SharedSessionManager, SessionRequest, run_cpu,
+};
 use docparse_formula::FormulaError;
-use docparse_layout::{
-    PageImage,
-    timing::{StageTimer, TimingStage, Timings},
-    wasm_compat::{OnnxBackend, TaskError, run_cpu},
-};
+use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
 use ort::{session::builder::SessionBuilder, value::Tensor};
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Condvar, Mutex},
-};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
@@ -19,14 +17,15 @@ type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
 /// One crop keeps its caller lifetime and attribution even when neighboring crops belong to other PDFs.
 #[derive(typed_builder::TypedBuilder)]
 struct Request {
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
     image: Arc<PageImage>,
     response: oneshot::Sender<Result<String, FormulaError>>,
     caller: Arc<oneshot::Sender<()>>,
-    timings: Timings,
+    context: TimingContext,
     #[builder(default)]
     queued: Option<StageTimer>,
-    span: tracing::Span,
-    dispatch: tracing::Dispatch,
 }
 
 impl Request {
@@ -38,9 +37,7 @@ impl Request {
     /// Ends admission timing outside the queue mutex while retaining the original tracing context.
     fn end_queue(&mut self) {
         let queued = self.queued.take();
-        tracing::dispatcher::with_default(&self.dispatch, || {
-            self.span.in_scope(|| drop(queued));
-        });
+        self.context.in_scope(|| drop(queued));
     }
 
     /// Attributes shared execution time to each original crop while preserving its page and tracing context.
@@ -49,17 +46,10 @@ impl Request {
         stage: TimingStage,
         operation: impl FnOnce() -> T,
     ) -> T {
-        let timers: Vec<_> = requests
-            .iter()
-            .map(|request| request.timings.start(stage))
-            .collect();
-        let result = operation();
-        for (request, timer) in requests.iter().zip(timers) {
-            tracing::dispatcher::with_default(&request.dispatch, || {
-                request.span.in_scope(|| drop(timer));
-            });
-        }
-        result
+        let timings: docparse_common::timing::BatchTimings =
+            requests.iter().map(|request| &request.context).collect();
+        let _timers = timings.start(stage);
+        operation()
     }
 
     /// Maps each ordered result to its original caller; only model-wide failures affect the entire batch.
@@ -80,193 +70,31 @@ impl Request {
                     "Texo batch failed: {error}"
                 ))),
             };
-            tracing::dispatcher::with_default(&request.dispatch, || {
-                request.span.in_scope(|| {
-                    if !cancelled && let Err(error) = &result {
-                        tracing::warn!("Texo crop failed: {}", error);
-                    }
-                    let _ = request.response.send(result);
-                });
+            request.context.in_scope(|| {
+                if !cancelled && let Err(error) = &result {
+                    tracing::warn!("Texo crop failed: {}", error);
+                }
+                let _ = request.response.send(result);
             });
         }
     }
 }
 
-/// Queue state counts individual crops even though admission publishes whole ready batches.
-#[derive(Default)]
-struct QueueState {
-    batches: VecDeque<Vec<Request>>,
-    crops: usize,
-    closed: bool,
-}
-
-/// Weighted bounded admission publishes each batch atomically and keeps unconsumed tails inside the capacity limit.
-struct BatchQueue {
-    state: Mutex<QueueState>,
-    changed: Condvar,
-    capacity: usize,
-}
-
-impl BatchQueue {
-    /// Creates a crop-counted queue without allocating buffers for its maximum capacity.
-    fn new(capacity: usize) -> Self {
-        Self {
-            state: Mutex::new(QueueState::default()),
-            changed: Condvar::new(),
-            capacity,
-        }
+impl SessionRequest for Request {
+    /// Shares cancellation filtering with every native model queue.
+    fn cancelled(&self) -> bool {
+        self.cancelled()
     }
-
-    /// Waits for room for the whole packet before making any of its crops visible to model owners.
-    fn push(&self, mut requests: Vec<Request>) -> Result<(), FormulaError> {
-        if requests.is_empty() || requests.len() > self.capacity {
-            return Err(FormulaError::Invalid(
-                "invalid Texo queue packet size".into(),
-            ));
-        }
-        let mut state = self.state.lock().map_err(|error| {
-            FormulaError::Invalid(format!("Texo queue poisoned: {error}"))
-        })?;
-        while !state.closed
-            && state.crops + requests.len() > self.capacity
-            && !requests.iter().all(Request::cancelled)
-        {
-            state = self.changed.wait(state).map_err(|error| {
-                FormulaError::Invalid(format!("Texo queue poisoned: {error}"))
-            })?;
-        }
-        if state.closed {
-            return Err(FormulaError::Invalid("Texo queue closed".into()));
-        }
-        if requests.iter().all(Request::cancelled) {
-            drop(state);
-            for request in &mut requests {
-                request.end_queue();
-            }
-            return Ok(());
-        }
-        state.crops += requests.len();
-        state.batches.push_back(requests);
-        self.changed.notify_all();
-        Ok(())
-    }
-
-    /// Preserves full packets, fills remaining capacity from ready tails, and excludes canceled crops from the limit.
-    fn pop(&self, limit: usize) -> Result<Option<Vec<Request>>, FormulaError> {
-        loop {
-            let mut state = self.state.lock().map_err(|error| {
-                FormulaError::Invalid(format!("Texo queue poisoned: {error}"))
-            })?;
-            while state.batches.is_empty() {
-                if state.closed {
-                    return Ok(None);
-                }
-                state = self.changed.wait(state).map_err(|error| {
-                    FormulaError::Invalid(format!(
-                        "Texo queue poisoned: {error}"
-                    ))
-                })?;
-            }
-            let mut requests = Vec::with_capacity(limit);
-            let mut cancelled = Vec::new();
-            // Only already-admitted packets participate: returning a partial batch never waits for another caller.
-            while requests.len() < limit {
-                let Some(front) = state.batches.front_mut() else {
-                    break;
-                };
-                let before = front.len();
-                cancelled.extend(
-                    front.extract_if(.., |request| request.cancelled()),
-                );
-                let count = front.len();
-                state.crops -= before - count;
-                if count == 0 {
-                    state.batches.pop_front();
-                    continue;
-                }
-                let remaining = limit - requests.len();
-                // A complete ready batch must not become fragments just because an earlier tail was short.
-                if count == limit && count > remaining {
-                    break;
-                }
-                let take = count.min(remaining);
-                if take == count {
-                    requests.extend(
-                        state.batches.pop_front().expect("inspected packet"),
-                    );
-                } else {
-                    requests.extend(
-                        state
-                            .batches
-                            .front_mut()
-                            .expect("inspected tail")
-                            .drain(..take),
-                    );
-                }
-                state.crops -= take;
-            }
-            self.changed.notify_all();
-            drop(state);
-            // Subscriber callbacks and pixel destruction must not serialize other owners' queue access.
-            for request in requests.iter_mut().chain(&mut cancelled) {
-                request.end_queue();
-            }
-            if !requests.is_empty() {
-                return Ok(Some(requests));
-            }
-        }
-    }
-
-    /// Wakes blocked producers and idle owners, including cleanup after partial model initialization.
-    fn close(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.closed = true;
-        state.crops = 0;
-        let discarded = std::mem::take(&mut state.batches);
-        self.changed.notify_all();
-        drop(state);
-        for mut packet in discarded {
-            for request in &mut packet {
-                request.end_queue();
-            }
-        }
+    /// Keeps original request attribution when the shared queue releases admission.
+    fn end_queue(&mut self) {
+        self.end_queue();
     }
 }
 
-/// Independent encoder/decoder owners consume one shared bounded queue whenever they become idle.
+/// Texo-specific generation policy delegates queue and thread ownership to common.
 pub(crate) struct SessionManager {
-    queue: Arc<BatchQueue>,
-    threads: Vec<std::thread::JoinHandle<()>>,
-    batch_size: usize,
-}
-
-/// Unexpected owner exit closes admission rather than leaving replies or producers waiting forever.
-struct SessionExit(Arc<BatchQueue>);
-
-impl Drop for SessionExit {
-    /// Also runs while unwinding a model panic; all queued response senders are released outside the queue lock.
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            tracing::error!("Texo session owner panicked; closing admission");
-        }
-        self.0.close();
-    }
-}
-
-impl Drop for SessionManager {
-    /// Closing admission wakes all idle owners before their model resources are joined and destroyed.
-    fn drop(&mut self) {
-        self.queue.close();
-        for thread in self.threads.drain(..) {
-            if thread.join().is_err() {
-                tracing::error!("Texo session thread panicked during shutdown");
-            }
-        }
-        tracing::debug!("closed native Texo session manager");
-    }
+    sessions: Arc<SharedSessionManager<Request>>,
+    packet_size: usize,
 }
 
 impl SessionManager {
@@ -282,18 +110,24 @@ impl SessionManager {
                 "Texo session manager requires the Texo engine".into(),
             ));
         };
-        let (sessions, batch_size) = (texo.sessions, config.batch_size);
+        let (sessions, batch_size, queue_size) =
+            (texo.session_size, config.batch_size, config.queue_size);
         let device = (backend.execution_provider()
             == docparse_layout::ExecutionProvider::Cuda)
             .then_some(ort::memory::AllocationDevice::CUDA);
         run_cpu(move || {
-            Self::start(sessions, batch_size, move || {
+            Self::start(sessions, batch_size, queue_size, move || {
+                // Both graphs handle varying batches and the decoder grows its cache at each step.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
+                        .with_memory_pattern(false)
+                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
+                        .with_memory_pattern(false)
+                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
@@ -311,81 +145,30 @@ impl SessionManager {
     fn start<F, W>(
         sessions: usize,
         batch_size: usize,
+        queue_size: usize,
         initialize: F,
     ) -> Result<Arc<Self>, FormulaError>
     where
         F: Fn() -> Result<W, FormulaError> + Send + Sync + 'static,
-        W: FnMut(&mut Vec<Request>) -> BatchResult,
+        W: FnMut(&mut Vec<Request>) -> BatchResult + 'static,
     {
-        if !(1..=8).contains(&sessions) || !(1..=32).contains(&batch_size) {
-            return Err(FormulaError::Invalid(
-                "invalid Texo session or batch capacity".into(),
-            ));
-        }
-        // One queued batch per owner bounds extra raster retention independently of document stage limits.
-        let queue = Arc::new(BatchQueue::new(batch_size * sessions));
-        let initialize = Arc::new(initialize);
-        let mut manager = Self {
-            queue: Arc::clone(&queue),
-            threads: Vec::with_capacity(sessions),
-            batch_size,
-        };
-        for index in 0..sessions {
-            let queue = Arc::clone(&queue);
-            let initialize = Arc::clone(&initialize);
-            let dispatch = tracing::dispatcher::get_default(Clone::clone);
-            let (ready, initialized) = oneshot::channel();
-            let thread = std::thread::Builder::new()
-                .name(format!("texo-session-{index}"))
-                .spawn(move || {
-                    let _exit = SessionExit(Arc::clone(&queue));
-                    tracing::dispatcher::with_default(&dispatch, || {
-                        let mut model = match initialize() {
-                            Ok(model) => model,
-                            Err(error) => {
-                                let _ = ready.send(Err(error));
-                                return;
-                            }
-                        };
-                        drop(initialize);
-                        if ready.send(Ok(())).is_err() {
-                            return;
-                        }
-                        loop {
-                            let mut requests = match queue.pop(batch_size) {
-                                Ok(Some(requests)) => requests,
-                                Ok(None) => break,
-                                Err(error) => {
-                                    tracing::error!(
-                                        "Texo request queue failed: {}",
-                                        error
-                                    );
-                                    break;
-                                }
-                            };
-                            tracing::debug!(
-                                "Texo session {} running {} ready crops",
-                                index,
-                                requests.len()
-                            );
-                            let result = model(&mut requests);
-                            Request::complete(requests, result);
-                        }
-                    });
-                })
-                .map_err(|error| TaskError::from_message(error.to_string()))?;
-            manager.threads.push(thread);
-            initialized.blocking_recv().map_err(|error| {
-                TaskError::from_message(error.to_string())
-            })??;
-        }
-        tracing::info!(
-            "started {} Texo sessions with batch limit {} and queue capacity {} crops",
+        let owners = SharedSessionManager::start(
             sessions,
             batch_size,
-            sessions * batch_size
-        );
-        Ok(Arc::new(manager))
+            queue_size,
+            move || {
+                let mut model = initialize()?;
+                Ok::<_, FormulaError>(move |mut requests: Vec<Request>| {
+                    let result = model(&mut requests);
+                    Request::complete(requests, result);
+                })
+            },
+        )?;
+        Ok(Arc::new(Self {
+            sessions: owners,
+            // Atomic producer packets must fit even when capacity is smaller than one inference batch.
+            packet_size: batch_size.min(queue_size),
+        }))
     }
 
     /// Publishes ready caller batches atomically and reconstructs crop order across independently completed model batches.
@@ -406,9 +189,7 @@ impl SessionManager {
                     .response(response)
                     .caller(Arc::clone(&caller))
                     .queued(Some(timings.start(TimingStage::FormulaQueue)))
-                    .timings(timings.clone())
-                    .span(tracing::Span::current())
-                    .dispatch(tracing::dispatcher::get_default(Clone::clone))
+                    .context(TimingContext::new(timings.clone()))
                     .build();
                 (request, receiver)
             })
@@ -416,19 +197,19 @@ impl SessionManager {
         // Retain the last manager owner off the inference/async threads through finite native work, including cancellation.
         run_cpu(move || {
             let mut responses = Vec::with_capacity(requests.len());
-            let mut packet = Vec::with_capacity(self.batch_size);
+            let mut packet = Vec::with_capacity(self.packet_size);
             for (request, receiver) in requests {
                 if caller.is_closed() {
                     break;
                 }
                 packet.push(request);
                 responses.push(receiver);
-                if packet.len() == self.batch_size {
-                    self.queue.push(std::mem::take(&mut packet))?;
+                if packet.len() == self.packet_size {
+                    self.sessions.send_batch(std::mem::take(&mut packet))?;
                 }
             }
             if !packet.is_empty() {
-                self.queue.push(packet)?;
+                self.sessions.send_batch(packet)?;
             }
             responses
                 .into_iter()
@@ -584,13 +365,15 @@ impl ModelSessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use docparse_common::queue::BlockingQueue as BatchQueue;
+    use std::sync::Mutex;
 
     /// A failed owner must wake callers blocked on either bounded admission or an unprocessed reply.
     #[tokio::test]
     #[allow(clippy::panic)] // Deliberately exercises the model owner's unwind cleanup.
     async fn panicked_owner_closes_pending_admission() {
         let manager = run_cpu(|| {
-            SessionManager::start(1, 2, || {
+            SessionManager::start(1, 2, 2, || {
                 Ok(|_: &mut Vec<Request>| -> BatchResult {
                     panic!("simulated model failure")
                 })
@@ -606,14 +389,14 @@ mod tests {
         )
         .await;
         // Always unblock the producer before asserting, including when testing a broken owner-exit path.
-        manager.queue.close();
+        manager.sessions.close();
         result
             .expect("owner failure must release queued callers")
             .expect_err("failed worker");
         run_cpu(move || drop(manager)).await.expect("shutdown");
     }
 
-    /// Full packets remain intact behind a partial batch, while partial tails can fill and spill without escaping capacity accounting.
+    /// Ready crops fill the limit across caller packet boundaries without escaping capacity accounting.
     #[test]
     fn full_batches_and_tail_spills_preserve_queue_accounting() {
         let queue = BatchQueue::new(19);
@@ -629,12 +412,11 @@ mod tests {
                 replies.push(reply);
                 lifetimes.push(lifetime);
             }
-            queue.push(packet).expect("capacity");
+            queue.push_batch(packet).expect("capacity");
         }
-        for (size, remaining) in [(2, 17), (8, 9), (8, 1), (1, 0)] {
-            let requests = queue.pop(8).expect("queue").expect("ready batch");
+        for size in [8, 8, 3] {
+            let requests = queue.pop(8).expect("ready batch");
             assert_eq!(requests.len(), size);
-            assert_eq!(queue.state.lock().expect("state").crops, remaining);
             let output = requests
                 .iter()
                 .map(|request| {
@@ -644,7 +426,7 @@ mod tests {
             Request::complete(requests, Ok(output));
         }
         queue.close();
-        assert!(queue.pop(8).expect("closed").is_none());
+        assert!(queue.pop(8).is_none());
         for (value, reply) in replies.into_iter().enumerate() {
             assert_eq!(
                 reply.blocking_recv().expect("reply").expect("result"),
@@ -659,7 +441,7 @@ mod tests {
         let records = Arc::new(Mutex::new(Vec::new()));
         let counts = Arc::clone(&records);
         let manager = run_cpu(move || {
-            SessionManager::start(2, 8, move || {
+            SessionManager::start(2, 8, 16, move || {
                 let counts = Arc::clone(&counts);
                 Ok(move |requests: &mut Vec<Request>| {
                     counts.lock().expect("records").push(requests.len());
@@ -706,7 +488,7 @@ mod tests {
         for page in [3, 7] {
             let (mut request, reply, lifetime) = request(page);
             let (timings, receiver) = Timings::channel();
-            request.timings = timings.for_page(u32::from(page));
+            request.context.timings = timings.for_page(u32::from(page));
             requests.push(request);
             observations.push(receiver);
             replies.push(reply);
@@ -757,9 +539,9 @@ mod tests {
                 .image(image)
                 .response(response)
                 .caller(Arc::new(caller))
-                .timings(Timings::default().for_page(u32::from(value)))
-                .span(tracing::Span::none())
-                .dispatch(tracing::dispatcher::get_default(Clone::clone))
+                .context(TimingContext::new(
+                    Timings::default().for_page(u32::from(value)),
+                ))
                 .build(),
             reply,
             lifetime,
@@ -774,13 +556,13 @@ mod tests {
         let mut lifetimes = Vec::new();
         for value in 0..5 {
             let (request, reply, lifetime) = request(value);
-            queue.push(vec![request]).expect("capacity");
+            queue.push_batch(vec![request]).expect("capacity");
             replies.push(reply);
             if value != 1 {
                 lifetimes.push(lifetime);
             }
         }
-        let requests = queue.pop(3).expect("queue").expect("first");
+        let requests = queue.pop(3).expect("first");
         assert_eq!(
             requests
                 .iter()
@@ -821,7 +603,7 @@ mod tests {
                 .expect("result"),
             "three"
         );
-        let requests = queue.pop(3).expect("queue").expect("tail");
+        let requests = queue.pop(3).expect("tail");
         assert_eq!(requests.len(), 1);
         Request::complete(requests, Ok(vec![Ok("four".into())]));
         for (reply, expected) in replies.into_iter().zip(["four"]) {
@@ -831,7 +613,7 @@ mod tests {
             );
         }
         queue.close();
-        assert!(queue.pop(3).expect("closed queue").is_none());
+        assert!(queue.pop(3).is_none());
     }
 
     /// Two owners execute concurrently, bounded admission backpressures, and canceling one caller preserves its peer.
@@ -850,7 +632,7 @@ mod tests {
         let _release = Release(Arc::clone(&gate));
         let worker_gate = Arc::clone(&gate);
         let manager = run_cpu(move || {
-            SessionManager::start(2, 2, move || {
+            SessionManager::start(2, 2, 3, move || {
                 let gate = Arc::clone(&worker_gate);
                 let started = started.clone();
                 Ok(move |requests: &mut Vec<Request>| {
@@ -906,29 +688,37 @@ mod tests {
         );
         let mut queued = Vec::new();
         let mut lifetimes = Vec::new();
-        for value in 20..24 {
+        for value in 20..23 {
             let (request, reply, lifetime) = request(value);
-            manager.queue.push(vec![request]).expect("bounded capacity");
+            manager
+                .sessions
+                .send_batch(vec![request])
+                .expect("bounded capacity");
             queued.push(reply);
             lifetimes.push(lifetime);
         }
         let mut packet = Vec::new();
-        for value in 24..26 {
+        for value in 23..24 {
             let (request, reply, lifetime) = request(value);
             packet.push(request);
             queued.push(reply);
             lifetimes.push(lifetime);
         }
-        let queue = Arc::clone(&manager.queue);
+        let queue = Arc::clone(&manager.sessions);
         let (entered, waiting) = oneshot::channel();
-        let blocked = tokio::task::spawn_blocking(move || {
+        let mut blocked = tokio::task::spawn_blocking(move || {
             let _ = entered.send(());
-            queue.push(packet)
+            queue.send_batch(packet)
         });
         waiting.await.expect("producer started");
-        assert_eq!(manager.queue.state.lock().expect("state").crops, 4);
+        // Three configured slots must block a fourth crop even though two sessions times two batch slots equals four.
         assert!(
-            !blocked.is_finished(),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                &mut blocked
+            )
+            .await
+            .is_err(),
             "a full queue must backpressure the complete packet"
         );
         let canceled = tasks.remove(0);
@@ -944,7 +734,7 @@ mod tests {
             .await
             .expect("producer")
             .expect("admitted after capacity release");
-        for (reply, expected) in queued.into_iter().zip(20..26) {
+        for (reply, expected) in queued.into_iter().zip(20..24) {
             assert_eq!(
                 reply.await.expect("reply").expect("crop"),
                 expected.to_string()
@@ -962,6 +752,43 @@ mod tests {
         run_cpu(move || drop(manager)).await.expect("shutdown");
     }
 
+    /// Producer packets split at queue capacity without losing order when one inference batch is larger.
+    #[tokio::test]
+    async fn queue_smaller_than_batch_accepts_every_crop() {
+        let manager = run_cpu(|| {
+            SessionManager::start(1, 8, 1, || {
+                Ok(|requests: &mut Vec<Request>| {
+                    Ok(requests
+                        .iter()
+                        .map(|request| {
+                            Ok(request
+                                .image
+                                .data()
+                                .first()
+                                .expect("pixel")
+                                .to_string())
+                        })
+                        .collect())
+                })
+            })
+        })
+        .await
+        .expect("startup task")
+        .expect("manager");
+        let output = Arc::clone(&manager)
+            .run(
+                (0..12).map(|value| request(value).0.image).collect(),
+                Timings::default(),
+            )
+            .await
+            .expect("all crops");
+        assert_eq!(
+            output,
+            (0..12).map(|value| value.to_string()).collect::<Vec<_>>()
+        );
+        run_cpu(move || drop(manager)).await.expect("shutdown");
+    }
+
     /// A partially initialized pool closes admission and drops earlier owners when a later model fails to load.
     #[test]
     fn failed_initialization_releases_existing_sessions() {
@@ -976,7 +803,7 @@ mod tests {
         let created = AtomicUsize::new(0);
         let destroyed = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&destroyed);
-        let result = SessionManager::start(2, 2, move || {
+        let result = SessionManager::start(2, 2, 4, move || {
             if created.fetch_add(1, Ordering::SeqCst) == 1 {
                 return Err(FormulaError::Invalid("load failure".into()));
             }
@@ -1004,14 +831,19 @@ mod tests {
         let artifacts = TexoArtifacts::try_from(&paths).expect("artifacts");
         artifacts.verify().expect("identity");
         let runner = run_cpu(move || {
-            SessionManager::start(2, 4, move || {
+            SessionManager::start(2, 4, 8, move || {
                 let backend = OnnxBackend::compiled();
+                // Match production memory policy while exercising the I/O-binding path.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
+                        .with_memory_pattern(false)
+                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
+                        .with_memory_pattern(false)
+                        .map_err(ort::Error::from)?
                         .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,

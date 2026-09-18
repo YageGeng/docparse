@@ -1,7 +1,7 @@
 export type * from "./types.js";
 import type { DocParser, DocumentResult, ExecutionProvider, FormulaSource, ModelSource, ParseOptions, RenderFormat, WebParseConfig, WebParserOptions, TsrTableRequest, TsrTableInput } from "./types.js";
 import type { WorkerCommand, WorkerMethod, WorkerOperations, WorkerRequest, WorkerResponse, WorkerResult, WorkerSuccess, WorkerTableReply } from "./protocol.js";
-import { formulaEngineError } from "./configuration.js";
+import { formulaEngineError, queueSizesError } from "./configuration.js";
 
 /** A request failure that preserves its stable machine-readable category. */
 export class DocParseError extends Error {
@@ -69,6 +69,8 @@ class WorkerParser implements DocParser {
 
   /** Transfers owned initialization data while retaining caller-owned buffers. */
   async initialize(options: WebParserOptions): Promise<void> {
+    const invalidQueues = queueSizesError(options.config);
+    if (invalidQueues) throw new DocParseError("InvalidConfig", invalidQueues);
     const suppliedFormula = options.formulaArtifacts;
     const formulaEnabled = options.config?.formula?.inline_enabled !== false || options.config?.formula?.display_enabled !== false;
     const explicitEngine = options.config?.formula?.engine;

@@ -19,6 +19,7 @@ wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-formula-miner
 
 [dependencies]
 # workspace crates
+docparse-common.workspace = true
 docparse-config.workspace = true
 docparse-formula.workspace = true
 docparse-formula-mineru.workspace = true

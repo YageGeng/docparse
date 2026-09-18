@@ -371,9 +371,9 @@ impl WebParser {
                 WebError::value(code, error)
             })?;
         let (timings, mut receiver) =
-            docparse_layout::timing::Timings::channel();
+            docparse_common::timing::Timings::channel();
         let timer = timings
-            .start(docparse_layout::timing::TimingStage::ResultSerialize);
+            .start(docparse_common::timing::TimingStage::ResultSerialize);
         let result = document
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|error| WebError::value("SerializationFailed", error));
@@ -443,10 +443,9 @@ impl ParseObserver for BrowserObserver {
 #[wasm_bindgen]
 pub fn default_config() -> Result<JsValue, JsValue> {
     let mut raw = RawConfig::default();
-    raw.layout.sessions = 1;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
-    raw.runtime.blocking_task_limit = 1;
+    raw.layout.session_size = 1;
+    raw.render.workers = 1;
+    raw.render.queue_size = 2;
     raw.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|error| WebError::value("SerializationFailed", error))
 }

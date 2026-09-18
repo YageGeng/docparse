@@ -218,6 +218,53 @@ unsafe extern "system" fn CreateSessionOptions(
     OrtStatusPtr::default()
 }
 
+/// Forwards graph optimization levels instead of accepting the upstream stub's no-op.
+unsafe extern "system" fn SetSessionGraphOptimizationLevel(
+    options: *mut OrtSessionOptions,
+    level: GraphOptimizationLevel,
+) -> OrtStatusPtr {
+    // SAFETY: ORT supplies a live, exclusively borrowed options handle allocated by this API.
+    let options = unsafe { &mut *options.cast::<SessionOptions>() };
+    options.js.graph_optimization_level = Some(match level {
+        GraphOptimizationLevel::ORT_DISABLE_ALL => {
+            binding::GraphOptimizationLevel::Disabled
+        }
+        GraphOptimizationLevel::ORT_ENABLE_BASIC => {
+            binding::GraphOptimizationLevel::Basic
+        }
+        GraphOptimizationLevel::ORT_ENABLE_EXTENDED => {
+            binding::GraphOptimizationLevel::Extended
+        }
+        GraphOptimizationLevel::ORT_ENABLE_LAYOUT => {
+            binding::GraphOptimizationLevel::Layout
+        }
+        GraphOptimizationLevel::ORT_ENABLE_ALL => {
+            binding::GraphOptimizationLevel::All
+        }
+    });
+    OrtStatusPtr::default()
+}
+
+/// Enables the memory pattern policy on the options passed to ORT Web.
+unsafe extern "system" fn EnableMemPattern(
+    options: *mut OrtSessionOptions,
+) -> OrtStatusPtr {
+    // SAFETY: ORT supplies a live, exclusively borrowed options handle allocated by this API.
+    let options = unsafe { &mut *options.cast::<SessionOptions>() };
+    options.js.enable_mem_pattern = Some(true);
+    OrtStatusPtr::default()
+}
+
+/// Disables cached memory patterns for sessions whose input and intermediate shapes vary.
+unsafe extern "system" fn DisableMemPattern(
+    options: *mut OrtSessionOptions,
+) -> OrtStatusPtr {
+    // SAFETY: ORT supplies a live, exclusively borrowed options handle allocated by this API.
+    let options = unsafe { &mut *options.cast::<SessionOptions>() };
+    options.js.enable_mem_pattern = Some(false);
+    OrtStatusPtr::default()
+}
+
 /// Accepts explicit per-output placement without mutating any other session's policy.
 unsafe extern "system" fn AddSessionConfigEntry(
     options: *mut OrtSessionOptions,
@@ -899,6 +946,9 @@ pub const fn api() -> OrtApi {
         Run,
         RunAsync,
         CreateSessionOptions,
+        SetSessionGraphOptimizationLevel,
+        EnableMemPattern,
+        DisableMemPattern,
         AddSessionConfigEntry,
         CloneSessionOptions,
         SessionGetInputCount,

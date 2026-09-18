@@ -111,6 +111,7 @@ pub(crate) enum PdfiumCommand {
         response: oneshot::Sender<Result<PreScannedPage, PdfiumRuntimeError>>,
     },
     Render {
+        page_lease: Option<docparse_common::PageLease>,
         page_number: u32,
         config: RenderConfig,
         response: oneshot::Sender<Result<RenderedPage, PdfiumRuntimeError>>,
@@ -131,10 +132,10 @@ impl PdfiumExecutor {
     /// Opens one document on a dedicated worker before returning its async facade.
     pub(crate) async fn open(
         input: PdfInput,
-        limits: &RuntimeConfig,
+        _limits: &RuntimeConfig,
     ) -> Result<Self, PdfiumRuntimeError> {
-        let capacity = limits.render_queue_capacity.max(1);
-        let (sender, receiver) = mpsc::channel(capacity);
+        // Each document serializes commands; the render delivery queue owns page capacity.
+        let (sender, receiver) = mpsc::channel(1);
         let (ready_sender, ready_receiver) = oneshot::channel();
         let worker = PdfiumWorker::spawn(input, receiver, ready_sender)?;
         let page_count = ready_receiver
@@ -184,6 +185,7 @@ impl PdfiumExecutor {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(PdfiumCommand::Render {
+                page_lease: docparse_common::PageLease::current(),
                 page_number,
                 config: config.clone(),
                 response,
@@ -283,15 +285,19 @@ pub(crate) async fn worker_main(
                 ));
             }
             PdfiumCommand::Render {
+                page_lease,
                 page_number,
                 config,
                 response,
             } => {
-                let _ = response.send(render_document_page(
-                    &document,
-                    page_number,
-                    &config,
-                ));
+                // The real PDFium worker, including an uncollected reply, retains the delivery after caller cancellation.
+                let render =
+                    || render_document_page(&document, page_number, &config);
+                let result = match &page_lease {
+                    Some(lease) => lease.scope_sync(render),
+                    None => render(),
+                };
+                let _ = response.send(result);
             }
             PdfiumCommand::Shutdown { response } => {
                 let _ = response.send(());

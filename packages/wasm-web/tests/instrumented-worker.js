@@ -87,6 +87,9 @@ Object.defineProperty(globalThis, "ort", {
       }
       metrics.sessions++;
       const model = { name: session.inputNames.includes("x") ? "tsr" : "layout", providers: metrics.providers, calls: 0, gpuSubmissions: 0 };
+      // Observe the exact optimization options received by the real ORT Web session.
+      model.graphOptimizationLevel = args[1]?.graphOptimizationLevel;
+      model.enableMemPattern = args[1]?.enableMemPattern;
       metrics.models.push(model);
       const release = session.release;
       session.release = async function (...args) { const result = await release.apply(this, args); metrics.sessions--; return result; };

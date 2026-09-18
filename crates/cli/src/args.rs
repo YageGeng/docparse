@@ -49,10 +49,10 @@ pub struct ParseArgs {
     #[arg(long)]
     #[builder(default)]
     pub output: Option<PathBuf>,
-    /// Optional override for PDFium page-stage continuation.
+    /// Overrides runtime.continue_on_error for recoverable PDFium page failures.
     #[arg(long)]
     #[builder(default)]
-    pub continue_on_page_error: Option<bool>,
+    pub continue_on_error: Option<bool>,
     /// Optional directory for per-page PNG/SVG diagnostic overlays.
     #[arg(long)]
     #[builder(default)]

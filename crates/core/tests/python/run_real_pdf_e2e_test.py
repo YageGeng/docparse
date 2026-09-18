@@ -89,6 +89,9 @@ def main() -> None:
         runner.write_config(config_path, model_dir, 4, "cpu")
         config = tomllib.loads(config_path.read_text())
         assert config["tsr"]["model_path"] == str(model_dir.parent / "slanet-plus/inference.onnx")
+        assert config["render"]["workers"] == 1
+        assert config["render"]["queue_size"] == 4
+        assert set(config["runtime"]) == {"continue_on_error"}
         assert config["tsr"]["mode"] == "fallback"
         assert config["tsr"]["cell_detection"]["enabled"] is True
         assert config["tsr"]["cell_detection"]["model_path"] == str(model_dir.parent / "rtdetr-table-cell-wireless/inference.onnx")

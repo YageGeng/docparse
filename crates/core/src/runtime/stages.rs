@@ -6,8 +6,8 @@ use crate::{
     DocumentContext, ExtractedPage, OcrEngine, OcrRequest, PageResult,
     PageWarning,
 };
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::{OcrPolicy, ValidatedConfig};
-use docparse_layout::timing::{TimingStage, Timings};
 use docparse_layout::{LayoutEngine, LayoutRequest};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -186,7 +186,7 @@ impl PageStage<crate::page::PageAnalysisDraft> {
         // Native CPU fusion must not monopolize an HTTP/heartbeat executor thread.
         let cpu_config = Arc::clone(&config);
         let cpu_timings = timings.clone();
-        let draft = docparse_layout::wasm_compat::run_cpu(move || {
+        let draft = docparse_common::run_cpu(move || {
             let _timer = cpu_timings.start(TimingStage::TextFinish);
             PageAnalyzer::new(cpu_config)
                 .with_timings(cpu_timings)
@@ -236,7 +236,7 @@ impl PageStage<crate::page::PageTableDraft> {
         let words = std::mem::take(&mut draft.extracted.table_evidence.words);
         let cpu_config = Arc::clone(&config);
         let cpu_timings = timings.clone();
-        let page = docparse_layout::wasm_compat::run_cpu(move || {
+        let page = docparse_common::run_cpu(move || {
             let _timer = cpu_timings.start(TimingStage::TextFinish);
             PageAnalyzer::new(cpu_config)
                 .with_timings(cpu_timings)

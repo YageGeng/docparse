@@ -14,7 +14,7 @@ pub(crate) mod preprocess;
 pub(crate) mod schema;
 pub(crate) mod session;
 
-use crate::timing::TimingStage;
+use docparse_common::timing::TimingStage;
 use preprocess::preprocess;
 
 #[derive(Debug, Deserialize)]
@@ -76,7 +76,7 @@ impl PpDocLayoutV3Engine {
         // Report the actual shared session count, independently of document/page admission limits.
         tracing::info!(
             "loaded PP-DocLayoutV3 with {} session(s)",
-            config.layout().sessions
+            config.layout().session_size
         );
         Ok(Self {
             pool,
@@ -96,7 +96,7 @@ impl LayoutEngine for PpDocLayoutV3Engine {
         PP_DOCLAYOUT_V3_REVISION
     }
 
-    /// Preprocesses and runs one page on a uniquely leased ORT session.
+    /// Prepares one page and submits it to the shared queue for model-side batching.
     fn detect(
         &self,
         request: LayoutRequest,
@@ -110,7 +110,7 @@ impl LayoutEngine for PpDocLayoutV3Engine {
             let image = Arc::clone(&request.image);
             let transform = request.transform;
             let threshold = self.score_threshold;
-            // CPU preprocessing happens before leasing the scarce session so later pages can prepare
+            // CPU preprocessing happens before queue admission so later pages can prepare
             // tensors while the current page is using the GPU.
             let preprocess_transform = transform.clone();
             let preprocessing = timings.clone();

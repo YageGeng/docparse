@@ -100,7 +100,7 @@ fn fixture_path() -> PathBuf {
 }
 
 /// Builds validated fake-engine configuration at one page concurrency.
-fn config(stage_pages: usize) -> Arc<ValidatedConfig> {
+fn config(queue_size: usize) -> Arc<ValidatedConfig> {
     let mut raw = RawConfig::default();
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
@@ -109,16 +109,14 @@ fn config(stage_pages: usize) -> Arc<ValidatedConfig> {
     raw.layout.model_config_path = PathBuf::from("/tmp/multipage-missing.yml");
     raw.layout.model_manifest_path =
         PathBuf::from("/tmp/multipage-missing.json");
-    raw.runtime.stage_pages = stage_pages;
-    raw.runtime.render_queue_capacity = stage_pages.min(2);
-    raw.runtime.blocking_task_limit = stage_pages;
+    raw.render.queue_size = queue_size;
     Arc::new(ValidatedConfig::try_from(raw).expect("fake config must validate"))
 }
 
 /// Builds one parser with a fresh fake engine and no default model access.
-async fn parser(stage_pages: usize) -> DocParser {
+async fn parser(queue_size: usize) -> DocParser {
     DocParser::builder()
-        .config(config(stage_pages))
+        .config(config(queue_size))
         .layout_engine(Arc::new(MultipageLayoutEngine))
         .build()
         .await

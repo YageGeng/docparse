@@ -17,6 +17,7 @@ wasm = ["docparse-config/wasm", "docparse-layout/wasm"]
 
 [dependencies]
 # workspace crates
+docparse-common.workspace = true
 docparse-config.workspace = true
 docparse-layout.workspace = true
 
@@ -24,6 +25,7 @@ docparse-layout.workspace = true
 thiserror.workspace = true
 
 # async
+futures-util.workspace = true
 tokio.workspace = true
 
 # config and serialization

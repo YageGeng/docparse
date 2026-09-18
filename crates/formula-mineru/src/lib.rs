@@ -2,13 +2,11 @@
 mod wasm_compat;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use docparse_common::timing::{TimingStage, Timings};
+use docparse_common::{WasmBoxedFuture, run_cpu, timeout};
 use docparse_config::{FormulaEngineConfig, ValidatedConfig};
 use docparse_formula::{FormulaEngine, FormulaError, queue::FormulaQueue};
-use docparse_layout::{
-    PageImage,
-    timing::{TimingStage, Timings},
-    wasm_compat::{WasmBoxedFuture, run_cpu, timeout},
-};
+use docparse_layout::PageImage;
 use futures_util::{
     StreamExt,
     future::{Either, select},
@@ -34,7 +32,7 @@ pub enum MineruError {
     #[error("MinerU PNG encoding failed: {0}")]
     Image(#[from] image::ImageError),
     #[error(transparent)]
-    Task(#[from] docparse_layout::wasm_compat::TaskError),
+    Task(#[from] docparse_common::TaskError),
     #[error("MinerU response does not match the completion schema")]
     Json(#[from] serde_json::Error),
     #[error(
@@ -53,10 +51,13 @@ impl From<MineruError> for FormulaError {
 }
 
 /// A bounded shared crop queue that continuously replenishes HTTP inference slots.
+#[derive(typed_builder::TypedBuilder)]
 pub struct MineruEngine {
     queue: FormulaQueue,
     timeout: Duration,
     admission: Arc<Semaphore>,
+    // Sender is declared first so it closes before the native worker is joined.
+    _worker: docparse_common::ThreadManager,
 }
 
 /// The actor owns transport resources independently of producer lifetimes.
@@ -92,56 +93,70 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
                 endpoint,
                 permits: Arc::new(Semaphore::new(service.concurrency)),
             });
-            let (queue, receiver) = FormulaQueue::new(service.concurrency);
+            let (queue, receiver) =
+                FormulaQueue::new(config.formula().queue_size);
             let concurrency = service.concurrency;
-            docparse_formula::spawn_worker(Box::pin(async move {
-                let incoming =
-                    stream::unfold(receiver, |mut receiver| async move {
-                        receiver.recv().await.map(|request| (request, receiver))
-                    });
-                incoming
-                    .for_each_concurrent(concurrency, |mut request| {
-                        let transport = Arc::clone(&transport);
-                        async move {
-                            request.end_queue();
-                            if request.cancelled() {
-                                return;
-                            }
-                            let image = Arc::clone(&request.image);
-                            let timings = request.timings.clone();
-                            // Canceling one caller aborts only its request, immediately making room for other queued work.
-                            let result = match select(
-                                Box::pin(
-                                    transport.recognize_image(image, timings),
-                                ),
-                                Box::pin(request.closed()),
-                            )
-                            .await
-                            {
-                                Either::Left((result, cancellation)) => {
-                                    drop(cancellation);
-                                    Some(result)
+            let worker = docparse_common::ThreadManager::spawn_async(
+                Box::pin(async move {
+                    let incoming =
+                        stream::unfold(receiver, |receiver| async move {
+                            loop {
+                                let batch = receiver.recv().await?;
+                                if let Some(request) = batch.take_ready(1).pop()
+                                {
+                                    return Some((request, receiver));
                                 }
-                                Either::Right(((), work)) => {
-                                    drop(work);
-                                    None
-                                }
-                            };
-                            if let Some(result) = result {
-                                request.complete(
-                                    result.map_err(FormulaError::from),
-                                );
                             }
-                        }
-                    })
-                    .await;
-                tracing::debug!("closed MinerU formula request queue");
-            }))?;
-            Ok(Self {
-                queue,
-                timeout,
-                admission: Arc::new(Semaphore::new(concurrency * 2)),
-            })
+                        });
+                    incoming
+                        .for_each_concurrent(concurrency, |mut request| {
+                            let transport = Arc::clone(&transport);
+                            async move {
+                                request.end_queue();
+                                if request.cancelled() {
+                                    return;
+                                }
+                                let image = Arc::clone(&request.image);
+                                let timings = request.context.timings.clone();
+                                // Canceling one caller aborts only its request, immediately making room for other queued work.
+                                let result = match select(
+                                    Box::pin(
+                                        transport
+                                            .recognize_image(image, timings),
+                                    ),
+                                    Box::pin(request.closed()),
+                                )
+                                .await
+                                {
+                                    Either::Left((result, cancellation)) => {
+                                        drop(cancellation);
+                                        Some(result)
+                                    }
+                                    Either::Right(((), work)) => {
+                                        drop(work);
+                                        None
+                                    }
+                                };
+                                if let Some(result) = result {
+                                    request.complete(
+                                        result.map_err(FormulaError::from),
+                                    );
+                                }
+                            }
+                        })
+                        .await;
+                    tracing::debug!("closed MinerU formula request queue");
+                }),
+            )?;
+
+            Ok(Self::builder()
+                .queue(queue)
+                .timeout(timeout)
+                .admission(Arc::new(Semaphore::new(
+                    concurrency + config.formula().queue_size,
+                )))
+                ._worker(worker)
+                .build())
         })();
         result.inspect_err(|error| {
             tracing::error!("MinerU formula initialization failed: {}", error)

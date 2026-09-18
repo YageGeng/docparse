@@ -1,12 +1,11 @@
 //! Recognize formula crops using SERVER_URL CONCURRENCY IMAGE... without local model files.
+use docparse_common::timing::Timings;
 use docparse_config::{
     FormulaEngineConfig, MineruFormulaConfig, RawConfig, ValidatedConfig,
 };
 use docparse_formula::FormulaEngine;
 use docparse_formula_mineru::MineruEngine;
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::sync::Arc;
 
 /// Reads cropped formula images and prints ordered LaTeX results from the external service.

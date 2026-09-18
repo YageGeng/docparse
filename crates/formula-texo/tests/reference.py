@@ -42,7 +42,8 @@ def main():
     fixtures = Path(__file__).parent / "fixtures"
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
-    options.log_severity_level = 3
+    # Keep shape warnings visible when validating updated exports against the golden outputs.
+    options.log_severity_level = 2
     encoder = ort.InferenceSession(str(root / "encoder_model.onnx"), options, providers=["CPUExecutionProvider"])
     decoder = ort.InferenceSession(str(root / "decoder_model_merged.onnx"), options, providers=["CPUExecutionProvider"])
     tokenizer = json.loads((root / "tokenizer.json").read_text())
@@ -65,7 +66,7 @@ def main():
         assert ids[-1] == 2, f"{path.name} did not terminate"
         cases.append({"image": path.name, "preprocess_sha256": hashlib.sha256(pixels.astype("<f4").tobytes()).hexdigest(), "tokens": ids, "latex": " ".join(vocabulary[i] for i in ids if i > 3)})
         print(path.name, len(ids), cases[-1]["latex"])
-    (fixtures / "reference.json").write_text(json.dumps({"revision": "63e04c86fc96c2324811114351eeea8118bf6b28", "runtime": ort.__version__, "cases": cases}, indent=2) + "\n")
+    (fixtures / "reference.json").write_text(json.dumps({"revision": "b2668efe5112082846fde4d446b9bfaab3989533", "runtime": ort.__version__, "cases": cases}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

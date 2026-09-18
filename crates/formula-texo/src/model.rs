@@ -1,10 +1,10 @@
 //! Shared model contract and autoregressive state for native and browser execution.
 use crate::{TexoArtifacts, wasm_compat::SessionRunner};
+use docparse_common::WasmBoxedFuture;
+use docparse_common::timing::Timings;
 use docparse_config::ValidatedConfig;
 use docparse_formula::{FormulaEngine, FormulaError};
-use docparse_layout::{
-    PageImage, timing::Timings, wasm_compat::WasmBoxedFuture,
-};
+use docparse_layout::PageImage;
 use ort::{
     session::{Session, SessionInputValue, SessionOutputs},
     value::{DynValue, Tensor},
@@ -67,7 +67,7 @@ impl TexoEngine {
         config: Arc<ValidatedConfig>,
         artifacts: TexoArtifacts,
     ) -> Result<Self, FormulaError> {
-        let artifacts = docparse_layout::wasm_compat::run_cpu(move || {
+        let artifacts = docparse_common::run_cpu(move || {
             artifacts.verify()?;
             Ok::<_, FormulaError>(artifacts)
         })
@@ -91,14 +91,14 @@ impl TexoEngine {
         Ok(Self {
             runner,
             admission: Arc::new(tokio::sync::Semaphore::new(
-                config.formula().batch_size
-                    * 2
-                    * match &config.formula().engine {
-                        docparse_config::FormulaEngineConfig::Texo(texo) => {
-                            texo.sessions
-                        }
-                        _ => 1,
-                    },
+                config.formula().queue_size
+                    + config.formula().batch_size
+                        * match &config.formula().engine {
+                            docparse_config::FormulaEngineConfig::Texo(
+                                texo,
+                            ) => texo.session_size,
+                            _ => 1,
+                        },
             )),
             name: format!(
                 "texo-transfer-onnx-{}",

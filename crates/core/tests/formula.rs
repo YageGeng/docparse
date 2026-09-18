@@ -1,10 +1,10 @@
+use docparse_common::timing::Timings;
 use docparse_config::{RawConfig, ValidatedConfig};
 use docparse_core::DocParser;
 use docparse_formula::{FormulaEngine, FormulaError};
 use docparse_layout::{
     Bbox, GeometrySource, LayoutDetection, LayoutEngine, LayoutError,
-    LayoutLabel, LayoutRequest, PageImage, timing::Timings,
-    wasm_compat::WasmBoxedFuture,
+    LayoutLabel, LayoutRequest, PageImage, wasm_compat::WasmBoxedFuture,
 };
 use std::sync::{Arc, Mutex};
 
@@ -106,9 +106,7 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
         let mut raw = RawConfig::default();
         raw.tsr.mode = docparse_config::TableMode::RulesOnly;
         raw.formula.batch_size = 2;
-        raw.runtime.stage_pages = 1;
-        raw.runtime.render_queue_capacity = 1;
-        raw.runtime.blocking_task_limit = 1;
+        raw.render.queue_size = 1;
         let batches = Arc::new(Mutex::new(Vec::new()));
         let parser = DocParser::builder()
             .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
@@ -205,8 +203,7 @@ async fn slow_crop_does_not_block_subsequent_submission() {
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
     raw.formula.batch_size = 1;
     raw.formula.timeout_ms = 500;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
+    raw.render.queue_size = 1;
     let parser = DocParser::builder()
         .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
         .layout_engine(Arc::new(Layout {
@@ -248,8 +245,7 @@ async fn independent_formula_toggles_preserve_native_source() {
             let mut raw = RawConfig::default();
             raw.tsr.mode = docparse_config::TableMode::RulesOnly;
             raw.formula.batch_size = 2;
-            raw.runtime.stage_pages = 1;
-            raw.runtime.render_queue_capacity = 1;
+            raw.render.queue_size = 1;
             let mut value = serde_json::to_value(raw).expect("config JSON");
             value
                 .get_mut("formula")

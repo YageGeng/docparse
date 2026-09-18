@@ -2,7 +2,7 @@ use docparse_layout::PageImage;
 use serde::Serialize;
 
 use crate::wasm_compat::{WasmCompatSend, WasmCompatSync};
-pub use docparse_layout::timing::Timing;
+pub use docparse_common::timing::Timing;
 
 /// Actual document pipeline boundaries, independent of execution speed or platform.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]

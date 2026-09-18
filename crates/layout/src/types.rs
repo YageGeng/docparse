@@ -36,6 +36,9 @@ pub struct PageImageInput {
 /// A validated page image shared without copying between inference engines.
 #[derive(Debug, Clone, TypedBuilder)]
 pub struct PageImage {
+    // Image clones retain completion-counted render capacity independently of their caller future.
+    #[builder(default = docparse_common::PageLease::current())]
+    page_lease: Option<docparse_common::PageLease>,
     width: u32,
     height: u32,
     pixel_format: PixelFormat,
@@ -43,6 +46,11 @@ pub struct PageImage {
 }
 
 impl PageImage {
+    /// Attaches the admitted delivery to caller-provided or externally rendered image storage.
+    pub fn retain_page(&mut self, lease: docparse_common::PageLease) {
+        self.page_lease = Some(lease);
+    }
+
     /// Returns image width in pixels.
     pub fn width(&self) -> u32 {
         self.width
@@ -306,5 +314,5 @@ pub struct LayoutRequest {
     pub transform: PageTransform,
     /// Optional observations do not become part of detection metadata.
     #[builder(default)]
-    pub timings: crate::timing::Timings,
+    pub timings: docparse_common::timing::Timings,
 }

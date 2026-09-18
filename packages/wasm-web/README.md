@@ -63,7 +63,13 @@ const parser = await prepareModels({
     config: "/models/rtdetr-table-cell-wireless/inference.yml",
     manifest: "/models/rtdetr-table-cell-wireless/model-manifest.json",
   },
-  config: { formula: { engine: { type: "texo" } } },
+  config: {
+    render: { workers: 1, queue_size: 2 },
+    layout: { queue_size: 1 },
+    tsr: { queue_size: 4, cell_detection: { queue_size: 4 } },
+    ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
+    formula: { queue_size: 4, engine: { type: "texo" } },
+  },
 });
 
 try {
@@ -107,7 +113,7 @@ initialized, even if sources are supplied. Preparation accepts `signal`,
 `onProgress`, and `onTiming` for cancellation and observation. First inference
 can still include provider-specific lazy kernel compilation.
 
-`config` uses native business groups and snake_case fields, such as `{render: {dpi: 144}, layout: {score_threshold: 0.5}}`. Filesystem paths (including the nested `ocr.detection`, `ocr.recognition`, and `ocr.orientation` groups), profiles, environment variables, and per-model `execution_provider` fields are excluded. Use the Worker's `executionProvider` option for all browser models together. All four concurrency settings must equal 1 in the initial Web implementation; invalid settings fail explicitly.
+`config` uses native business groups and snake_case fields; render settings include `{workers: 1, queue_size: 2, dpi: 144}` alongside the required model queues. Filesystem paths (including the nested `ocr.detection`, `ocr.recognition`, and `ocr.orientation` groups), profiles, environment variables, and per-model `execution_provider` fields are excluded. Use the Worker's `executionProvider` option for all browser models together. `render.workers` must be 1 in this single-Worker implementation. Required `render.queue_size` may exceed 1 and counts unfinished pages through actual resource cleanup. Retired runtime capacity settings fail explicitly.
 
 `runtimeBaseUrl` can select a self-hosted ORT directory containing the same JS/mjs/wasm versions as the build manifest. Relative model URLs resolve against the calling page. Default runtime resources follow the SDK deployment location.
 
@@ -133,7 +139,7 @@ console.table(timings);
 | `layout_inference` | Input binding and the synchronous ORT run or asynchronous ORT Promise. Includes runtime transfers/lazy compilation performed inside that call; this is not GPU kernel time. |
 | `layout_readback` | Web output synchronization plus conversion of the two consumed outputs; native output conversion. Native provider-internal transfers remain in `layout_inference`. |
 | `layout_postprocess` | Detection filtering and coordinate conversion. |
-| `tsr_preprocess`, `tsr_queue`, `tsr_inference`, `tsr_postprocess` | Table crop preparation, single-session wait, selected-backend model execution, and token/location decoding. |
+| `tsr_preprocess`, `tsr_queue`, `tsr_inference`, `tsr_postprocess` | Table crop preparation, shared-queue wait, selected-backend model execution, and token/location decoding. |
 | `text_prepare`, `ocr`, `text_finish` | Native text/layout preparation, an actual OCR call when needed, then final text/layout composition. |
 | `link_validate` | Cross-page linking, result assembly, and validation. |
 | `result_serialize`, `preview_encode` | Rust result conversion to JavaScript; each Worker PNG encoding operation, including asynchronous waiting. |
@@ -227,6 +233,7 @@ With Codex Browser Use, pass `tab.playwright` as `page`. The generator yields pr
 ```typescript
 const parser = await createParser({
   artifacts, tsrArtifacts, tsrCellArtifacts, formulaArtifacts,
+  config, // Includes render.workers and all explicit queue_size values from the initialization example.
   onProgress: event => console.log(event.stage),
 });
 const document = await parser.parse(pdfBytes, {
@@ -335,9 +342,11 @@ Final `table` blocks may include a `table` object with zero-based rows/columns, 
 Set `config.tsr.batch_size` and `config.tsr.cell_detection.batch_size` independently
 to cap structure and detector crops per ONNX invocation (1–32, default 1).
 Ready requests can share a batch; partial batches run immediately and canceled
-requests do not occupy batch slots. The table submission window refills in
-completion order so a slow earlier table cannot hold up unrelated work. `table_jobs` remains the admission limit, and the browser inference
-guard still serializes different model runs through output readback.
+requests do not occupy batch slots. Results are processed in completion order
+so a slow earlier table cannot hold up unrelated work. The parser submits all
+ready table requests and model queues apply backpressure;
+`table_jobs` is no longer accepted. The browser inference guard still serializes
+different model runs through output readback.
 
 Original text remains owned once by `block.lines[].text_items`. Cell lines contain non-owning references (`text_item_id`, UTF-8 `byte_range`, measured `bbox`). Do not use JavaScript string offsets directly with these byte ranges. Tagged empty cells may have a null bbox; populated tagged cells expose measured content bounds, while geometry-based cells expose inferred grid bounds. Validation checks occupancy, source coverage, byte boundaries, geometry, and cached text. Existing schema-2 documents without the optional structure remain readable.
 
@@ -354,7 +363,7 @@ artifacts, then select `fallback` or `tsr_only` on the parse call.
 
 ```javascript
 const document = await parser.parse(bytes, {
-  table: { mode: "fallback", table_jobs: 2, timeout_ms: 60000 },
+  table: { mode: "fallback", timeout_ms: 60000 },
   onTableStructure: async (request, signal) => {
     // Invoke your own adapter, returning the original request ID and crop-pixel boxes.
     const result = await yourTableProvider(request.image.blob, { signal });
@@ -442,7 +451,13 @@ const parser = await createParser({
     recognition: modelSource("pp-ocrv6-medium-rec"),
     orientation: modelSource("pp-lcnet-textline-ori"),
   },
-  config: { ocr: { policy: "missing_regions" }, formula: { inline_enabled: false, display_enabled: false } },
+  config: {
+    render: { workers: 1, queue_size: 2 },
+    layout: { queue_size: 1 },
+    tsr: { queue_size: 4, cell_detection: { queue_size: 4 } },
+    ocr: { policy: "missing_regions", detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
+    formula: { queue_size: 4, inline_enabled: false, display_enabled: false },
+  },
   executionProvider: "webgpu",
 });
 ```
@@ -483,8 +498,12 @@ models are neither downloaded nor loaded for MinerU.
 const parser = await createParser({
   artifacts: layoutArtifacts,
   config: {
-    tsr: { mode: "rules_only" },
+    render: { workers: 1, queue_size: 2 },
+    layout: { queue_size: 1 },
+    tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" },
+    ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
     formula: {
+      queue_size: 8,
       engine: { type: "mineru", server_url: "https://mineru.example.com/v1", concurrency: 8 },
       batch_size: 8,
       timeout_ms: 120000,
@@ -519,8 +538,11 @@ SDK callers can also select a preset without providing any formula paths:
 const parser = await createParser({
   artifacts: layoutArtifacts,
   config: {
-    tsr: { mode: "rules_only" },
-    formula: { engine: { type: "texo" }, batch_size: 4, timeout_ms: 120000 },
+    render: { workers: 1, queue_size: 2 },
+    layout: { queue_size: 1 },
+    tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" },
+    ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
+    formula: { queue_size: 4, engine: { type: "texo" }, batch_size: 4, timeout_ms: 120000 },
   },
 });
 // Select PP with engine: { type: "pp" } when creating the next parser.
@@ -586,7 +608,8 @@ formula details. Invalid math leaves the surrounding prose visible. Original
 
 `formula.inline_enabled` and `formula.display_enabled` both default to `true`.
 They control recognition independently; neither is a master switch. For display
-formulas only, use `config: { formula: { inline_enabled: false, display_enabled: true } }`.
+formulas only, set `config.formula.inline_enabled = false` and
+`config.formula.display_enabled = true`, retaining the required queue capacities.
 Set both to `false` to omit formula artifacts and skip model loading. Disabled
 kinds retain native text and layout evidence but do not produce recognized entries
 in `pages[].formulas`. The example exposes separate Inline formulas and Display
@@ -595,3 +618,32 @@ formulas switches; changing either invalidates the prepared parser.
 The former `formula.enabled` key has been removed. Replace `enabled: false` with
 both switches set to false; replace `enabled: true` with both set to true or omit
 them to use the defaults.
+
+## Per-model session and batch limits
+
+Use `session_size` (1–8) and `batch_size` (1–32) under `layout`, `tsr`,
+`tsr.cell_detection`, and each of `ocr.detection`, `ocr.recognition`, and
+`ocr.orientation`. Local formula engines use `formula.engine.session_size` and
+`formula.batch_size`. The former `sessions` and top-level `ocr.batch_size` names
+are rejected. Each model shares one ready-input queue among its sessions. Short
+batches run immediately. OCR combines equal tensor dimensions without changing
+padding. ORT Web's global guard still serializes physical runs and readback;
+more sessions do not remove that browser runtime restriction. Model files remain
+supplied through artifacts, not configuration paths.
+
+Every model queue requires an explicit `queue_size` under `layout`, `tsr`,
+`tsr.cell_detection`, `ocr.detection`, `ocr.recognition`, `ocr.orientation`, and
+`formula`. `config` and these capacities are required even when a model is disabled;
+missing, zero, fractional, or out-of-range values fail before model downloads.
+Capacities range from 1 to 536869887, independently of sessions and batches.
+`formula.queue_size` also applies to MinerU. A queue may be smaller than one
+batch; producers wait for space while consumers execute available inputs.
+
+Render capacity uses completion acknowledgements: dequeuing a page does not free
+its slot. `render.workers` and `render.queue_size` are mandatory; the browser
+requires one PDFium Worker and supports multiple unfinished pages. The previous
+`runtime.stage_pages`, `render_queue_capacity`, and `blocking_task_limit` are rejected.
+
+Run `rtk node crates/web/tests/render_backpressure.mjs` from the repository root
+after building the SDK. It checks real three-page layout inference with render
+capacities 1 and 2, active cancellation, and successful parser recreation.

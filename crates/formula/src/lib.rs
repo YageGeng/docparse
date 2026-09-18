@@ -10,4 +10,3 @@ pub use artifacts::{
     PLUS_M_MODEL_SHA256, TOKENIZER_SHA256,
 };
 pub use model::{FormulaEngine, FormulaError, PpFormulaNetEngine};
-pub use wasm_compat::spawn_worker;

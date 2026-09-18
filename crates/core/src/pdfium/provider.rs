@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::{RenderConfig, RuntimeConfig};
-use docparse_layout::timing::{TimingStage, Timings};
 
 use super::{
     PdfInput, PdfiumExecutor, PdfiumRuntimeError, PreScannedPage, RenderedPage,

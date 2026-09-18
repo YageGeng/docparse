@@ -1,8 +1,81 @@
+use docparse_common::timing::Timings;
 use docparse_formula::{FormulaArtifacts, FormulaEngine, PpFormulaNetEngine};
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::sync::Arc;
+
+/// Two real PP sessions must keep serving ordered batches after their construction runtime shuts down.
+#[test]
+#[ignore = "requires downloaded PP-FormulaNet Plus-S artifacts"]
+fn shared_pp_sessions_survive_construction_runtime() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let directory = root.join("models/pp-formulanet-plus-s");
+    let mut raw = docparse_config::RawConfig::default();
+    raw.formula.batch_size = 3;
+    raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+        docparse_config::PpFormulaConfig::builder()
+            .session_size(2)
+            .model_path(directory.join("inference.onnx"))
+            .tokenizer_path(directory.join("tokenizer.json"))
+            .model_manifest_path(directory.join("model-manifest.json"))
+            .build(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let engine = runtime
+        .block_on(PpFormulaNetEngine::from_config(Arc::new(
+            docparse_config::ValidatedConfig::try_from(raw).expect("config"),
+        )))
+        .expect("sessions");
+    let image = image::open(
+        root.join("crates/formula-texo/tests/fixtures/formula_single.png"),
+    )
+    .expect("fixture")
+    .into_rgb8();
+    let image = Arc::new(
+        docparse_layout::PageImage::try_from(
+            docparse_layout::PageImageInput::builder()
+                .width(image.width())
+                .height(image.height())
+                .pixel_format(docparse_layout::PixelFormat::Rgb8)
+                .data(Arc::from(image.into_raw()))
+                .build(),
+        )
+        .expect("crop"),
+    );
+    let expected = runtime
+        .block_on(engine.recognize(
+            vec![Arc::clone(&image)],
+            docparse_common::timing::Timings::default(),
+        ))
+        .expect("baseline");
+    drop(runtime);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("replacement runtime");
+    let (first, second) = runtime.block_on(async {
+        tokio::join!(
+            engine.recognize(
+                vec![Arc::clone(&image); 4],
+                docparse_common::timing::Timings::default()
+            ),
+            engine.recognize(
+                vec![Arc::clone(&image); 2],
+                docparse_common::timing::Timings::default()
+            ),
+        )
+    });
+    assert_eq!(
+        first.expect("first caller"),
+        vec![expected.first().expect("baseline formula").clone(); 4]
+    );
+    assert_eq!(
+        second.expect("second caller"),
+        vec![expected.first().expect("baseline formula").clone(); 2]
+    );
+}
 
 /// Altered model bytes must be rejected before ONNX allocates a session.
 #[tokio::test]
@@ -42,11 +115,11 @@ async fn real_formula_batches_preserve_cardinality_and_content() {
             .unwrap_or_else(|_| "pp-formulanet-plus-s".into());
         let directory = root.join("models").join(model);
         raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
-            docparse_config::PpFormulaConfig {
-                model_path: directory.join("inference.onnx"),
-                tokenizer_path: directory.join("tokenizer.json"),
-                model_manifest_path: directory.join("model-manifest.json"),
-            },
+            docparse_config::PpFormulaConfig::builder()
+                .model_path(directory.join("inference.onnx"))
+                .tokenizer_path(directory.join("tokenizer.json"))
+                .model_manifest_path(directory.join("model-manifest.json"))
+                .build(),
         );
     }
     eprintln!("loading real formula engine");

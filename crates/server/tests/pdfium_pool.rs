@@ -1,8 +1,8 @@
+use docparse_common::timing::Timings;
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_core::{
     LocalPdfiumProvider, ParseObserver, ParseProgress, PdfInput, PdfiumProvider,
 };
-use docparse_layout::timing::Timings;
 use docparse_server::pdfium_pool::PdfiumPool;
 
 use std::{path::Path, sync::Arc, time::Duration};
@@ -12,6 +12,234 @@ mod pdf;
 
 static PROCESS_TEST_LOCK: tokio::sync::Mutex<()> =
     tokio::sync::Mutex::const_new(());
+
+/// Expired idle tokens must not evict another process's healthy reservation during crash recovery.
+#[tokio::test]
+async fn stale_idle_token_does_not_restart_a_healthy_reservation() {
+    let _serial = PROCESS_TEST_LOCK.lock().await;
+    for hold_first in [true, false] {
+        let pool = PdfiumPool::start(
+            2,
+            Path::new(env!("CARGO_BIN_EXE_docparse-server")),
+        )
+        .await
+        .expect("pool");
+        let first = pool.reserve().await.expect("first reservation");
+        let second = pool.reserve().await.expect("second reservation");
+        let held = if hold_first {
+            drop(second);
+            first
+        } else {
+            drop(first);
+            second
+        };
+        let original = worker_pids();
+        let victim = *original.first().expect("worker");
+        let healthy = *original.get(1).expect("peer worker");
+        let killed = std::process::Command::new("kill")
+            .args(["-KILL", &victim.to_string()])
+            .status()
+            .expect("kill owned worker");
+        let replacement = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let pids = worker_pids();
+                if pids.len() == 2 && !pids.contains(&victim) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        // Let the replacement finish its IPC handshake without consuming the stale idle token.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        let after_return = worker_pids();
+        let reused =
+            tokio::time::timeout(Duration::from_secs(5), pool.reserve()).await;
+        let admitted = matches!(reused, Ok(Ok(_)));
+        drop(reused);
+        let cleanup = pool.shutdown().await;
+        cleanup.expect("pool cleanup");
+        assert!(killed.success());
+        replacement.expect("replacement startup");
+        assert!(admitted, "stale tokens must not prevent future admission");
+        assert!(
+            after_return.contains(&healthy),
+            "returning a healthy reservation restarted PID {healthy}: {after_return:?}; hold_first={hold_first}"
+        );
+    }
+}
+
+/// Keeps downstream processing open after the only PDFium process has completed rendering.
+struct WaitingLayout {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Semaphore,
+}
+impl docparse_layout::LayoutEngine for WaitingLayout {
+    /// Identifies the deterministic downstream scheduling boundary.
+    fn name(&self) -> &str {
+        "waiting-layout"
+    }
+    /// Supplies a stable revision independently of model artifacts.
+    fn model_revision(&self) -> &str {
+        "1"
+    }
+    /// Waits for test-controlled downstream capacity while the real PDFium lease is independently released.
+    fn detect(
+        &self,
+        _request: docparse_layout::LayoutRequest,
+    ) -> docparse_core::WasmBoxedFuture<
+        '_,
+        Result<
+            Vec<docparse_layout::LayoutDetection>,
+            docparse_layout::LayoutError,
+        >,
+    > {
+        Box::pin(async {
+            self.entered.notify_one();
+            self.release.acquire().await.expect("gate").forget();
+            Ok(Vec::new())
+        })
+    }
+}
+
+/// Observes completed real Render operations, including results not yet consumed by a model.
+#[derive(Default)]
+struct RenderCount(std::sync::atomic::AtomicUsize);
+impl ParseObserver for RenderCount {
+    /// Progress events do not affect raster accounting.
+    fn on_progress(&self, _progress: ParseProgress) {}
+    /// Counts real render completions without consulting the queue's own accounting.
+    fn on_timing(&self, timing: docparse_core::Timing) {
+        if timing.stage == docparse_common::timing::TimingStage::PdfRender {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+/// Idle processes admit the next PDF before old model work finishes, while the shared render queue blocks its rasterization.
+#[tokio::test]
+async fn idle_reservation_admits_pdf_while_render_queue_is_full() {
+    let _serial = PROCESS_TEST_LOCK.lock().await;
+    let pool =
+        PdfiumPool::start(1, Path::new(env!("CARGO_BIN_EXE_docparse-server")))
+            .await
+            .expect("pool");
+    let pids = worker_pids();
+    for _ in 0..3 {
+        drop(pool.reserve().await.expect("unused reservation"));
+    }
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/tests/fixtures/pdf/extraction_metadata.pdf");
+    let mut raw = docparse_config::RawConfig::default();
+    raw.render.queue_size = 1;
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+    let layout = Arc::new(WaitingLayout {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Semaphore::new(0),
+    });
+    let parser = docparse_core::DocParser::builder()
+        .config(Arc::new(
+            docparse_config::ValidatedConfig::try_from(raw).expect("config"),
+        ))
+        .layout_engine(
+            Arc::clone(&layout) as Arc<dyn docparse_layout::LayoutEngine>
+        )
+        .build()
+        .await
+        .expect("parser");
+    let observer = Arc::new(RenderCount::default());
+    let first = pool
+        .reserve()
+        .await
+        .expect("first reservation")
+        .open(PdfInput::Path(fixture.clone()), Timings::default())
+        .await
+        .expect("first open");
+    let first_parser = parser.clone();
+    let first_observer = Arc::clone(&observer);
+    let first_task = tokio::spawn(async move {
+        first_parser
+            .parse_session_with_options(
+                first,
+                docparse_core::ParseOptions::builder()
+                    .observer(Some(first_observer.as_ref()))
+                    .build(),
+            )
+            .await
+    });
+    let entered = tokio::time::timeout(
+        Duration::from_secs(10),
+        layout.entered.notified(),
+    )
+    .await;
+    if entered.is_err() {
+        first_task.abort();
+        pool.shutdown().await.expect("cleanup");
+    }
+    assert!(
+        entered.is_ok(),
+        "first page must use its already-open session without a second acquire"
+    );
+    let next =
+        tokio::time::timeout(Duration::from_secs(5), pool.reserve()).await;
+    if next.is_err() {
+        layout.release.add_permits(2);
+        first_task.await.expect("join").expect("first document");
+        pool.shutdown().await.expect("cleanup");
+        assert!(
+            next.is_ok(),
+            "idle worker must admit a new PDF before the old task finishes"
+        );
+        return;
+    }
+    let second = next
+        .expect("reservation deadline")
+        .expect("reservation")
+        .open(PdfInput::Path(fixture), Timings::default())
+        .await
+        .expect("second open");
+    let still_running = !first_task.is_finished();
+    let second_observer = Arc::clone(&observer);
+    let second_task = tokio::spawn(async move {
+        parser
+            .parse_session_with_options(
+                second,
+                docparse_core::ParseOptions::builder()
+                    .observer(Some(second_observer.as_ref()))
+                    .build(),
+            )
+            .await
+    });
+    let prematurely_started = tokio::time::timeout(
+        Duration::from_millis(100),
+        layout.entered.notified(),
+    )
+    .await;
+    let renders = observer.0.load(std::sync::atomic::Ordering::SeqCst);
+    layout.release.add_permits(2);
+    first_task.await.expect("first join").expect("first result");
+    second_task
+        .await
+        .expect("second join")
+        .expect("second result");
+    let reused = worker_pids();
+    pool.shutdown().await.expect("shutdown");
+    assert!(still_running);
+    assert!(prematurely_started.is_err());
+    assert_eq!(
+        renders, 1,
+        "the next PDF may open, but cannot render while the old delivery owns the only slot"
+    );
+    assert_eq!(
+        pids, reused,
+        "unused reservations and ordinary closes must not restart PDFium"
+    );
+    assert_eq!(observer.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
 
 /// Reads actual child PIDs instead of trusting the pool's own accounting.
 fn worker_pids() -> Vec<u32> {

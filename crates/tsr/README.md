@@ -34,16 +34,21 @@ Artifact: [PaddlePaddle/SLANet_plus_onnx](https://huggingface.co/PaddlePaddle/SL
 Apache-2.0, revision `7dbe640e127602bf506815e822c09758de73c482`. Preprocessing and
 vocabulary follow its inference.yml and the [PaddleX reference implementation](https://github.com/PaddlePaddle/PaddleX/tree/develop/paddlex/inference/models/table_structure_recognition).
 
-Each loaded model owns one serialized session. `tsr.batch_size` and
+Each model owns `session_size` independent consumers (1–8, default 1), configured
+separately as `tsr.session_size` and `tsr.cell_detection.session_size`. They consume
+one shared queue per model. `tsr.batch_size` and
 `tsr.cell_detection.batch_size` independently cap ready crops per ONNX invocation
 (1–32, library default 1; the repository config uses 4 for each). Both native and
 WASM runners combine queued requests and immediately run partial batches without
 waiting to fill them. The batch axis stays dynamic; detector box counts split
 outputs back into the original request order and each crop keeps its own scale.
-`tsr.table_jobs` remains the per-document admission limit, including same-page
-tables. It must allow enough concurrent requests for batches to fill; independent
-documents also share the model queues. Per-request inference timings include the
-shared batch interval and must not be summed as distinct model execution time.
+The former `tsr.table_jobs` setting is removed. Ready tables are submitted
+concurrently across pages and documents. Each model queue holds at most
+its required `queue_size` pending inputs, in addition to active batches; a full
+queue waits for capacity rather than dropping work. Crops and tensors held by
+callers waiting to enqueue are outside that queue capacity. Per-request inference
+timings include the shared batch interval and must not be summed as distinct
+model execution time.
 
 Native model threads initialize, batch, and destroy their own sessions independently
 of caller Tokio runtimes. Native cancellation retains the session owner until
@@ -67,7 +72,7 @@ SLANeXt uses a 512-pixel input and its invalid position head is discarded.
 Its structure tokens require an independent cell detector.
 
 `[tsr.cell_detection]` accepts `enabled` (default `true`), `model = "wired"` or `"wireless"`, a
-`score_threshold`, `batch_size`, and independent `model_path`, `model_config_path`, and
+`score_threshold`, required `queue_size`, `session_size`, `batch_size`, and independent `model_path`, `model_config_path`, and
 `model_manifest_path` values. RT-DETR reuses layout's OpenCV-compatible cubic
 RGB preprocessing at 640 pixels and returns crop-pixel boxes. The core decoder
 matches those observations to logical cells before source-text filling.

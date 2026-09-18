@@ -13,6 +13,23 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 /// Owned model input remains live until the runtime has finished reading it.
 pub(crate) struct ImageTensor(pub Array4<f32>);
 
+impl TryFrom<&[&ImageTensor]> for ImageTensor {
+    type Error = OcrError;
+
+    /// Concatenates equal-sized single inputs without widening padding or changing OCR output semantics.
+    fn try_from(inputs: &[&ImageTensor]) -> Result<Self, Self::Error> {
+        ndarray::concatenate(
+            ndarray::Axis(0),
+            &inputs
+                .iter()
+                .map(|input| input.0.view())
+                .collect::<Vec<_>>(),
+        )
+        .map(Self)
+        .map_err(|error| OcrError::InvalidData(error.to_string()))
+    }
+}
+
 impl ImageTensor {
     /// Resizes to bounded multiples of 32 and applies detection's ImageNet normalization in BGR order.
     #[expect(

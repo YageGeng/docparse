@@ -1,9 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_common::timing::Timings;
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use docparse_tsr::{ModelArtifacts, SlanetPlusEngine};
 
 /// Both batched model queues remain usable after their construction runtime is destroyed.
@@ -15,6 +14,13 @@ fn batched_models_survive_construction_runtime() {
         docparse_config::ConfigLoader::new(root.join("docparse.toml"))
             .load_raw()
             .expect("configuration");
+    // Exercise both shared queues with more than one native consumer.
+    raw.tsr.session_size = 2;
+    raw.tsr
+        .cell_detection
+        .as_mut()
+        .expect("cell model")
+        .session_size = 2;
     raw.tsr.batch_size = 4;
     raw.tsr
         .cell_detection
@@ -100,6 +106,9 @@ async fn configurable_batches_match_singleton_predictions() {
             docparse_config::ConfigLoader::new(root.join("docparse.toml"))
                 .load_raw()
                 .expect("configuration");
+        raw.tsr.session_size = if structure_batch == 1 { 1 } else { 2 };
+        raw.tsr.cell_detection.as_mut().expect("cells").session_size =
+            if cell_batch == 1 { 1 } else { 2 };
         raw.tsr.batch_size = structure_batch;
         raw.tsr
             .cell_detection

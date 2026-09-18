@@ -7,14 +7,13 @@ use axum::{
     routing::post,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use docparse_common::timing::Timings;
 use docparse_config::{
     FormulaEngineConfig, MineruFormulaConfig, RawConfig, ValidatedConfig,
 };
 use docparse_formula::FormulaEngine;
 use docparse_formula_mineru::MineruEngine;
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use serde_json::{Value, json};
 use std::{
     sync::{
@@ -145,6 +144,30 @@ fn engine(url: String, concurrency: usize, timeout_ms: u64) -> MineruEngine {
     raw.formula.timeout_ms = timeout_ms;
     MineruEngine::try_from(&ValidatedConfig::try_from(raw).expect("config"))
         .expect("engine")
+}
+
+/// Engine-owned consumers must survive destruction of the runtime that constructed them.
+#[test]
+fn engine_survives_construction_runtime() {
+    let construction = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let server_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("server runtime");
+    let (url, _, server) = server_runtime.block_on(service());
+    let recognizer = construction.block_on(async { engine(url, 2, 2000) });
+    drop(construction);
+    let output = server_runtime
+        .block_on(recognizer.recognize(vec![crop(2)], Timings::default()));
+    server.abort();
+    assert_eq!(
+        output.expect("engine survives construction runtime"),
+        ["x_{2}"]
+    );
 }
 
 /// Out-of-order HTTP completions preserve crop order and share one concurrency budget across pages.

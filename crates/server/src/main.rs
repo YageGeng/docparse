@@ -50,10 +50,10 @@ struct Arguments {
     storage_dir: PathBuf,
     #[arg(long, default_value = "docparse.toml")]
     config: PathBuf,
-    /// Overrides whole-document admission through server.jobs; model-session counts remain independent.
+    /// Overrides render.workers, the sole process-owned PDF admission capacity.
     #[builder(default)]
     #[arg(long)]
-    jobs: Option<usize>,
+    render_workers: Option<usize>,
     #[arg(long, default_value_t = 536870912)]
     max_upload_bytes: usize,
     /// Overrides server.max_uploads from the shared configuration.
@@ -97,7 +97,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 impl Arguments {
     /// Applies explicit CLI/environment overrides before validating listener, upload, and worker limits.
     fn load_config(&self) -> Result<RawConfig, ConfigError> {
-        let mut raw = ConfigLoader::new(&self.config).load_raw()?;
+        // Apply CLI capacities as the final source so required fields may be supplied without a file default.
+        let mut overrides = figment::value::Dict::new();
+        if let Some(workers) = self.render_workers {
+            overrides.insert(
+                "render".into(),
+                figment::value::Value::from(figment::value::Dict::from([(
+                    "workers".into(),
+                    workers.into(),
+                )])),
+            );
+        }
+        let mut raw = ConfigLoader::new(&self.config)
+            .with_overrides(overrides)
+            .load_raw()?;
         if let Some(bind) = self.bind {
             raw.server.host = bind.ip().to_string();
             raw.server.port = bind.port();
@@ -105,13 +118,11 @@ impl Arguments {
         if let Some(url) = &self.database_url {
             raw.database.url = url.clone();
         }
-        if let Some(concurrency) = self.jobs {
-            raw.server.jobs = concurrency;
-        }
         if let Some(max_uploads) = self.max_uploads {
             raw.server.max_uploads = max_uploads;
         }
         raw.server.validate()?;
+        raw.render.validate()?;
         Ok(raw)
     }
 
@@ -124,10 +135,9 @@ impl Arguments {
             .build()
     }
 
-    /// Uses resolved document concurrency alongside the existing CLI lease and timeout policy.
-    fn worker_options(&self, server: &ServerConfig) -> WorkerOptions {
+    /// Keeps lease and timeout policy separate from PDFium-driven document admission.
+    fn worker_options(&self) -> WorkerOptions {
         WorkerOptions::builder()
-            .concurrency(server.jobs)
             .lease_seconds(self.lease_seconds)
             .max_attempts(self.max_attempts)
             .job_timeout(Duration::from_secs(self.job_timeout_seconds))
@@ -144,11 +154,10 @@ impl Arguments {
         if matches!(self.role, Role::Api) {
             return Ok(None);
         }
-        let max_processes = raw.server.pdfium_workers;
-        let options = self.worker_options(&raw.server);
+        let max_processes = raw.render.workers;
+        let options = self.worker_options();
         tracing::info!(
-            "starting parser with document concurrency {} and at most {} PDFium workers",
-            options.concurrency,
+            "starting parser with at most {} PDFium workers",
             max_processes
         );
         let config = Arc::new(ValidatedConfig::try_from(raw)?);
@@ -244,8 +253,8 @@ async fn run_services(
         Ok(())
     };
     let working = async {
-        if let Some(worker) = worker {
-            worker.run(shutdown.clone()).await?;
+        if let (Some(worker), Some(pool)) = (worker, &pool) {
+            worker.run(Arc::clone(pool), shutdown.clone()).await?;
         }
         Ok::<(), Box<dyn Error>>(())
     };
@@ -286,24 +295,32 @@ async fn run_services(
 mod tests {
     use super::*;
 
-    /// Omitted CLI flags retain configuration, while explicit flags override it before validation.
+    /// Produces explicit required capacities without depending on the deployment configuration.
+    fn configuration(workers: usize, uploads: usize) -> String {
+        format!(
+            "render.workers = {workers}\nrender.queue_size = 2\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 1\nocr.orientation.queue_size = 1\nformula.queue_size = 1\nserver.max_uploads = {uploads}\n"
+        )
+    }
+
+    /// Worker CLI settings override configuration without restoring an independent full-document concurrency gate.
     #[test]
     fn concurrency_uses_configuration_unless_cli_overrides_it() {
-        let directory = tempfile::tempdir().expect("configuration directory");
+        let directory = tempfile::tempdir().expect("directory");
         let path = directory.path().join("docparse.toml");
-        for (field, flag, default) in
-            [("jobs", "--jobs", 2), ("max_uploads", "--max-uploads", 4)]
+        for (flag, worker_setting) in
+            [("--render-workers", true), ("--max-uploads", false)]
         {
-            for (configured, override_value, expected) in [
-                (None, None, default),
-                (Some(8), None, 8),
-                (Some(8), Some(3), 3),
-                (Some(0), Some(3), 3),
-            ] {
-                let content = configured
-                    .map(|value| format!("[server]\n{field} = {value}\n"))
-                    .unwrap_or_default();
-                std::fs::write(&path, content).expect("configuration file");
+            for (configured, override_value, expected) in
+                [(8, None, 8), (8, Some(3), 3), (0, Some(3), 3)]
+            {
+                std::fs::write(
+                    &path,
+                    configuration(
+                        if worker_setting { configured } else { 1 },
+                        if worker_setting { 4 } else { configured },
+                    ),
+                )
+                .expect("config");
                 let mut argv = vec![
                     std::ffi::OsString::from("docparse-server"),
                     "--config".into(),
@@ -313,34 +330,49 @@ mod tests {
                     argv.extend([flag.into(), value.to_string().into()]);
                 }
                 let arguments =
-                    Arguments::try_parse_from(argv).expect("CLI arguments");
-                let raw =
-                    arguments.load_config().expect("effective configuration");
-                let server = serde_json::to_value(&raw.server)
-                    .expect("server configuration");
-                assert_eq!(
-                    server.get(field),
-                    Some(&serde_json::json!(expected))
-                );
-                let applied = if field == "max_uploads" {
-                    arguments.http_options(&raw.server).max_uploads
+                    Arguments::try_parse_from(argv).expect("arguments");
+                let raw = arguments.load_config().expect("configuration");
+                let actual = if worker_setting {
+                    raw.render.workers
                 } else {
-                    arguments.worker_options(&raw.server).concurrency
+                    arguments.http_options(&raw.server).max_uploads
                 };
-                assert_eq!(applied, expected);
+                assert_eq!(actual, expected);
             }
         }
+        // Required worker capacity may come from the CLI rather than the file.
+        std::fs::write(
+            &path,
+            configuration(1, 4).replace("render.workers = 1\n", ""),
+        )
+        .expect("config");
+        let arguments = Arguments::try_parse_from([
+            std::ffi::OsString::from("docparse-server"),
+            "--config".into(),
+            path.as_os_str().to_owned(),
+            "--render-workers".into(),
+            "2".into(),
+        ])
+        .expect("arguments");
+        assert_eq!(
+            arguments
+                .load_config()
+                .expect("CLI supplies required workers")
+                .render
+                .workers,
+            2
+        );
     }
 
-    /// Invalid explicit overrides must fail before database connections or model initialization.
+    /// Invalid explicit overrides fail before database connections or process initialization.
     #[test]
     fn concurrency_rejects_invalid_cli_overrides() {
-        let directory = tempfile::tempdir().expect("configuration directory");
+        let directory = tempfile::tempdir().expect("directory");
         let path = directory.path().join("docparse.toml");
-        std::fs::write(&path, "").expect("configuration file");
+        std::fs::write(&path, configuration(1, 4)).expect("configuration");
         for (field, flag, limits) in [
-            ("jobs", "--jobs", [0, 129]),
-            ("max_uploads", "--max-uploads", [0, 1025]),
+            ("render.workers", "--render-workers", [0, 536869888]),
+            ("server.max_uploads", "--max-uploads", [0, 1025]),
         ] {
             for limit in limits {
                 let arguments = Arguments::try_parse_from([
@@ -350,11 +382,9 @@ mod tests {
                     flag.into(),
                     limit.to_string().into(),
                 ])
-                .expect("numeric CLI value");
+                .expect("arguments");
                 assert!(
-                    matches!(arguments.load_config(), Err(ConfigError::InvalidValue { field: actual, .. })
-                    if actual == format!("server.{field}")),
-                    "invalid CLI concurrency must be rejected during configuration loading"
+                    matches!(arguments.load_config(), Err(ConfigError::InvalidValue { field: actual, .. }) if actual == field)
                 );
             }
         }

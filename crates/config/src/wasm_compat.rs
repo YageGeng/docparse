@@ -92,8 +92,19 @@ mod platform {
                 path: config_path.clone(),
                 source,
             };
+            // Programmatic defaults remain available, but files and overrides must explicitly supply queue capacities.
+            let mut defaults: Dict =
+                Figment::from(Serialized::defaults(RawConfig::default()))
+                    .extract()
+                    .map_err(|error| load_error(Box::new(error)))?;
+            Self::remove_queue_defaults(&mut defaults);
+            if let Some(figment::value::Value::Dict(_, render)) =
+                defaults.get_mut("render")
+            {
+                render.remove("workers");
+            }
             let mut figment = Self::merge_source(
-                Figment::from(Serialized::defaults(RawConfig::default())),
+                Figment::from(Serialized::defaults(defaults)),
                 Toml::file(&config_path),
             )
             .map_err(&load_error)?;
@@ -133,6 +144,16 @@ mod platform {
                 })?;
             config.resolve_paths(&base_directory);
             Ok(config)
+        }
+
+        /// Removes required capacities from every nested default section before user layers are merged.
+        fn remove_queue_defaults(values: &mut Dict) {
+            values.remove("queue_size");
+            for value in values.values_mut() {
+                if let figment::value::Value::Dict(_, nested) = value {
+                    Self::remove_queue_defaults(nested);
+                }
+            }
         }
 
         /// Replaces model-specific defaults when a higher-priority layer switches the tagged engine.
@@ -270,15 +291,15 @@ mod platform {
                 &mut self.tsr.model_config_path,
                 &mut self.tsr.model_manifest_path,
                 // OCR file overrides follow the same config-relative policy as layout and TSR.
-                &mut self.ocr.detection.model_path,
-                &mut self.ocr.detection.model_config_path,
-                &mut self.ocr.detection.model_manifest_path,
-                &mut self.ocr.recognition.model_path,
-                &mut self.ocr.recognition.model_config_path,
-                &mut self.ocr.recognition.model_manifest_path,
-                &mut self.ocr.orientation.model_path,
-                &mut self.ocr.orientation.model_config_path,
-                &mut self.ocr.orientation.model_manifest_path,
+                &mut self.ocr.detection.files.model_path,
+                &mut self.ocr.detection.files.model_config_path,
+                &mut self.ocr.detection.files.model_manifest_path,
+                &mut self.ocr.recognition.files.model_path,
+                &mut self.ocr.recognition.files.model_config_path,
+                &mut self.ocr.recognition.files.model_manifest_path,
+                &mut self.ocr.orientation.files.model_path,
+                &mut self.ocr.orientation.files.model_config_path,
+                &mut self.ocr.orientation.files.model_manifest_path,
             ] {
                 if path.is_relative() {
                     *path = base_directory.join(&*path);
@@ -326,39 +347,16 @@ mod platform {
     }
 
     impl crate::ValidatedConfig {
-        /// Rejects browser concurrency that the single-Worker implementation cannot provide.
+        /// Bounds browser page ownership; model consumers now share queues under the global inference guard.
         pub(crate) fn validate_platform(
             config: &crate::RawConfig,
         ) -> Result<(), crate::ConfigError> {
-            if let crate::FormulaEngineConfig::Texo(texo) =
-                &config.formula.engine
-                && texo.sessions != 1
-            {
+            // One browser Worker owns one PDFium instance; page work may still overlap through its bounded queue.
+            if config.render.workers != 1 {
                 return Err(crate::ConfigError::UnsupportedWebConcurrency {
-                    field: "formula.engine.sessions",
-                    value: texo.sessions,
+                    field: "render.workers",
+                    value: config.render.workers,
                 });
-            }
-            for (field, value) in [
-                ("layout.sessions", config.layout.sessions),
-                ("runtime.stage_pages", config.runtime.stage_pages),
-                (
-                    "runtime.render_queue_capacity",
-                    config.runtime.render_queue_capacity,
-                ),
-                (
-                    "runtime.blocking_task_limit",
-                    config.runtime.blocking_task_limit,
-                ),
-            ] {
-                if value != 1 {
-                    return Err(
-                        crate::ConfigError::UnsupportedWebConcurrency {
-                            field,
-                            value,
-                        },
-                    );
-                }
             }
             Ok(())
         }

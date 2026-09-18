@@ -55,7 +55,7 @@ impl PageTableDraft {
     pub(crate) fn reconstruct_local(
         &mut self,
         config: &docparse_config::FusionConfig,
-        timings: &docparse_layout::timing::Timings,
+        timings: &docparse_common::timing::Timings,
     ) {
         let _timer = self
             .blocks
@@ -64,7 +64,7 @@ impl PageTableDraft {
             .then(|| {
                 timings
                     .for_page(self.extracted.page_number)
-                    .start(docparse_layout::timing::TimingStage::TableStructure)
+                    .start(docparse_common::timing::TimingStage::TableStructure)
             });
         let assembler = crate::table::TableAssembler::new(
             config,
@@ -100,7 +100,7 @@ impl PageTableDraft {
 #[derive(Debug, Clone)]
 pub(crate) struct PageAnalyzer {
     config: Arc<ValidatedConfig>,
-    timings: docparse_layout::timing::Timings,
+    timings: docparse_common::timing::Timings,
 }
 
 impl PageAnalyzer {
@@ -108,14 +108,14 @@ impl PageAnalyzer {
     pub(crate) fn new(config: Arc<ValidatedConfig>) -> Self {
         Self {
             config,
-            timings: docparse_layout::timing::Timings::default(),
+            timings: docparse_common::timing::Timings::default(),
         }
     }
 
     /// Shares the per-parse timing sink without making observations part of page data.
     pub(crate) fn with_timings(
         mut self,
-        timings: docparse_layout::timing::Timings,
+        timings: docparse_common::timing::Timings,
     ) -> Self {
         self.timings = timings;
         self

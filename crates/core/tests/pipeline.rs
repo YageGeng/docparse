@@ -129,7 +129,7 @@ impl docparse_core::TableStructureEngine for GatedEnrichment {
     }
 }
 
-/// Slow OCR must neither consume the next page's layout slot nor retain finished PDFium work.
+/// Two delivery slots allow overlapping stages while completed rasterization frees PDFium.
 #[tokio::test]
 async fn slow_ocr_allows_later_layout_and_another_document() {
     let mut raw = RawConfig::default();
@@ -137,8 +137,7 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     raw.ocr.policy = OcrPolicy::Always;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
+    raw.render.queue_size = 2;
     let gate = Arc::new(Semaphore::new(0));
     let (sender, mut receiver) = mpsc::unbounded_channel();
     let parser = DocParser::builder()
@@ -227,15 +226,14 @@ async fn slow_ocr_allows_later_layout_and_another_document() {
         opened.expect("PDFium must close before OCR finishes"),
         Some(1)
     );
-    // A full TSR stage must not retain OCR's slot for the following page.
+    // A slow TSR request holds one delivery, leaving the second available for OCR.
     let gate = Arc::new(Semaphore::new(0));
     let mut raw = RawConfig::default();
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::TsrOnly;
     raw.ocr.policy = OcrPolicy::Always;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
+    raw.render.queue_size = 2;
     let (layout_events, _) = mpsc::unbounded_channel();
     let (ocr_events, mut receiver) = mpsc::unbounded_channel();
     let parser = DocParser::builder()
@@ -289,7 +287,7 @@ impl docparse_formula::FormulaEngine for GatedEnrichment {
     fn recognize(
         &self,
         images: Vec<Arc<docparse_layout::PageImage>>,
-        _timings: docparse_layout::timing::Timings,
+        _timings: docparse_common::timing::Timings,
     ) -> WasmBoxedFuture<'_, Result<Vec<String>, docparse_formula::FormulaError>>
     {
         Box::pin(async move {
@@ -333,8 +331,7 @@ async fn slow_formulas_allow_later_tables() {
     raw.ocr.policy = OcrPolicy::Disabled;
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
+    raw.render.queue_size = 2;
     let gate = Arc::new(Semaphore::new(0));
     let (layout_events, _) = mpsc::unbounded_channel();
     let (table_events, mut receiver) = mpsc::unbounded_channel();
@@ -370,7 +367,7 @@ async fn slow_formulas_allow_later_tables() {
     let later =
         tokio::time::timeout(Duration::from_secs(2), receiver.recv()).await;
     let waiting_for_formula = !task.is_finished();
-    // One completed table may wait behind the single formula slot; the whole document must not be queued.
+    // Two unfinished pages exhaust the shared render queue even after both have finished table processing.
     let beyond_capacity =
         tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await;
     // Release blocked work before asserting so a regression cannot leave native resources stranded.

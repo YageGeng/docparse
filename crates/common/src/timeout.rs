@@ -7,7 +7,7 @@ use std::time::Duration;
 #[error("operation deadline elapsed")]
 pub struct Elapsed;
 
-#[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 mod platform {
     use super::*;
 
@@ -22,7 +22,7 @@ mod platform {
     }
 }
 
-#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 mod platform {
     use super::*;
     use futures_util::future::{Either, select};

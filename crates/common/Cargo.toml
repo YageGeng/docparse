@@ -1,0 +1,36 @@
+[package]
+name = "docparse-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Shared queues, thread ownership, timing, and platform runtime support"
+
+[dependencies]
+# error
+thiserror.workspace = true
+
+# async
+futures-util.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+
+# config and serialization
+serde.workspace = true
+
+# cli and diagnostics
+tracing.workspace = true
+web-time.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# async
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# browser
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[lints]
+workspace = true

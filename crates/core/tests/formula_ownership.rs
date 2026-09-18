@@ -1,8 +1,9 @@
+use docparse_common::timing::Timings;
 use docparse_config::{ConfigLoader, OcrPolicy, TableMode, ValidatedConfig};
 use docparse_core::{
     DocParser, LocalPdfiumProvider, PageInput, PdfInput, PdfiumProvider,
 };
-use docparse_layout::{LayoutLabel, timing::Timings};
+use docparse_layout::LayoutLabel;
 use std::{path::PathBuf, sync::Arc};
 
 /// Replays real page-five detection and recognition to keep the caption formula out of the adjacent column.

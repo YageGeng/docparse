@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # workspace crates
+docparse-common.workspace = true
 docparse-config = { workspace = true, features = ["wasm"] }
 docparse-core = { workspace = true, features = ["wasm"] }
 docparse-formula = { workspace = true, features = ["wasm"] }

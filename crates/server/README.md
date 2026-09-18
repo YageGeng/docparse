@@ -45,48 +45,43 @@ rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-wor
 rtk cargo build -p docparse-server --release --features cuda
 ```
 
-`server.pdfium_workers` defaults to 1 and bounds all PDFium children,
-including startup and cleanup. For example:
+`render.workers` is required and bounds all PDFium children, including startup
+and cleanup. `render.queue_size` bounds unfinished pages across all documents:
 
 ```toml
+[render]
+workers = 5
+queue_size = 16
+
 [server]
 max_uploads = 4
-jobs = 2
-pdfium_workers = 2
 ```
 
-The equivalent environment override is `DOCPARSE_SERVER__PDFIUM_WORKERS`.
-`server.jobs` limits whole document jobs, defaults to 2, and accepts
-values from 1 through 128. `DOCPARSE_SERVER__JOBS` overrides the file;
-an explicitly supplied `--jobs` overrides both. Omitting the flag
-keeps the configured value. Changes take effect after restarting the server.
-`server.max_uploads` caps upload requests across the entire instance, defaults to
-4, and accepts values from 1 through 1024. `DOCPARSE_SERVER__MAX_UPLOADS` overrides
-the file, and an explicit `--max-uploads` overrides both. This does not change
-the browser's per-page upload queue or the document parsing concurrency.
-The PDFium limit is independent of `server.jobs` and
-`runtime.stage_pages` (pages per analysis stage). Layout/OCR/TSR/formula sessions
-remain shared in the server; workers initialize only PDFium. `PdfiumQueue`
-measures waiting for a process slot separately from `PdfOpen`.
+Use `DOCPARSE_RENDER__WORKERS` or `--render-workers` to override the pool size.
+Idle process reservations drive database claims directly. A worker can open the
+next PDF after the previous document's last raster is delivered and Close is
+acknowledged, even while the previous document still runs inference. Completed
+post-render tasks never gate new claims. Unused reservations return without
+restarting their processes; job heartbeat and timeout supervision continues
+until the complete attempt ends.
 
-Concurrency names distinguish model sessions from queued work:
+Idle-process inventory uses a handle channel without a buffer limit so stale
+crash tokens cannot evict healthy returned reservations. This channel contains
+only process handles; supervisors still enforce the configured process limit.
+Page and model work queues retain their bounded admission.
 
-| Setting | Scope and unit |
-| --- | --- |
-| `server.jobs` | Whole-document jobs per server |
-| `server.pdfium_workers` | Live PDFium child processes per server |
-| `layout.sessions` | Shared layout ONNX sessions |
-| `runtime.stage_pages` | Owned pages per document in each analysis stage |
-| `tsr.table_jobs` | In-flight table requests per document, including queue waits |
-| `tsr.batch_size` | Ready table crops per structure-model invocation |
-| `tsr.cell_detection.batch_size` | Ready table crops per cell-detector invocation |
-| `formula.batch_size` | Formula crops per batch in the shared formula worker |
+`render.queue_size` is not merely a raster buffer: reservations remain occupied
+through the page's complete pipeline and any actual background cleanup after
+cancellation. A full queue pauses the next Render operation; idle processes may
+still claim, open and pre-scan a new document. Model `queue_size` settings retain
+their pending-input semantics, independently of `session_size` and `batch_size`.
 
-The first five settings replace `worker_concurrency`, `pdfium_max_workers`,
-`session_pool_size`, `page_concurrency`, and `tsr.max_in_flight`, respectively;
-old keys are rejected. All batch limits use the name `batch_size`.
-`formula.batch_size` retains its name and behavior. Rename server CLI overrides to
-`--jobs` and E2E page admission overrides to `--stage-pages`.
+`server.max_uploads` remains an independent HTTP admission limit (1–1024,
+default 4), with `DOCPARSE_SERVER__MAX_UPLOADS` and `--max-uploads` overrides.
+The retired server `jobs`/`pdfium_workers` and runtime
+`stage_pages`/`render_queue_capacity`/`blocking_task_limit` fields are rejected.
+There is no replacement page-limit or full-document concurrency setting.
+E2E scripts use `--render-queue-size` for page delivery capacity.
 
 Install matching `docparse-server` and `docparse-pdfium-worker` executables in the
 same directory. Worker startup fails on missing or incompatible artifacts; there
@@ -338,7 +333,7 @@ attempt progress. PostgreSQL's clock controls all lease checks and deadlines.
 The default lease is 60 seconds, renewed at least every 20 seconds. Old workers
 cannot publish progress or success once the lease expires or another worker owns
 the task. Defaults are two concurrent documents per worker, three attempts, and a
-one-hour deadline per attempt; tune `server.jobs`, `--lease-seconds`,
+one-hour deadline per attempt; tune `render.workers`, `--lease-seconds`,
 `--max-attempts`, and `--job-timeout-seconds` for your documents and hardware.
 
 SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/ready` to return 503, close SSE subscriptions,
@@ -448,26 +443,22 @@ and result publication, and excludes upload, queueing, and the final database up
 The duration is saved atomically with the attempt outcome; the completion log uses
 the same value. Retries clear it, while historical or interrupted attempts remain null.
 
-Full-document native extraction still precedes global watermark/font statistics.
-After this pass, render, layout/preparation, OCR/composition, TSR/page assembly,
-and formula recognition/projection run as separate bounded stages. Each analysis
-stage admits at most `runtime.stage_pages` pages, including completed results
-waiting for downstream capacity. Up to roughly `4 * stage_pages +
-render_queue_capacity + 1` page rasters can be retained per document, plus native
-facts, model tensors, and final results. Queue pressure intentionally stops
-further rasterization instead of growing memory without bound.
+Full-document native extraction precedes global watermark/font statistics.
+After that pass, each admitted page advances independently through layout, OCR,
+tables and formulas. All documents share `render.queue_size` unfinished page
+deliveries. The queue reserves before rendering and retains capacity through
+result collection and the final native/IPC/model resource owner after cancellation.
 
-Relative to the former combined TSR/formula stage, this allows up to one extra
-`stage_pages` of owned pages per document. With page concurrency 4 and five
-concurrent document jobs, budget for up to 20 additional rasters plus page data.
-Formula overload still backpressures the bounded upstream stages; isolating its
-slots allows earlier table work to overlap without unbounded buffering.
+This bounds retained page work, not total service RSS: model weights, document
+text facts, results, IPC copies and independently retained observer buffers also
+consume memory. Keep result collection and publication moving; completed PDFium
+leases do not cap documents still in post-processing.
 
 Native Texo uses a shared ready-crop queue across documents and pages. The
-`formula.engine.sessions` independent encoder/decoder pairs drain batches up to
+`formula.engine.session_size` independent encoder/decoder pairs drain batches up to
 `formula.batch_size` without waiting to fill them. The session count defaults to
 one; the sample configuration selects two owners and batches of eight. Admission
-queues at most `sessions * batch_size` crops in addition to active batches and
+queues at most `formula.queue_size` crops in addition to active batches and
 existing page tasks. Increasing sessions duplicates model resources; measure
 throughput and peak GPU memory before increasing it further. Cancellation and
 sequence-level failures stay scoped to the original caller. Native formula
@@ -475,10 +466,11 @@ timings are per crop, so shared batch durations must not be summed as GPU busy t
 
 PDFium remains process-serialized for safety and closes immediately after the
 last raster has been delivered, allowing other documents to open while inference
-finishes. Native OCR `max_in_flight` defaults to two, overlapping different model
-stages across pages while serializing each session on a dedicated native thread. Browser OCR remains
-single-page bounded. Layout session pools retain their existing configuration;
-TSR retains one session. Tune against the existing stage/queue timings and actual
+finishes. OCR stages overlap across pages through per-model shared queues;
+`session_size` determines consumers and `queue_size` bounds pending requests.
+The former `ocr.max_in_flight` page gate and browser-only single-page cap are
+removed. ORT Web retains its global execution/readback guard. Layout and TSR
+also use independent model sessions. Tune against stage/queue timings and actual
 GPU measurements. More replicas sharing one GPU can duplicate model memory rather
 than increase throughput; place workers according to GPU and memory budgets.
 

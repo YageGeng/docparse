@@ -1,18 +1,17 @@
-//! One parse's bounded async table stage over already-owned layout blocks.
+//! Concurrent table requests over already-owned layout blocks; providers own queue backpressure.
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Duration;
 
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::FusionConfig;
-use docparse_layout::timing::{TimingStage, Timings};
 use docparse_layout::{
     AffineTransform, Bbox, LayoutLabel, PageImage, PageImageInput,
     PageTransform, Point,
 };
-use futures_util::{StreamExt, stream};
-use tokio::sync::Semaphore;
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use typed_builder::TypedBuilder;
 
 use crate::page::PageTableDraft;
@@ -24,15 +23,14 @@ use crate::{
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Shared once per parse, so parallel pages obey the same external concurrency budget.
+/// Shares table policy and the provider across all pages of a parse.
 pub(crate) struct TableRuntime {
     options: TableOptions,
     engine: Option<Arc<dyn TableStructureEngine>>,
-    permits: Semaphore,
 }
 
 impl TableRuntime {
-    /// Applies the per-document table-job budget without allocating additional model sessions.
+    /// Shares validated policy without imposing a document-level gate ahead of provider queues.
     #[allow(
         clippy::arc_with_non_send_sync,
         reason = "browser trait objects stay in one Worker; native bounds require Send and Sync"
@@ -42,14 +40,10 @@ impl TableRuntime {
         engine: Option<Arc<dyn TableStructureEngine>>,
     ) -> Result<Arc<Self>, TableStructureError> {
         options.validate(engine.is_some())?;
-        Ok(Arc::new(Self {
-            permits: Semaphore::new(options.table_jobs),
-            options,
-            engine,
-        }))
+        Ok(Arc::new(Self { options, engine }))
     }
 
-    /// Admits same-page tables concurrently for model batching while preserving ordered results and failures.
+    /// Submits all ready same-page tables concurrently and preserves result ownership and failures.
     pub(crate) async fn resolve(
         &self,
         draft: &mut PageTableDraft,
@@ -72,8 +66,8 @@ impl TableRuntime {
             &draft.formula_regions,
         );
         let assembler = &assembler;
-        // Multiple ready crops can share a model batch; the existing per-document permit still owns admission.
-        let requests: Vec<_> = draft
+        // Model queues decide when requests can enter; the parser does not impose an additional task window.
+        let mut requests: FuturesUnordered<_> = draft
             .blocks
             .iter_mut()
             .filter(|b| b.label == LayoutLabel::Table)
@@ -177,9 +171,6 @@ impl TableRuntime {
                 Vec::new()
             }
         }).collect();
-        let requests =
-            stream::iter(requests).buffer_unordered(self.options.table_jobs);
-        tokio::pin!(requests);
         while let Some(warnings) = requests.next().await {
             draft.warnings.extend(warnings);
         }
@@ -193,7 +184,7 @@ impl TableRuntime {
         });
     }
 
-    /// Includes queue wait in the deadline and releases the permit and provider future on cancellation.
+    /// Includes model-queue waits in the deadline and drops the provider future on cancellation.
     async fn recognize(
         &self,
         engine: Arc<dyn TableStructureEngine>,
@@ -205,15 +196,7 @@ impl TableRuntime {
             .start(TimingStage::TableExternal);
         crate::wasm_compat::timeout(
             Duration::from_millis(self.options.timeout_ms),
-            async {
-                let _permit =
-                    self.permits.acquire().await.map_err(|error| {
-                        TableStructureError::Engine {
-                            message: format!("table scheduler closed: {error}"),
-                        }
-                    })?;
-                engine.recognize(request).await
-            },
+            async { engine.recognize(request).await },
         )
         .await
         .map_err(|_elapsed| TableStructureError::Timeout {

@@ -13,15 +13,12 @@ use crate::BlockId;
 
 pub use docparse_config::TableMode;
 
-/// Per-parse table limits; the default tries local rules before the configured TSR engine.
+/// Per-parse table policy and deadline; providers own their queue backpressure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TableOptions {
     #[builder(default)]
     pub mode: TableMode,
-    /// Bounds in-flight table requests per parse, including waits for shared model sessions.
-    #[builder(default = 2)]
-    pub table_jobs: usize,
     #[builder(default = 60_000)]
     pub timeout_ms: u64,
 }
@@ -39,14 +36,9 @@ impl TableOptions {
         &self,
         has_engine: bool,
     ) -> Result<(), TableStructureError> {
-        if self.table_jobs == 0
-            || self.table_jobs > 32
-            || self.timeout_ms == 0
-            || self.timeout_ms > 86_400_000
-        {
+        if self.timeout_ms == 0 || self.timeout_ms > 86_400_000 {
             return Err(TableStructureError::InvalidOptions {
-                reason: "table_jobs must be 1..=32 and timeout_ms 1..=86400000"
-                    .to_owned(),
+                reason: "timeout_ms must be 1..=86400000".to_owned(),
             });
         }
         if self.mode != TableMode::RulesOnly && !has_engine {
@@ -82,7 +74,7 @@ pub struct TsrTableRequest {
     pub reason: TsrRequestReason,
     /// Stage observations remain local to the parser and are not serialized to external providers.
     #[builder(default)]
-    pub timings: docparse_layout::timing::Timings,
+    pub timings: docparse_common::timing::Timings,
 }
 
 /// External structure tokens and one crop-pixel box for each cell opening tag.
@@ -160,11 +152,10 @@ pub trait TableStructureEngine:
 }
 
 impl From<&docparse_config::TsrConfig> for TableOptions {
-    /// Resolves the parser instance policy into one call's bounded table stage.
+    /// Resolves the parser policy without adding a second concurrency limit ahead of model queues.
     fn from(config: &docparse_config::TsrConfig) -> Self {
         Self::builder()
             .mode(config.mode)
-            .table_jobs(config.table_jobs)
             .timeout_ms(config.timeout_ms)
             .build()
     }

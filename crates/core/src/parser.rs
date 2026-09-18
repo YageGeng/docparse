@@ -135,6 +135,7 @@ impl ParseOptions<'_> {
 #[derive(Clone, TypedBuilder)]
 #[builder(builder_method(name = with_engines, vis = "pub(crate)"), builder_type(name = ParserAssembly, vis = "pub(crate)"))]
 pub struct DocParser {
+    render_queue: docparse_common::PageQueue,
     /// Shared PDFium execution boundary; library callers keep the local provider.
     #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
     pdfium_provider: Arc<dyn crate::PdfiumProvider>,
@@ -503,6 +504,9 @@ impl DocParserBuilder {
         )
         .await?;
         Ok(DocParser::with_engines()
+            .render_queue(docparse_common::PageQueue::new(
+                config.render().queue_size,
+            ))
             .pdfium_provider(self.pdfium_provider)
             .config(config)
             .layout_engine(layout_engine)
@@ -577,6 +581,18 @@ impl DocParser {
         .await
     }
 
+    /// Consumes a session opened with a reserved PDFium slot without acquiring another process.
+    pub async fn parse_session_with_options(
+        &self,
+        session: Box<dyn crate::PdfiumSession>,
+        options: ParseOptions<'_>,
+    ) -> Result<DocumentResult, DocParseError> {
+        self.runtime()
+            .parse_document_with_options(session, options)
+            .await
+            .map_err(DocParseError::from)
+    }
+
     /// Parses one already extracted and rendered page with a one-page context.
     pub async fn parse_page(
         &self,
@@ -592,13 +608,20 @@ impl DocParser {
         mut input: PageInput,
         options: ParseOptions<'_>,
     ) -> Result<PageResult, DocParseError> {
+        // Standalone pages share the same delivery capacity as full-document parsing.
+        let lease = self.render_queue.reserve().await.map_err(|error| {
+            DocParseError::from(crate::runtime::ParseRuntimeError::Task(
+                error.to_string(),
+            ))
+        })?;
+        Arc::make_mut(&mut input.image).retain_page(lease.clone());
         let observer = options.observer;
         let (collector, mut timing_receiver) =
-            docparse_layout::timing::Timings::channel();
+            docparse_common::timing::Timings::channel();
         let timings = if observer.is_some() {
             collector
         } else {
-            docparse_layout::timing::Timings::default()
+            docparse_common::timing::Timings::default()
         };
         let tables =
             options.table_runtime(&self.config, self.table_engine.as_ref())?;
@@ -652,23 +675,26 @@ impl DocParser {
             .image(input.image)
             .transform(input.transform)
             .build();
-        let result = analyze_rendered_page(
-            crate::runtime::PageAnalysisInput::builder()
-                .config(Arc::clone(&self.config))
-                .layout_engine(Arc::clone(&self.layout_engine))
-                .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
-                .formula_engine(self.formula_engine.as_ref().map(Arc::clone))
-                .context(context)
-                .extracted(input.extracted)
-                .rendered(rendered)
-                .timings(timings)
-                .tables(tables)
-                .build(),
-        )
-        .await
-        .map_err(|source| DocParseError::ParsePage {
-            source: Box::new(source),
-        });
+        let result = lease
+            .scope(analyze_rendered_page(
+                crate::runtime::PageAnalysisInput::builder()
+                    .config(Arc::clone(&self.config))
+                    .layout_engine(Arc::clone(&self.layout_engine))
+                    .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
+                    .formula_engine(
+                        self.formula_engine.as_ref().map(Arc::clone),
+                    )
+                    .context(context)
+                    .extracted(input.extracted)
+                    .rendered(rendered)
+                    .timings(timings)
+                    .tables(tables)
+                    .build(),
+            ))
+            .await
+            .map_err(|source| DocParseError::ParsePage {
+                source: Box::new(source),
+            });
         if let Some(observer) = observer {
             while let Ok(timing) = timing_receiver.try_recv() {
                 observer.on_timing(timing);
@@ -688,6 +714,7 @@ impl DocParser {
     /// Creates one short-lived runtime facade that clones only shared ownership handles.
     pub(crate) fn runtime(&self) -> ParseRuntime {
         ParseRuntime::builder()
+            .render_queue(self.render_queue.clone())
             .pdfium_provider(Arc::clone(&self.pdfium_provider))
             .config(Arc::clone(&self.config))
             .layout_engine(Arc::clone(&self.layout_engine))
@@ -718,7 +745,7 @@ mod tests {
         fn detect(
             &self,
             _request: docparse_layout::LayoutRequest,
-        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        ) -> docparse_common::WasmBoxedFuture<
             '_,
             Result<
                 Vec<docparse_layout::LayoutDetection>,

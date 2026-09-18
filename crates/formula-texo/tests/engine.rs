@@ -1,10 +1,8 @@
 //! Formula engine boundary regressions independent of external model files.
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_formula::{FormulaEngine, FormulaError};
 use docparse_formula_texo::{TexoArtifacts, TexoEngine};
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat,
-    timing::{TimingStage, Timings},
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::sync::Arc;
 
 /// Truncated and unrelated weights must fail before allocating model tensors.
@@ -55,7 +53,7 @@ async fn real_model_batch_parity_and_cancellation() {
     let mut raw = docparse_config::RawConfig::default();
     raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
         docparse_config::TexoFormulaConfig::builder()
-            .sessions(2)
+            .session_size(2)
             .encoder_path(dir.join("encoder_model.onnx"))
             .decoder_path(dir.join("decoder_model_merged.onnx"))
             .tokenizer_path(dir.join("tokenizer.json"))

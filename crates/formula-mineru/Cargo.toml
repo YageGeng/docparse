@@ -13,6 +13,7 @@ wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-layout/wasm"]
 
 [dependencies]
 # workspace crates
+docparse-common.workspace = true
 docparse-config.workspace = true
 docparse-formula.workspace = true
 docparse-layout.workspace = true

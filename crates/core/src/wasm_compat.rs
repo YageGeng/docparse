@@ -1,11 +1,10 @@
 //! Native and browser runtime boundaries with explicitly scoped compatibility submodules.
-mod task_set;
-pub(crate) use docparse_layout::wasm_compat::timeout;
+// Runtime mechanics are shared directly rather than routed through a model crate.
+pub(crate) use docparse_common::{TaskSet, spawn, timeout};
 
 pub use crate::pdfium::PdfInput;
-pub(crate) use task_set::{TaskSet, spawn};
 
-pub use docparse_layout::wasm_compat::{
+pub use docparse_common::{
     TaskError, WasmBoxedFuture, WasmCompatSend, WasmCompatSync,
 };
 

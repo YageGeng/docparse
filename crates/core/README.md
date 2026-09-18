@@ -154,7 +154,9 @@ are rejected. Explicit external header flags are preserved. Cell text always
 comes from the block's existing Native/OCR facts; external generated text is not
 accepted as native content.
 
-External requests share `table_jobs` (default 2) across the entire parse.
+Ready table requests are submitted concurrently. The parser does not impose a
+separate `table_jobs` limit; built-in models apply bounded-queue backpressure,
+and custom providers own their admission policy.
 `timeout_ms` (default 60000) includes queue wait; there is no automatic retry.
 Dropping the provider future must release the adapter's outstanding resources.
 An external success uses `source: "external_tsr"`; consumers enabling this mode
@@ -181,3 +183,13 @@ The shared TSR decoder applies `TsrGeometryPolicy` before grid occupancy is
 validated: declared input remains strict, while model predictions may reconcile
 learned spans. Built-in and external model adapters use that same path. Geometric
 word coverage alone does not skip source-supported topology refinement.
+
+## Render delivery capacity
+
+All clones of a parser share `render.queue_size` unfinished page deliveries.
+Slots are reserved before rasterization and remain occupied until page result
+collection and actual resource cleanup. `parse_session_with_options` accepts a
+PDFium session already opened on a reserved process, avoiding a second pool wait.
+Standalone page parsing uses the same capacity; caller-allocated images predate
+this admission boundary. Retaining a `PageImage` clone also retains its delivery;
+observers that need an independent permanent copy must copy pixel data deliberately.

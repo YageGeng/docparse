@@ -87,8 +87,8 @@ async fn parse_command(
     factory: &dyn ParserFactory,
 ) -> anyhow::Result<Option<String>> {
     let mut raw = load_raw_config(arguments.config, arguments.profile)?;
-    if let Some(continue_on_page_error) = arguments.continue_on_page_error {
-        raw.runtime.continue_on_page_error = continue_on_page_error;
+    if let Some(continue_on_error) = arguments.continue_on_error {
+        raw.runtime.continue_on_error = continue_on_error;
     }
     let config = Arc::new(ValidatedConfig::try_from(raw)?);
     let formula_placeholder = config.output().formula_placeholder.clone();

@@ -116,19 +116,77 @@ impl TryFrom<RawConfig> for ValidatedConfig {
     /// Validates all lexical and numeric invariants without reading model artifacts.
     fn try_from(config: RawConfig) -> Result<Self, Self::Error> {
         Self::validate_platform(&config)?;
-        // Bound page-level overlap even though each OCR model retains its own session lock.
-        // Keep line tensors bounded independently of overlapping page admission.
-        if !(1..=32).contains(&config.ocr.batch_size) {
-            return Err(ConfigError::InvalidValue {
-                field: "ocr.batch_size",
-                reason: "must be between 1 and 32",
-            });
+        // Queue capacity is explicit and independent of consumers or batches, including capacities below one batch.
+        for (size, field) in
+            [
+                (config.layout.queue_size, "layout.queue_size"),
+                (config.tsr.queue_size, "tsr.queue_size"),
+                (config.formula.queue_size, "formula.queue_size"),
+                (config.ocr.detection.queue_size, "ocr.detection.queue_size"),
+                (
+                    config.ocr.recognition.queue_size,
+                    "ocr.recognition.queue_size",
+                ),
+                (
+                    config.ocr.orientation.queue_size,
+                    "ocr.orientation.queue_size",
+                ),
+            ]
+            .into_iter()
+            .chain(config.tsr.cell_detection.as_ref().map(
+                |cells| (cells.queue_size, "tsr.cell_detection.queue_size"),
+            ))
+        {
+            // Leave room for up to 1024 active HTTP requests within the 32-bit Tokio semaphore limit.
+            if size == 0 || size > (u32::MAX >> 3) as usize - 1024 {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "queue_size must be between 1 and 536869887",
+                });
+            }
         }
-        if !(1..=32).contains(&config.ocr.max_in_flight) {
-            return Err(ConfigError::InvalidValue {
-                field: "ocr.max_in_flight",
-                reason: "must be between one and 32",
-            });
+        // Session counts are model consumers; batch sizes never alter page admission.
+        for (value, field) in [
+            (config.layout.session_size, "layout.session_size"),
+            (config.tsr.session_size, "tsr.session_size"),
+            (
+                config.ocr.detection.session_size,
+                "ocr.detection.session_size",
+            ),
+            (
+                config.ocr.recognition.session_size,
+                "ocr.recognition.session_size",
+            ),
+            (
+                config.ocr.orientation.session_size,
+                "ocr.orientation.session_size",
+            ),
+        ] {
+            if !(1..=8).contains(&value) {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "must be between 1 and 8",
+                });
+            }
+        }
+        for (value, field) in [
+            (config.layout.batch_size, "layout.batch_size"),
+            (config.ocr.detection.batch_size, "ocr.detection.batch_size"),
+            (
+                config.ocr.recognition.batch_size,
+                "ocr.recognition.batch_size",
+            ),
+            (
+                config.ocr.orientation.batch_size,
+                "ocr.orientation.batch_size",
+            ),
+        ] {
+            if !(1..=32).contains(&value) {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "must be between 1 and 32",
+                });
+            }
         }
         // Bound OCR tensors, candidate work and deadlines before any model or image is loaded.
         for (value, field) in [
@@ -161,14 +219,13 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             config.layout.score_threshold,
             "layout.score_threshold",
         )?;
-        if config.layout.sessions == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "layout.sessions",
-                reason: "must be greater than zero",
-            });
-        }
-
         if let Some(cells) = &config.tsr.cell_detection {
+            if !(1..=8).contains(&cells.session_size) {
+                return Err(ConfigError::InvalidValue {
+                    field: "tsr.cell_detection.session_size",
+                    reason: "must be between 1 and 8",
+                });
+            }
             // Bound detector batches independently from structure batches and table admission.
             if !(1..=32).contains(&cells.batch_size) {
                 return Err(ConfigError::InvalidValue {
@@ -194,17 +251,11 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "SLANeXt requires independent cell detection because its position output is invalid",
             });
         }
-        // Batch size bounds one tensor invocation; table_jobs still bounds each document's requests.
+        // Batch size bounds one tensor invocation; bounded model queues own request backpressure.
         if !(1..=32).contains(&config.tsr.batch_size) {
             return Err(ConfigError::InvalidValue {
                 field: "tsr.batch_size",
                 reason: "must be between 1 and 32",
-            });
-        }
-        if !(1..=32).contains(&config.tsr.table_jobs) {
-            return Err(ConfigError::InvalidValue {
-                field: "tsr.table_jobs",
-                reason: "must be between one and 32",
             });
         }
         if !(1..=86_400_000).contains(&config.tsr.timeout_ms) {
@@ -213,39 +264,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "must be between one and 86400000 milliseconds",
             });
         }
-        if config.runtime.stage_pages == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "runtime.stage_pages",
-                reason: "must be greater than zero",
-            });
-        }
-        if config.runtime.render_queue_capacity == 0
-            || config.runtime.render_queue_capacity > config.runtime.stage_pages
-        {
-            return Err(ConfigError::InvalidValue {
-                field: "runtime.render_queue_capacity",
-                reason: "must be between one and stage_pages",
-            });
-        }
-        if config.runtime.blocking_task_limit == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "runtime.blocking_task_limit",
-                reason: "must be greater than zero",
-            });
-        }
-
-        if config.render.dpi == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "render.dpi",
-                reason: "must be greater than zero",
-            });
-        }
-        if config.render.max_long_edge_pixels < MINIMUM_MODEL_INPUT_EDGE {
-            return Err(ConfigError::InvalidValue {
-                field: "render.max_long_edge_pixels",
-                reason: "must be at least 800 pixels",
-            });
-        }
+        config.render.validate()?;
 
         Self::validate_unit_interval(
             config.fusion.minimum_line_coverage,
@@ -315,11 +334,14 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         {
             mineru.endpoint()?;
         }
-        if let crate::FormulaEngineConfig::Texo(texo) = &config.formula.engine
-            && !(1..=8).contains(&texo.sessions)
-        {
+        let session_size = match &config.formula.engine {
+            crate::FormulaEngineConfig::Pp(pp) => pp.session_size,
+            crate::FormulaEngineConfig::Texo(texo) => texo.session_size,
+            crate::FormulaEngineConfig::Mineru(_) => 1,
+        };
+        if !(1..=8).contains(&session_size) {
             return Err(ConfigError::InvalidValue {
-                field: "formula.engine.sessions",
+                field: "formula.engine.session_size",
                 reason: "must be between 1 and 8",
             });
         }
@@ -367,18 +389,6 @@ impl ServerConfig {
             return Err(ConfigError::InvalidValue {
                 field: "server.max_uploads",
                 reason: "must be between 1 and 1024",
-            });
-        }
-        if !(1..=128).contains(&self.jobs) {
-            return Err(ConfigError::InvalidValue {
-                field: "server.jobs",
-                reason: "must be between 1 and 128",
-            });
-        }
-        if self.pdfium_workers == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "server.pdfium_workers",
-                reason: "must be greater than zero",
             });
         }
         if self.host.is_empty() || self.host.chars().any(char::is_whitespace) {
@@ -445,6 +455,39 @@ impl DatabaseConfig {
                 });
             }
         }
+        Ok(())
+    }
+}
+
+impl RenderConfig {
+    /// Validates render capacity before service startup as well as standalone parser construction.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Render queues count unfinished pages independently of the number of PDFium processes.
+        for (value, field) in [
+            (self.workers, "render.workers"),
+            (self.queue_size, "render.queue_size"),
+        ] {
+            if value == 0 || value > (u32::MAX >> 3) as usize - 1024 {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "must be between 1 and 536869887",
+                });
+            }
+        }
+
+        if self.dpi == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "render.dpi",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.max_long_edge_pixels < MINIMUM_MODEL_INPUT_EDGE {
+            return Err(ConfigError::InvalidValue {
+                field: "render.max_long_edge_pixels",
+                reason: "must be at least 800 pixels",
+            });
+        }
+
         Ok(())
     }
 }

@@ -179,42 +179,44 @@ def verify_model(workspace: Path, model_dir: Path) -> None:
 def write_config(
     path: Path,
     model_dir: Path,
-    stage_pages: int,
+    render_queue_size: int,
     execution_provider: str,
 ) -> None:
-    """Write session and stage-page limits under the same names accepted by the native config loader."""
-    queue_capacity = max(1, min(2, stage_pages))
+    """Write explicit model queue capacities alongside session and render delivery limits required by the loader."""
     # This 124 MB model reserves roughly 4.2 GB per CUDA session on an 8 GB GPU.
-    sessions = 1 if execution_provider == "cuda" else stage_pages
+    # Session consumers use the unified 1..8 bound, independently of page admission.
+    session_size = 1 if execution_provider == "cuda" else min(8, render_queue_size)
     # The current parser enables TSR by default; temporary run directories cannot supply its code-default relative paths.
     table_dir = model_dir.parent / "slanet-plus"
     cell_dir = model_dir.parent / "rtdetr-table-cell-wireless"
     payload = f'''[layout]
+queue_size = {session_size}
 model_path = "{(model_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(model_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(model_dir / 'model-manifest.json').as_posix()}"
 score_threshold = 0.5
-sessions = {sessions}
+session_size = {session_size}
 
 [tsr]
+queue_size = 1
 model_path = "{(table_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(table_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(table_dir / 'model-manifest.json').as_posix()}"
 mode = "fallback"
 
 [tsr.cell_detection]
+queue_size = 1
 enabled = true
 model_path = "{(cell_dir / 'inference.onnx').as_posix()}"
 model_config_path = "{(cell_dir / 'inference.yml').as_posix()}"
 model_manifest_path = "{(cell_dir / 'model-manifest.json').as_posix()}"
 
 [runtime]
-stage_pages = {stage_pages}
-render_queue_capacity = {queue_capacity}
-blocking_task_limit = {stage_pages}
-continue_on_page_error = true
+continue_on_error = true
 
 [render]
+workers = 1
+queue_size = {render_queue_size}
 dpi = 144
 max_long_edge_pixels = 2400
 
@@ -234,7 +236,17 @@ estimated_font_size_tolerance_points = 1.5
 [ocr]
 policy = "disabled"
 
+[ocr.detection]
+queue_size = 1
+
+[ocr.recognition]
+queue_size = 16
+
+[ocr.orientation]
+queue_size = 16
+
 [formula]
+queue_size = 4
 inline_enabled = false
 display_enabled = false
 
@@ -396,7 +408,7 @@ def update_summary(
     output_dir: Path,
     elapsed_seconds: float,
     peak_rss_bytes: int,
-    stage_pages: int,
+    render_queue_size: int,
     write_overlays: bool,
     execution_provider: str,
     cargo_profile: str,
@@ -410,7 +422,7 @@ def update_summary(
     summary["runtime"] = {
         "elapsed_seconds": elapsed_seconds,
         "peak_rss_bytes": peak_rss_bytes,
-        "stage_pages": stage_pages,
+        "render_queue_size": render_queue_size,
         "execution_provider": execution_provider,
         "cargo_profile": cargo_profile,
         "platform": platform.platform(),
@@ -432,7 +444,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--run-id", default="run")
-    parser.add_argument("--stage-pages", type=int, default=4)
+    parser.add_argument("--render-queue-size", type=int, default=4)
     parser.add_argument(
         "--execution-provider", choices=["cpu", "cuda"], default="cpu"
     )
@@ -451,8 +463,8 @@ def main() -> int:
     pdf_dir = arguments.pdf_dir.expanduser().resolve()
     model_dir = (workspace / arguments.model_dir).resolve() if not arguments.model_dir.is_absolute() else arguments.model_dir.resolve()
     manifest_path = (workspace / arguments.manifest).resolve() if not arguments.manifest.is_absolute() else arguments.manifest.resolve()
-    if arguments.stage_pages <= 0:
-        print("error: --stage-pages must be greater than zero", file=sys.stderr)
+    if arguments.render_queue_size <= 0:
+        print("error: --render-queue-size must be greater than zero", file=sys.stderr)
         return 2
     try:
         documents = load_manifest(manifest_path)
@@ -482,7 +494,7 @@ def main() -> int:
         write_config(
             config_path,
             model_dir,
-            arguments.stage_pages,
+            arguments.render_queue_size,
             arguments.execution_provider,
         )
         environment.update(
@@ -504,7 +516,7 @@ def main() -> int:
             output_dir,
             elapsed,
             peak_rss,
-            arguments.stage_pages,
+            arguments.render_queue_size,
             arguments.write_overlays,
             arguments.execution_provider,
             arguments.cargo_profile,

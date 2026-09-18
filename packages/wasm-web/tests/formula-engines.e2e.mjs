@@ -48,7 +48,7 @@ try {
   for (const [engine, provider, mode] of (process.argv.includes("--ui-only") ? [] : [["texo", "wasm", "preset"], ["pp", "wasm", "preset"], ["texo", "webgpu", "preset"], ["pp", "webgpu", "legacy"], ["texo", "webgpu", "bytes"]])) {
     const result = await page.evaluate(async ({ engine, provider, mode, pdf }) => {
       const { createParser } = await import("/dist/index.js");
-      const options = { artifacts: { kind: "urls", model: "/models/inference.onnx", config: "/models/inference.yml", manifest: "/models/model-manifest.json" }, executionProvider: provider, config: { tsr: { mode: "rules_only" }, ocr: { policy: "disabled" }, formula: { engine: { type: engine }, batch_size: 2 } } };
+      const options = { artifacts: { kind: "urls", model: "/models/inference.onnx", config: "/models/inference.yml", manifest: "/models/model-manifest.json" }, executionProvider: provider, config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 }, policy: "disabled" }, formula: { queue_size: 2, engine: { type: engine }, batch_size: 2 } } };
       let owned;
       if (mode === "legacy") {
         delete options.config.formula.engine;
@@ -78,7 +78,7 @@ try {
   }
   const invalid = await page.evaluate(async () => {
     const { createParser } = await import("/dist/index.js");
-    const base = { artifacts: { kind: "urls", model: "/unused", config: "/unused", manifest: "/unused" }, config: { tsr: { mode: "rules_only" }, formula: { engine: { type: "texo" } } } };
+    const base = { artifacts: { kind: "urls", model: "/unused", config: "/unused", manifest: "/unused" }, config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } }, formula: { queue_size: 2, engine: { type: "texo" } } } };
     const cases = [
       { ...base, formulaArtifacts: { type: "pp", kind: "urls", model: "/unused", tokenizer: "/unused", manifest: "/unused" } },
       { ...base, formulaArtifacts: { type: "texo", kind: "urls", encoder: "/unused", tokenizer: "/unused" } },

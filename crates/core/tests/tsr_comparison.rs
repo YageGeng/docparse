@@ -1,4 +1,5 @@
 //! Real PDF experiments execute the production page/TSR path and retain inspectable failures.
+use docparse_common::timing::{Timing, Timings};
 use docparse_config::{
     ConfigLoader, ModelFiles, TableCellConfig, TableCellModel, TsrModel,
     ValidatedConfig,
@@ -8,10 +9,7 @@ use docparse_core::{
     PdfInput, PdfiumProvider, TableStructureEngine, TableStructureError,
     TsrGeometryPolicy, TsrTableInput, TsrTableRequest,
 };
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat,
-    timing::{Timing, Timings},
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -127,6 +125,7 @@ fn configure_comparison_models(
         let directory = root.join(format!("models/rtdetr-table-cell-{suffix}"));
         tsr.cell_detection = Some(
             TableCellConfig::builder()
+                .queue_size(1)
                 .model(cell_model)
                 .score_threshold(0.3)
                 .files(
@@ -331,12 +330,14 @@ fn comparison_variants_replace_inherited_model_artifacts() {
         ),
     ] {
         let mut tsr = docparse_config::TsrConfig::builder()
+            .queue_size(1)
             .model(TsrModel::SlanextWireless)
             .model_path(PathBuf::from("inherited/model.onnx"))
             .model_config_path(PathBuf::from("inherited/model.yml"))
             .model_manifest_path(PathBuf::from("inherited/manifest.json"))
             .cell_detection(Some(
                 TableCellConfig::builder()
+                    .queue_size(1)
                     .model(TableCellModel::Wired)
                     .score_threshold(0.7)
                     .files(
@@ -353,7 +354,6 @@ fn comparison_variants_replace_inherited_model_artifacts() {
                     .build(),
             ))
             .mode(docparse_config::TableMode::Fallback)
-            .table_jobs(3)
             .timeout_ms(1234)
             .build();
         configure_comparison_models(&mut tsr, variant, &root).expect("variant");
@@ -375,7 +375,6 @@ fn comparison_variants_replace_inherited_model_artifacts() {
             "{variant}"
         );
         assert_eq!(tsr.timeout_ms, 1234);
-        assert_eq!(tsr.table_jobs, 3);
         assert_eq!(
             tsr.cell_detection
                 .as_ref()

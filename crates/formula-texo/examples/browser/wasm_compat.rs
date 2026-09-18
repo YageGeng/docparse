@@ -1,12 +1,11 @@
 //! A browser Worker can own this model directly without the PDF/WebUI stack.
 #[cfg(target_arch = "wasm32")]
 mod browser {
+    use docparse_common::timing::Timings;
     use docparse_config::{RawConfig, ValidatedConfig};
     use docparse_formula::FormulaEngine;
     use docparse_formula_texo::{TexoArtifacts, TexoEngine};
-    use docparse_layout::{
-        PageImage, PageImageInput, PixelFormat, timing::Timings,
-    };
+    use docparse_layout::{PageImage, PageImageInput, PixelFormat};
     use std::sync::Arc;
     use wasm_bindgen::prelude::*;
 
@@ -42,9 +41,8 @@ mod browser {
             raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
                 docparse_config::TexoFormulaConfig::default(),
             );
-            raw.runtime.stage_pages = 1;
-            raw.runtime.render_queue_capacity = 1;
-            raw.runtime.blocking_task_limit = 1;
+            raw.render.workers = 1;
+            raw.render.queue_size = 2;
             let config = ValidatedConfig::try_from(raw)
                 .map_err(|error| JsValue::from_str(&error.to_string()))?
                 .with_webgpu(webgpu);

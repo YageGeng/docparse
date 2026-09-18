@@ -29,6 +29,7 @@ To select Plus-M, update the existing `[formula.engine]` selection in `docparse.
 
 ```toml
 [formula]
+queue_size = 8
 inline_enabled = true
 display_enabled = true
 
@@ -116,6 +117,9 @@ Apache-2.0 license notices.
 ## Shared queue
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
+Required `formula.queue_size` sets its capacity independently of sessions and batches.
+`formula.engine.session_size` creates 1–8 independent PP consumers (default 1).
+Native queue executors belong to the engine and survive its construction runtime.
 Each idle owner drains only ready work up to `formula.batch_size`; short tails
 run immediately. The parser reserves crop admission before raster allocation,
 keeps a bounded sliding window, and maps independently completed results back to

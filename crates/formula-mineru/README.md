@@ -11,6 +11,7 @@ Replace the existing formula engine section in your configuration:
 
 ```toml
 [formula]
+queue_size = 8
 inline_enabled = true
 display_enabled = true
 batch_size = 16
@@ -29,9 +30,10 @@ between 1 and 1024. Overrides use `DOCPARSE_FORMULA__ENGINE__SERVER_URL` and
 `DOCPARSE_FORMULA__ENGINE__CONCURRENCY`.
 
 Concurrency limits all requests sharing one engine, across pages and documents.
-A bounded crop queue feeds HTTP slots continuously: as one request finishes,
+Required `formula.queue_size` bounds pending crops independently of HTTP concurrency.
+The bounded crop queue feeds HTTP slots continuously: as one request finishes,
 ready work can start without waiting for its original caller batch. Core uses a
-shared pre-crop admission budget of twice the HTTP concurrency and preserves
+shared pre-crop admission budget of `formula.queue_size + formula.engine.concurrency` and preserves
 per-formula errors. `formula.batch_size` governs local model batching and does
 not limit this HTTP queue. `formula.timeout_ms` covers each parser crop, including
 admission, PNG encoding, HTTP, and decoding; direct multi-image `recognize` calls

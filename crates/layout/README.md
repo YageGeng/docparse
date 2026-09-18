@@ -1,11 +1,18 @@
 # docparse-layout
 
-中立的 `LayoutEngine`/geometry API 与固定 PP-DocLayoutV3 ONNX Runtime 实现。支持 CPU，以及互斥 feature `cuda`、`coreml`、`openvino`。显式请求的 accelerator 无法注册时返回错误，不静默回退 CPU。
+Neutral `LayoutEngine` and geometry APIs with pinned PP-DocLayoutV3 ONNX inference.
+Supports CPU and mutually exclusive `cuda`, `coreml`, and `openvino` features.
+Explicit accelerator initialization failures are returned without silent fallback.
+Model artifacts and Python output oracles are documented in the root README.
 
-模型不随 crate 分发。固定 artifact、Python oracle 和多尺寸 tensor/detection parity 流程见仓库根目录 `README.md`。
+`layout.session_size` creates 1–8 independent consumers (default 1) sharing one
+bounded queue. Required `layout.queue_size` bounds pending pages independently
+of sessions. `layout.batch_size` caps ready pages per inference (1–32, default 1).
+An idle consumer takes available pages immediately, combines their tensors, and
+splits output boxes using per-page counts. It never waits for a full batch.
 
-Native model sessions own dedicated threads for creation, inference, destruction,
-and thread-local cleanup. Idle sessions use no Tokio blocking capacity and can
-outlive their construction runtime. Only finite initialization and inference waits
-use the blocking pool; cancelled callers keep their native work owned until it
-finishes. The final owner closes the queue and joins the thread synchronously.
+Native sessions create, run, and destroy their model on the same dedicated thread.
+They outlive their construction runtime. Finite submission waits retain model
+ownership through cancellation; final shutdown closes admission and joins all
+owners. Browser sessions consume the same queue and keep the global ORT guard
+through output readback.

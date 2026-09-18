@@ -15,6 +15,43 @@ pub(crate) struct ModelInputs {
     pub(crate) scale_factor: Array2<f32>,
 }
 
+impl TryFrom<&[&ModelInputs]> for ModelInputs {
+    type Error = crate::LayoutError;
+
+    /// Concatenates ready pages on the batch axis without changing each page's resize or scale metadata.
+    fn try_from(inputs: &[&ModelInputs]) -> Result<Self, Self::Error> {
+        let invalid = |error: ndarray::ShapeError| crate::LayoutError::Engine {
+            message: format!("invalid layout batch: {error}"),
+        };
+        Ok(Self {
+            image: ndarray::concatenate(
+                ndarray::Axis(0),
+                &inputs
+                    .iter()
+                    .map(|input| input.image.view())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(invalid)?,
+            image_size: ndarray::concatenate(
+                ndarray::Axis(0),
+                &inputs
+                    .iter()
+                    .map(|input| input.image_size.view())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(invalid)?,
+            scale_factor: ndarray::concatenate(
+                ndarray::Axis(0),
+                &inputs
+                    .iter()
+                    .map(|input| input.scale_factor.view())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(invalid)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct InterpolationWeights {
     indices: [usize; 4],

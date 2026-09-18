@@ -1,10 +1,9 @@
 //! Reproducible native latency probe: MODEL_DIRECTORY REPEATS IMAGE...
+use docparse_common::timing::Timings;
 use docparse_config::{RawConfig, ValidatedConfig};
 use docparse_formula::FormulaEngine;
 use docparse_formula_texo::TexoEngine;
-use docparse_layout::{
-    PageImage, PageImageInput, PixelFormat, timing::Timings,
-};
+use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Instant};
 
 /// Loads once, warms one batch, and reports warm batch latency separately from initialization.

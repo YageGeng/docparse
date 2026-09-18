@@ -1,9 +1,9 @@
+use docparse_common::timing::Timings;
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_core::pdfium_ipc::Raster;
 use docparse_core::{
     LocalPdfiumProvider, PdfInput, PdfiumProvider, RenderedPage,
 };
-use docparse_layout::timing::Timings;
 use ipc_channel::ipc::IpcSharedMemory;
 
 /// IPC raster reconstruction must preserve geometry and reject a short shared pixel buffer.

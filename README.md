@@ -5,8 +5,8 @@ DocParse is a Rust PDF parsing pipeline. PDFium supplies native text facts and p
 The native [HTTP server](crates/server/README.md) accepts durable PDF jobs and
 provides JSON results and reconnectable SSE progress. It uses SeaORM 2.0,
 PostgreSQL, and a shared file directory, with separate migration, database, and
-server crates. Layout, OCR, and TSR have independent bounded page stages; native
-OCR can overlap two pages by default through `ocr.max_in_flight`.
+server crates. Idle PDFium processes claim new documents; a shared render queue
+bounds unfinished pages while models consume their own bounded input queues.
 
 Model regions are candidates rather than a one-to-one final block contract. Ownership is assigned at the `TextItem` boundary, with short, unambiguous superscripts/subscripts attached to their parent before model assignment; residual XY-cut preserves column gutters before line assembly. Page-wide normalization merges content only when one bbox fully contains the other, including identical boxes, then computes reading order. Every native text fact remains owned exactly once.
 
@@ -69,9 +69,69 @@ rtk cargo build -p docparse-cli --features cuda
 rtk docparse parse input.pdf --config docparse.toml --format json
 ```
 
-Native layout, OCR, TSR and formula share a backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Core, CLI and server expose only unified `cuda`, `coreml`, `metal`, and `openvino` provider features. Each core feature enables the same provider for all four model crates; CLI and server forward it unchanged. Model-prefixed provider features are not supported. Omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `sessions` for the device.
+Native layout, OCR, TSR and formula share a backend selected by Cargo features; TOML and environment `execution_provider` overrides are rejected. Core, CLI and server expose only unified `cuda`, `coreml`, `metal`, and `openvino` provider features. Each core feature enables the same provider for all four model crates; CLI and server forward it unchanged. Model-prefixed provider features are not supported. Omit accelerator features for CPU. Metal uses CoreML with CPU/GPU compute units, without ANE. An enabled accelerator that cannot initialize fails explicitly. CUDA, CoreML/Metal, and OpenVINO features are mutually exclusive; do not use `--all-features`. Large models can retain several GiB per CUDA session, so size `session_size` for the device.
 
 CoreML and Metal sessions request `FastPrediction` specialization for their reusable models. The [M4 benchmark report](docs/reports/2026-09-15-coreml-performance/README.md) records warmed real-PDF measurements and the compatibility and output checks for alternative settings.
+
+### Render backpressure
+
+`render.workers` is the PDFium process-pool size and the sole admission boundary
+for loading PDFs. An idle worker claims a new PDF even while earlier documents
+are still inferring or publishing results. No separate full-document job limit
+remains. `render.queue_size` is required and counts unfinished pages across all
+documents sharing a parser, including rendering, model work and cleanup.
+
+Capacity is reserved before rendering and returned only after result collection
+and the last actual resource owner releases it. Receiving a raster does not free
+its slot. `server.jobs`, `server.pdfium_workers`, `runtime.stage_pages`,
+`runtime.render_queue_capacity` and `runtime.blocking_task_limit` are rejected.
+Use `--render-workers` for a server override. WASM requires `render.workers = 1`
+and accepts `render.queue_size > 1` without removing ORT Web's global guard.
+
+`runtime.continue_on_error` controls continuation after recoverable page failures
+(default `true`). The CLI override is `--continue-on-error true|false`; the former
+`continue_on_page_error` key is rejected. Fatal document/transport errors still stop parsing.
+
+### Model queues and inference limits
+
+`crates/common` owns queues, native thread/session lifetime, cancelable task groups,
+portable runtime helpers, and timing contexts. Model crates retain loading, tensor
+batching, inference, and output conversion.
+
+Every local model has `session_size` (1–8, default 1) independent ONNX owners
+consuming one shared bounded queue. Required `queue_size` independently bounds
+pending inputs; a full queue waits for space. It may be smaller than `batch_size`.
+`batch_size` (1–32) caps the number of ready
+inputs taken by an idle consumer: it runs a short batch immediately and never
+waits to fill it. Additional sessions duplicate model/runtime resources.
+
+| Model | Session count | Batch limit | Required queue capacity |
+| --- | --- | --- | --- |
+| Layout | `layout.session_size` | `layout.batch_size` | `layout.queue_size` |
+| PP / Texo formula | `formula.engine.session_size` | `formula.batch_size` | `formula.queue_size` |
+| Table structure | `tsr.session_size` | `tsr.batch_size` | `tsr.queue_size` |
+| Table cells | `tsr.cell_detection.session_size` | `tsr.cell_detection.batch_size` | `tsr.cell_detection.queue_size` |
+| OCR detection | `ocr.detection.session_size` | `ocr.detection.batch_size` | `ocr.detection.queue_size` |
+| OCR recognition | `ocr.recognition.session_size` | `ocr.recognition.batch_size` | `ocr.recognition.queue_size` |
+| OCR orientation | `ocr.orientation.session_size` | `ocr.orientation.batch_size` | `ocr.orientation.queue_size` |
+
+OCR drains individual requests across pages, then merges equal tensor shapes to
+preserve existing padding and output semantics. Detection defaults to batch 1;
+recognition and orientation default to 16. Layout and table model batches default
+to 1. OCR has no separate page concurrency gate; each model uses its session
+count and queue backpressure. Table requests
+have no separate `table_jobs` limit and use provider-owned queue backpressure.
+Replace old `sessions` keys with `session_size`, and replace `ocr.batch_size` with
+the three model-specific settings above. MinerU remains an external HTTP service
+configured with `formula.engine.concurrency` and the same required `formula.queue_size`.
+All seven model queue capacities, plus render.workers and render.queue_size, must be supplied by configuration files or overrides;
+missing values and zero are rejected, including for disabled model sections.
+Rust callers can explicitly choose `RawConfig::default()` as a complete preset.
+Queue capacity excludes active batches and payloads retained by waiting producers.
+
+Native engines survive their construction Tokio runtime. Browser consumers share
+the same queues but retain the global ORT inference/readback guard, so extra
+browser sessions do not bypass runtime serialization.
 
 ### Formula recognition
 
@@ -81,9 +141,8 @@ Every formula engine shares a bounded queue across its callers. Idle model owner
 consume already-ready crops up to the configured batch limit without waiting for
 more arrivals. Parser submission is a sliding window with a shared pre-crop
 admission budget, so one slow formula does not block subsequent crops from the
-same page or cause unrelated formulas to fail. Table requests also refill their
-admission window in completion order; structure and cell detectors retain their
-separate ready-only queues.
+same page or cause unrelated formulas to fail. Table requests are submitted concurrently; structure and cell detectors retain
+their separate ready-only queues.
 
 To evaluate Plus-M, provision `--model pp-formulanet-plus-m` and update the existing
 `[formula.engine]` selection in `docparse.toml`:

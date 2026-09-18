@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::stages::{PageAnalysisInput, PageStage};
+use super::stages::PageAnalysisInput;
 use crate::wasm_compat::{TaskError, TaskSet};
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::ValidatedConfig;
 use docparse_layout::LayoutEngine;
-use docparse_layout::timing::{TimingStage, Timings};
 use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
@@ -109,6 +109,7 @@ impl ScannedDocument {
 /// Document pipeline with immutable injected engines and bounded runtime settings.
 #[derive(Clone, TypedBuilder)]
 pub(crate) struct ParseRuntime {
+    render_queue: docparse_common::PageQueue,
     #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
     pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     config: Arc<ValidatedConfig>,
@@ -123,11 +124,29 @@ pub(crate) struct ParseRuntime {
     glyph_resolver: Option<Arc<dyn crate::GlyphResolver>>,
 }
 
+/// A reserved/open session avoids reacquiring the only PDFium worker during server dispatch.
+pub(crate) enum DocumentSource {
+    Input(PdfInput),
+    Session(Box<dyn PdfiumSession>),
+}
+impl From<PdfInput> for DocumentSource {
+    /// Keeps existing library input APIs on the provider-owned opening path.
+    fn from(input: PdfInput) -> Self {
+        Self::Input(input)
+    }
+}
+impl From<Box<dyn PdfiumSession>> for DocumentSource {
+    /// Transfers an already-open document without asking the pool for another process.
+    fn from(session: Box<dyn PdfiumSession>) -> Self {
+        Self::Session(session)
+    }
+}
+
 impl ParseRuntime {
     /// Orchestrates scanning, bounded page analysis, and finalization with one per-call table runtime.
     pub(crate) async fn parse_document_with_options(
         &self,
-        input: PdfInput,
+        input: impl Into<DocumentSource> + crate::WasmCompatSend,
         options: crate::ParseOptions<'_>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
         let observer = options.observer;
@@ -147,10 +166,14 @@ impl ParseRuntime {
             "starting document parse with layout engine {}",
             self.layout_engine.name()
         );
-        let executor = self
-            .pdfium_provider
-            .open(input, self.config.runtime(), timings.clone())
-            .await?;
+        let executor = match input.into() {
+            DocumentSource::Input(input) => {
+                self.pdfium_provider
+                    .open(input, self.config.runtime(), timings.clone())
+                    .await?
+            }
+            DocumentSource::Session(session) => session,
+        };
         let page_count = executor.page_count();
         // Scan errors share one shutdown boundary; the page driver takes ownership only after scanning succeeds.
         let mut scanned = match self
@@ -251,7 +274,7 @@ impl ParseRuntime {
                     let (extracted, warning, page_error) =
                         match Self::recover_pre_scan(
                             outcome,
-                            self.config.runtime().continue_on_page_error,
+                            self.config.runtime().continue_on_error,
                         ) {
                             Ok(recovered) => recovered,
                             Err(error) => {
@@ -344,201 +367,123 @@ impl ParseRuntime {
         observer: Option<&dyn crate::ParseObserver>,
     ) -> Result<Vec<PageResult>, ParseRuntimeError> {
         let page_count = executor.page_count();
-        let (render_sender, mut render_receiver) =
-            mpsc::channel(self.config.runtime().render_queue_capacity);
+        // This channel only hands off results; shared completion-counted slots own the actual capacity.
+        let (render_sender, mut render_receiver) = mpsc::channel(1);
         let render_config = self.config.render().clone();
         let render_timings = timings.clone();
-        let producer = crate::wasm_compat::spawn(async move {
+        let render_queue = self.render_queue.clone();
+        let mut producer = crate::wasm_compat::spawn(async move {
             for page_number in 1..=page_count {
+                let lease = render_queue.reserve().await.map_err(|error| {
+                    PdfiumRuntimeError::Transport(error.to_string())
+                })?;
                 let timer = render_timings
                     .for_page(page_number)
                     .start(TimingStage::PdfRender);
-                let rendered =
-                    executor.render_page(page_number, &render_config).await;
+                let rendered = lease
+                    .scope(executor.render_page(page_number, &render_config))
+                    .await;
                 drop(timer);
-                if render_sender.send((page_number, rendered)).await.is_err() {
+                if render_sender
+                    .send((page_number, rendered, lease))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
-            // Release the document's PDFium resources and execution slot after the last raster.
+            // Free PDFium immediately after final delivery, independently of remaining model work.
             executor.close().await
         });
-
-        // stage_pages bounds each document's stage tasks, independently of shared model-session counts.
-        // Completed upstream tasks retain their pixels until downstream capacity becomes available.
-        let limit = self.config.runtime().stage_pages;
-        let mut layout_tasks: TaskSet<
-            Result<
-                PageStage<crate::page::PageAnalysisDraft>,
-                ParseRuntimeError,
-            >,
-        > = TaskSet::new();
-        let mut ocr_tasks: TaskSet<
-            Result<PageStage<crate::page::PageTableDraft>, ParseRuntimeError>,
-        > = TaskSet::new();
-        // Formula batches can outlive table inference; keep their backpressure out of the table slots.
-        let mut table_tasks = TaskSet::new();
-        let mut page_tasks = TaskSet::new();
+        let mut tasks = TaskSet::new();
         let mut pages = Vec::with_capacity(page_count as usize);
-        let mut fatal_error = None;
         let mut receiver_open = true;
-        'processing: while receiver_open
-            || !layout_tasks.is_empty()
-            || !ocr_tasks.is_empty()
-            || !table_tasks.is_empty()
-            || !page_tasks.is_empty()
-        {
+        let mut producer_finished = false;
+        let mut fatal_error = None;
+        while receiver_open || !tasks.is_empty() || !producer_finished {
             tokio::select! {
+                outcome = &mut producer, if !producer_finished => {
+                    // A failed render owner must cancel pending page work immediately; successful Close only finishes production.
+                    producer_finished = true;
+                    let result = outcome.map_err(|error| ParseRuntimeError::Task(error.to_string()))
+                        .and_then(|result| result.map_err(ParseRuntimeError::Pdfium));
+                    if let Err(error) = result {
+                        tracing::error!("render producer failed: {}", error);
+                        fatal_error = Some(error);
+                        break;
+                    }
+                }
                 Some(timing) = timing_receiver.recv(), if observer.is_some() => {
                     if let Some(observer) = observer { observer.on_timing(timing); }
                 }
-                result = layout_tasks.join_next(), if !layout_tasks.is_empty() && ocr_tasks.len() < limit => {
+                result = tasks.join_next(), if !tasks.is_empty() => {
                     if let Some(result) = result {
-                        match Self::collect_task(result) {
-                            Ok(stage) => ocr_tasks.spawn(async move { stage.recognize().await }),
-                            Err(error) => { fatal_error = Some(error); break 'processing; }
-                        }
-                    }
-                }
-                result = ocr_tasks.join_next(), if !ocr_tasks.is_empty() && table_tasks.len() < limit => {
-                    if let Some(result) = result {
-                        match Self::collect_task(result) {
-                            Ok(stage) => table_tasks.spawn(async move { stage.resolve_tables().await }),
-                            Err(error) => { fatal_error = Some(error); break 'processing; }
-                        }
-                    }
-                }
-                result = table_tasks.join_next(), if !table_tasks.is_empty() && page_tasks.len() < limit => {
-                    if let Some(result) = result {
-                        match Self::collect_task(result) {
-                            Ok(stage) => page_tasks.spawn(async move { stage.finish().await }),
-                            Err(error) => { fatal_error = Some(error); break 'processing; }
-                        }
-                    }
-                }
-                result = page_tasks.join_next(), if !page_tasks.is_empty() => {
-                    if let Some(result) = result {
-                        match Self::collect_task(result) {
+                        // A completed result keeps its slot until this collection boundary.
+                        match Self::collect_task(result.map(|(outcome, _lease)| outcome)) {
                             Ok(page) => {
                                 pages.push(page);
                                 if let Some(observer) = observer {
                                     observer.on_progress(crate::ParseProgress::Analyzing { completed: pages.len() as u32, total: page_count });
                                 }
-                            },
-                            Err(error) => { fatal_error = Some(error); break 'processing; }
-                        }
-                    }
-                }
-                rendered = render_receiver.recv(), if receiver_open && layout_tasks.len() < limit => {
-                    match rendered {
-                        Some((page_number, result)) => {
-                            let Some(extracted) = scanned.extracted_pages.remove(&page_number) else {
-                                fatal_error = Some(
-                                    ParseRuntimeError::MissingExtractedPage { page_number },
-                                );
-                                break 'processing;
-                            };
-                            let page_timings = timings.for_page(page_number);
-                            let config = Arc::clone(&self.config);
-                            let layout_engine = Arc::clone(&self.layout_engine);
-                            let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
-                            let formula_engine = self.formula_engine.as_ref().map(Arc::clone);
-                            let tables = Arc::clone(&tables);
-                            let context = Arc::clone(&scanned.context);
-                            match result {
-                                Ok(rendered) => {
-                                    // Observers see the owned raster before it moves into analysis.
-                                    // No PDFium handles escape, and unobserved parses make no copy.
-                                    if let Some(observer) = observer {
-                                        observer.on_page_image(page_number, rendered.image.as_ref());
-                                    }
-                                    layout_tasks.spawn(async move {
-                                        (PageAnalysisInput::builder()
-                                            .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine).formula_engine(formula_engine)
-                                            .context(context).extracted(extracted).rendered(rendered).timings(page_timings).tables(tables).build()).prepare()
-                                        .await
-                                    });
-                                }
-                                Err(error) if self.config.runtime().continue_on_page_error && !error.is_fatal() => {
-                                    tracing::warn!(
-                                        "render failed for page {}, using native fallback: {}",
-                                        page_number,
-                                        error
-                                    );
-                                    // Render failures have no inference dependency; finish this bounded fallback off-runtime.
-                                    let fallback = docparse_layout::wasm_compat::run_cpu(move || {
-                                        analyze_without_render(config, context, extracted, error, page_timings)
-                                    }).await;
-                                    match Self::collect_task(fallback) {
-                                        Ok(page) => {
-                                            pages.push(page);
-                                            if let Some(observer) = observer {
-                                                observer.on_progress(crate::ParseProgress::Analyzing { completed: pages.len() as u32, total: page_count });
-                                            }
-                                        }
-                                        Err(error) => { fatal_error = Some(error); break 'processing; }
-                                    }
-                                }
-                                Err(error) => {
-                                    tracing::error!(
-                                        "render failed for page {}: {}",
-                                        page_number,
-                                        error
-                                    );
-                                    fatal_error = Some(ParseRuntimeError::Pdfium(error));
-                                    break 'processing;
-                                }
                             }
+                            Err(error) => { fatal_error = Some(error); break; }
                         }
-                        None => receiver_open = false,
                     }
                 }
-            }
-        }
-        if fatal_error.is_some() {
-            // Closing the receiver stops the serial PDFium producer after at most its current
-            // render, while aborting the JoinSet prevents queued page analyses from starting.
-            render_receiver.close();
-            layout_tasks.abort_all();
-            ocr_tasks.abort_all();
-            table_tasks.abort_all();
-            page_tasks.abort_all();
-            while layout_tasks.join_next().await.is_some() {}
-            while ocr_tasks.join_next().await.is_some() {}
-            while table_tasks.join_next().await.is_some() {}
-            while page_tasks.join_next().await.is_some() {}
-        }
-        let close_result = match producer.await {
-            Ok(result) => result,
-            Err(error) => {
-                if let Some(fatal_error) = fatal_error {
-                    tracing::warn!(
-                        "render producer also failed during fatal page cleanup: {}",
-                        error
-                    );
-                    return Err(fatal_error);
+                rendered = render_receiver.recv(), if receiver_open => {
+                    let Some((page_number, rendered, lease)) = rendered else { receiver_open = false; continue; };
+                    let Some(extracted) = scanned.extracted_pages.remove(&page_number) else {
+                        fatal_error = Some(ParseRuntimeError::MissingExtractedPage { page_number });
+                        break;
+                    };
+                    let timings = timings.for_page(page_number);
+                    let config = Arc::clone(&self.config);
+                    let layout_engine = Arc::clone(&self.layout_engine);
+                    let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
+                    let formula_engine = self.formula_engine.as_ref().map(Arc::clone);
+                    let tables = Arc::clone(&tables);
+                    let context = Arc::clone(&scanned.context);
+                    let rendered = rendered.map(|mut rendered| {
+                        Arc::make_mut(&mut rendered.image).retain_page(lease.clone());
+                        if let Some(observer) = observer { observer.on_page_image(page_number, rendered.image.as_ref()); }
+                        rendered
+                    });
+                    tasks.spawn(async move {
+                        let outcome = lease.scope(async move {
+                            match rendered {
+                                Ok(rendered) => super::analyze_rendered_page(PageAnalysisInput::builder()
+                                    .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine).formula_engine(formula_engine)
+                                    .context(context).extracted(extracted).rendered(rendered).timings(timings).tables(tables).build()).await,
+                                Err(error) if config.runtime().continue_on_error && !error.is_fatal() => {
+                                    tracing::warn!("render failed for page {}, using native fallback: {}", page_number, error);
+                                    docparse_common::run_cpu(move || analyze_without_render(config, context, extracted, error, timings))
+                                        .await.map_err(|error| ParseRuntimeError::Task(error.to_string()))?
+                                }
+                                Err(error) => Err(ParseRuntimeError::Pdfium(error)),
+                            }
+                        }).await;
+                        (outcome, lease)
+                    });
                 }
-                return Err(ParseRuntimeError::Task(error.to_string()));
             }
-        };
+        }
         if let Some(error) = fatal_error {
-            if let Err(close_error) = close_result {
-                tracing::warn!(
-                    "PDFium executor close also failed after fatal page error: {}",
-                    close_error
-                );
-            }
+            // Stop a producer waiting for capacity before draining owned page tasks; background work keeps its own lease.
+            render_receiver.close();
+            drop(producer);
+            while render_receiver.try_recv().is_ok() {}
+            drop(render_receiver);
+            tasks.abort_all();
+            while tasks.join_next().await.is_some() {}
             return Err(error);
         }
-        close_result?;
-
         Ok(pages)
     }
 
     /// Applies configured page-error continuation to one page-shell outcome.
     fn recover_pre_scan(
         outcome: PreScannedPage,
-        continue_on_page_error: bool,
+        continue_on_error: bool,
     ) -> Result<
         (ExtractedPage, Option<PageWarning>, Option<PageError>),
         PdfiumRuntimeError,
@@ -550,7 +495,7 @@ impl ParseRuntime {
         let Some(error) = extraction_error else {
             return Ok((extracted, None, None));
         };
-        if !continue_on_page_error {
+        if !continue_on_error {
             return Err(error);
         }
         let message = error.to_string();
@@ -647,7 +592,7 @@ mod tests {
         fn detect(
             &self,
             _request: LayoutRequest,
-        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        ) -> docparse_common::WasmBoxedFuture<
             '_,
             Result<Vec<LayoutDetection>, LayoutError>,
         > {
@@ -676,7 +621,7 @@ mod tests {
         fn detect(
             &self,
             _request: LayoutRequest,
-        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+        ) -> docparse_common::WasmBoxedFuture<
             '_,
             Result<Vec<LayoutDetection>, LayoutError>,
         > {
@@ -710,6 +655,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_parses_document_with_injected_layout_engine() {
         let runtime = ParseRuntime::builder()
+            .render_queue(docparse_common::PageQueue::new(16))
             .config(config())
             .layout_engine(Arc::new(EmptyLayoutEngine) as Arc<dyn LayoutEngine>)
             .build();
@@ -751,14 +697,15 @@ mod tests {
         raw.layout.model_config_path = PathBuf::from("/tmp/missing-model.yml");
         raw.layout.model_manifest_path =
             PathBuf::from("/tmp/missing-model.json");
-        raw.runtime.stage_pages = 1;
-        raw.runtime.render_queue_capacity = 1;
-        raw.runtime.blocking_task_limit = 1;
+        raw.render.queue_size = 1;
         let config = Arc::new(
             ValidatedConfig::try_from(raw).expect("test config must validate"),
         );
         let calls = Arc::new(AtomicUsize::new(0));
         let runtime = ParseRuntime::builder()
+            .render_queue(docparse_common::PageQueue::new(
+                config.render().queue_size,
+            ))
             .config(config)
             .layout_engine(Arc::new(PanickingLayoutEngine {
                 calls: Arc::clone(&calls),

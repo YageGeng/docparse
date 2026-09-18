@@ -33,7 +33,7 @@ fn mineru_loads_without_local_artifacts() {
     let raw = ConfigLoader::new(path)
         .with_env_provider(figment::Figment::from(
             figment::providers::Serialized::defaults(
-                json!({"formula": {"engine": {"concurrency": 3}}}),
+                json!({"render":{"workers":1,"queue_size":16},"layout":{"queue_size":1},"tsr":{"queue_size":1,"cell_detection":{"queue_size":1}},"ocr":{"detection":{"queue_size":1},"recognition":{"queue_size":16},"orientation":{"queue_size":16}},"formula": {"queue_size":4,"engine": {"concurrency": 3}}}),
             ),
         ))
         .load_raw()

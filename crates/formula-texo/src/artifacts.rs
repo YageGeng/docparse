@@ -3,14 +3,14 @@ use docparse_formula::FormulaError;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-/// Author-published ONNX checkpoint with the transferred 687-token vocabulary.
-pub const MODEL_REVISION: &str = "63e04c86fc96c2324811114351eeea8118bf6b28";
+/// Author-published checkpoint with corrected output shapes and the transferred 687-token vocabulary.
+pub const MODEL_REVISION: &str = "b2668efe5112082846fde4d446b9bfaab3989533";
 /// SHA-256 of the image encoder at the pinned revision.
 pub const ENCODER_SHA256: &str =
-    "95cccef463e5ed3623282f1541c0011a00b8a5d0828ea2cd57d6953ad4310b5b";
+    "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae";
 /// SHA-256 of the merged first-step/cached decoder at the pinned revision.
 pub const DECODER_SHA256: &str =
-    "10be29b751f6de5f9900c3658551020dc865257eb2c3034bc4c1e016e4d0e35d";
+    "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be";
 /// SHA-256 of the WordLevel tokenizer matching both graphs.
 pub const TOKENIZER_SHA256: &str =
     "1240f9d178e1ad2a0076fe95ba62e332871c702accdd5ce3ae3ef33ffd6c3a1e";

@@ -2,7 +2,7 @@ import init, { default_config, WebParser } from "./pkg/docparse_web.js";
 import type { DocumentResult, FormulaSource, ModelSource, ParserProgress, ParserTiming, WebParseConfig, TsrTableInput } from "./types.js";
 import type { WorkerInbound, WorkerResponse, WorkerSuccess, TsrCropPixels } from "./protocol.js";
 import { artifact } from "./artifacts.js";
-import { formulaEngineError } from "./configuration.js";
+import { formulaEngineError, queueSizesError } from "./configuration.js";
 
 const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
 let parser: WebParser | undefined;
@@ -32,12 +32,14 @@ async function pageImage(pageNumber: number, width: number, height: number, pixe
 
 /** Rejects filesystem settings and merges only business values into Rust-provided defaults. */
 function configuration(overrides: WebParseConfig | undefined): unknown {
+  const invalidQueues = queueSizesError(overrides);
+  if (invalidQueues) throw Object.assign(new Error(invalidQueues), { code: "InvalidConfig" });
   const raw = default_config() as Record<string, Record<string, unknown>>;
   for (const [group, values] of Object.entries(overrides ?? {})) {
     if (!Object.hasOwn(raw, group) || !values || typeof values !== "object" || Array.isArray(values)) throw Object.assign(new Error(`Unknown or invalid configuration group ${group}`), { code: "InvalidConfig" });
     for (const key of Object.keys(values)) {
-      // OCR's nested file groups are native-only; browser models arrive through the artifact API.
-      if (["layout", "tsr", "ocr", "formula"].includes(group) && ["model_path", "tokenizer_path", "model_config_path", "model_manifest_path", "execution_provider", "detection", "recognition", "orientation"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
+      // Browser model bytes still arrive through the artifact API; only execution limits are configurable.
+      if (["layout", "tsr", "ocr", "formula"].includes(group) && ["model_path", "tokenizer_path", "model_config_path", "model_manifest_path", "execution_provider"].includes(key)) throw Object.assign(new Error(`Web configuration does not accept ${group}.${key}`), { code: "InvalidConfig" });
     }
     const merged = { ...raw[group], ...values };
     if (group === "formula" && Object.hasOwn(values, "engine")) {
@@ -52,9 +54,18 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
       const cells = (values as Record<string, unknown>).cell_detection;
       // Batch size is a model limit validated by Rust; filesystem paths remain native-only.
-      if (!cells || typeof cells !== "object" || Array.isArray(cells) || Object.keys(cells).some(key => !["enabled", "model", "score_threshold", "batch_size"].includes(key))) throw Object.assign(new Error("Web cell detection accepts enabled, model, score_threshold and batch_size only"), { code: "InvalidConfig" });
+      if (!cells || typeof cells !== "object" || Array.isArray(cells) || Object.keys(cells).some(key => !["enabled", "model", "score_threshold", "batch_size", "session_size", "queue_size"].includes(key))) throw Object.assign(new Error("Web cell detection accepts enabled, model, score_threshold, session_size, batch_size and queue_size only"), { code: "InvalidConfig" });
       // Preserve nested defaults; native paths remain unused with verified Worker artifacts.
       merged.cell_detection = { ...(raw[group].cell_detection as Record<string, unknown>), ...cells };
+    }
+    if (group === "ocr") {
+      for (const model of ["detection", "recognition", "orientation"]) {
+        if (!Object.hasOwn(values, model)) continue;
+        const settings = (values as Record<string, unknown>)[model];
+        if (!settings || typeof settings !== "object" || Array.isArray(settings) || Object.keys(settings).some(key => !["session_size", "batch_size", "queue_size"].includes(key))) throw Object.assign(new Error(`Web OCR ${model} accepts session_size, batch_size and queue_size only`), { code: "InvalidConfig" });
+        // Merge nested limits without erasing unused native path defaults required by the Rust schema.
+        merged[model] = { ...(raw[group][model] as Record<string, unknown>), ...settings };
+      }
     }
     raw[group] = merged;
   }

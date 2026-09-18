@@ -1107,6 +1107,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "docparse-common"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-time",
+]
+
+[[package]]
 name = "docparse-config"
 version = "0.1.0"
 dependencies = [
@@ -1126,6 +1141,7 @@ name = "docparse-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "docparse-common",
  "docparse-config",
  "docparse-formula",
  "docparse-formula-mineru",
@@ -1178,6 +1194,7 @@ dependencies = [
 name = "docparse-formula"
 version = "0.1.0"
 dependencies = [
+ "docparse-common",
  "docparse-config",
  "docparse-layout",
  "futures-util",
@@ -1203,6 +1220,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "docparse-common",
  "docparse-config",
  "docparse-formula",
  "docparse-layout",
@@ -1221,6 +1239,7 @@ dependencies = [
 name = "docparse-formula-texo"
 version = "0.1.0"
 dependencies = [
+ "docparse-common",
  "docparse-config",
  "docparse-formula",
  "docparse-layout",
@@ -1244,6 +1263,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "docparse-common",
  "docparse-config",
  "futures-util",
  "geo",
@@ -1279,8 +1299,10 @@ dependencies = [
 name = "docparse-ocr"
 version = "0.1.0"
 dependencies = [
+ "docparse-common",
  "docparse-config",
  "docparse-layout",
+ "futures-util",
  "geo",
  "image",
  "ndarray",
@@ -1324,12 +1346,14 @@ dependencies = [
  "axum",
  "blake3",
  "clap",
+ "docparse-common",
  "docparse-config",
  "docparse-core",
  "docparse-database",
  "docparse-layout",
  "docparse-ocr",
  "docparse-tsr",
+ "figment",
  "flate2",
  "futures-util",
  "http-body",
@@ -1356,6 +1380,7 @@ dependencies = [
 name = "docparse-tsr"
 version = "0.1.0"
 dependencies = [
+ "docparse-common",
  "docparse-config",
  "docparse-layout",
  "flate2",
@@ -1377,6 +1402,7 @@ dependencies = [
 name = "docparse-web"
 version = "0.1.0"
 dependencies = [
+ "docparse-common",
  "docparse-config",
  "docparse-core",
  "docparse-formula",

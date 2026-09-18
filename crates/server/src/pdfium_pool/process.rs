@@ -19,6 +19,9 @@ const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// One bounded bridge request; only this thread performs blocking IPC operations.
 #[derive(TypedBuilder)]
 struct BridgeCall {
+    // IPC work may outlive the caller and must keep completion-counted render capacity.
+    #[builder(default)]
+    _page_lease: Option<docparse_common::PageLease>,
     lease: u64,
     command: Command,
     #[builder(default)]
@@ -158,6 +161,7 @@ impl Process {
         lease: u64,
         command: Command,
         resolver: Option<Arc<dyn GlyphResolver>>,
+        page_lease: Option<docparse_common::PageLease>,
     ) -> WasmBoxedFuture<'static, Result<Outcome, PdfiumRuntimeError>> {
         let bridge = self.bridge.clone();
         Box::pin(async move {
@@ -165,6 +169,7 @@ impl Process {
             bridge
                 .send(
                     BridgeCall::builder()
+                        ._page_lease(page_lease)
                         .lease(lease)
                         .command(command)
                         .resolver(resolver)
@@ -199,7 +204,7 @@ impl Process {
             && matches!(
                 tokio::time::timeout(
                     CLOSE_TIMEOUT,
-                    self.exchange(0, Command::Shutdown, None)
+                    self.exchange(0, Command::Shutdown, None, None)
                 )
                 .await,
                 Ok(Ok(Outcome::Closed))

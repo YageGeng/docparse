@@ -23,9 +23,7 @@ async fn native_artifacts_parse_real_pdf_bytes() {
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-    raw.runtime.stage_pages = 1;
-    raw.runtime.render_queue_capacity = 1;
-    raw.runtime.blocking_task_limit = 1;
+    raw.render.queue_size = 1;
     let parser = DocParser::from_artifacts(
         ValidatedConfig::try_from(raw).expect("valid numeric configuration"),
         artifacts,

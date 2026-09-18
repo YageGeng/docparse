@@ -62,7 +62,7 @@ try {
       try {
         const progress = [], images = [], timings = [];
         parser = await createParser({
-          config: { formula: { inline_enabled: false, display_enabled: false }, tsr: { mode: 'rules_only' } },
+          config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, formula: { queue_size: 1, inline_enabled: false, display_enabled: false }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: 'rules_only' }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 1 }, orientation: { queue_size: 1 } } },
           artifacts: { kind: 'urls', model: '/models/inference.onnx', config: '/models/inference.yml', manifest: '/models/model-manifest.json' },
         });
         const document = await parser.parse(new Uint8Array(bytes), {

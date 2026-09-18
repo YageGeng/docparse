@@ -4,14 +4,12 @@ extern crate self as wasm_bindgen_futures;
 use std::{future::Future, time::Duration};
 use tokio::{sync::oneshot, task::LocalSet};
 
-mod wasm_compat {
-    pub use docparse_layout::wasm_compat::TaskError;
-    /// Mirrors the browser's non-Send boxed future boundary.
-    pub type WasmBoxedFuture<'a, T> =
-        std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
-}
+pub use docparse_common::{PageLease, TaskError};
+/// Mirrors the browser's non-Send boxed future while exercising its production scheduler on LocalSet.
+pub type WasmBoxedFuture<'a, T> =
+    std::pin::Pin<Box<dyn Future<Output = T> + 'a>>;
 
-#[path = "../src/wasm_compat/task_set/web.rs"]
+#[path = "../src/task_set/web.rs"]
 mod browser;
 
 /// Substitutes only the browser microtask executor; task ownership uses production code unchanged.

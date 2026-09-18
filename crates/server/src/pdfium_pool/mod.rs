@@ -1,13 +1,13 @@
 //! Server-owned PDFium processes with document-affine leases and a strict live-process limit.
 mod process;
 
+use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::{RenderConfig, RuntimeConfig};
 use docparse_core::pdfium_ipc::{Command, Outcome, Source, WORKER_BINARY};
 use docparse_core::{
     GlyphResolver, PdfInput, PdfiumProvider, PdfiumRuntimeError, PdfiumSession,
     PreScannedPage, RenderedPage, WasmBoxedFuture,
 };
-use docparse_layout::timing::{TimingStage, Timings};
 use process::{CLOSE_TIMEOUT, Process};
 use std::{
     path::{Path, PathBuf},
@@ -15,10 +15,15 @@ use std::{
 };
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
+use typed_builder::TypedBuilder;
 
 /// One bounded application request, independently cancellable through its owning lease.
+#[derive(TypedBuilder)]
 struct Call {
+    #[builder(default = docparse_common::PageLease::current())]
+    page_lease: Option<docparse_common::PageLease>,
     command: Command,
+    #[builder(default)]
     resolver: Option<Arc<dyn GlyphResolver>>,
     response: oneshot::Sender<Result<Outcome, PdfiumRuntimeError>>,
 }
@@ -52,7 +57,7 @@ impl Lease {
         let result = tokio::select! {
             _ = self.cancelled.cancelled() => Err(PdfiumRuntimeError::Transport("PDFium lease cancelled".into())),
             result = async {
-                self.commands.send(Call { command, resolver, response }).await
+                self.commands.send(Call::builder().command(command).resolver(resolver).response(response).build()).await
                     .map_err(|_error| PdfiumRuntimeError::Transport("PDFium lease stopped".into()))?;
                 reply.await.map_err(|_error| PdfiumRuntimeError::Transport("PDFium lease response closed".into()))?
             } => result,
@@ -65,8 +70,11 @@ impl Lease {
 }
 
 /// Every parser clone in one server shares these N process slots.
+#[derive(TypedBuilder)]
 pub struct PdfiumPool {
-    available: Mutex<mpsc::Receiver<Lease>>,
+    // This is process-handle inventory, not a work queue; stale tokens must not crowd out healthy returns.
+    returned: mpsc::UnboundedSender<Lease>,
+    available: Mutex<mpsc::UnboundedReceiver<Lease>>,
     stopping: CancellationToken,
     finished: watch::Receiver<Option<Result<(), String>>>,
 }
@@ -99,14 +107,18 @@ impl PdfiumPool {
                 )
             })?
             .join(format!("{WORKER_BINARY}{}", std::env::consts::EXE_SUFFIX));
-        let (available, leases) = mpsc::channel(max_processes);
+        // Supervisors still enforce max_processes; expired idle handles may coexist with their replacements.
+        let (available, leases) = mpsc::unbounded_channel();
         let stopping = CancellationToken::new();
         let (completed, finished) = watch::channel(None);
-        let pool = Arc::new(Self {
-            available: Mutex::new(leases),
-            stopping: stopping.clone(),
-            finished,
-        });
+        let pool = Arc::new(
+            Self::builder()
+                .returned(available.clone())
+                .available(Mutex::new(leases))
+                .stopping(stopping.clone())
+                .finished(finished)
+                .build(),
+        );
         let (ready, initialized) = oneshot::channel();
         // This task owns all processes even if the caller drops the startup future.
         tokio::spawn(async move {
@@ -195,6 +207,27 @@ impl PdfiumPool {
         Ok(pool)
     }
 
+    /// Reserves an idle process before claiming a durable job; unused reservations return without restarting it.
+    pub async fn reserve(
+        &self,
+    ) -> Result<PdfiumReservation, PdfiumRuntimeError> {
+        let lease = loop {
+            let lease = tokio::select! {
+                biased;
+                _ = self.stopping.cancelled() => return Err(PdfiumRuntimeError::Transport("PDFium pool is closed".into())),
+                lease = async { self.available.lock().await.recv().await } => lease,
+            }.ok_or_else(|| PdfiumRuntimeError::Transport("PDFium pool has no active slots".into()))?;
+            if !lease.cancelled.is_cancelled() && !lease.commands.is_closed() {
+                break lease;
+            }
+        };
+        Ok(PdfiumReservation {
+            lease: Some(lease),
+            returned: self.returned.clone(),
+            stopping: self.stopping.clone(),
+        })
+    }
+
     /// Stops accepting documents and waits for the same cleanup result on every call.
     pub async fn shutdown(&self) -> Result<(), PdfiumRuntimeError> {
         self.stopping.cancel();
@@ -226,7 +259,7 @@ impl PdfiumPool {
         slot: usize,
         mut process: Process,
         binary: PathBuf,
-        available: mpsc::Sender<Lease>,
+        available: mpsc::UnboundedSender<Lease>,
         stopping: CancellationToken,
     ) -> Result<(), PdfiumRuntimeError> {
         let mut lease_id = 0_u64;
@@ -254,8 +287,9 @@ impl PdfiumPool {
                     failed = true;
                     false
                 }
-                result = available.send(lease) => result.is_ok(),
+                result = async { available.send(lease) } => result.is_ok(),
             };
+            let mut active_page = None;
             let mut completed = false;
             let mut rejected = false;
             if offered {
@@ -282,8 +316,13 @@ impl PdfiumPool {
                     };
                     let closing = matches!(call.command, Command::Close);
                     let opening = matches!(call.command, Command::Open(_));
-                    let exchange =
-                        process.exchange(lease_id, call.command, call.resolver);
+                    active_page = call.page_lease.clone();
+                    let exchange = process.exchange(
+                        lease_id,
+                        call.command,
+                        call.resolver,
+                        call.page_lease,
+                    );
                     let outcome = tokio::select! {
                         biased;
                         _ = stopping.cancelled() => Err(PdfiumRuntimeError::Transport("PDFium pool stopped".into())),
@@ -320,7 +359,15 @@ impl PdfiumPool {
                             error
                         );
                     }
+                    let acknowledged = outcome.is_ok()
+                        || outcome
+                            .as_ref()
+                            .is_err_and(|error| !error.is_fatal());
                     let _ = call.response.send(outcome);
+                    if acknowledged {
+                        // The IPC operation has acknowledged completion; the reply or caller owns any remaining image.
+                        active_page.take();
+                    }
                     if completed || rejected || fatal {
                         break;
                     }
@@ -346,6 +393,7 @@ impl PdfiumPool {
             // Cancellation requests a bounded graceful exit even while a document is open.
             // Broken transports and crashed children cannot acknowledge shutdown.
             process.stop(!failed).await?;
+            drop(active_page);
             if stopping.is_cancelled() || available.is_closed() {
                 return Ok(());
             }
@@ -380,36 +428,60 @@ impl PdfiumProvider for PdfiumPool {
     {
         Box::pin(async move {
             let queued = timings.start(TimingStage::PdfiumQueue);
-            let lease = loop {
-                let lease = tokio::select! {
-                    biased;
-                    _ = self.stopping.cancelled() => return Err(PdfiumRuntimeError::Transport("PDFium pool is closed".into())),
-                    lease = async { self.available.lock().await.recv().await } => lease,
-                }.ok_or_else(|| PdfiumRuntimeError::Transport("PDFium pool has no active slots".into()))?;
-                if !lease.cancelled.is_cancelled()
-                    && !lease.commands.is_closed()
-                {
-                    break lease;
-                }
-            };
+            let reservation = self.reserve().await?;
             drop(queued);
-            let _opening = timings.start(TimingStage::PdfOpen);
-            let outcome = lease
-                .request(Command::Open(Source::try_from(input)?), None)
-                .await?;
-            let Outcome::Opened(pages) = outcome else {
-                return Err(PdfiumRuntimeError::Transport(
-                    "expected PDFium Opened response".into(),
-                ));
-            };
-            if pages == 0 {
-                return Err(PdfiumRuntimeError::Transport(
-                    "PDFium returned zero pages".into(),
-                ));
-            }
-            Ok(Box::new(RemoteSession { lease, pages })
-                as Box<dyn PdfiumSession>)
+            reservation.open(input, timings).await
         })
+    }
+}
+
+/// An idle process reservation that has not yet opened a document.
+pub struct PdfiumReservation {
+    lease: Option<Lease>,
+    returned: mpsc::UnboundedSender<Lease>,
+    stopping: CancellationToken,
+}
+impl Drop for PdfiumReservation {
+    /// Returns known-idle processes directly instead of triggering document cancellation and process replacement.
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            if self.stopping.is_cancelled()
+                || lease.cancelled.is_cancelled()
+                || lease.commands.is_closed()
+            {
+                return;
+            }
+            if let Err(error) = self.returned.send(lease) {
+                tracing::warn!(
+                    "could not return idle PDFium reservation: {}",
+                    error
+                );
+            }
+        }
+    }
+}
+impl PdfiumReservation {
+    /// Opens on this exact reservation, transferring cancellation ownership only once a document is attempted.
+    pub async fn open(
+        mut self,
+        input: PdfInput,
+        timings: Timings,
+    ) -> Result<Box<dyn PdfiumSession>, PdfiumRuntimeError> {
+        let _opening = timings.start(TimingStage::PdfOpen);
+        let source = Source::try_from(input)?;
+        let lease = self.lease.take().expect("unconsumed PDFium reservation");
+        let outcome = lease.request(Command::Open(source), None).await?;
+        let Outcome::Opened(pages) = outcome else {
+            return Err(PdfiumRuntimeError::Transport(
+                "expected PDFium Opened response".into(),
+            ));
+        };
+        if pages == 0 {
+            return Err(PdfiumRuntimeError::Transport(
+                "PDFium returned zero pages".into(),
+            ));
+        }
+        Ok(Box::new(RemoteSession { lease, pages }))
     }
 }
 

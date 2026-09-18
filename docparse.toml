@@ -5,9 +5,6 @@ file = "logs/docparse.log"
 
 [server]
 max_uploads = 100
-# Whole-document jobs and PDFium child processes are separate server-wide limits.
-jobs = 5
-pdfium_workers = 5
 host = "127.0.0.1"
 port = 8080
 api_prefix = "/api/v1/docparse"
@@ -23,31 +20,40 @@ sqlx_logging_level = "debug"
 sqlx_slow_statements_logging_level = "warn"
 sqlx_slow_statements_threshold_ms = 1000
 
+[runtime]
+continue_on_error = true
+
+[render]
+workers = 5
+queue_size = 16
+dpi = 144
+max_long_edge_pixels = 2400
+
 [layout]
 model_path = "models/pp-doclayout-v3/inference.onnx"
 model_config_path = "models/pp-doclayout-v3/inference.yml"
 model_manifest_path = "models/pp-doclayout-v3/model-manifest.json"
 score_threshold = 0.5
-# Shared ONNX sessions bound concurrent layout inference across all documents.
-sessions = 4
+session_size = 2
+batch_size = 1
+queue_size = 8
 
-# SLANet+ topology with independent wireless-table cell geometry.
 [tsr]
 mode = "tsr_only"
+session_size = 2
+batch_size = 1
+queue_size = 16
+timeout_ms = 60000
 model = "slanet_plus"
 model_path = "models/slanet-plus/inference.onnx"
 model_config_path = "models/slanet-plus/inference.yml"
 model_manifest_path = "models/slanet-plus/model-manifest.json"
-# Per-document table requests, including queue waits; model sessions remain shared.
-table_jobs = 8
-# Combine ready structure requests without waiting for a full batch.
-batch_size = 4
-timeout_ms = 60000
 
 [tsr.cell_detection]
 enabled = true
-# Detector batching is independent of structure batching.
+session_size = 2
 batch_size = 4
+queue_size = 16
 model = "wireless"
 score_threshold = 0.3
 model_path = "models/rtdetr-table-cell-wireless/inference.onnx"
@@ -56,52 +62,44 @@ model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
 
 [ocr]
 policy = "disabled"
-max_in_flight = 2
-# Group equal-width lines without increasing the number of model sessions.
-batch_size = 16
 
 [ocr.detection]
+session_size = 2
+batch_size = 4
+queue_size = 16
 model_path = "models/pp-ocrv6-medium-det/inference.onnx"
 model_config_path = "models/pp-ocrv6-medium-det/inference.yml"
 model_manifest_path = "models/pp-ocrv6-medium-det/model-manifest.json"
 
 [ocr.recognition]
+session_size = 2
+batch_size = 4
+queue_size = 16
 model_path = "models/pp-ocrv6-medium-rec/inference.onnx"
 model_config_path = "models/pp-ocrv6-medium-rec/inference.yml"
 model_manifest_path = "models/pp-ocrv6-medium-rec/model-manifest.json"
 
 [ocr.orientation]
+queue_size = 8
+session_size = 2
+batch_size = 4
 model_path = "models/pp-lcnet-textline-ori/inference.onnx"
 model_config_path = "models/pp-lcnet-textline-ori/inference.yml"
 model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 
-# Recognize every layout-detected inline/display formula. JSON retains LaTeX and Markdown.
-# PP uses CPU compatibility on Apple; Texo registers the selected execution provider.
 [formula]
-# Combine ready crops across pages without waiting to fill a batch.
-batch_size = 8
+queue_size = 32
+batch_size = 4
 inline_enabled = true
 display_enabled = true
 timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
-# Independent encoder/decoder pairs sharing the bounded crop queue.
-sessions = 2
+session_size = 4
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
-
-[runtime]
-# Owned pages per document in each pipeline stage, including queued work.
-stage_pages = 8
-render_queue_capacity = 2
-blocking_task_limit = 4
-continue_on_page_error = true
-
-[render]
-dpi = 144
-max_long_edge_pixels = 2400
 
 [fusion]
 minimum_line_coverage = 0.30

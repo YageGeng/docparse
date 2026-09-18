@@ -1,7 +1,10 @@
 //! Shared execution-provider registration for layout, OCR and table structure models.
 use crate::LayoutError;
 use docparse_config::ValidatedConfig;
-use ort::session::{Session, builder::SessionBuilder};
+use ort::session::{
+    Session,
+    builder::{GraphOptimizationLevel, SessionBuilder},
+};
 use serde::Serialize;
 
 /// Identifies the ONNX backend selected by build features or the browser runtime.
@@ -104,7 +107,13 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
     fn try_from(
         OnnxBackend(provider): OnnxBackend,
     ) -> Result<Self, Self::Error> {
-        let builder = Session::builder()?;
+        // Enable every graph rewrite and default to reusable memory plans; OCR and formula override the latter.
+        // ORT Web's WebGPU provider independently forces memory patterns off in its runtime.
+        let builder = Session::builder()?
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(ort::Error::from)?
+            .with_memory_pattern(true)
+            .map_err(ort::Error::from)?;
         let dispatch = match provider {
             ExecutionProvider::Cpu => return Ok(builder),
             ExecutionProvider::Cuda => {

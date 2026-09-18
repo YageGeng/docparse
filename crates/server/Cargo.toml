@@ -17,6 +17,7 @@ openvino = ["docparse-core/openvino"]
 
 [dependencies]
 # workspace crates
+docparse-common.workspace = true
 docparse-config.workspace = true
 docparse-core = { workspace = true, features = ["pdfium-ipc"] }
 docparse-database.workspace = true
@@ -48,6 +49,7 @@ tempfile.workspace = true
 uuid.workspace = true
 
 # config and serialization
+figment.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

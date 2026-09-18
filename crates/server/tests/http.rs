@@ -86,6 +86,124 @@ fn get(path: &str) -> Request<Body> {
     Request::get(path).body(Body::empty()).expect("GET")
 }
 
+/// Database claims follow idle PDFium processes, even while an earlier document occupies the full render queue.
+#[tokio::test]
+#[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+async fn idle_pdfium_claims_next_job_before_previous_inference_finishes() {
+    let db = connection::connect(
+        &DatabaseConfig::builder()
+            .url(
+                std::env::var("DOCPARSE_TEST_DATABASE_URL")
+                    .expect("database URL"),
+            )
+            .build(),
+    )
+    .await
+    .expect("database");
+    let directory = tempfile::tempdir().expect("storage");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let shutdown = CancellationToken::new();
+    let app = router(
+        AppState::new(
+            db.clone(),
+            storage.clone(),
+            HttpOptions::builder().build(),
+            shutdown.clone(),
+        )
+        .expect("state"),
+        &docparse_config::ServerConfig::default(),
+    )
+    .expect("router");
+    let gate = Arc::new(Semaphore::new(0));
+    let (entered, mut events) = mpsc::unbounded_channel();
+    let mut raw = RawConfig::default();
+    raw.render.queue_size = 1;
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::RulesOnly;
+    let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
+    let parser = DocParser::builder()
+        .config(Arc::clone(&config))
+        .layout_engine(Arc::new(GatedLayout {
+            gate: Arc::clone(&gate),
+            entered,
+        }))
+        .build()
+        .await
+        .expect("parser");
+    let worker = Worker::builder()
+        .db(db.clone())
+        .storage(storage)
+        .parser(Arc::new(parser))
+        .output(config.output().clone())
+        .options(WorkerOptions::builder().lease_seconds(3).build())
+        .build();
+    let pool = docparse_server::pdfium_pool::PdfiumPool::start(
+        1,
+        std::path::Path::new(env!("CARGO_BIN_EXE_docparse-server")),
+    )
+    .await
+    .expect("pool");
+    let pdf =
+        include_bytes!("../../core/tests/fixtures/pdf/extraction_metadata.pdf");
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    assert_eq!(
+        json(app.clone(), upload(first, pdf)).await.0,
+        StatusCode::ACCEPTED
+    );
+    let task = tokio::spawn(worker.run(Arc::clone(&pool), shutdown.clone()));
+    let first_entered =
+        tokio::time::timeout(Duration::from_secs(10), events.recv()).await;
+    let submitted = json(app.clone(), upload(second, pdf)).await.0;
+    let claimed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let (_, snapshot) = json(
+                app.clone(),
+                get(&format!("/api/jobs/status?id={second}")),
+            )
+            .await;
+            if snapshot.pointer("/data/status").and_then(Value::as_str)
+                == Some("running")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    let extra_page =
+        tokio::time::timeout(Duration::from_millis(100), events.recv()).await;
+    shutdown.cancel();
+    gate.add_permits(100);
+    let drained = tokio::time::timeout(Duration::from_secs(10), task).await;
+    pool.shutdown().await.expect("pool cleanup");
+    first_entered
+        .expect("first inference reached")
+        .expect("event");
+    assert_eq!(submitted, StatusCode::ACCEPTED);
+    assert!(
+        claimed.is_ok(),
+        "an idle PDFium worker must claim the next PDF before the old inference finishes"
+    );
+    assert!(
+        extra_page.is_err(),
+        "claimed PDF must wait for render capacity"
+    );
+    drained
+        .expect("drain deadline")
+        .expect("worker join")
+        .expect("worker");
+    for id in [first, second] {
+        let (_, snapshot) =
+            json(app.clone(), get(&format!("/api/jobs/status?id={id}"))).await;
+        assert_eq!(
+            snapshot.pointer("/data/status").and_then(Value::as_str),
+            Some("succeeded")
+        );
+    }
+}
+
 /// Malformed workbench queries must fail at the HTTP boundary without reaching the database driver.
 #[tokio::test]
 async fn workbench_queries_reject_invalid_input() {
@@ -555,18 +673,21 @@ async fn durable_http_survives_disconnected_clients() {
         .storage(storage.clone())
         .parser(Arc::new(parser))
         .output(config.output().clone())
-        .options(
-            WorkerOptions::builder()
-                .concurrency(1)
-                .lease_seconds(3)
-                .build(),
-        )
+        .options(WorkerOptions::builder().lease_seconds(3).build())
         .build();
     let worker_stop = CancellationToken::new();
     let worker_signal = worker_stop.clone();
     let running_worker = worker.clone();
-    let task =
-        tokio::spawn(async move { running_worker.run(worker_signal).await });
+    let pool = docparse_server::pdfium_pool::PdfiumPool::start(
+        1,
+        std::path::Path::new(env!("CARGO_BIN_EXE_docparse-server")),
+    )
+    .await
+    .expect("PDFium pool");
+    let running_pool = Arc::clone(&pool);
+    let task = tokio::spawn(async move {
+        running_worker.run(running_pool, worker_signal).await
+    });
     tokio::time::timeout(Duration::from_secs(10), receiver.recv())
         .await
         .expect("worker starts");
@@ -606,6 +727,7 @@ async fn durable_http_survives_disconnected_clients() {
         .expect("drain")
         .expect("join")
         .expect("worker");
+    pool.shutdown().await.expect("stop PDFium pool");
     let other_db = connection::connect(
         &DatabaseConfig::builder().url(url.clone()).build(),
     )

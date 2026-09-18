@@ -51,23 +51,22 @@ fn short_concurrency_names_load_and_override() {
     let path = write_config(
         directory.path(),
         "docparse.toml",
-        "[server]\njobs = 5\npdfium_workers = 5\n[layout]\nsessions = 4\n[runtime]\nstage_pages = 4\n[tsr]\ntable_jobs = 8\n[formula]\nbatch_size = 4\n",
+        "[render]\nworkers = 5\nqueue_size = 4\n[layout]\nsession_size = 4\n[tsr]\nsession_size = 8\n[formula]\nbatch_size = 4\n",
     );
     let raw = ConfigLoader::new(&path)
         .with_env_provider(environment_provider(json!({
-            "server": {"jobs": 3},
-            "layout": {"sessions": 2},
-            "tsr": {"table_jobs": 6}
+            "render": {"workers": 3},
+            "layout": {"session_size": 2},
+            "tsr": {"session_size": 6}
         })))
         .load_raw()
         .expect("short concurrency names must load");
     let values = serde_json::to_value(raw).expect("serialized configuration");
     for (pointer, expected) in [
-        ("/server/jobs", 3),
-        ("/server/pdfium_workers", 5),
-        ("/layout/sessions", 2),
-        ("/runtime/stage_pages", 4),
-        ("/tsr/table_jobs", 6),
+        ("/render/workers", 3),
+        ("/layout/session_size", 2),
+        ("/render/queue_size", 4),
+        ("/tsr/session_size", 6),
         ("/formula/batch_size", 4),
     ] {
         assert_eq!(
@@ -83,9 +82,14 @@ fn short_concurrency_names_load_and_override() {
         ("layout", "session_pool_size"),
         ("runtime", "page_concurrency"),
         ("tsr", "max_in_flight"),
+        ("tsr", "table_jobs"),
+        ("ocr", "max_in_flight"),
     ] {
-        fs::write(&path, format!("[{section}]\n{field} = 2\n"))
-            .expect("old configuration");
+        write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[{section}]\n{field} = 2\n"),
+        );
         assert!(
             matches!(
                 ConfigLoader::new(&path).load_raw(),
@@ -296,7 +300,7 @@ fn default_wireless_cells_can_be_disabled_by_profile() {
     docparse_config::ValidatedConfig::try_from(raw)
         .expect_err("SLANeXt requires an enabled detector");
 
-    // Direct JSON callers inherit the same combination when the nested section is absent.
+    // Direct JSON callers must explicitly configure or disable the detector instead of inheriting a queue capacity.
     let mut value = serde_json::to_value(&defaults).expect("defaults");
     value
         .get_mut("tsr")
@@ -304,28 +308,28 @@ fn default_wireless_cells_can_be_disabled_by_profile() {
         .as_object_mut()
         .expect("TSR object")
         .remove("cell_detection");
+    serde_json::from_value::<RawConfig>(value.clone())
+        .expect_err("missing detector queue configuration");
+    value
+        .get_mut("tsr")
+        .expect("TSR")
+        .as_object_mut()
+        .expect("object")
+        .insert("cell_detection".into(), serde_json::Value::Null);
     let decoded: RawConfig =
-        serde_json::from_value(value).expect("default cells");
-    assert_eq!(decoded.tsr.cell_detection, defaults.tsr.cell_detection);
+        serde_json::from_value(value).expect("explicitly disabled detector");
+    assert!(decoded.tsr.cell_detection.is_none());
 }
 
 /// Batch controls must load from old files and reject unbounded tensor allocations.
 #[test]
 fn ocr_batch_size_loads_and_validates() {
-    // Older browser/config payloads omit this field instead of going through the native loader.
-    let mut legacy =
-        serde_json::to_value(docparse_config::OcrConfig::default())
-            .expect("OCR config");
-    legacy.as_object_mut().expect("object").remove("batch_size");
-    let legacy: docparse_config::OcrConfig =
-        serde_json::from_value(legacy).expect("legacy config");
-    assert_eq!(legacy.batch_size, 16);
     let directory = tempfile::tempdir().expect("directory");
     for size in [1, 8, 32] {
         let path = write_config(
             directory.path(),
             "docparse.toml",
-            &format!("[ocr]\nbatch_size = {size}\n"),
+            &format!("[ocr.recognition]\nbatch_size = {size}\n"),
         );
         ConfigLoader::new(path)
             .load_raw()
@@ -336,14 +340,14 @@ fn ocr_batch_size_loads_and_validates() {
         let path = write_config(
             directory.path(),
             "docparse.toml",
-            &format!("[ocr]\nbatch_size = {size}\n"),
+            &format!("[ocr.recognition]\nbatch_size = {size}\n"),
         );
         assert!(matches!(
             ConfigLoader::new(path)
                 .load_raw()
                 .and_then(docparse_config::ValidatedConfig::try_from),
             Err(ConfigError::InvalidValue {
-                field: "ocr.batch_size",
+                field: "ocr.recognition.batch_size",
                 ..
             })
         ));
@@ -353,6 +357,47 @@ fn ocr_batch_size_loads_and_validates() {
 /// Writes one configuration file and returns its path.
 fn write_config(directory: &Path, name: &str, contents: &str) -> PathBuf {
     let path = directory.join(name);
+    let mut contents = contents.to_owned();
+    // Keep fixture tables valid while explicitly supplying capacities unrelated to each loader test.
+    if name == "docparse.toml" {
+        for (section, size) in [
+            ("render", 16),
+            ("layout", 1),
+            ("tsr", 1),
+            ("tsr.cell_detection", 1),
+            ("ocr.detection", 1),
+            ("ocr.recognition", 16),
+            ("ocr.orientation", 16),
+            ("formula", 4),
+        ] {
+            let header = format!("[{section}]");
+            let configured = format!("{header}\nqueue_size = {size}");
+            if contents.contains(&header) {
+                let existing = contents
+                    .split_once(&header)
+                    .expect("header")
+                    .1
+                    .split("\n[")
+                    .next()
+                    .expect("section");
+                if !existing.contains("queue_size") {
+                    contents = contents.replace(&header, &configured);
+                }
+            } else {
+                contents.push_str(&format!("\n{configured}\n"));
+            }
+        }
+        let render = contents
+            .split_once("[render]")
+            .expect("render")
+            .1
+            .split("\n[")
+            .next()
+            .expect("section");
+        if !render.contains("workers") {
+            contents = contents.replace("[render]", "[render]\nworkers = 1");
+        }
+    }
     fs::write(&path, contents)
         .expect("the test configuration must be writable");
     path
@@ -392,8 +437,8 @@ score_threshold = 0.4
 model_path = "tables/model.onnx"
 mode = "tsr_only"
 
-[runtime]
-stage_pages = 2
+[render]
+queue_size = 2
 "#,
     );
     write_config(
@@ -406,8 +451,8 @@ score_threshold = 0.6
 [tsr]
 mode = "fallback"
 
-[runtime]
-stage_pages = 3
+[render]
+queue_size = 3
 "#,
     );
 
@@ -417,7 +462,7 @@ stage_pages = 3
         .expect("the layered configuration must load");
 
     assert!((config.layout.score_threshold - 0.6).abs() < f64::EPSILON);
-    assert_eq!(config.runtime.stage_pages, 3);
+    assert_eq!(config.render.queue_size, 3);
     assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
     assert_eq!(
         config.tsr.model_path,
@@ -569,17 +614,17 @@ fn explicit_profile_and_overrides_have_expected_precedence() {
     let main_path = write_config(
         directory.path(),
         "docparse.toml",
-        "[runtime]\nstage_pages = 2\n",
+        "[render]\nqueue_size = 2\n",
     );
     write_config(
         directory.path(),
         "docparse.dev.toml",
-        "[runtime]\nstage_pages = 6\n",
+        "[render]\nqueue_size = 6\n",
     );
     write_config(
         directory.path(),
         "docparse.prod.toml",
-        "[runtime]\nstage_pages = 7\n",
+        "[render]\nqueue_size = 7\n",
     );
     let environment = environment_provider(json!({
         "profile": "dev",
@@ -593,7 +638,7 @@ fn explicit_profile_and_overrides_have_expected_precedence() {
         .load_raw()
         .expect("all configuration layers must merge");
 
-    assert_eq!(config.runtime.stage_pages, 7);
+    assert_eq!(config.render.queue_size, 7);
     assert!((config.layout.score_threshold - 0.9).abs() < f64::EPSILON);
 }
 
@@ -606,7 +651,7 @@ fn environment_profile_selects_file_without_entering_raw_config() {
     write_config(
         directory.path(),
         "docparse.dev.toml",
-        "[runtime]\nstage_pages = 6\n",
+        "[render]\nqueue_size = 6\n",
     );
     let environment = environment_provider(json!({ "profile": "dev" }));
 
@@ -615,7 +660,7 @@ fn environment_profile_selects_file_without_entering_raw_config() {
         .load_raw()
         .expect("the environment-selected profile must load");
 
-    assert_eq!(config.runtime.stage_pages, 6);
+    assert_eq!(config.render.queue_size, 6);
 }
 
 /// Verifies that a missing main configuration file has a dedicated error.
@@ -717,8 +762,8 @@ fn repository_default_config_matches_documented_defaults() {
 
     assert!((config.layout.score_threshold - 0.5).abs() < f64::EPSILON);
     // Per-host stage tuning must not invalidate the documented library default.
-    assert_eq!(RawConfig::default().runtime.stage_pages, 4);
-    assert!(config.runtime.stage_pages > 0);
+    assert_eq!(RawConfig::default().render.queue_size, 16);
+    assert!(config.render.queue_size > 0);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
     assert_eq!(config.tsr.mode, docparse_config::TableMode::TsrOnly);

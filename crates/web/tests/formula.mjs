@@ -64,7 +64,7 @@ try {
       parser = await createParser({ executionProvider: provider, allowCpuFallback: false,
         artifacts: { kind: "urls", model: "/models/pp-doclayout-v3/inference.onnx", config: "/models/pp-doclayout-v3/inference.yml", manifest: "/models/pp-doclayout-v3/model-manifest.json" },
         formulaArtifacts: recognition === "off" ? undefined : { kind: "urls", model: "/models/pp-formulanet-plus-s/inference.onnx", tokenizer: "/models/pp-formulanet-plus-s/tokenizer.json", manifest: "/models/pp-formulanet-plus-s/model-manifest.json" },
-        config: { tsr: { mode: "rules_only" }, formula: { inline_enabled: !["display", "off"].includes(recognition), display_enabled: !["inline", "off"].includes(recognition), batch_size: 2, timeout_ms: 120000 } },
+        config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } }, formula: { queue_size: 2, inline_enabled: !["display", "off"].includes(recognition), display_enabled: !["inline", "off"].includes(recognition), batch_size: 2, timeout_ms: 120000 } },
         onProgress: progress => { if (progress.stage !== "downloading") console.log(JSON.stringify(progress)); },
       });
       const initializationMs = performance.now() - started;

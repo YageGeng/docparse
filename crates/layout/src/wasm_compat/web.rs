@@ -1,5 +1,4 @@
 //! Browser model initialization policy, metadata, and Worker-local CPU execution.
-use super::{TaskError, WasmCompatSend};
 use crate::{LayoutError, ModelMetadataSchema};
 use ort::session::Session;
 use std::collections::BTreeMap;
@@ -16,15 +15,6 @@ impl PpDocLayoutV3Engine {
         tracing::error!("browser model creation requires explicit artifacts");
         Err(LayoutError::ModelArtifactsRequired)
     }
-}
-
-/// Executes a CPU segment within the dedicated browser Worker.
-pub async fn run_cpu<F, T>(operation: F) -> Result<T, TaskError>
-where
-    F: FnOnce() -> T + WasmCompatSend + 'static,
-    T: WasmCompatSend + 'static,
-{
-    Ok(operation())
 }
 
 /// Represents descriptive metadata explicitly as unavailable on the Web backend.

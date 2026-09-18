@@ -1,6 +1,7 @@
 //! Immutable structure and cell model artifacts share the existing verification contract.
+use docparse_common::timing::TimingStage;
 use docparse_config::{TableCellModel, TsrModel};
-use docparse_layout::{ModelArtifacts, ModelContract, timing::TimingStage};
+use docparse_layout::{ModelArtifacts, ModelContract};
 
 /// Files required by the selected structure model and optional cell detector.
 #[derive(Debug, Clone)]

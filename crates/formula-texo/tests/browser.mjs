@@ -64,10 +64,17 @@ const server = createServer(async (request, response) => {
   } catch (error) { response.statusCode = 500; response.end(String(error)); }
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-const browser = await chromium.launch({channel: "chrome", headless: true});
+// Headless Chrome may require explicit WebGPU enablement to expose its available adapter.
+const browser = await chromium.launch({channel: "chrome", headless: true, args: provider === "webgpu" ? ["--enable-unsafe-webgpu"] : []});
 try {
   const page = await browser.newPage();
-  page.on("console", message => console.error(message.text().slice(0, 500)));
+  const shapeWarnings = [];
+  // Validate the corrected export without hiding ORT's output-shape diagnostics.
+  page.on("console", message => {
+    const text = message.text();
+    if (/VerifyOutputSizes|Expected shape from model.*does not match actual shape/s.test(text)) shapeWarnings.push(text);
+    console.error(text.slice(0, 500));
+  });
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   const result = await page.evaluate(webgpu => new Promise((resolve, reject) => {
     const worker = new Worker('/worker.mjs', {type:'module'});
@@ -82,6 +89,7 @@ try {
   assert.deepEqual(result.locationViolations, [], "hidden states and nonempty caches must stay on GPU");
   assert.deepEqual(result.warmup, [expected]);
   assert.deepEqual(result.batch, [expected, expected]);
+  assert.deepEqual(shapeWarnings, [], "Texo must not emit output-shape mismatch warnings");
   if (provider === "webgpu") assert(result.gpuSubmissions > 0, "WebGPU must submit actual GPU work");
   console.log(JSON.stringify({provider, browser: browser.version(), ...result}));
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

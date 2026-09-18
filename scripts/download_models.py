@@ -75,15 +75,15 @@ class Model:
     def from_name(cls, name: str) -> Model:
         """Selects a pinned contract for either complete or targeted provisioning."""
         if name == "texo":
-            # Match the three artifact hashes enforced by docparse-formula-texo.
+            # Pin the corrected output-shape export and match docparse-formula-texo's enforced hashes.
             repository = "alephpi/FormulaNet"
-            revision = "63e04c86fc96c2324811114351eeea8118bf6b28"
+            revision = "b2668efe5112082846fde4d446b9bfaab3989533"
             base = f"https://huggingface.co/{repository}/resolve/{revision}/onnx"
             artifacts = tuple(
                 Artifact(filename, f"{base}/{filename}?download=true", digest)
                 for filename, digest in [
-                    ("encoder_model.onnx", "95cccef463e5ed3623282f1541c0011a00b8a5d0828ea2cd57d6953ad4310b5b"),
-                    ("decoder_model_merged.onnx", "10be29b751f6de5f9900c3658551020dc865257eb2c3034bc4c1e016e4d0e35d"),
+                    ("encoder_model.onnx", "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae"),
+                    ("decoder_model_merged.onnx", "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"),
                     ("tokenizer.json", "1240f9d178e1ad2a0076fe95ba62e332871c702accdd5ce3ae3ef33ffd6c3a1e"),
                 ]
             )

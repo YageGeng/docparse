@@ -9,13 +9,16 @@ use docparse_config::{
 #[test]
 fn texo_sessions_are_bounded_and_default_to_one() {
     let mut value = serde_json::to_value(RawConfig::default()).expect("config");
-    assert_eq!(value.pointer("/formula/engine/sessions"), Some(&1.into()));
+    assert_eq!(
+        value.pointer("/formula/engine/session_size"),
+        Some(&1.into())
+    );
     for count in [0, 9] {
         *value
-            .pointer_mut("/formula/engine/sessions")
+            .pointer_mut("/formula/engine/session_size")
             .expect("sessions") = count.into();
         let raw = serde_json::from_value(value.clone()).expect("shape");
-        assert_invalid_value(raw, "formula.engine.sessions");
+        assert_invalid_value(raw, "formula.engine.session_size");
     }
 }
 
@@ -24,7 +27,7 @@ fn loaded_defaults() -> RawConfig {
     let directory =
         tempfile::tempdir().expect("the test directory must be created");
     let config_path = directory.path().join("docparse.toml");
-    fs::write(&config_path, "")
+    fs::write(&config_path, "render.workers = 1\nrender.queue_size = 16\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 16\nocr.orientation.queue_size = 16\nformula.queue_size = 4\n")
         .expect("the test configuration must be writable");
     ConfigLoader::new(config_path)
         .load_raw()
@@ -59,24 +62,15 @@ fn invalid_ranges_are_rejected() {
     assert_invalid_value(config, "layout.score_threshold");
 
     let mut config = defaults.clone();
-    config.layout.sessions = 0;
-    assert_invalid_value(config, "layout.sessions");
+    config.layout.session_size = 0;
+    assert_invalid_value(config, "layout.session_size");
 
     let mut config = defaults.clone();
-    config.runtime.stage_pages = 0;
-    assert_invalid_value(config, "runtime.stage_pages");
-
+    config.render.workers = 0;
+    assert_invalid_value(config, "render.workers");
     let mut config = defaults.clone();
-    config.runtime.render_queue_capacity = 0;
-    assert_invalid_value(config, "runtime.render_queue_capacity");
-
-    let mut config = defaults.clone();
-    config.runtime.blocking_task_limit = 0;
-    assert_invalid_value(config, "runtime.blocking_task_limit");
-
-    let mut config = defaults.clone();
-    config.runtime.render_queue_capacity = config.runtime.stage_pages + 1;
-    assert_invalid_value(config, "runtime.render_queue_capacity");
+    config.render.queue_size = 0;
+    assert_invalid_value(config, "render.queue_size");
 
     let mut config = defaults.clone();
     config.render.dpi = 0;
@@ -150,57 +144,32 @@ fn parameter_validation_does_not_require_model_paths() {
         .expect("model paths belong to native artifact loading, not parameter validation");
 }
 
-/// OCR page overlap must retain a finite positive memory budget.
+/// The retired page gate must not silently override per-model consumers and queue backpressure.
 #[test]
-fn ocr_in_flight_limit_is_validated() {
-    for limit in [0, 33] {
-        let mut raw = RawConfig::default();
-        raw.ocr.max_in_flight = limit;
-        assert_invalid_value(raw, "ocr.max_in_flight");
-    }
-    assert_eq!(RawConfig::default().ocr.max_in_flight, 2);
+fn ocr_in_flight_limit_is_rejected() {
+    let mut value = serde_json::to_value(RawConfig::default()).expect("config");
+    value
+        .get_mut("ocr")
+        .expect("OCR")
+        .as_object_mut()
+        .expect("object")
+        .insert("max_in_flight".into(), serde_json::json!(2));
+    serde_json::from_value::<RawConfig>(value).expect_err("retired page gate");
 }
 
-/// A zero process budget must fail before any server worker is started.
-#[test]
-fn server_pdfium_process_budget_is_loaded_and_validated() {
-    let configured: ServerConfig = serde_json::from_value(serde_json::json!({
-        "pdfium_workers": 2
-    }))
-    .expect("server process budget must load");
-    configured.validate().expect("positive process budget");
-    let zero: ServerConfig = serde_json::from_value(serde_json::json!({
-        "pdfium_workers": 0
-    }))
-    .expect("numeric process budget must deserialize before validation");
-    assert!(matches!(
-        zero.validate(),
-        Err(ConfigError::InvalidValue {
-            field: "server.pdfium_workers",
-            ..
-        })
-    ));
-}
-
-/// Upload and document concurrency retain their existing admission ranges.
+/// Upload concurrency retains its existing admission range without a document job gate.
 #[test]
 fn server_concurrency_limits_are_loaded_and_validated() {
-    for (field, cases) in [
-        (
-            "jobs",
-            [(0, false), (1, true), (4, true), (128, true), (129, false)],
-        ),
-        (
-            "max_uploads",
-            [
-                (0, false),
-                (1, true),
-                (4, true),
-                (1024, true),
-                (1025, false),
-            ],
-        ),
-    ] {
+    for (field, cases) in [(
+        "max_uploads",
+        [
+            (0, false),
+            (1, true),
+            (4, true),
+            (1024, true),
+            (1025, false),
+        ],
+    )] {
         for (limit, valid) in cases {
             let config: ServerConfig =
                 serde_json::from_value(serde_json::json!({
@@ -348,7 +317,7 @@ fn formula_configuration_accepts_bounded_batches() {
         .expect("default config");
     value.as_object_mut().expect("object").insert(
         "formula".into(),
-        serde_json::json!({"batch_size": 4, "timeout_ms": 120000}),
+        serde_json::json!({"queue_size": 4, "batch_size": 4, "timeout_ms": 120000}),
     );
     let raw =
         serde_json::from_value::<docparse_config::RawConfig>(value.clone());

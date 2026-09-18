@@ -1,11 +1,10 @@
+use docparse_common::timing::Timings;
 use docparse_config::{ConfigLoader, OcrPolicy, TableMode, ValidatedConfig};
 use docparse_core::{
     DocParser, LocalPdfiumProvider, PageInput, PdfInput, PdfiumProvider,
 };
 use docparse_formula::{FormulaEngine, FormulaError, PpFormulaNetEngine};
-use docparse_layout::{
-    PageImage, timing::Timings, wasm_compat::WasmBoxedFuture,
-};
+use docparse_layout::{PageImage, wasm_compat::WasmBoxedFuture};
 use std::{
     path::PathBuf,
     sync::{
@@ -67,11 +66,11 @@ async fn real_motion_descriptor_preserves_overbar() {
     // These regression expectations belong to the PP model, independently of the application default.
     let pp = root.join("models/pp-formulanet-plus-s");
     raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
-        docparse_config::PpFormulaConfig {
-            model_path: pp.join("inference.onnx"),
-            tokenizer_path: pp.join("tokenizer.json"),
-            model_manifest_path: pp.join("model-manifest.json"),
-        },
+        docparse_config::PpFormulaConfig::builder()
+            .model_path(pp.join("inference.onnx"))
+            .tokenizer_path(pp.join("tokenizer.json"))
+            .model_manifest_path(pp.join("model-manifest.json"))
+            .build(),
     );
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;
@@ -202,11 +201,11 @@ async fn real_softmax_crop_preserves_component_subscript() {
     // These regression expectations belong to the PP model, independently of the application default.
     let pp = root.join("models/pp-formulanet-plus-s");
     raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
-        docparse_config::PpFormulaConfig {
-            model_path: pp.join("inference.onnx"),
-            tokenizer_path: pp.join("tokenizer.json"),
-            model_manifest_path: pp.join("model-manifest.json"),
-        },
+        docparse_config::PpFormulaConfig::builder()
+            .model_path(pp.join("inference.onnx"))
+            .tokenizer_path(pp.join("tokenizer.json"))
+            .model_manifest_path(pp.join("model-manifest.json"))
+            .build(),
     );
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;

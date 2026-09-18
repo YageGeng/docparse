@@ -516,7 +516,7 @@ async fn external_mode_requires_a_provider() {
     ));
 }
 
-/// Counts live futures across pages sharing the same invocation budget.
+/// Counts provider-owned in-flight work across concurrently submitted tables.
 #[derive(Default)]
 struct ConcurrentEngine {
     active: AtomicUsize,
@@ -524,7 +524,7 @@ struct ConcurrentEngine {
     calls: AtomicUsize,
 }
 
-/// Three disjoint tables expose whether a completed second request admits the third.
+/// Three disjoint tables expose whether every ready request reaches the provider concurrently.
 struct RefillTables;
 
 impl LayoutEngine for RefillTables {
@@ -573,7 +573,7 @@ impl LayoutEngine for RefillTables {
     }
 }
 
-/// The first request needs the third to arrive while the second completes immediately.
+/// Both earlier requests require the third to arrive before either can complete.
 #[derive(Default)]
 struct RefillingTableEngine {
     calls: AtomicUsize,
@@ -596,7 +596,7 @@ impl TableStructureEngine for RefillingTableEngine {
     > {
         Box::pin(async move {
             match self.calls.fetch_add(1, Ordering::SeqCst) {
-                0 => self.stalled.store(
+                0 | 1 => self.stalled.fetch_or(
                     tokio::time::timeout(
                         std::time::Duration::from_millis(500),
                         self.third.notified(),
@@ -605,9 +605,12 @@ impl TableStructureEngine for RefillingTableEngine {
                     .is_err(),
                     Ordering::SeqCst,
                 ),
-                2 => self.third.notify_one(),
-                _ => {}
-            }
+                2 => {
+                    self.third.notify_waiters();
+                    false
+                }
+                _ => false,
+            };
             Err(TableStructureError::Engine {
                 message: "scheduler probe completed".into(),
             })
@@ -615,7 +618,7 @@ impl TableStructureEngine for RefillingTableEngine {
     }
 }
 
-/// Completion-order refill avoids a head-of-line stall within one page's table budget.
+/// Every ready table must reach the provider without a separate per-document concurrency gate.
 #[tokio::test]
 async fn slow_first_table_does_not_block_ready_work() {
     let mut raw = RawConfig::default();
@@ -633,12 +636,7 @@ async fn slow_first_table_does_not_block_ready_work() {
         .parse_page_with_options(
             Fixture::page(true),
             ParseOptions::builder()
-                .table(
-                    TableOptions::builder()
-                        .mode(TableMode::TsrOnly)
-                        .table_jobs(2)
-                        .build(),
-                )
+                .table(TableOptions::builder().mode(TableMode::TsrOnly).build())
                 .table_engine(Some(
                     Arc::clone(&engine) as Arc<dyn TableStructureEngine>
                 ))
@@ -649,7 +647,7 @@ async fn slow_first_table_does_not_block_ready_work() {
     assert_eq!(engine.calls.load(Ordering::SeqCst), 3);
     assert!(
         !engine.stalled.load(Ordering::SeqCst),
-        "the second completion must admit the third table before the first completes"
+        "the third table must reach the provider before either earlier request completes"
     );
 }
 struct Active<'a>(&'a AtomicUsize);
@@ -664,7 +662,7 @@ impl TableStructureEngine for ConcurrentEngine {
     fn name(&self) -> &str {
         "concurrency-probe"
     }
-    /// Keeps requests alive long enough for independent pages to contend for the shared permits.
+    /// Keeps requests alive briefly so concurrent submission can be observed without model artifacts.
     fn recognize(
         &self,
         request: TsrTableRequest,
@@ -697,53 +695,45 @@ impl TableStructureEngine for ConcurrentEngine {
     }
 }
 
-/// Tables on the same page overlap up to the same per-document budget used by parallel pages.
+/// Ready tables on one page reach the provider together without the retired default limit of two.
 #[tokio::test]
-async fn same_page_tables_share_the_job_budget() {
-    // Two ready tables on one page must reach the model together for batching to be possible.
+async fn same_page_tables_reach_provider_together() {
     let mut raw = RawConfig::default();
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
     let parser = DocParser::builder()
         .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
-        .layout_engine(Arc::new(PartialTables))
+        .layout_engine(Arc::new(RefillTables))
         .build()
         .await
         .expect("parser");
-    for limit in [1, 2] {
-        let engine = Arc::new(ConcurrentEngine::default());
-        parser
-            .parse_page_with_options(
-                Fixture::page(true),
-                ParseOptions::builder()
-                    .table(
-                        TableOptions::builder()
-                            .mode(TableMode::TsrOnly)
-                            .table_jobs(limit)
-                            .build(),
-                    )
-                    .table_engine(Some(
-                        Arc::clone(&engine) as Arc<dyn TableStructureEngine>
-                    ))
-                    .build(),
-            )
-            .await
-            .expect("page");
-        assert_eq!(engine.calls.load(Ordering::SeqCst), 2);
-        assert_eq!(engine.maximum.load(Ordering::SeqCst), limit);
-        assert_eq!(engine.active.load(Ordering::SeqCst), 0);
-    }
+    let engine = Arc::new(ConcurrentEngine::default());
+    parser
+        .parse_page_with_options(
+            Fixture::page(true),
+            ParseOptions::builder()
+                .table(TableOptions::builder().mode(TableMode::TsrOnly).build())
+                .table_engine(Some(
+                    Arc::clone(&engine) as Arc<dyn TableStructureEngine>
+                ))
+                .build(),
+        )
+        .await
+        .expect("page");
+    assert_eq!(engine.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(engine.maximum.load(Ordering::SeqCst), 3);
+    assert_eq!(engine.active.load(Ordering::SeqCst), 0);
 }
 
-/// One document's tables share one limit even when several pages execute concurrently.
+/// Independent pages retain all provider results after removal of the document-level table gate.
 #[tokio::test]
-async fn external_budget_is_shared_across_pages() {
+async fn external_requests_complete_across_pages() {
     let mut raw = RawConfig::default();
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
-    raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-    raw.runtime.stage_pages = 4;
+    raw.tsr.mode = TableMode::RulesOnly;
+    raw.render.queue_size = 4;
     raw.render.max_long_edge_pixels = 800;
     let parser = DocParser::builder()
         .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
@@ -756,40 +746,32 @@ async fn external_budget_is_shared_across_pages() {
             .join("tests/fixtures/pdf/multipage_layout.pdf"),
     )
     .expect("fixture");
-    for limit in [1, 2] {
-        let engine = Arc::new(ConcurrentEngine::default());
-        let result = parser
-            .parse_bytes_with_options(
-                Arc::from(bytes.clone()),
-                ParseOptions::builder()
-                    .table(
-                        TableOptions::builder()
-                            .mode(TableMode::TsrOnly)
-                            .table_jobs(limit)
-                            .build(),
-                    )
-                    .table_engine(Some(
-                        Arc::clone(&engine) as Arc<dyn TableStructureEngine>
-                    ))
-                    .build(),
-            )
-            .await
-            .expect("document");
-        assert!(result.pages.len() >= 2);
-        assert_eq!(engine.calls.load(Ordering::SeqCst), result.pages.len());
-        assert!(engine.maximum.load(Ordering::SeqCst) <= limit);
-        assert_eq!(engine.active.load(Ordering::SeqCst), 0);
-        assert!(
-            result
-                .pages
-                .iter()
-                .flat_map(|p| &p.blocks)
-                .filter(|b| b.label == LayoutLabel::Table)
-                .all(|b| b.table.as_ref().is_some_and(
-                    |t| t.source == TableStructureSource::ExternalTsr
+    let engine = Arc::new(ConcurrentEngine::default());
+    let result = parser
+        .parse_bytes_with_options(
+            Arc::from(bytes),
+            ParseOptions::builder()
+                .table(TableOptions::builder().mode(TableMode::TsrOnly).build())
+                .table_engine(Some(
+                    Arc::clone(&engine) as Arc<dyn TableStructureEngine>
                 ))
-        );
-    }
+                .build(),
+        )
+        .await
+        .expect("document");
+    assert!(result.pages.len() >= 2);
+    assert_eq!(engine.calls.load(Ordering::SeqCst), result.pages.len());
+    assert_eq!(engine.active.load(Ordering::SeqCst), 0);
+    assert!(
+        result
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .filter(|block| block.label == LayoutLabel::Table)
+            .all(|block| block.table.as_ref().is_some_and(|table| table
+                .source
+                == TableStructureSource::ExternalTsr))
+    );
 }
 
 /// Crop rounding cannot alter page ownership, including at low or nonuniform raster scales and rotated origins.

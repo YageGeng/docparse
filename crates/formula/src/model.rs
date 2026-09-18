@@ -1,11 +1,9 @@
 //! Public formula engine and lossless decoding of the pinned model token output.
 use crate::{FormulaArtifacts, wasm_compat::SessionRunner};
+use docparse_common::timing::Timings;
+use docparse_common::{WasmBoxedFuture, WasmCompatSend, WasmCompatSync};
 use docparse_config::ValidatedConfig;
-use docparse_layout::{
-    PageImage,
-    timing::Timings,
-    wasm_compat::{WasmBoxedFuture, WasmCompatSend, WasmCompatSync},
-};
+use docparse_layout::PageImage;
 use std::sync::Arc;
 
 /// Formula failures preserve the cause without pretending that source text is recognized LaTeX.
@@ -28,7 +26,7 @@ pub enum FormulaError {
     #[error(transparent)]
     Layout(#[from] docparse_layout::LayoutError),
     #[error(transparent)]
-    Task(#[from] docparse_layout::wasm_compat::TaskError),
+    Task(#[from] docparse_common::TaskError),
     #[error("formula artifacts require explicit bytes on this platform")]
     ArtifactsRequired,
 }
@@ -62,12 +60,11 @@ impl PpFormulaNetEngine {
         config: Arc<ValidatedConfig>,
         artifacts: FormulaArtifacts,
     ) -> Result<Self, FormulaError> {
-        let (artifacts, kind) =
-            docparse_layout::wasm_compat::run_cpu(move || {
-                let kind = artifacts.verify()?;
-                Ok::<_, FormulaError>((artifacts, kind))
-            })
-            .await??;
+        let (artifacts, kind) = docparse_common::run_cpu(move || {
+            let kind = artifacts.verify()?;
+            Ok::<_, FormulaError>((artifacts, kind))
+        })
+        .await??;
         let backend =
             docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
         tracing::info!(
@@ -76,11 +73,18 @@ impl PpFormulaNetEngine {
             backend.execution_provider(),
             config.formula().batch_size
         );
+        let session_size = match &config.formula().engine {
+            docparse_config::FormulaEngineConfig::Pp(pp) => pp.session_size,
+            _ => 1,
+        };
+        // Each local model owns the configured number of consumers, independently of batching.
         let runner = SessionRunner::load(
             artifacts,
             backend,
             kind,
             config.formula().batch_size,
+            session_size,
+            config.formula().queue_size,
         )
         .await
         .map_err(|error| {
@@ -102,7 +106,8 @@ impl PpFormulaNetEngine {
             runner,
             name: format!("{}-onnx-{provider}", kind.as_str()),
             admission: Arc::new(tokio::sync::Semaphore::new(
-                config.formula().batch_size * 2,
+                config.formula().batch_size * session_size
+                    + config.formula().queue_size,
             )),
         })
     }

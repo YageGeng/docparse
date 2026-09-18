@@ -13,6 +13,21 @@ impl TryFrom<&SessionOutputs<'_>> for ModelOutputs {
 
     /// Validates the consumed tensor shapes before copying their small owned result.
     fn try_from(outputs: &SessionOutputs<'_>) -> Result<Self, Self::Error> {
+        Self::from_batch(outputs, 1)?
+            .pop()
+            .ok_or(LayoutError::InvalidOutput {
+                name: "fetch_name_1",
+                reason: "missing layout result".into(),
+            })
+    }
+}
+
+impl ModelOutputs {
+    /// Splits concatenated boxes using per-page counts so each caller retains only its own detections.
+    pub(crate) fn from_batch(
+        outputs: &SessionOutputs<'_>,
+        batch: usize,
+    ) -> Result<Vec<Self>, LayoutError> {
         let boxes = outputs
             .get("fetch_name_0")
             .ok_or(LayoutError::MissingOutput {
@@ -30,26 +45,33 @@ impl TryFrom<&SessionOutputs<'_>> for ModelOutputs {
                 name: "fetch_name_1",
             })?
             .try_extract_array::<i32>()?;
-        let count = counts.iter().next().copied().ok_or(
-            LayoutError::InvalidOutput {
-                name: "fetch_name_1",
-                reason: "expected one bbox count".into(),
-            },
-        )?;
-        if counts.len() != 1
-            || boxes.ncols() != 7
-            || count < 0
-            || usize::try_from(count).unwrap_or(usize::MAX) > boxes.nrows()
-        {
+        if counts.len() != batch || boxes.ncols() != 7 {
             return Err(LayoutError::InvalidOutput {
                 name: "fetch_name_0",
                 reason: "box shape or valid row count violates model contract"
                     .into(),
             });
         }
-        Ok(Self {
-            boxes: boxes.to_owned(),
-            count,
-        })
+        let mut offset = 0usize;
+        counts
+            .iter()
+            .map(|&count| {
+                let end = usize::try_from(count)
+                    .ok()
+                    .and_then(|count| offset.checked_add(count))
+                    .filter(|&end| end <= boxes.nrows())
+                    .ok_or(LayoutError::InvalidOutput {
+                        name: "fetch_name_1",
+                        reason: "layout bbox counts exceed the output buffer"
+                            .into(),
+                    })?;
+                let result = Self {
+                    boxes: boxes.slice(ndarray::s![offset..end, ..]).to_owned(),
+                    count,
+                };
+                offset = end;
+                Ok(result)
+            })
+            .collect()
     }
 }

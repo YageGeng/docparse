@@ -46,7 +46,7 @@ try {
     const { createParser } = await import("/dist/index.js");
     const codes = [];
     for (const engine of [{ type: "mineru", server_url: "" }, { type: "mineru", server_url: "http://localhost:8000", concurrency: 0 }, { type: "mineru", server_url: "file:///tmp/model" }]) {
-      try { const parser = await createParser({ artifacts: { kind: "urls", model: "/unused", config: "/unused", manifest: "/unused" }, config: { formula: { engine } } }); await parser.close(); codes.push("accepted"); }
+      try { const parser = await createParser({ artifacts: { kind: "urls", model: "/unused", config: "/unused", manifest: "/unused" }, config: { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 } }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 1 }, orientation: { queue_size: 1 } }, formula: { queue_size: 1, engine } } }); await parser.close(); codes.push("accepted"); }
       catch (error) { codes.push(error.code); }
     }
     return codes;
