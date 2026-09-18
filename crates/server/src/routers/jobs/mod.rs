@@ -7,6 +7,8 @@ mod source;
 mod status;
 mod upload;
 
+pub use events::Subscriptions;
+
 use crate::state::AppState;
 use utoipa_axum::{router::OpenApiRouter, routes};
 

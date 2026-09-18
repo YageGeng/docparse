@@ -32,6 +32,71 @@ use tower::ServiceExt;
 use tracing::{Instrument, instrument::WithSubscriber};
 use uuid::Uuid;
 
+/// Streaming telemetry must wait for consumption and distinguish cancellation from a completed response.
+#[tokio::test]
+async fn streaming_logs_follow_body_lifecycle() {
+    let log = tempfile::NamedTempFile::new().expect("log");
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().expect("writer"))
+        .finish();
+    async {
+        let app = axum::Router::new()
+            .route(
+                "/stream",
+                axum::routing::get(|| async {
+                    Body::from_stream(futures_util::stream::iter([Ok::<
+                        _,
+                        std::io::Error,
+                    >(
+                        "payload"
+                    )]))
+                }),
+            )
+            .layer(axum::middleware::from_fn(
+                docparse_server::middlewares::trace::request_trace,
+            ));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/stream")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert!(
+            !std::fs::read_to_string(log.path())
+                .expect("logs")
+                .contains("body completed")
+        );
+        assert_eq!(
+            to_bytes(response.into_body(), 100).await.expect("body"),
+            "payload"
+        );
+        let text = std::fs::read_to_string(log.path()).expect("logs");
+        assert!(text.contains("body completed"), "{text}");
+        assert!(text.contains("7 bytes"), "{text}");
+        drop(
+            app.oneshot(
+                Request::get("/stream")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response"),
+        );
+        assert!(
+            std::fs::read_to_string(log.path())
+                .expect("logs")
+                .contains("body cancelled")
+        );
+    }
+    .with_subscriber(subscriber)
+    .await;
+}
+
 /// File logging must append plain text across restarts while keeping stdout active.
 #[test]
 fn file_subscriber_appends_plaintext() {

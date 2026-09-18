@@ -7,7 +7,7 @@ const env = loadEnv("development", process.cwd(), "");
 const url =
   process.env.DOCPARSE_OPENAPI_URL ||
   env.DOCPARSE_OPENAPI_URL ||
-  "http://127.0.0.1:8080/api/openapi.json";
+  `${env.VITE_API_TARGET || "http://127.0.0.1:8080"}${(env.VITE_API_PREFIX ?? "/api/v1/docparse").replace(/\/$/, "")}/openapi.json`;
 const response = await fetch(url);
 if (!response.ok)
   throw new Error(`OpenAPI request failed: HTTP ${response.status}`);

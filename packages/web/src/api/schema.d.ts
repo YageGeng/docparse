@@ -123,7 +123,7 @@ export interface paths {
         };
         /**
          * Streams the immutable successful JSON envelope from shared storage rather than loading it into API memory.
-         * @description Read the completed document as JSON (default) or Markdown. JSON includes both LaTeX and Markdown for every recognized formula. Markdown is a presentation of the stored result; no inference is repeated.
+         * @description Read the completed document as JSON (default), one JSON page with page=N, or cached Markdown. Responses support gzip and If-None-Match revalidation. JSON includes both LaTeX and Markdown for every recognized formula. Markdown is a presentation of the stored result; no inference is repeated.
          */
         get: operations["result"];
         put?: never;
@@ -218,16 +218,9 @@ export interface components {
             success: boolean;
         };
         /** @description WisLand-compatible successful JSON envelope, also used inside SSE data messages. */
-        ApiResponse_DocumentResult: {
-            /** @description Canonical complete document aggregate. */
-            data: {
-                context: components["schemas"]["DocumentContext"];
-                errors: components["schemas"]["PageError"][];
-                pages: components["schemas"]["PageResult"][];
-                relations: components["schemas"]["DocumentRelations"];
-                /** @example 2.0 */
-                schema_version: string;
-            };
+        ApiResponse_JobJsonResult: {
+            /** @description JSON result shape depends on whether the page query parameter is present. */
+            data: components["schemas"]["DocumentResult"] | components["schemas"]["Pagenation_PageResult"];
             message: string;
             success: boolean;
         };
@@ -427,6 +420,8 @@ export interface components {
             polygon?: null | components["schemas"]["Polygon"];
             text_item_range: components["schemas"]["TextItemRange"];
         };
+        /** @description JSON result shape depends on whether the page query parameter is present. */
+        JobJsonResult: components["schemas"]["DocumentResult"] | components["schemas"]["Pagenation_PageResult"];
         /** @description A history page includes a cursor only when another matching row exists. */
         JobList: {
             items: components["schemas"]["JobSnapshot"][];
@@ -530,6 +525,36 @@ export interface components {
             code: string;
             message: string;
             stage: string;
+        };
+        /** @description A selected document page with total page count and parsing errors. */
+        Pagenation_PageResult: {
+            /** @description Document parsing errors remain visible when a requested page is missing. */
+            errors: components["schemas"]["PageError"][];
+            /** @description One page's canonical nested result. */
+            page?: {
+                blocks: components["schemas"]["Block"][];
+                diagnostics: {
+                    [key: string]: string;
+                };
+                /** @description Formula recognition outputs retain both LaTeX and Markdown under every JSON visibility policy. */
+                formulas?: components["schemas"]["FormulaResult"][];
+                /** Format: double */
+                height: number;
+                /** Format: int32 */
+                page_number: number;
+                /** @description Original unusable PDF facts replaced by confident OCR; excluded from reading order, retained for audit. */
+                replaced_native_text?: components["schemas"]["TextItem"][];
+                /** Format: int32 */
+                rotation: number;
+                warnings: components["schemas"]["PageWarning"][];
+                /** Format: double */
+                width: number;
+            };
+            /**
+             * Format: int32
+             * @description Total source PDF pages, including pages that failed parsing.
+             */
+            page_count: number;
         };
         /** @description Actual document pipeline boundaries, independent of execution speed or platform. */
         ParseProgress: {
@@ -1067,8 +1092,13 @@ export interface operations {
                 id: string;
                 /** @description Defaults to json; markdown returns text/markdown rather than a JSON envelope. */
                 format?: "json" | "markdown";
+                /** @description Optional one-based page number; available only for JSON and preserves full-document downloads when omitted. */
+                page?: number;
             };
-            header?: never;
+            header?: {
+                /** @description Revalidate an immutable result representation */
+                "If-None-Match"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1080,9 +1110,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApiResponse_DocumentResult"];
+                    "application/json": components["schemas"]["ApiResponse_JobJsonResult"];
                     "text/markdown": string;
                 };
+            };
+            /** @description Result representation is unchanged */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Invalid task UUID (4001002) */
             400: {

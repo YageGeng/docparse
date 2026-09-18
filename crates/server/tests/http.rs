@@ -108,6 +108,9 @@ async fn workbench_queries_reject_invalid_input() {
         "/api/jobs/list?status=other",
         "/api/jobs/list?unknown=true",
         "/api/jobs/source?id=bad",
+        "/api/jobs/result?id=00000000-0000-0000-0000-000000000000&page=0",
+        "/api/jobs/result?id=00000000-0000-0000-0000-000000000000&page=-1",
+        "/api/jobs/result?id=00000000-0000-0000-0000-000000000000&page=4294967296",
     ] {
         let (status, error) = json(app.clone(), get(path)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
@@ -432,12 +435,14 @@ async fn durable_http_survives_disconnected_clients() {
         .oneshot(
             Request::get(format!("/api/jobs/source?id={id}"))
                 .header("range", "bytes=0-4")
+                .header("accept-encoding", "gzip")
                 .body(Body::empty())
                 .expect("range request"),
         )
         .await
         .expect("source range");
     assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
+    assert!(!ranged.headers().contains_key("content-encoding"));
     assert_eq!(
         ranged.headers().get("content-type").expect("content type"),
         "application/pdf"
@@ -902,10 +907,20 @@ async fn sse_failure_uses_the_error_code_trait() {
         .await
         .expect("submit");
     let response = app
+        .clone()
         .oneshot(get(&format!("/api/jobs/events?id={id}")))
         .await
         .expect("SSE");
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(!response.headers().contains_key("content-encoding"));
+    let mut request = get(&format!("/api/jobs/events?id={id}"));
+    request
+        .headers_mut()
+        .insert("accept-encoding", "gzip".parse().expect("header"));
+    let second = app.oneshot(request).await.expect("second SSE");
+    assert!(!second.headers().contains_key("content-encoding"));
+    let mut second = second.into_body().into_data_stream();
+    second.next().await.expect("second replay").expect("frame");
     let mut stream = response.into_body().into_data_stream();
     stream
         .next()
@@ -932,6 +947,14 @@ async fn sse_failure_uses_the_error_code_trait() {
         serde_json::json!({"success":false,"error":{"code":4041001,"message":"request failed at job-events-poll"}})
     );
     assert!(stream.next().await.is_none());
+    let second_error =
+        tokio::time::timeout(Duration::from_secs(5), second.next())
+            .await
+            .expect("second poll")
+            .expect("error")
+            .expect("frame");
+    assert!(String::from_utf8_lossy(&second_error).contains("event: error"));
+    assert!(second.next().await.is_none());
 }
 
 /// Caught panics use the typed error envelope without copying the arbitrary panic payload into Display.

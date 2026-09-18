@@ -231,6 +231,32 @@ uses `ApiResponse::write` with `JsonRenderer::view_with_config`, sharing the sam
 Serde envelope as ordinary HTTP and SSE responses while preserving visibility
 filtering. JSON whitespace and object-key order are not part of the API contract.
 
+Responses negotiate streaming gzip with `Accept-Encoding`; SSE and PDF responses
+retain their original encoding. Full JSON and cached Markdown stream with 256 KiB
+read buffers. Results use weak ETags and `Cache-Control: private, no-cache` so
+repeat reads can return 304 after checking that the task remains visible.
+
+`GET /api/jobs/result?id=<uuid>&page=1` returns an `ApiResponse<Pagenation<PageResult>>` containing
+`page_count`, `errors`, and `page` (null for a failed/missing source page). Page
+numbers outside 1..=page_count and combining page with Markdown return 400.
+The first page request creates a small byte-offset index beside the immutable JSON;
+subsequent reads seek directly to that page without decoding the whole document.
+Index creation temporarily reads the source bytes but does not build the full
+document object graph. This works for existing results without reparsing PDFs.
+
+Markdown is rendered once on first demand and cached on disk per placeholder
+policy. Writable files in the reserved `.locks` directory coordinate cache creation
+and deletion across replicas without locking result payloads. The shared filesystem
+must support cross-client file locking. Lock files remain after result deletion to
+keep waiting replicas on the same inode; reclaim them only with all replicas stopped.
+No database connection or
+transaction is retained during these operations. Deletion removes derived files
+before removing the canonical JSON. Uploads remain single-request multipart
+streams, with buffered writes and early PDF signature validation, not resumable
+chunk sessions. HTTP completion logs report encoded body bytes handed to the
+transport, total elapsed time, errors and cancelled bodies; they do not prove the
+remote client has consumed every byte.
+
 Each `ApiError` variant carries a `code: ApiCode` supplied when its Snafu context
 is constructed, plus a short stage marker identifying the failing operation.
 `ApiCode` contains only `http_code: u16` and `code: u64`; business failures use
@@ -296,8 +322,10 @@ events.addEventListener("job", ({ data }) => {
 Parsing runs in an owned task separate from the lease supervisor, so synchronous
 parser work cannot prevent heartbeats. Heartbeat database waits are bounded.
 Workers coalesce progress into a watch channel and persist changes at most twice
-per second. Each subscriber polls the database once per second and receives SSE
-keep-alives every 15 seconds. Slow/disconnected subscribers never backpressure the
+per second. Subscribers to the same job share one database poller per API instance,
+which stops when the last subscriber disconnects, the job finishes, or shutdown
+begins. Each connection receives an immediate snapshot and SSE keep-alives every
+15 seconds. Slow/disconnected subscribers never backpressure the
 parser. Responses set `X-Accel-Buffering: no` and `Cache-Control: no-cache,
 no-transform`; disable proxy response buffering and set its idle timeout above the
 keep-alive interval. A proxy restart can close the connection; reconnect to any API.

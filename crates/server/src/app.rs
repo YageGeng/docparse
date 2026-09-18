@@ -8,7 +8,13 @@ use crate::{
 use axum::{Extension, Router, extract::DefaultBodyLimit, middleware};
 use docparse_config::{ConfigError, ServerConfig};
 use std::sync::Arc;
-use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::{
+    catch_panic::CatchPanicLayer,
+    compression::{
+        CompressionLayer, CompressionLevel,
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+    },
+};
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
@@ -67,6 +73,17 @@ pub fn router(
             state.options.max_upload_bytes + 64 * 1024,
         ))
         .layer(CatchPanicLayer::custom(PanicHandler))
+        // Compress incrementally; PDF byte ranges and event delivery must retain their original representation.
+        .layer(
+            CompressionLayer::new()
+                .gzip(true)
+                .quality(CompressionLevel::Fastest)
+                .compress_when(
+                    DefaultPredicate::new()
+                        .and(NotForContentType::new("text/event-stream"))
+                        .and(NotForContentType::new("application/pdf")),
+                ),
+        )
         .layer(middleware::from_fn(trace::request_trace))
         .with_state(state))
 }

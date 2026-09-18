@@ -33,6 +33,9 @@ pub struct AppState {
     pub options: HttpOptions,
     pub uploads: Arc<Semaphore>,
     pub shutdown: CancellationToken,
+    /// Shares database polling per job without imposing a subscriber or request limit.
+    #[builder(default)]
+    pub(crate) subscriptions: Arc<crate::routers::jobs::Subscriptions>,
 }
 
 impl AppState {

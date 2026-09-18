@@ -8,6 +8,7 @@ pub mod middlewares;
 pub mod model;
 pub mod pdfium_pool;
 pub mod routers;
+pub mod service;
 pub mod state;
 pub mod storage;
 pub mod worker;

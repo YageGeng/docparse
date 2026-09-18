@@ -1,44 +1,60 @@
 /// <reference lib="webworker" />
-import { ApiError, decodeResponse, type DocumentResult } from "@/api/client";
+import { ApiError, decodeResponse, type JobPage } from "@/api/client";
 import type { ResultMessage, ResultRequest } from "./result";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-// ponytail: worker memory scales with full JSON; add a server page-result endpoint if larger documents exceed browser memory.
-let document: DocumentResult | undefined;
-let requested = 1;
+let url: string | undefined;
+let active: AbortController | undefined;
+let requested = 0;
+let pageCount: number | undefined;
 
-/** Copies one page rather than cloning the complete document graph onto the UI thread. */
-function sendPage() {
-  if (!document) return;
-  const number = Math.min(document.context.page_count, Math.max(1, requested));
-  scope.postMessage({
-    kind: "page",
-    requested,
-    pageCount: document.context.page_count,
-    errors: document.errors,
-    page: document.pages.find((page) => page.page_number === number),
-  } satisfies ResultMessage);
-}
-
-/** Owns the full JSON fetch and parse; requests received during loading select the page sent when loading finishes. */
+/** Fetches only the selected page; native HTTP decoding handles gzip before JSON parsing. */
 scope.onmessage = async ({ data }: MessageEvent<ResultRequest>) => {
-  requested = data.page;
-  if (data.kind === "page") {
-    sendPage();
-    return;
+  if (data.kind === "load") {
+    url = data.url;
+    pageCount = undefined;
   }
+  if (!url) return;
+  // Mounting sends load and page messages together; do not cancel and repeat the identical request.
+  if (data.kind === "page" && data.page === requested) return;
+  requested = data.page;
+  active?.abort();
+  const controller = new AbortController();
+  active = controller;
+  const pageUrl = new URL(url);
   try {
-    const response = await fetch(data.url, {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    document = decodeResponse<DocumentResult>(
-      await response.text(),
-      response.status,
-      response.headers.get("x-request-id") ?? undefined,
-    );
-    sendPage();
+    // Bootstrap from page one when the count is unknown, including when the PDF preview is unavailable.
+    let number = Math.max(1, Math.min(pageCount ?? 1, data.page));
+    for (;;) {
+      pageUrl.searchParams.set("page", String(number));
+      const response = await fetch(pageUrl, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      const document = decodeResponse<JobPage>(
+        await response.text(),
+        response.status,
+        response.headers.get("x-request-id") ?? undefined,
+      );
+      if (controller.signal.aborted) return;
+      pageCount = document.page_count;
+      const normalized = Math.max(1, Math.min(pageCount, data.page));
+      if (number !== normalized) {
+        number = normalized;
+        continue;
+      }
+      scope.postMessage({
+        kind: "page",
+        requested: data.page,
+        pageCount: document.page_count,
+        errors: document.errors,
+        page: document.page ?? undefined,
+      } satisfies ResultMessage);
+      return;
+    }
   } catch (error) {
+    if (controller.signal.aborted) return;
     scope.postMessage({
       kind: "error",
       message: error instanceof Error ? error.message : "结果读取失败。",

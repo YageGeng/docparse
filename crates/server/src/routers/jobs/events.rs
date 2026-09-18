@@ -1,6 +1,6 @@
 use crate::{
     code::ApiCode,
-    error::{ApiResult, DatabaseSnafu, RequestSnafu},
+    error::{ApiError, ApiResult, DatabaseSnafu, RequestSnafu, SerializeSnafu},
     model::{
         base::ApiResponse,
         error::ApiErrorResponse,
@@ -19,8 +19,47 @@ use axum::{
 use docparse_database::query::parse_job::ParseJobQuery as Jobs;
 use futures_util::{Stream, stream};
 use snafu::{OptionExt, ResultExt};
-use std::{convert::Infallible, time::Duration};
+use std::{
+    collections::HashMap, convert::Infallible, sync::Arc, time::Duration,
+};
+use tokio::sync::{Mutex, watch};
 use tracing::{Instrument, instrument::WithSubscriber};
+use uuid::Uuid;
+
+/// One replaceable snapshot is shared by all subscribers to a job on this API instance.
+#[derive(Clone)]
+pub(crate) struct JobEvent {
+    version: i64,
+    event: Event,
+    terminal: bool,
+}
+
+/// Owns only active pollers; dropping the last receiver releases its task and registry entry.
+#[derive(Default)]
+pub struct Subscriptions {
+    channels: Mutex<HashMap<Uuid, watch::Sender<JobEvent>>>,
+}
+
+impl TryFrom<JobSnapshot> for JobEvent {
+    type Error = ApiError;
+
+    /// Serializes once per revision rather than once per connected browser.
+    fn try_from(job: JobSnapshot) -> ApiResult<Self> {
+        Ok(Self {
+            version: job.version,
+            terminal: job.is_terminal(),
+            event: Event::default()
+                .event("job")
+                .id(job.version.to_string())
+                .data(serde_json::to_string(&ApiResponse::data(job)).context(
+                    SerializeSnafu {
+                        stage: "job-events-encode",
+                        code: ApiCode::COMMON_INTERNAL_ERROR,
+                    },
+                )?),
+        })
+    }
+}
 
 /// Replays the latest durable snapshot on every connection and polls revisions without owning the parse task.
 #[utoipa::path(
@@ -65,30 +104,38 @@ pub async fn events(
         })?;
     tracing::Span::current()
         .record("pdf_hash", tracing::field::display(&first.input_hash));
-    // SSE polling outlives the handler, so capture its subscriber here rather than from the later body-polling task.
-    let span = tracing::Span::current();
-    let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-    // Snapshot replay intentionally coalesces intermediate events; terminal state never depends on a transient channel.
-    let events = stream::unfold(
-        Some((state, Some(first), -1_i64)),
-        move |cursor| {
-            let span = span.clone();
-            let dispatcher = dispatcher.clone();
-            async move {
-            let (state, mut pending, mut version) = cursor?;
-            loop {
-                let loaded = match pending.take() {
-                    Some(job) => Ok(Some(job)),
-                    None => {
-                        tokio::select! {
-                            _ = state.shutdown.cancelled() => return None,
-                            _ = tokio::time::sleep(state.options.poll_interval) => {}
-                        }
-                        Jobs::find_by_id(&state.db, id).await
+    let first = JobEvent::try_from(JobSnapshot::from(first))?;
+    let registry = Arc::clone(&state.subscriptions);
+    let mut subscriptions = registry.channels.lock().await;
+    let receiver = if let Some(sender) = subscriptions.get(&id) {
+        // A fresh database read may be ahead of the shared poller; never replay an older revision.
+        sender.send_if_modified(|current| {
+            if first.version > current.version {
+                *current = first.clone();
+                true
+            } else {
+                false
+            }
+        });
+        sender.subscribe()
+    } else {
+        let (sender, receiver) = watch::channel(first.clone());
+        if !first.terminal {
+            subscriptions.insert(id, sender.clone());
+            let registry = Arc::clone(&registry);
+            let poller = async move {
+                tracing::debug!("started shared SSE polling for job {}", id);
+                loop {
+                    tokio::select! {
+                        _ = state.shutdown.cancelled() => break,
+                        _ = sender.closed() => break,
+                        _ = tokio::time::sleep(state.options.poll_interval) => {}
                     }
-                };
-                // Preserve stage and source for SSE failures using the same ErrorCode conversion as ordinary HTTP.
-                let loaded = loaded
+                    let loaded = tokio::select! {
+                        _ = state.shutdown.cancelled() => break,
+                        _ = sender.closed() => break,
+                        loaded = Jobs::find_by_id(&state.db, id) => loaded,
+                    }
                     .with_context(|source| DatabaseSnafu {
                         stage: "job-events-poll",
                         code: ApiCode::from(&*source),
@@ -98,36 +145,76 @@ pub async fn events(
                             stage: "job-events-poll",
                             code: ApiCode::not_found(4041001),
                         })
-                    });
-                let job = match loaded {
-                    Ok(job) => JobSnapshot::from(job),
-                    Err(error) => {
-                        tracing::warn!("SSE subscription failed: {}", error);
-                        let event = Event::default()
-                            .event("error")
-                            .json_data(ApiErrorResponse::from(error))
-                            .ok()?;
-                        return Some((Ok::<_, Infallible>(event), None));
+                    })
+                    .and_then(|job| JobEvent::try_from(JobSnapshot::from(job)));
+                    match loaded {
+                        Ok(event) => {
+                            let terminal = event.terminal;
+                            sender.send_if_modified(|current| {
+                                if event.version > current.version {
+                                    *current = event.clone();
+                                    true
+                                } else {
+                                    false
+                                }
+                            });
+                            if terminal {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                "SSE subscription failed for job {}: {}",
+                                id,
+                                error
+                            );
+                            match Event::default()
+                                .event("error")
+                                .json_data(ApiErrorResponse::from(error))
+                            {
+                                Ok(event) => {
+                                    sender.send_replace(JobEvent {
+                                        version: -1,
+                                        event,
+                                        terminal: true,
+                                    });
+                                }
+                                Err(error) => tracing::error!(
+                                    "failed to serialize SSE error for job {}: {}",
+                                    id,
+                                    error
+                                ),
+                            }
+                            break;
+                        }
                     }
-                };
-                if job.version == version {
-                    continue;
                 }
-                version = job.version;
-                let terminal = job.is_terminal();
-                let event = Event::default()
-                    .event("job")
-                    .id(version.to_string())
-                    .json_data(ApiResponse::data(job))
-                    .ok()?;
-                return Some((
-                    Ok::<_, Infallible>(event),
-                    (!terminal).then_some((state, None, version)),
-                ));
-            }
-            }.instrument(span).with_subscriber(dispatcher)
-        },
-    );
+                let mut subscriptions = registry.channels.lock().await;
+                if subscriptions
+                    .get(&id)
+                    .is_some_and(|current| current.same_channel(&sender))
+                {
+                    subscriptions.remove(&id);
+                }
+                tracing::debug!("stopped shared SSE polling for job {}", id);
+            };
+            tokio::spawn(poller.in_current_span().with_current_subscriber());
+        }
+        receiver
+    };
+    drop(subscriptions);
+    // Each connection still replays immediately and closes only after delivering its terminal snapshot.
+    let events = stream::unfold(Some((receiver, true)), |cursor| async move {
+        let (mut receiver, first) = cursor?;
+        if !first && receiver.changed().await.is_err() {
+            return None;
+        }
+        let snapshot = receiver.borrow_and_update().clone();
+        Some((
+            Ok::<_, Infallible>(snapshot.event),
+            (!snapshot.terminal).then_some((receiver, false)),
+        ))
+    });
     Ok(sse_response(events))
 }
 

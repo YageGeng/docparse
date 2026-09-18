@@ -25,6 +25,7 @@ export type ResultMessage =
       requestId?: string;
     };
 type ResultState = {
+  documentId?: string;
   pageCount: number;
   errors: DocumentResult["errors"];
   page?: PageResult;
@@ -33,7 +34,7 @@ type ResultState = {
 };
 const empty: ResultState = { pageCount: 0, errors: [], isFetching: false };
 
-/** Keeps large document JSON off the UI thread and transfers only the requested page, releasing all data on navigation. */
+/** Reads one page in a worker, cancelling stale downloads and releasing data on navigation. */
 export function useDocumentResult(id: string, page: number, enabled: boolean) {
   const [state, setState] = useState<ResultState>(empty);
   const [revision, reload] = useReducer((value: number) => value + 1, 0);
@@ -63,6 +64,7 @@ export function useDocumentResult(id: string, page: number, enabled: boolean) {
         setState({ ...empty, error });
       } else if (data.requested === requested.current) {
         setState({
+          documentId: id,
           pageCount: data.pageCount,
           errors: data.errors,
           page: data.page,

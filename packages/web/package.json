@@ -8,6 +8,7 @@
     "prebuild": "node scripts/prepare-pdfjs.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "postbuild": "node scripts/compress-assets.mjs",
     "check": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "api:generate": "node scripts/generate-api.mjs"

@@ -107,14 +107,41 @@ impl SharedStorage {
     pub async fn remove(&self, name: &str) -> ApiResult<()> {
         let path = self.path(name)?;
         let root = self.root.clone();
+        let storage = self.clone();
+        let name = name.to_owned();
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            // Coordination never locks the data inode, so mandatory SMB locks cannot disrupt result readers.
+            let _lock = storage.lock_result(&name)?;
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                let prefix = format!(
+                    "{}.",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
+                for entry in std::fs::read_dir(&root)? {
+                    let entry = entry?;
+                    if entry.file_name().to_string_lossy().starts_with(&prefix)
+                    {
+                        match std::fs::remove_file(entry.path()) {
+                            Ok(()) => {}
+                            Err(error)
+                                if error.kind()
+                                    == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
             match std::fs::remove_file(path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
             // Also sync after NotFound: a previous interrupted attempt may have unlinked without syncing.
-            std::fs::File::open(root)?.sync_all()
+            std::fs::File::open(root)?.sync_all()?;
+            Ok(())
         })
         .await
         .context(TaskSnafu {
@@ -125,6 +152,26 @@ impl SharedStorage {
             stage: "storage-remove-file",
             code: ApiCode::service_unavailable(5031003),
         })
+    }
+
+    /// Acquires a writable, stable coordination inode from blocking filesystem tasks on every replica.
+    pub(crate) fn lock_result(
+        &self,
+        name: &str,
+    ) -> std::io::Result<std::fs::File> {
+        // Validate the object identity before deriving a path in the reserved lock namespace.
+        self.path(name).map_err(std::io::Error::other)?;
+        let directory = self.root.join(".locks");
+        std::fs::create_dir_all(&directory)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join(name))?;
+        // ponytail: retain lock inodes after deletion to prevent split locks; reclaim only with all replicas stopped.
+        file.lock()?;
+        Ok(file)
     }
 
     /// Restricts database and internal object names to a flat namespace without path traversal.

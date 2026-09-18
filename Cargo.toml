@@ -96,8 +96,9 @@ tokio-util = { version = "0.7", features = ["io", "rt"] }
 
 # http
 axum = { version = "0.8", features = ["multipart"] }
+http-body = "1"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["catch-panic", "fs"] } # CORS is handled at ingress; fs provides standard PDF Range responses.
+tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "fs"] } # CORS is handled at ingress.
 
 # api documentation
 utoipa = { version = "5", features = ["uuid"] }
@@ -118,7 +119,7 @@ figment = { version = "0.10", features = ["toml", "env"] }
 rmp = "0.8"
 serde = { version = "1", features = ["derive"] }
 # Exact float parsing keeps canonical page coordinates byte-stable after JSON round trips.
-serde_json = { version = "1", features = ["float_roundtrip"] }
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
 serde_path_to_error = "0.1"
 serde_yml = "0.0.13"
 

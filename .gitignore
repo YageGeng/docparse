@@ -31,6 +31,9 @@
 /**/__pycache__
 /.venv/
 
+# docparse configuration
+docparse.*.toml
+
 # Misc
 output.json
 

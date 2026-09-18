@@ -53,6 +53,16 @@ The existing trusted-ingress boundary applies: task history is deployment-wide.
 Tenant-specific access requires corresponding authorization and query filtering
 in the backend before deploying a multi-tenant workbench.
 
+### HTTP compression
+
+`npm run build` creates gzip siblings for compressible assets using Node's built-in
+zlib. Configure the static host to serve them with `Content-Encoding: gzip` and
+`Vary: Accept-Encoding`; see `nginx.conf.example`. The API independently compresses
+JSON and Markdown through tower-http. Do not manually decompress fetch/XHR
+responses or set `Accept-Encoding` in browser JavaScript. Proxies must preserve
+encoding headers and stream uploads and SSE without buffering. Match the API prefix
+in the browser build, proxy configuration and server configuration.
+
 ## Behavior
 
 History and document details show the server-persisted parsing duration, including
@@ -99,9 +109,13 @@ snapshots and release the PDF/result readers, including after deletion in anothe
 - Only visible thumbnails and the active PDF page are rendered. Obsolete renders
   are cancelled, and PDF resources are released on navigation. Failed range
   requests are restarted when connectivity returns.
-- A separate result worker fetches, parses and retains the complete JSON. Only
-  the requested page is copied to the UI thread. Worker memory still scales with
-  the full result, while the UI avoids retaining or stringifying all pages.
+- A separate result worker fetches only `jobs/result?id=<uuid>&page=<number>`.
+  It first reads page one to learn the page count, then clamps deep-link page numbers
+  before fetching the selected page and normalizes the URL. This also works when
+  the PDF preview cannot be loaded.
+  Switching pages aborts stale reads; both network traffic and retained result
+  memory scale with the selected page. Browsers automatically decode HTTP gzip
+  before the worker parses JSON. Complete downloads remain available separately.
 - Text, canonical merged-cell tables and per-page/per-block JSON are rendered
   without interpreting document text as HTML. Complete JSON downloads stream
   directly from the persisted server result.

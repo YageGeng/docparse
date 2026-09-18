@@ -2,33 +2,35 @@ use crate::{
     code::ApiCode,
     error::{
         ApiResult, DatabaseSnafu, RequestSnafu, SerializeSnafu, StorageSnafu,
-        TaskSnafu,
     },
     model::{
         base::ApiResponse,
         error::ApiErrorResponse,
-        job::{JobResultQuery, ResultFormat},
+        job::{JobJsonResult, JobResultQuery, ResultFormat},
     },
+    service::result_files::ResultIndex,
     state::AppState,
 };
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{Query, State, rejection::QueryRejection},
-    http::header,
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use docparse_core::DocumentResult;
 use docparse_database::{JobStatus, query::parse_job::ParseJobQuery as Jobs};
+use futures_util::{StreamExt, stream};
 use snafu::{OptionExt, ResultExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
 /// Streams the immutable successful JSON envelope from shared storage rather than loading it into API memory.
 #[utoipa::path(
     get, path = "/jobs/result", tag = super::TAG,
-    description = "Read the completed document as JSON (default) or Markdown. JSON includes both LaTeX and Markdown for every recognized formula. Markdown is a presentation of the stored result; no inference is repeated.",
-    params(JobResultQuery),
+    description = "Read the completed document as JSON (default), one JSON page with page=N, or cached Markdown. Responses support gzip and If-None-Match revalidation. JSON includes both LaTeX and Markdown for every recognized formula. Markdown is a presentation of the stored result; no inference is repeated.",
+    params(JobResultQuery, ("If-None-Match" = Option<String>, Header, description = "Revalidate an immutable result representation")),
     responses(
-        (status = 200, description = "Canonical JSON envelope or complete document Markdown", content((ApiResponse<DocumentResult> = "application/json"), (String = "text/markdown"))),
+        (status = 200, description = "Canonical JSON envelope or complete document Markdown", content((ApiResponse<JobJsonResult> = "application/json"), (String = "text/markdown"))),
+        (status = 304, description = "Result representation is unchanged"),
         (status = 400, description = "Invalid task UUID (4001002)", body = ApiErrorResponse),
         (status = 404, description = "Task not found (4041001)", body = ApiErrorResponse),
         (status = 409, description = "Result not ready (4091002) or task failed (4091003)", body = ApiErrorResponse),
@@ -39,15 +41,26 @@ use tokio_util::io::ReaderStream;
 pub async fn result(
     State(state): State<AppState>,
     query: Result<Query<JobResultQuery>, QueryRejection>,
+    headers: HeaderMap,
 ) -> ApiResult<Response> {
     // Query extraction keeps task identifiers out of route templates and works with native EventSource.
-    let Query(JobResultQuery { id, format }) = query.map_err(|_rejection| {
-        RequestSnafu {
-            stage: "job-result-parse-id",
+    let Query(JobResultQuery { id, format, page }) =
+        query.map_err(|_rejection| {
+            RequestSnafu {
+                stage: "job-result-parse-id",
+                code: ApiCode::bad_request(4001002),
+            }
+            .build()
+        })?;
+    let markdown = matches!(format.unwrap_or_default(), ResultFormat::Markdown);
+    let page = page.map(u32::from);
+    if page.is_some() && markdown {
+        return RequestSnafu {
+            stage: "result-check-page",
             code: ApiCode::bad_request(4001002),
         }
-        .build()
-    })?;
+        .fail();
+    }
     tracing::Span::current().record("job_id", tracing::field::display(id));
     let job = Jobs::find_by_id(&state.db, id)
         .await
@@ -79,54 +92,137 @@ pub async fn result(
         stage: "job-result-read-path",
         code: ApiCode::COMMON_INTERNAL_ERROR,
     })?;
-    let file = tokio::fs::File::open(state.storage.path(&name)?)
-        .await
-        .context(StorageSnafu {
+    let source = state.storage.path(&name)?;
+    // Check durable visibility and source existence before honoring validators, including wildcard requests.
+    let mut file =
+        tokio::fs::File::open(&source).await.context(StorageSnafu {
             stage: "result-open-file",
             code: ApiCode::service_unavailable(5031003),
         })?;
-    if matches!(format.unwrap_or_default(), ResultFormat::Markdown) {
-        /// Only the canonical document is needed from the persisted success envelope.
-        #[derive(serde::Deserialize)]
-        struct StoredDocument {
-            data: DocumentResult,
-        }
-        let file = file.into_std().await;
-        let placeholder = state.options.output.formula_placeholder.clone();
-        tracing::info!("rendering stored job {} as Markdown", id);
-        let markdown =
-            tokio::task::spawn_blocking(move || -> ApiResult<String> {
-                let stored: StoredDocument =
-                    serde_json::from_reader(std::io::BufReader::new(file))
-                        .context(SerializeSnafu {
-                            stage: "result-decode-json",
-                            code: ApiCode::COMMON_INTERNAL_ERROR,
-                        })?;
-                Ok(docparse_core::MarkdownRenderer::new(
-                    docparse_core::RenderView::Semantic,
-                    placeholder,
-                )
-                .render(&stored.data))
-            })
-            .await
-            .context(TaskSnafu {
-                stage: "result-render-markdown",
+    let index = if page.is_some() {
+        let index = state.storage.result_artifact(&name, None).await?;
+        let bytes = tokio::fs::read(index).await.context(StorageSnafu {
+            stage: "result-read-index",
+            code: ApiCode::service_unavailable(5031003),
+        })?;
+        let index: ResultIndex =
+            serde_json::from_slice(&bytes).context(SerializeSnafu {
+                stage: "result-decode-index",
                 code: ApiCode::COMMON_INTERNAL_ERROR,
-            })??;
-        tracing::info!(
-            "rendered stored job {} as {} Markdown bytes",
-            id,
-            markdown.len()
+            })?;
+        if page.is_some_and(|number| number > index.page_count) {
+            return RequestSnafu {
+                stage: "result-check-page",
+                code: ApiCode::bad_request(4001002),
+            }
+            .fail();
+        }
+        Some(index)
+    } else {
+        None
+    };
+    // Weak validators identify the semantic representation across gzip and identity content codings.
+    let identity = format!(
+        "v1:{name}:{page:?}:{markdown}:{}",
+        if markdown {
+            state.options.output.formula_placeholder.as_str()
+        } else {
+            ""
+        }
+    );
+    let tag = format!("\"{}\"", blake3::hash(identity.as_bytes()));
+    let etag = format!("W/{tag}");
+    let unchanged = headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|value| {
+            let value = value.trim();
+            value == "*" || value.strip_prefix("W/").unwrap_or(value) == tag
+        });
+    let mut response = if unchanged {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else if let (Some(number), Some(index)) = (page, index) {
+        // Only the selected byte range enters the HTTP body; canonical page JSON is never decoded or copied here.
+        let prefix = format!(
+            "{{\"data\":{{\"page_count\":{},\"errors\":{},\"page\":",
+            index.page_count,
+            serde_json::to_string(&index.errors).context(SerializeSnafu {
+                stage: "result-encode-errors",
+                code: ApiCode::COMMON_INTERNAL_ERROR
+            })?
         );
-        return Ok((
-            [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
-            markdown,
+        let suffix =
+            Bytes::from_static(b"},\"success\":true,\"message\":\"Success\"}");
+        let body = if let Some(range) = index.pages.get(&number) {
+            file.seek(std::io::SeekFrom::Start(range.start))
+                .await
+                .context(StorageSnafu {
+                    stage: "result-seek-page",
+                    code: ApiCode::service_unavailable(5031003),
+                })?;
+            Body::from_stream(
+                stream::once(async {
+                    Ok::<_, std::io::Error>(Bytes::from(prefix))
+                })
+                .chain(ReaderStream::with_capacity(
+                    file.take(range.end - range.start),
+                    256 * 1024,
+                ))
+                .chain(stream::once(async { Ok::<_, std::io::Error>(suffix) })),
+            )
+        } else {
+            Body::from(format!(
+                "{prefix}null{}",
+                String::from_utf8_lossy(&suffix)
+            ))
+        };
+        ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+    } else {
+        let content_type = if markdown {
+            let path = state
+                .storage
+                .result_artifact(
+                    &name,
+                    Some(&state.options.output.formula_placeholder),
+                )
+                .await?;
+            file = tokio::fs::File::open(path).await.context(StorageSnafu {
+                stage: "result-open-markdown",
+                code: ApiCode::service_unavailable(5031003),
+            })?;
+            "text/markdown; charset=utf-8"
+        } else {
+            "application/json"
+        };
+        let length = file
+            .metadata()
+            .await
+            .context(StorageSnafu {
+                stage: "result-read-size",
+                code: ApiCode::service_unavailable(5031003),
+            })?
+            .len();
+        (
+            [
+                (header::CONTENT_TYPE, content_type.to_owned()),
+                (header::CONTENT_LENGTH, length.to_string()),
+            ],
+            Body::from_stream(ReaderStream::with_capacity(file, 256 * 1024)),
         )
-            .into_response());
-    }
-    Ok((
-        [(header::CONTENT_TYPE, "application/json")],
-        Body::from_stream(ReaderStream::new(file)),
-    )
-        .into_response())
+            .into_response()
+    };
+    response
+        .headers_mut()
+        .insert(header::ETAG, etag.parse().expect("generated ASCII ETag"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        "private, no-cache".parse().expect("static cache policy"),
+    );
+    response.headers_mut().insert(
+        header::VARY,
+        "Accept-Encoding".parse().expect("static Vary"),
+    );
+    Ok(response)
 }

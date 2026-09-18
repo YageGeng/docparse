@@ -60,6 +60,20 @@ async fn documentation_covers_routes_and_wire_schemas() {
         );
     }
     check_references(&spec, &spec);
+    let page = spec
+        .pointer("/paths/~1api~1jobs~1result/get/parameters")
+        .and_then(Value::as_array)
+        .expect("result parameters")
+        .iter()
+        .find(|parameter| {
+            parameter.get("name").and_then(Value::as_str) == Some("page")
+        })
+        .expect("page parameter");
+    assert_eq!(page.get("required"), Some(&Value::Bool(false)));
+    assert_eq!(
+        page.pointer("/schema/minimum").and_then(Value::as_f64),
+        Some(1.0)
+    );
     assert!(
         spec.pointer("/paths/~1api~1jobs~1result/get/parameters")
             .and_then(Value::as_array)

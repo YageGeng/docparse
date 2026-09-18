@@ -118,6 +118,12 @@ impl IntoResponse for ApiError {
                 code.code,
                 self
             );
+        } else {
+            tracing::warn!(
+                "request rejected with API code {}: {}",
+                code.code,
+                self
+            );
         }
         ApiErrorResponse::from(self).into_response()
     }

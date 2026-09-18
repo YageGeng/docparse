@@ -44,6 +44,16 @@ export function WorkspacePage() {
     Math.min(total || 1, Number.isSafeInteger(requested) ? requested : 1),
   );
   const page = result.page?.page_number === number ? result.page : undefined;
+  useEffect(() => {
+    // Normalize deep links only from metadata belonging to this document, never a stale reader from navigation.
+    if (result.documentId !== id || !result.pageCount) return;
+    const normalized = Math.min(requested, result.pageCount);
+    if (!params.has("page") || params.get("page") === String(normalized)) return;
+    const next = new URLSearchParams(params);
+    next.set("page", String(normalized));
+    if (normalized !== requested) next.delete("block");
+    setParams(next, { replace: true });
+  }, [id, params, requested, result.documentId, result.pageCount, setParams]);
   const selected = params.get("block") || undefined;
   const [zoom, setZoom] = useState(1);
   const [overlays, setOverlays] = useState(true);

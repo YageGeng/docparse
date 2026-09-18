@@ -1,0 +1,26 @@
+# Install inside the nginx http context and adjust the root and upstream for this deployment.
+server {
+    listen 80;
+    root /srv/docparse/web/dist;
+
+    gzip on;
+    gzip_vary on;
+    gzip_static on;
+    gzip_types application/json application/javascript text/css text/markdown image/svg+xml application/wasm;
+
+    # Match VITE_API_PREFIX and server.api_prefix, including multipart framing allowance.
+    location /api/v1/docparse/ {
+        client_max_body_size 513m;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 360s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

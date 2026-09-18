@@ -1,3 +1,4 @@
+use super::page::{Page, Pagination};
 use docparse_database::JobStatus;
 use docparse_database::entities::parse_jobs::Model;
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,7 @@ use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
 /// Identifies a durable job through query parameters, including native EventSource subscriptions.
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct JobQuery {
@@ -25,7 +26,7 @@ pub enum ResultFormat {
 }
 
 /// A durable task identifier and an optional output representation.
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct JobResultQuery {
@@ -35,6 +36,20 @@ pub struct JobResultQuery {
     #[serde(default)]
     #[param(inline)]
     pub format: Option<ResultFormat>,
+    /// Optional one-based page number; available only for JSON and preserves full-document downloads when omitted.
+    #[serde(default)]
+    #[param(value_type = Option<u32>, minimum = 1)]
+    pub page: Option<Page>,
+}
+
+/// JSON result shape depends on whether the page query parameter is present.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum JobJsonResult {
+    /// Complete canonical download.
+    Document(Box<docparse_core::DocumentResult>),
+    /// Single page for incremental viewing.
+    Page(Pagination<docparse_core::PageResult>),
 }
 
 /// Multipart contract for a streamed upload; the handler continues to process chunks instead of buffering this DTO.

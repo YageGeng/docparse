@@ -82,7 +82,10 @@ pub async fn upload(
             stage: "upload-open-writer",
             code: ApiCode::service_unavailable(5031003),
         })?;
-        let mut writer = tokio::fs::File::from_std(file);
+        let mut writer = tokio::io::BufWriter::with_capacity(
+            256 * 1024,
+            tokio::fs::File::from_std(file),
+        );
         let mut hash = blake3::Hasher::new();
         let mut total = 0usize;
         let mut prefix = Vec::<u8>::with_capacity(5);
@@ -125,6 +128,14 @@ pub async fn upload(
                     .fail();
                 }
                 prefix.extend(chunk.iter().take(5 - prefix.len()));
+                // Reject invalid signatures as soon as their bytes arrive, before accepting the rest of a large body.
+                if !b"%PDF-".starts_with(&prefix) {
+                    return RequestSnafu {
+                        stage: "upload-check-signature",
+                        code: ApiCode::bad_request(4001001),
+                    }
+                    .fail();
+                }
                 hash.update(&chunk);
                 writer.write_all(&chunk).await.context(StorageSnafu {
                     stage: "upload-write-pdf",
@@ -145,6 +156,11 @@ pub async fn upload(
         })?;
         drop(writer);
         let hash = hash.finalize().to_hex().to_string();
+        tracing::info!(
+            "received PDF job {} with {} bytes; persisting input",
+            id,
+            total
+        );
         tracing::Span::current()
             .record("pdf_hash", tracing::field::display(&hash));
         state
