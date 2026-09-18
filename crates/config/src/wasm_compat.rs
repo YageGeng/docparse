@@ -329,6 +329,15 @@ mod platform {
         pub(crate) fn validate_platform(
             config: &crate::RawConfig,
         ) -> Result<(), crate::ConfigError> {
+            if let crate::FormulaEngineConfig::Texo(texo) =
+                &config.formula.engine
+                && texo.sessions != 1
+            {
+                return Err(crate::ConfigError::UnsupportedWebConcurrency {
+                    field: "formula.engine.sessions",
+                    value: texo.sessions,
+                });
+            }
             for (field, value) in [
                 ("layout.sessions", config.layout.sessions),
                 ("runtime.stage_pages", config.runtime.stage_pages),

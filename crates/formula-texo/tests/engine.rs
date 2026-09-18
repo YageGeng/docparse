@@ -54,11 +54,12 @@ async fn real_model_batch_parity_and_cancellation() {
         });
     let mut raw = docparse_config::RawConfig::default();
     raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
-        docparse_config::TexoFormulaConfig {
-            encoder_path: dir.join("encoder_model.onnx"),
-            decoder_path: dir.join("decoder_model_merged.onnx"),
-            tokenizer_path: dir.join("tokenizer.json"),
-        },
+        docparse_config::TexoFormulaConfig::builder()
+            .sessions(2)
+            .encoder_path(dir.join("encoder_model.onnx"))
+            .decoder_path(dir.join("decoder_model_merged.onnx"))
+            .tokenizer_path(dir.join("tokenizer.json"))
+            .build(),
     );
     let config = Arc::new(
         docparse_config::ValidatedConfig::try_from(raw).expect("config"),
@@ -99,6 +100,29 @@ async fn real_model_batch_parity_and_cancellation() {
             std::slice::from_ref(expected)
         );
     }
+    let (page_a, page_b) = tokio::join!(
+        engine.recognize(images.clone(), Timings::default().for_page(1)),
+        engine.recognize(images.clone(), Timings::default().for_page(2)),
+    );
+    assert_eq!(page_a.expect("first page"), expected);
+    assert_eq!(page_b.expect("second page"), expected);
+    let empty = Arc::new(
+        PageImage::try_from(
+            PageImageInput::builder()
+                .width(0)
+                .height(0)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(Vec::<u8>::new()))
+                .build(),
+        )
+        .expect("empty raster"),
+    );
+    let (invalid, valid) = tokio::join!(
+        engine.recognize(vec![empty], Timings::default()),
+        engine.recognize(images.clone(), Timings::default()),
+    );
+    invalid.expect_err("malformed crop");
+    assert_eq!(valid.expect("unrelated page survives"), expected);
     engine
         .recognize(Vec::new(), Timings::default())
         .await

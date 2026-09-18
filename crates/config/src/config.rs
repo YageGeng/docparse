@@ -171,7 +171,7 @@ pub struct FormulaConfig {
     /// Maximum formulas per actual ONNX invocation, including the final partial batch.
     #[builder(default = 4)]
     pub batch_size: usize,
-    /// Per-batch deadline including waiting for the shared model session.
+    /// Per-call deadline including queue admission and every model batch containing its crops.
     #[builder(default = 120_000)]
     pub timeout_ms: u64,
 }
@@ -224,10 +224,13 @@ impl Default for PpFormulaConfig {
     }
 }
 
-/// Files used only by the Texo recognizer; filenames do not select the engine.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Artifacts and independent encoder/decoder owners used only by the Texo recognizer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TexoFormulaConfig {
+    /// Shared native session pairs; browser workers support exactly one.
+    #[builder(default = 1)]
+    pub sessions: usize,
     /// Image encoder ONNX graph.
     pub encoder_path: PathBuf,
     /// Merged first-step/cached decoder ONNX graph.
@@ -239,11 +242,11 @@ pub struct TexoFormulaConfig {
 impl Default for TexoFormulaConfig {
     /// Uses the three author-published artifacts installed by the Texo downloader.
     fn default() -> Self {
-        Self {
-            encoder_path: "models/texo/encoder_model.onnx".into(),
-            decoder_path: "models/texo/decoder_model_merged.onnx".into(),
-            tokenizer_path: "models/texo/tokenizer.json".into(),
-        }
+        Self::builder()
+            .encoder_path("models/texo/encoder_model.onnx".into())
+            .decoder_path("models/texo/decoder_model_merged.onnx".into())
+            .tokenizer_path("models/texo/tokenizer.json".into())
+            .build()
     }
 }
 

@@ -759,11 +759,11 @@ mod tests {
         raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
         raw.tsr.mode = crate::TableMode::RulesOnly;
         raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
-            docparse_config::TexoFormulaConfig {
-                encoder_path: dir.join("encoder_model.onnx"),
-                decoder_path: dir.join("decoder_model_merged.onnx"),
-                tokenizer_path: dir.join("tokenizer.json"),
-            },
+            docparse_config::TexoFormulaConfig::builder()
+                .encoder_path(dir.join("encoder_model.onnx"))
+                .decoder_path(dir.join("decoder_model_merged.onnx"))
+                .tokenizer_path(dir.join("tokenizer.json"))
+                .build(),
         );
         let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
         for explicit in [false, true] {

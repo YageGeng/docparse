@@ -309,6 +309,14 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             "fusion.estimated_font_size_tolerance_points",
         )?;
 
+        if let crate::FormulaEngineConfig::Texo(texo) = &config.formula.engine
+            && !(1..=8).contains(&texo.sessions)
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.engine.sessions",
+                reason: "must be between 1 and 8",
+            });
+        }
         if !(1..=32).contains(&config.formula.batch_size) {
             return Err(ConfigError::InvalidValue {
                 field: "formula.batch_size",

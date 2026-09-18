@@ -463,6 +463,16 @@ concurrent document jobs, budget for up to 20 additional rasters plus page data.
 Formula overload still backpressures the bounded upstream stages; isolating its
 slots allows earlier table work to overlap without unbounded buffering.
 
+Native Texo uses a shared ready-crop queue across documents and pages. The
+`formula.engine.sessions` independent encoder/decoder pairs drain batches up to
+`formula.batch_size` without waiting to fill them. The session count defaults to
+one; the sample configuration selects two owners and batches of eight. Admission
+queues at most `sessions * batch_size` crops in addition to active batches and
+existing page tasks. Increasing sessions duplicates model resources; measure
+throughput and peak GPU memory before increasing it further. Cancellation and
+sequence-level failures stay scoped to the original caller. Native formula
+timings are per crop, so shared batch durations must not be summed as GPU busy time.
+
 PDFium remains process-serialized for safety and closes immediately after the
 last raster has been delivered, allowing other documents to open while inference
 finishes. Native OCR `max_in_flight` defaults to two, overlapping different model

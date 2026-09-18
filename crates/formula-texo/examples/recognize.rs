@@ -36,11 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut config = RawConfig::default();
     config.formula.engine = docparse_config::FormulaEngineConfig::Texo(
-        docparse_config::TexoFormulaConfig {
-            encoder_path: directory.join("encoder_model.onnx"),
-            decoder_path: directory.join("decoder_model_merged.onnx"),
-            tokenizer_path: directory.join("tokenizer.json"),
-        },
+        docparse_config::TexoFormulaConfig::builder()
+            .encoder_path(directory.join("encoder_model.onnx"))
+            .decoder_path(directory.join("decoder_model_merged.onnx"))
+            .tokenizer_path(directory.join("tokenizer.json"))
+            .build(),
     );
     let loading = Instant::now();
     let engine =

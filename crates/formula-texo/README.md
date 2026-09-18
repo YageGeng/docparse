@@ -20,11 +20,12 @@ Configure the existing formula section:
 [formula]
 inline_enabled = true
 display_enabled = true
-batch_size = 4
+batch_size = 8
 timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
+sessions = 2
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
@@ -71,12 +72,33 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   features and caches to device memory, returning only logits
   to CPU. Dynamic cache outputs receive fresh bindings at each step to avoid
   overwriting still-live inputs. Their allocation device is validated at runtime.
-- Native calls use the existing bounded `SessionWorker`. Dropping a pending call
-  terminates its ORT run. The browser actor skips canceled requests and checks
-  cancellation between decoder steps while retaining the global inference guard.
+- Native calls share a bounded crop queue across pages and documents. Each of
+  `formula.engine.sessions` independent owners holds its own encoder, decoder,
+  tokenizer, and execution thread. An idle owner drains ready crops up to
+  `formula.batch_size`; it never waits to fill a batch. Queue capacity is
+  `sessions * batch_size` crops, in addition to active batches and the callers'
+  existing bounded page tasks. Results return in each caller's original order.
+  Caller batches enter atomically. Full batches stay intact; ready partial tails
+  may be combined or split to fill a model batch. Canceled crops do not consume
+  its batch slots, and unconsumed tails still count toward queue capacity.
+- Session count defaults to one and accepts 1..8 on native targets. Every extra
+  session duplicates model/runtime resources. Browser workers require one session
+  and retain their existing actor and global inference guard.
+- Cancellation skips queued crops and pads canceled rows at decoder boundaries.
+  It cannot terminate another caller sharing the batch; a fully canceled batch
+  stops before its next decoder invocation. Initialization failures close and join
+  any owners already created, and final shutdown joins all model threads.
+  Unexpected owner exit closes admission and releases queued replies and blocked
+  producers rather than leaving them waiting on an abandoned queue.
 - Queue, preprocessing, inference, and tokenizer time use core's existing stages.
+  Native observations are per crop and retain the originating page and document;
+  shared inference time is attributed to each participating crop, so summed
+  timings are not GPU busy time.
 - No synthetic EOS is inserted. A sequence reaching 1024 tokens without EOS fails
-  rather than returning truncated LaTeX as a successful recognition.
+  rather than returning truncated LaTeX as a successful recognition. A malformed
+  input or unfinished sequence fails only its originating call; completed crops
+  from other calls in the same native batch still succeed. Model-wide execution
+  errors fail every affected call.
 - Preprocessing preserves upstream Pillow/OpenCV rounding and bounds crop area
   and intermediate resizing allocations. It does not add the web demo's optional
   dark-background inversion heuristic.

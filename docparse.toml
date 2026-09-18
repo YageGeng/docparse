@@ -78,13 +78,16 @@ model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 # Recognize every layout-detected inline/display formula. JSON retains LaTeX and Markdown.
 # PP uses CPU compatibility on Apple; Texo registers the selected execution provider.
 [formula]
-batch_size = 4
+# Combine ready crops across pages without waiting to fill a batch.
+batch_size = 8
 inline_enabled = true
 display_enabled = true
 timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
+# Independent encoder/decoder pairs sharing the bounded crop queue.
+sessions = 2
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"

@@ -77,13 +77,12 @@ impl TexoEngine {
             "loading Texo ONNX encoder and cached decoder with provider {}",
             backend.execution_provider()
         );
-        let runner =
-            SessionRunner::load(artifacts, backend)
-                .await
-                .map_err(|error| {
-                    tracing::error!("Texo initialization failed: {}", error);
-                    error
-                })?;
+        let runner = SessionRunner::load(artifacts, backend, config.formula())
+            .await
+            .map_err(|error| {
+                tracing::error!("Texo initialization failed: {}", error);
+                error
+            })?;
         tracing::info!(
             "loaded Texo ONNX sessions with registered provider {}",
             backend.execution_provider()
@@ -165,6 +164,22 @@ pub(crate) struct Generation {
 }
 
 impl Generation {
+    /// Stops canceled rows from extending a mixed batch; their outputs are discarded by the request owner.
+    pub(crate) fn cancel(
+        &mut self,
+        cancelled: impl Iterator<Item = bool>,
+    ) -> bool {
+        for ((finished, next), cancelled) in
+            self.finished.iter_mut().zip(&mut self.next).zip(cancelled)
+        {
+            if cancelled {
+                *finished = true;
+                *next = 1;
+            }
+        }
+        self.finished.iter().all(|finished| *finished)
+    }
+
     /// Initializes the decoder's empty past and BOS separately for each crop.
     pub(crate) fn new(
         hidden: DynValue,
@@ -265,17 +280,18 @@ impl Generation {
         Ok(false)
     }
 
-    /// Decodes complete sequences without forcing EOS or treating the length cap as success.
+    /// Keeps complete crops from other callers when one sequence reaches the generation cap.
     pub(crate) fn decode(
         self,
         tokenizer: &tokenizers::Tokenizer,
-    ) -> Result<Vec<String>, FormulaError> {
-        if self.finished.iter().any(|done| !done) {
-            return Err(FormulaError::Invalid("Texo generation reached 1024 tokens without EOS; refusing truncated LaTeX".into()));
-        }
+    ) -> Vec<Result<String, FormulaError>> {
         self.tokens
             .iter()
-            .map(|ids| {
+            .zip(self.finished)
+            .map(|(ids, finished)| {
+                if !finished {
+                    return Err(FormulaError::Invalid("Texo generation reached 1024 tokens without EOS; refusing truncated LaTeX".into()));
+                }
                 tokenizer
                     .decode(ids, true)
                     .map(|latex| latex.trim().to_owned())
@@ -289,6 +305,42 @@ impl Generation {
 mod tests {
     use super::*;
 
+    /// Canceled long rows cannot keep a completed peer waiting for the token limit.
+    #[test]
+    fn canceled_rows_release_completed_peers() {
+        let hidden = Tensor::from_array(([2, 1, 2048], vec![0_f32; 4096]))
+            .expect("tensor")
+            .into_dyn();
+        let mut generation = Generation::new(hidden, 2).expect("generation");
+        assert!(!generation.cancel([true, false].into_iter()));
+        assert_eq!(generation.finished, vec![true, false]);
+        *generation.finished.get_mut(1).expect("second row") = true;
+        assert!(generation.cancel([true, false].into_iter()));
+    }
+
+    /// One unfinished crop must not discard a completed crop from another page in the same batch.
+    #[test]
+    fn completed_crops_survive_an_unfinished_batch_peer() {
+        let hidden = Tensor::from_array(([2, 1, 2048], vec![0_f32; 4096]))
+            .expect("tensor")
+            .into_dyn();
+        let mut generation = Generation::new(hidden, 2).expect("generation");
+        *generation.finished.first_mut().expect("first row") = true;
+        generation.tokens.first_mut().expect("first row").clear();
+        let tokenizer = tokenizers::Tokenizer::new(
+            tokenizers::models::wordlevel::WordLevel::default(),
+        );
+        let results = generation.decode(&tokenizer);
+        assert!(
+            results.first().expect("first result").is_ok(),
+            "completed crop must survive"
+        );
+        assert!(
+            results.get(1).expect("second result").is_err(),
+            "unfinished crop must fail"
+        );
+    }
+
     /// Reaching the generation cap cannot turn a partial expression into successful LaTeX.
     #[test]
     fn rejects_unfinished_sequences() {
@@ -300,7 +352,7 @@ mod tests {
             tokenizers::models::wordlevel::WordLevel::default(),
         );
         assert!(
-            matches!(generation.decode(&tokenizer), Err(FormulaError::Invalid(message)) if message.contains("without EOS"))
+            matches!(generation.decode(&tokenizer).pop(), Some(Err(FormulaError::Invalid(message))) if message.contains("without EOS"))
         );
     }
 }

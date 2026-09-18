@@ -100,7 +100,7 @@ fn pad_center(p: &Plane, size: usize) -> Plane {
 }
 
 /// Full pipeline: RGB crop -> CHW float tensor of shape (3, 384, 384).
-fn preprocess(img: &PageImage) -> Result<Vec<f32>, FormulaError> {
+pub(crate) fn preprocess(img: &PageImage) -> Result<Vec<f32>, FormulaError> {
     let w = img.width() as usize;
     let h = img.height() as usize;
     if w == 0

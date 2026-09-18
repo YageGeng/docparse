@@ -5,6 +5,20 @@ use docparse_config::{
     ValidatedConfig,
 };
 
+/// Texo session capacity defaults conservatively and rejects unbounded or empty pools.
+#[test]
+fn texo_sessions_are_bounded_and_default_to_one() {
+    let mut value = serde_json::to_value(RawConfig::default()).expect("config");
+    assert_eq!(value.pointer("/formula/engine/sessions"), Some(&1.into()));
+    for count in [0, 9] {
+        *value
+            .pointer_mut("/formula/engine/sessions")
+            .expect("sessions") = count.into();
+        let raw = serde_json::from_value(value.clone()).expect("shape");
+        assert_invalid_value(raw, "formula.engine.sessions");
+    }
+}
+
 /// Loads code defaults through the real loader so model paths become absolute.
 fn loaded_defaults() -> RawConfig {
     let directory =

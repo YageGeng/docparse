@@ -39,7 +39,7 @@ export type ModelSource =
   | { kind: "bytes"; model: Uint8Array; config: Uint8Array; manifest: Uint8Array };
 
 /** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
-export type FormulaEngineOptions = { type: "pp" } | { type: "texo" };
+export type FormulaEngineOptions = { type: "pp" } | { type: "texo"; sessions?: 1 };
 
 /** Explicit model resources. Omitted type retains the existing PP-only source shape. */
 export type FormulaSource =
