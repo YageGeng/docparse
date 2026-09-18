@@ -81,15 +81,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|error| -> Box<dyn Error> { error })?
         .try_init()?;
 
+    let monitoring = docparse_server::service::monitoring::Monitoring::install(
+        raw.monitoring.prometheus_url.as_deref(),
+        match arguments.role {
+            Role::Api => "api",
+            Role::Worker => "worker",
+            Role::All => "all",
+        },
+    )?;
     let server = raw.server.clone();
     let mut http_options = arguments.http_options(&server);
     http_options.output = raw.output.clone();
-    let state = AppState::new(
+    let mut state = AppState::new(
         connection::connect(&raw.database).await?,
         SharedStorage::new(&arguments.storage_dir).await?,
         http_options,
         CancellationToken::new(),
     )?;
+    state.monitoring = Some(Arc::clone(&monitoring));
+    monitoring.collect(state.db.clone(), state.shutdown.clone());
     let worker = arguments.build_worker(raw, &state).await?;
     run_services(arguments.role, server, state, worker).await
 }
@@ -235,9 +245,6 @@ async fn run_services(
         stopping.cancel();
     });
     let serving = async {
-        if matches!(role, Role::Worker) {
-            return Ok::<(), Box<dyn Error>>(());
-        }
         let listener =
             tokio::net::TcpListener::bind((server.host.as_str(), server.port))
                 .await?;
@@ -247,7 +254,20 @@ async fn run_services(
             state.options.max_uploads
         );
         // The same configuration drives binding and the final documented route prefix.
-        axum::serve(listener, app::router(state, &server)?)
+        // Worker-only processes still expose their own recorder for Prometheus scraping.
+        let router = if matches!(role, Role::Worker) {
+            axum::Router::new()
+                .route(
+                    "/metrics",
+                    axum::routing::get(
+                        docparse_server::routers::monitoring::metrics,
+                    ),
+                )
+                .with_state(state)
+        } else {
+            app::router(state, &server)?
+        };
+        axum::serve(listener, router)
             .with_graceful_shutdown(shutdown.clone().cancelled_owned())
             .await?;
         Ok(())

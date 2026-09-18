@@ -30,6 +30,9 @@ serde_json.workspace = true
 # builder
 typed-builder.workspace = true
 
+# cli and diagnostics
+metrics.workspace = true
+
 [dev-dependencies]
 # async
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

@@ -119,7 +119,8 @@ mod tests {
     /// Ready batches honor their cap, skip canceled crops, flush a short tail, and route each result once.
     #[tokio::test]
     async fn ready_batches_preserve_replies_and_flush_partial_work() {
-        let (sender, receiver) = docparse_common::Queue::<Request>::new(5);
+        let (sender, receiver) =
+            docparse_common::Queue::<Request>::new("test", 5);
         let mut replies = Vec::new();
         for value in 0..5 {
             let (response, reply) = oneshot::channel();
@@ -132,7 +133,7 @@ mod tests {
                 None
             };
             sender
-                .try_send(
+                .send(
                     Request::builder()
                         .input(ModelInput::Structure(
                             crate::preprocess::SlanetInput(
@@ -147,6 +148,7 @@ mod tests {
                         .context(TimingContext::new(Timings::default()))
                         .build(),
                 )
+                .await
                 .map_err(|error| error.to_string())
                 .expect("ready queue has space for every test request");
             replies.push(reply);
@@ -246,6 +248,7 @@ mod platform {
             queue_size: usize,
         ) -> Result<Arc<Self>, TsrError> {
             let manager = SessionManager::load(
+                kind.metric_name(),
                 session_size,
                 batch_size,
                 queue_size,
@@ -280,7 +283,16 @@ mod platform {
                                     .map(|request| &request.input)
                                     .collect::<Vec<_>>(),
                             )?;
-                            let outputs = session.run(input.values()?)?;
+                            let values = input.values()?;
+                            let physical =
+                                docparse_common::telemetry::Inference::new(
+                                    kind.metric_name(),
+                                    "model",
+                                    requests.len(),
+                                );
+                            let outputs = session.run(values);
+                            physical.finish(outputs.is_ok());
+                            let outputs = outputs?;
                             ModelResult::from_batch(
                                 kind,
                                 requests.len(),
@@ -356,11 +368,10 @@ mod platform {
 mod platform {
     use super::*;
     use ort::session::RunOptions;
-    use tokio::sync::mpsc;
 
     /// Browser sessions stay on their owning Worker while queued inputs outlive canceled calls.
     pub(crate) struct SessionRunner {
-        sender: mpsc::Sender<Request>,
+        sender: docparse_common::queue::QueueSender<Request>,
     }
 
     impl SessionRunner {
@@ -373,8 +384,10 @@ mod platform {
             session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, TsrError> {
-            let (sender, receiver) =
-                docparse_common::Queue::<Request>::new(queue_size);
+            let (sender, receiver) = docparse_common::Queue::<Request>::new(
+                kind.metric_name(),
+                queue_size,
+            );
             for _ in 0..session_size {
                 let mut session = SessionBuilder::try_from(backend)?
                     .commit_from_memory(&artifacts.model)

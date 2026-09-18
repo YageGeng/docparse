@@ -27,6 +27,15 @@ pub(crate) struct Orientation {
 }
 
 impl ModelKind {
+    /// Uses bounded stage identities for shared queue and physical inference measurements.
+    pub fn metric_name(self) -> &'static str {
+        match self {
+            Self::Detection => "ocr_detection",
+            Self::Recognition => "ocr_recognition",
+            Self::Orientation => "ocr_orientation",
+        }
+    }
+
     /// Returns the exact official Paddle artifact identity accepted for this stage.
     pub fn contract(self) -> ModelContract {
         let (repository, revision, model, config) = match self {

@@ -48,6 +48,18 @@ pub struct Model {
     pub error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    /// First successful claim, retained across attempts.
+    #[builder(default)]
+    pub started_at: Option<DateTimeWithTimeZone>,
+    /// Terminal transition only; heartbeat and deletion never overwrite it.
+    #[builder(default)]
+    pub finished_at: Option<DateTimeWithTimeZone>,
+    /// Current attempt origin, independent of heartbeat timestamps.
+    #[builder(default)]
+    pub attempt_started_at: Option<DateTimeWithTimeZone>,
+    /// Most recent requeue; NULL on historical/new rows falls back to created_at.
+    #[builder(default)]
+    pub queued_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

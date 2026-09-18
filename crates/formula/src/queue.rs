@@ -6,19 +6,22 @@ use docparse_common::timing::{StageTimer, TimingStage, Timings};
 use docparse_common::{Queue, SessionRequest};
 use docparse_layout::PageImage;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use typed_builder::TypedBuilder;
 
 /// One sender represents the same queue across every page and document using an engine.
 #[derive(Clone)]
 pub struct FormulaQueue {
-    sender: mpsc::Sender<FormulaRequest>,
+    sender: docparse_common::queue::QueueSender<FormulaRequest>,
 }
 
 impl FormulaQueue {
     /// Creates a bounded crop queue; capacity must be positive, as with Tokio channels.
-    pub fn new(capacity: usize) -> (Self, Queue<FormulaRequest>) {
-        let (sender, receiver) = Queue::new(capacity);
+    pub fn new(
+        name: &'static str,
+        capacity: usize,
+    ) -> (Self, Queue<FormulaRequest>) {
+        let (sender, receiver) = Queue::new(name, capacity);
         (Self { sender }, receiver)
     }
 

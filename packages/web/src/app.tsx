@@ -11,6 +11,8 @@ const WorkspacePage = lazy(() =>
   })),
 );
 
+const MonitoringPage = lazy(() => import("@/features/monitoring/MonitoringPage").then((module) => ({ default: module.MonitoringPage })));
+
 /** Keeps shared navigation small so both history and document inspection devote their space to actual PDFs. */
 export function App() {
   return (
@@ -31,6 +33,8 @@ export function App() {
           <Link to="/" className="nav-link">
             文档
           </Link>
+          {/* Keep ongoing uploads mounted when opening operational monitoring. */}
+          <Link to="/monitoring" target="_blank" rel="noopener noreferrer" className="nav-link">运行监测</Link>
           <a
             href={apiUrl("docs")}
             target="_blank"
@@ -56,6 +60,7 @@ export function App() {
       </header>
       <Routes>
         <Route path="/" element={<JobsPage />} />
+        <Route path="/monitoring" element={<Suspense fallback={<main id="main-content" className="empty-state" role="status">正在加载运行监测…</main>}><MonitoringPage /></Suspense>} />
         <Route
           path="/document"
           element={

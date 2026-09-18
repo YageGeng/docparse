@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        [prefix || "^/(jobs|health|ready|openapi\\.json|docs)(?:[/?]|$)"]: {
+        [prefix || "^/(jobs|monitoring|health|ready|openapi\\.json|docs)(?:[/?]|$)"]: {
           target: env.VITE_API_TARGET || "http://127.0.0.1:8080",
           changeOrigin: true,
           // SSE must remain a stream even while model jobs run for several minutes.

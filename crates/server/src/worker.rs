@@ -147,6 +147,7 @@ impl Worker {
             self.options.validate()?;
             let id = lease.job.id;
             tracing::info!("starting job {} attempt {}", id, lease.job.attempts);
+            let _active = docparse_common::telemetry::Activity::new("docparse_job_attempts_active", ("scope", "local"), 1.0);
             let started = tokio::time::Instant::now();
             let (sender, mut progress) = watch::channel(None);
             let observer = ProgressObserver(sender);
@@ -161,6 +162,7 @@ impl Worker {
             operation.spawn(async move {
                 let input = storage.path(&format!("{input_hash}.pdf"))?;
                 let options = ParseOptions::builder().observer(Some(&observer)).build();
+                let parsing = docparse_common::telemetry::Timer::new("docparse_job_parse_seconds", "scope", "local");
                 let result = if let Some(reservation) = reservation {
                     observer.on_progress(ParseProgress::Opening);
                     let session = reservation.open(docparse_core::PdfInput::Path(input), docparse_common::timing::Timings::default()).await
@@ -170,11 +172,16 @@ impl Worker {
                 } else {
                     parser.parse_path_with_options(input, options).await
                 }.context(ParseSnafu { stage: "document-parse-pdf", code: ApiCode::unprocessable_entity(4221001) })?;
+                drop(parsing);
+                metrics::counter!("docparse_pages_parsed_total").increment(result.pages.len() as u64);
                 let mut temporary = storage.temporary().await?;
+                let publishing = docparse_common::telemetry::Timer::new("docparse_job_publish_seconds", "scope", "local");
                 let writer_span = tracing::Span::current();
                 let writer_dispatcher = tracing::dispatcher::get_default(Clone::clone);
-                let temporary =
+                let (temporary, publishing) =
                     tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&writer_dispatcher, || writer_span.in_scope(|| -> ApiResult<_> {
+                        // Move timing ownership into the real writer; cancelling its async waiter cannot stop it.
+                        let publishing = publishing;
                         // Stream the standard API envelope around the configured canonical view, avoiding a second document-sized buffer.
                         {
                             // Buffer small serializer writes so large documents do not issue one filesystem write per token.
@@ -196,7 +203,7 @@ impl Worker {
                                 code: ApiCode::service_unavailable(5031003),
                             })?;
                         }
-                        Ok(temporary)
+                        Ok((temporary, publishing))
                     })))
                     .await
                     .context(TaskSnafu {
@@ -205,7 +212,7 @@ impl Worker {
                     })??;
                 // Each attempt gets a different object: a stale blocking writer cannot replace its successor's result.
                 let name = format!("{id}-{token}.json");
-                storage.publish(temporary, &name).await?;
+                storage.publish((temporary, publishing), &name).await?;
                 Ok::<_, crate::error::ApiError>(name)
             }.in_current_span().with_current_subscriber());
             let deadline = tokio::time::sleep(self.options.job_timeout);

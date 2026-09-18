@@ -117,7 +117,8 @@ mod platform {
                 ));
             };
             let batch_size = config.batch_size;
-            let (queue, receiver) = FormulaQueue::new(config.queue_size);
+            let (queue, receiver) =
+                FormulaQueue::new("formula_texo", config.queue_size);
             for _ in 0..texo.session_size {
                 // Apply the shared runtime settings to both graphs, including their memory policy.
                 let mut encoder_builder = SessionBuilder::try_from(backend)?;

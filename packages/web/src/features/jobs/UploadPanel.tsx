@@ -327,7 +327,11 @@ export function UploadPanel({
   ).length;
   // Acknowledged files belong in server history, not in the actionable upload queue.
   const outstanding = uploads.filter((entry) => entry.status !== "accepted");
-  const retryable = outstanding.filter((entry) => entry.file);
+  // Retry retained files together; identity conflicts still require the explicit new-upload action.
+  const retryable = outstanding.filter(
+    (entry) => entry.file &&
+      !(entry.error instanceof ApiError && entry.error.code === 4091001),
+  );
 
   return (
     <section aria-label="上传文档" className="space-y-3">
@@ -450,14 +454,15 @@ export function UploadPanel({
           className="space-y-3 rounded-xl border bg-background p-4"
           aria-label="上传队列"
         >
-          {!busy && retryable.length > 1 && (
+          {retryable.length > 0 && (
             <Button
               variant="outline"
               size="sm"
+              disabled={busy != null}
               onClick={() => void run(retryable, "upload")}
             >
-              <RotateCcw size={14} />
-              重试未完成文件
+              <RotateCcw size={14} aria-hidden="true" />
+              一键重传未完成文件（{retryable.length}）
             </Button>
           )}
           <ul className="space-y-3">

@@ -140,7 +140,7 @@ mod platform {
             batch_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, OcrError> {
-            let manager = SessionManager::load(session_size, batch_size, queue_size, move || {
+            let manager = SessionManager::load(kind.metric_name(), session_size, batch_size, queue_size, move || {
                 // Inherit the global session policy instead of overriding memory patterns per model.
                 let mut session = SessionBuilder::try_from(backend)?
                     .with_intra_threads(1)
@@ -153,7 +153,9 @@ mod platform {
                         let result = (|| {
                             let input = ImageTensor::try_from(requests.iter().map(|request| &request.input).collect::<Vec<_>>().as_slice())?;
                             let timers = timings.start_unique(kind.timing());
+                            let physical = docparse_common::telemetry::Inference::new(kind.metric_name(), "model", requests.len());
                             let outputs = session.run(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? });
+                            physical.finish(outputs.is_ok());
                             drop(timers);
                             let outputs = outputs?;
                             let timers = timings.start_unique(TimingStage::OcrReadback);
@@ -212,11 +214,10 @@ mod platform {
 mod platform {
     use super::*;
     use ort::session::RunOptions;
-    use tokio::sync::mpsc;
 
     /// Browser sessions consume the same queue while the existing global guard protects ORT Web.
     pub(crate) struct SessionRunner {
-        sender: mpsc::Sender<Request>,
+        sender: docparse_common::queue::QueueSender<Request>,
     }
     impl SessionRunner {
         /// Loads independent browser sessions without imposing page-local inference batch boundaries.
@@ -228,8 +229,10 @@ mod platform {
             batch_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, OcrError> {
-            let (sender, receiver) =
-                docparse_common::Queue::<Request>::new(queue_size);
+            let (sender, receiver) = docparse_common::Queue::<Request>::new(
+                kind.metric_name(),
+                queue_size,
+            );
             for _ in 0..session_size {
                 // All three OCR stages inherit the same native/browser session policy.
                 let mut session = SessionBuilder::try_from(backend)?

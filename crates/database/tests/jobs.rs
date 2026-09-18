@@ -265,6 +265,18 @@ async fn leases_recover_and_stale_workers_cannot_publish() {
         Some(1234)
     );
     assert!(result.version > second.job.version);
+    // Timeline origins remain stable across a lost lease and a failed attempt.
+    assert!(
+        first.job.started_at.is_some(),
+        "first claim records its start"
+    );
+    assert_eq!(first.job.started_at, second.job.started_at);
+    assert_eq!(first.job.started_at, third.job.started_at);
+    assert!(second.job.attempt_started_at > first.job.attempt_started_at);
+    assert!(queued.queued_at >= second.job.attempt_started_at);
+    assert!(queued.finished_at.is_none(), "retry is not terminal");
+    assert!(result.finished_at >= result.attempt_started_at);
+    assert!(result.finished_at.is_some(), "success has an immutable end");
     // Exhausted abandoned jobs become terminal instead of remaining permanently runnable.
     let exhausted = Uuid::new_v4();
     Jobs::submit(&db, exhausted, &hash, None, None)
@@ -277,14 +289,19 @@ async fn leases_recover_and_stale_workers_cannot_publish() {
     assert_eq!(lease.job.id, exhausted);
     tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(Jobs::claim(&db, 60, 1).await.expect("reap").is_none());
-    assert_eq!(
-        Jobs::find_by_id(&db, exhausted)
-            .await
-            .expect("read terminal failure")
-            .expect("job")
-            .status,
-        JobStatus::Failed
-    );
+    let failed = Jobs::find_by_id(&db, exhausted)
+        .await
+        .expect("read terminal failure")
+        .expect("job");
+    assert_eq!(failed.status, JobStatus::Failed);
+    assert!(failed.finished_at.is_some());
+    assert!(failed.finished_at >= failed.started_at);
+    let deleted = Jobs::mark_deleted(&db, exhausted)
+        .await
+        .expect("delete")
+        .expect("job");
+    assert_eq!(deleted.started_at, failed.started_at);
+    assert_eq!(deleted.finished_at, failed.finished_at);
 }
 
 /// A locked exhausted job must not block other workers from claiming an unrelated queued document.

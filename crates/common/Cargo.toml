@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["rt"] }
 serde.workspace = true
 
 # cli and diagnostics
+metrics.workspace = true
 tracing.workspace = true
 web-time.workspace = true
 

@@ -31,6 +31,17 @@ pub struct RawConfig {
     #[builder(default)]
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// Optional historical query upstream; local metrics are always available on the server.
+    #[builder(default)]
+    #[serde(default)]
+    pub monitoring: MonitoringConfig,
+}
+
+/// Server-side historical queries never accept a browser-supplied upstream URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct MonitoringConfig {
+    pub prometheus_url: Option<String>,
 }
 
 /// Server event filters and optional file destination; native setup validates logging resources.

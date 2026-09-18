@@ -171,6 +171,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/docparse/monitoring/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetches bounded range results only from the configured upstream, preserving gaps and NaN strings. */
+        get: operations["history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/docparse/monitoring/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Converts the same recorder to JSON; never substitutes unavailable database data with zero. */
+        get: operations["snapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/docparse/openapi.json": {
         parameters: {
             query?: never;
@@ -220,7 +254,7 @@ export interface components {
         /** @description WisLand-compatible successful JSON envelope, also used inside SSE data messages. */
         ApiResponse_JobJsonResult: {
             /** @description JSON result shape depends on whether the page query parameter is present. */
-            data: components["schemas"]["DocumentResult"] | components["schemas"]["Pagenation_PageResult"];
+            data: components["schemas"]["DocumentResult"] | components["schemas"]["Pagination_PageResult"];
             message: string;
             success: boolean;
         };
@@ -239,6 +273,8 @@ export interface components {
         ApiResponse_JobSnapshot: {
             /** @description Public progress snapshots omit storage names, lease tokens, and other worker-only fields. */
             data: {
+                /** @description Current attempt start is unaffected by lease heartbeats. */
+                attempt_started_at?: string | null;
                 /** Format: int32 */
                 attempts: number;
                 /** Format: date-time */
@@ -250,11 +286,15 @@ export interface components {
                 duration_ms?: number | null;
                 error?: string | null;
                 filename?: string | null;
+                /** @description Final success or exhausted failure; NULL while still eligible for retry. */
+                finished_at?: string | null;
                 /** Format: uuid */
                 id: string;
                 progress?: null | components["schemas"]["ParseProgress"];
                 /** Format: int64 */
                 size_bytes?: number | null;
+                /** @description First successful claim; NULL for never-started or legacy tasks. */
+                started_at?: string | null;
                 /** @description The shared task enum retains the existing lowercase wire values. */
                 status: components["schemas"]["JobStatus"];
                 /** Format: date-time */
@@ -266,8 +306,27 @@ export interface components {
             success: boolean;
         };
         /** @description WisLand-compatible successful JSON envelope, also used inside SSE data messages. */
+        ApiResponse_Snapshot: {
+            /** @description Local observations include collection time so clients can detect stale snapshots. */
+            data: {
+                /** Format: int64 */
+                collected_at: number;
+                history_available: boolean;
+                process: components["schemas"]["Process"];
+                samples: components["schemas"]["Sample"][];
+            };
+            message: string;
+            success: boolean;
+        };
+        /** @description WisLand-compatible successful JSON envelope, also used inside SSE data messages. */
         ApiResponse_String: {
             data: string;
+            message: string;
+            success: boolean;
+        };
+        /** @description WisLand-compatible successful JSON envelope, also used inside SSE data messages. */
+        ApiResponse_Value: {
+            data: unknown;
             message: string;
             success: boolean;
         };
@@ -317,6 +376,11 @@ export interface components {
         };
         /** @description Stable identity for one final block. */
         BlockId: string;
+        /**
+         * @description Allowlisting bounds both query cost and metric exposure; arbitrary PromQL is never forwarded.
+         * @enum {string}
+         */
+        Chart: "queue_wait" | "admission_wait" | "page_pressure" | "oldest" | "turnaround" | "backlog" | "queue" | "blocked" | "throughput" | "wait" | "parse" | "inference" | "workers" | "pages";
         /** @description Immutable document-level facts shared by page analysis. */
         DocumentContext: {
             /** Format: double */
@@ -421,7 +485,7 @@ export interface components {
             text_item_range: components["schemas"]["TextItemRange"];
         };
         /** @description JSON result shape depends on whether the page query parameter is present. */
-        JobJsonResult: components["schemas"]["DocumentResult"] | components["schemas"]["Pagenation_PageResult"];
+        JobJsonResult: components["schemas"]["DocumentResult"] | components["schemas"]["Pagination_PageResult"];
         /** @description A history page includes a cursor only when another matching row exists. */
         JobList: {
             items: components["schemas"]["JobSnapshot"][];
@@ -430,6 +494,8 @@ export interface components {
         };
         /** @description Public progress snapshots omit storage names, lease tokens, and other worker-only fields. */
         JobSnapshot: {
+            /** @description Current attempt start is unaffected by lease heartbeats. */
+            attempt_started_at?: string | null;
             /** Format: int32 */
             attempts: number;
             /** Format: date-time */
@@ -441,11 +507,15 @@ export interface components {
             duration_ms?: number | null;
             error?: string | null;
             filename?: string | null;
+            /** @description Final success or exhausted failure; NULL while still eligible for retry. */
+            finished_at?: string | null;
             /** Format: uuid */
             id: string;
             progress?: null | components["schemas"]["ParseProgress"];
             /** Format: int64 */
             size_bytes?: number | null;
+            /** @description First successful claim; NULL for never-started or legacy tasks. */
+            started_at?: string | null;
             /** @description The shared task enum retains the existing lowercase wire values. */
             status: components["schemas"]["JobStatus"];
             /** Format: date-time */
@@ -527,7 +597,7 @@ export interface components {
             stage: string;
         };
         /** @description A selected document page with total page count and parsing errors. */
-        Pagenation_PageResult: {
+        Pagination_PageResult: {
             /** @description Document parsing errors remain visible when a requested page is missing. */
             errors: components["schemas"]["PageError"][];
             /** @description One page's canonical nested result. */
@@ -618,6 +688,11 @@ export interface components {
             /** Format: double */
             y: number;
         }[];
+        /** @description Identifies a local recorder without adding unbounded process IDs to metric labels. */
+        Process: {
+            id: string;
+            role: string;
+        };
         /**
          * @description Supported document-level relation categories.
          * @enum {string}
@@ -628,6 +703,23 @@ export interface components {
          * @enum {string}
          */
         RepairAction: "RemovedControl" | "EncodedHyphen" | "MergedFragment" | "GlyphNameRecovery" | "FontCmapRecovery" | "GlyphOutlineRecovery" | "GlyphComposition" | "LigatureExpansion" | "PunctuationNormalization" | "OcrSpacing" | "OcrNativeOverlap";
+        /** @description Fixed low-cardinality metric values, with histograms represented by their sum/count series. */
+        Sample: {
+            labels: {
+                [key: string]: string;
+            };
+            name: string;
+            /** Format: double */
+            value: number;
+        };
+        /** @description Local observations include collection time so clients can detect stale snapshots. */
+        Snapshot: {
+            /** Format: int64 */
+            collected_at: number;
+            history_available: boolean;
+            process: components["schemas"]["Process"];
+            samples: components["schemas"]["Sample"][];
+        };
         /** @description Original model or fallback region geometry retained beside final content bounds. */
         SourceRegionEvidence: {
             bbox: components["schemas"]["Bbox"];
@@ -1299,6 +1391,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chart: components["schemas"]["Chart"];
+                seconds: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_Value"];
+                };
+            };
+        };
+    };
+    snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_Snapshot"];
                 };
             };
         };

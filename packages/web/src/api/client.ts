@@ -5,7 +5,8 @@ export type JobList = components["schemas"]["JobList"];
 export type JobStatus = components["schemas"]["JobStatus"];
 export type DocumentResult = components["schemas"]["DocumentResult"];
 export type PageResult = components["schemas"]["PageResult"];
-export type JobPage = components["schemas"]["Pagenation_PageResult"];
+// Follow the current backend pagination schema when regenerating monitoring endpoints.
+export type JobPage = components["schemas"]["Pagination_PageResult"];
 export type Block = components["schemas"]["Block"];
 export type Table = components["schemas"]["Table"];
 export const apiPrefix = (import.meta.env.VITE_API_PREFIX ?? "/api/v1/docparse").replace(

@@ -9,6 +9,29 @@ use std::{
 };
 use tempfile::NamedTempFile;
 
+/// A publication retains optional timing through the final blocking filesystem operation.
+pub struct Publication {
+    file: NamedTempFile,
+    timing: Option<docparse_common::telemetry::Timer>,
+}
+impl From<NamedTempFile> for Publication {
+    /// Uploads and ordinary storage users keep their existing untimed publication API.
+    fn from(file: NamedTempFile) -> Self {
+        Self { file, timing: None }
+    }
+}
+impl From<(NamedTempFile, docparse_common::telemetry::Timer)> for Publication {
+    /// Result serialization transfers its timer together with the bytes awaiting durable publication.
+    fn from(
+        (file, timing): (NamedTempFile, docparse_common::telemetry::Timer),
+    ) -> Self {
+        Self {
+            file,
+            timing: Some(timing),
+        }
+    }
+}
+
 /// All replicas mount this directory; published objects are immutable and atomically visible.
 #[derive(Clone)]
 pub struct SharedStorage {
@@ -59,14 +82,17 @@ impl SharedStorage {
     /// Syncs bytes and the parent directory before a database row can reference the final name.
     pub async fn publish(
         &self,
-        file: NamedTempFile,
+        file: impl Into<Publication>,
         name: &str,
     ) -> ApiResult<()> {
+        let Publication { file, timing } = file.into();
         let target = self.path(name)?;
         let root = self.root.clone();
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
         tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || span.in_scope(|| -> std::io::Result<()> {
+            // The real fsync/persist owner retains timing after cancellation of the async caller.
+            let _timing = timing;
             file.as_file().sync_all()?;
             match file.persist_noclobber(&target) {
                 Ok(_) => {}

@@ -4,6 +4,7 @@ mod m20260912_131310_create_parse_jobs;
 mod m20260913_145511_add_job_file_metadata;
 mod m20260913_173134_add_job_duration;
 mod m20260913_174348_add_job_deletion;
+mod m20260918_193547_add_job_timeline;
 
 pub struct Migrator;
 
@@ -16,6 +17,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260913_145511_add_job_file_metadata::Migration),
             Box::new(m20260913_173134_add_job_duration::Migration),
             Box::new(m20260913_174348_add_job_deletion::Migration),
+            Box::new(m20260918_193547_add_job_timeline::Migration),
         ]
     }
 }

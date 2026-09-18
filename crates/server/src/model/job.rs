@@ -72,6 +72,15 @@ pub struct JobSnapshot {
     pub created_at: String,
     #[schema(format = DateTime)]
     pub updated_at: String,
+    /// First successful claim; NULL for never-started or legacy tasks.
+    #[builder(default)]
+    pub started_at: Option<String>,
+    /// Final success or exhausted failure; NULL while still eligible for retry.
+    #[builder(default)]
+    pub finished_at: Option<String>,
+    /// Current attempt start is unaffected by lease heartbeats.
+    #[builder(default)]
+    pub attempt_started_at: Option<String>,
     /// The shared task enum retains the existing lowercase wire values.
     pub status: JobStatus,
     pub version: i64,
@@ -97,6 +106,11 @@ impl From<Model> for JobSnapshot {
             .size_bytes(job.size_bytes)
             .created_at(job.created_at.to_rfc3339())
             .updated_at(job.updated_at.to_rfc3339())
+            .started_at(job.started_at.map(|time| time.to_rfc3339()))
+            .finished_at(job.finished_at.map(|time| time.to_rfc3339()))
+            .attempt_started_at(
+                job.attempt_started_at.map(|time| time.to_rfc3339()),
+            )
             .status(job.status)
             .version(job.version)
             .attempts(job.attempts)

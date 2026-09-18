@@ -122,3 +122,7 @@ estimated_font_size_tolerance_points = 1.5
 formula_placeholder = "[formula]"
 include_evidence = false
 include_diagnostics = true
+
+[monitoring]
+# Optional history upstream; live metrics and /metrics do not require Prometheus.
+# prometheus_url = "http://127.0.0.1:19090"

@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub struct SessionManager<R: SessionRequest> {
     queue: Arc<BlockingQueue<R>>,
     threads: ThreadManager,
+    metrics: Arc<crate::telemetry::ModelMetrics>,
 }
 
 /// Any unexpected owner exit closes the shared queue instead of stranding callers.
@@ -34,6 +35,7 @@ impl<R: SessionRequest> Drop for SessionManager<R> {
 impl<R: SessionRequest> SessionManager<R> {
     /// Initializes all consumers before exposing the explicitly sized queue and cleans up partial failures.
     pub async fn load<F, W, E>(
+        name: &'static str,
         session_size: usize,
         batch_size: usize,
         queue_size: usize,
@@ -45,7 +47,7 @@ impl<R: SessionRequest> SessionManager<R> {
         E: From<TaskError> + Send + 'static,
     {
         run_cpu(move || {
-            Self::start(session_size, batch_size, queue_size, initialize)
+            Self::start(name, session_size, batch_size, queue_size, initialize)
         })
         .await
         .map_err(E::from)?
@@ -53,6 +55,7 @@ impl<R: SessionRequest> SessionManager<R> {
 
     /// Starts native owners from blocking code while retaining the same cleanup on partial failure.
     pub fn start<F, W, E>(
+        name: &'static str,
         session_size: usize,
         batch_size: usize,
         queue_size: usize,
@@ -74,13 +77,19 @@ impl<R: SessionRequest> SessionManager<R> {
         }
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         // Pending capacity is configured independently of active consumers and their batch limit.
-        let queue = Arc::new(BlockingQueue::new(queue_size));
+        let queue = Arc::new(BlockingQueue::new(name, queue_size));
         let mut manager = Self {
             queue: Arc::clone(&queue),
             threads: ThreadManager::default(),
+            metrics: crate::telemetry::ModelMetrics::new(
+                name,
+                session_size,
+                batch_size,
+            ),
         };
         let initialize = Arc::new(initialize);
         for index in 0..session_size {
+            let metrics = Arc::clone(&manager.metrics);
             let queue = Arc::clone(&queue);
             let initialize = Arc::clone(&initialize);
             let dispatch = dispatch.clone();
@@ -101,7 +110,9 @@ impl<R: SessionRequest> SessionManager<R> {
                         if ready.send(Ok(())).is_err() {
                             return;
                         }
+                        let _alive = metrics.alive(1);
                         while let Some(requests) = queue.pop(batch_size) {
+                            let _batch = metrics.batch();
                             model(requests);
                         }
                     });
@@ -166,7 +177,7 @@ mod tests {
         let workers = Arc::clone(&next);
         let released = Arc::clone(&release);
         let manager = runtime
-            .block_on(SessionManager::load(2, 1, 2, move || {
+            .block_on(SessionManager::load("test", 2, 1, 2, move || {
                 let worker = workers.fetch_add(1, Ordering::SeqCst);
                 let released = Arc::clone(&released);
                 Ok::<_, TaskError>(move |requests: Vec<Request>| {
@@ -223,6 +234,7 @@ mod tests {
         let drops = Arc::new(AtomicUsize::new(0));
         let destroyed = Arc::clone(&drops);
         let result = runtime.block_on(SessionManager::<Request>::load(
+            "test",
             2,
             2,
             4,

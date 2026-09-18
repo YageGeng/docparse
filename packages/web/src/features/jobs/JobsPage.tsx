@@ -216,11 +216,16 @@ export function JobsPage() {
                           <FileText size={21} />
                         </div>
                         <div className="min-w-0">
+                          {/* Keep the upload page mounted so opening a document cannot abort its queue. */}
                           <Link
                             className="document-name"
                             to={`/document?job=${job.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="在新标签页打开"
                           >
                             {job.filename || `文档 ${job.id.slice(0, 8)}.pdf`}
+                            <span className="sr-only">（在新标签页打开）</span>
                           </Link>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {fileSize(job.size_bytes)}
@@ -255,10 +260,13 @@ export function JobsPage() {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">
+                        {/* Match the filename link to preserve active uploads from either entry point. */}
                         <Link
                           className="row-open"
                           to={`/document?job=${job.id}`}
-                          aria-label={`打开 ${job.filename || job.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`在新标签页打开 ${job.filename || job.id}`}
                         >
                           <ArrowRight size={17} />
                         </Link>

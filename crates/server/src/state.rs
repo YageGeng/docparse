@@ -33,12 +33,28 @@ pub struct AppState {
     pub options: HttpOptions,
     pub uploads: Arc<Semaphore>,
     pub shutdown: CancellationToken,
+    /// Optional only for embedding/tests; the production entry point always installs metrics.
+    #[builder(default)]
+    pub monitoring: Option<Arc<crate::service::monitoring::Monitoring>>,
     /// Shares database polling per job without imposing a subscriber or request limit.
     #[builder(default)]
     pub(crate) subscriptions: Arc<crate::routers::jobs::Subscriptions>,
 }
 
 impl AppState {
+    /// Resolves optional embedding state once so all monitoring routes share the same unavailable response.
+    pub(crate) fn monitoring(
+        &self,
+    ) -> ApiResult<&crate::service::monitoring::Monitoring> {
+        self.monitoring.as_deref().ok_or_else(|| {
+            RequestSnafu {
+                stage: "metrics-unavailable",
+                code: ApiCode::service_unavailable(5031003),
+            }
+            .build()
+        })
+    }
+
     /// Validates memory and timing limits before constructing the router's shared state.
     pub fn new(
         db: DatabaseConnection,

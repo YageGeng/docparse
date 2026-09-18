@@ -124,11 +124,16 @@ mod platform {
             inputs: &ModelInputs,
             batch: usize,
         ) -> Result<Vec<ModelOutputs>, LayoutError> {
+            let physical = docparse_common::telemetry::Inference::new(
+                "layout", "model", batch,
+            );
             let outputs = self.session.run_with_options(ort::inputs! {
                 "im_shape" => TensorRef::from_array_view(&inputs.image_size)?,
                 "image" => TensorRef::from_array_view(&inputs.image)?,
                 "scale_factor" => TensorRef::from_array_view(&inputs.scale_factor)?,
-            }, &self.options)?;
+            }, &self.options);
+            physical.finish(outputs.is_ok());
+            let outputs = outputs?;
             ModelOutputs::from_batch(&outputs, batch)
         }
     }
@@ -147,6 +152,7 @@ mod platform {
             let backend =
                 crate::wasm_compat::OnnxBackend::from(config.as_ref());
             let manager = SessionManager::load(
+                "layout",
                 config.layout().session_size,
                 config.layout().batch_size,
                 config.layout().queue_size,
@@ -576,11 +582,10 @@ mod platform {
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod platform {
     use super::*;
-    use tokio::sync::mpsc;
 
     /// Browser consumers share one input queue while ORT execution remains guarded globally.
     pub(crate) struct LayoutSessionPool {
-        sender: mpsc::Sender<Request>,
+        sender: docparse_common::queue::QueueSender<Request>,
     }
 
     impl LayoutSessionPool {
@@ -591,6 +596,7 @@ mod platform {
         ) -> Result<Arc<Self>, LayoutError> {
             let batch_size = config.layout().batch_size;
             let (sender, receiver) = docparse_common::Queue::<Request>::new(
+                "layout",
                 config.layout().queue_size,
             );
             for _ in 0..config.layout().session_size {

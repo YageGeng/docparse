@@ -149,6 +149,7 @@ impl SessionManager {
         W: FnMut(&mut Vec<Request>) -> BatchResult + 'static,
     {
         let owners = SharedSessionManager::start(
+            "formula_texo",
             sessions,
             batch_size,
             queue_size,
@@ -287,16 +288,30 @@ impl ModelSessions {
                     binding.bind_input("pixel_values", &pixels)?;
                     binding
                         .bind_output_to_device("last_hidden_state", memory)?;
-                    let mut outputs = self
+                    let physical = docparse_common::telemetry::Inference::new(
+                        "formula_texo",
+                        "encoder",
+                        requests.len(),
+                    );
+                    let outputs = self
                         .encoder
-                        .run_binding_with_options(&binding, &options)?;
+                        .run_binding_with_options(&binding, &options);
+                    physical.finish(outputs.is_ok());
+                    let mut outputs = outputs?;
                     binding.synchronize_outputs()?;
                     outputs.remove("last_hidden_state")
                 } else {
-                    let mut outputs = self.encoder.run_with_options(
+                    let physical = docparse_common::telemetry::Inference::new(
+                        "formula_texo",
+                        "encoder",
+                        requests.len(),
+                    );
+                    let outputs = self.encoder.run_with_options(
                         ort::inputs!["pixel_values" => pixels],
                         &options,
-                    )?;
+                    );
+                    physical.finish(outputs.is_ok());
+                    let mut outputs = outputs?;
                     outputs.remove("last_hidden_state")
                 }
                 .ok_or_else(|| {
@@ -330,16 +345,31 @@ impl ModelSessions {
                             ort::memory::MemoryType::Default,
                         )?;
                         binding.bind_output_to_device("logits", &cpu)?;
+                        let physical =
+                            docparse_common::telemetry::Inference::new(
+                                "formula_texo",
+                                "decoder",
+                                requests.len(),
+                            );
                         let outputs = self
                             .decoder
-                            .run_binding_with_options(&binding, &options)?;
+                            .run_binding_with_options(&binding, &options);
+                        physical.finish(outputs.is_ok());
+                        let outputs = outputs?;
                         binding.synchronize_outputs()?;
                         StepOutput::try_from(outputs)?
                     } else {
-                        StepOutput::try_from(self.decoder.run_with_options(
-                            generation.inputs()?,
-                            &options,
-                        )?)?
+                        let inputs = generation.inputs()?;
+                        let physical =
+                            docparse_common::telemetry::Inference::new(
+                                "formula_texo",
+                                "decoder",
+                                requests.len(),
+                            );
+                        let outputs =
+                            self.decoder.run_with_options(inputs, &options);
+                        physical.finish(outputs.is_ok());
+                        StepOutput::try_from(outputs?)?
                     };
                     if generation.advance(output)? {
                         break;
@@ -395,7 +425,7 @@ mod tests {
     /// Ready crops fill the limit across caller packet boundaries without escaping capacity accounting.
     #[test]
     fn full_batches_and_tail_spills_preserve_queue_accounting() {
-        let queue = BatchQueue::new(19);
+        let queue = BatchQueue::new("test", 19);
         let mut lifetimes = Vec::new();
         let mut replies = Vec::new();
         let mut value = 0;
@@ -547,7 +577,7 @@ mod tests {
     /// Cross-page batches skip canceled crops, flush short tails, and isolate sequence failures.
     #[test]
     fn ready_crops_preserve_order_and_isolate_errors() {
-        let queue = BatchQueue::new(5);
+        let queue = BatchQueue::new("test", 5);
         let mut replies = Vec::new();
         let mut lifetimes = Vec::new();
         for value in 0..5 {

@@ -93,11 +93,20 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
                 endpoint,
                 permits: Arc::new(Semaphore::new(service.concurrency)),
             });
-            let (queue, receiver) =
-                FormulaQueue::new(config.formula().queue_size);
+            let (queue, receiver) = FormulaQueue::new(
+                "formula_mineru",
+                config.formula().queue_size,
+            );
             let concurrency = service.concurrency;
+            // One remote execution slot processes one crop at a time.
+            let metrics = docparse_common::telemetry::ModelMetrics::new(
+                "formula_mineru",
+                concurrency,
+                1,
+            );
             let worker = docparse_common::ThreadManager::spawn_async(
                 Box::pin(async move {
+                    let _alive = metrics.alive(concurrency);
                     let incoming =
                         stream::unfold(receiver, |receiver| async move {
                             loop {
@@ -111,11 +120,13 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
                     incoming
                         .for_each_concurrent(concurrency, |mut request| {
                             let transport = Arc::clone(&transport);
+                            let metrics = &metrics;
                             async move {
                                 request.end_queue();
                                 if request.cancelled() {
                                     return;
                                 }
+                                let _batch = metrics.batch();
                                 let image = Arc::clone(&request.image);
                                 let timings = request.context.timings.clone();
                                 // Canceling one caller aborts only its request, immediately making room for other queued work.

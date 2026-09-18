@@ -45,7 +45,12 @@ mod platform {
                     kind.as_str()
                 );
             }
-            let (queue, receiver) = FormulaQueue::new(queue_size);
+            let metrics = docparse_common::telemetry::ModelMetrics::new(
+                "formula_pp",
+                session_size,
+                batch_size,
+            );
+            let (queue, receiver) = FormulaQueue::new("formula_pp", queue_size);
             let mut runner = Self {
                 queue,
                 workers: Vec::with_capacity(session_size),
@@ -71,12 +76,15 @@ mod platform {
                 })
                 .await?;
                 let receiver = receiver.clone();
+                let metrics = Arc::clone(&metrics);
                 runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                let _alive = metrics.alive(1);
                 while let Some(batch) = receiver.recv().await {
                     let mut requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
                     }
+                    let _batch = metrics.batch();
                     let images = requests
                         .iter()
                         .map(|request| Arc::clone(&request.image))
@@ -105,10 +113,13 @@ mod platform {
                         drop(preprocessing);
                         let inference =
                             timings.start(TimingStage::FormulaInference);
+                        let physical = docparse_common::telemetry::Inference::new("formula_pp", "model", batch);
                         let outputs = session.run_with_options(
                             ort::inputs!["x" => Tensor::from_array(input.0)?],
                             &options,
-                        )?;
+                        );
+                        physical.finish(outputs.is_ok());
+                        let outputs = outputs?;
                         drop(inference);
                         let _decoding =
                             timings.start(TimingStage::FormulaDecode);
@@ -216,7 +227,12 @@ mod platform {
             session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
-            let (queue, receiver) = FormulaQueue::new(queue_size);
+            let metrics = docparse_common::telemetry::ModelMetrics::new(
+                "formula_pp",
+                session_size,
+                batch_size,
+            );
+            let (queue, receiver) = FormulaQueue::new("formula_pp", queue_size);
             let mut runner = Self {
                 queue,
                 workers: Vec::with_capacity(session_size),
@@ -229,13 +245,16 @@ mod platform {
                 let decoder = FormulaDecoder::new(&artifacts.tokenizer)?;
                 let options = ort::session::RunOptions::new()?;
                 let receiver = receiver.clone();
+                let metrics = Arc::clone(&metrics);
                 runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                let _alive = metrics.alive(1);
                 while let Some(batch) = receiver.recv().await {
                     let _guard = OnnxBackend::inference_guard().await;
                     let requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
                     }
+                    let _batch = metrics.batch();
                     let images = requests
                         .iter()
                         .map(|request| Arc::clone(&request.image))

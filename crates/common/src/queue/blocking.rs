@@ -1,6 +1,10 @@
 //! Shared native bounded admission and ready-only draining.
 use super::SessionRequest;
-use crate::TaskError;
+use crate::{
+    TaskError,
+    telemetry::{Admission, QueueMetrics, Queued},
+};
+use std::sync::Arc;
 use std::{
     collections::VecDeque,
     sync::{Condvar, Mutex},
@@ -8,7 +12,7 @@ use std::{
 
 /// Queue state remains independent of session initialization and execution.
 struct QueueState<R> {
-    requests: VecDeque<R>,
+    requests: VecDeque<Queued<R>>,
     closed: bool,
 }
 
@@ -16,12 +20,12 @@ struct QueueState<R> {
 pub struct BlockingQueue<R> {
     state: Mutex<QueueState<R>>,
     changed: Condvar,
-    capacity: usize,
+    metrics: Arc<QueueMetrics>,
 }
 
 impl<R: SessionRequest> BlockingQueue<R> {
     /// Creates a bounded crop queue independently of consumer initialization.
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(name: &'static str, capacity: usize) -> Self {
         assert!(capacity > 0, "queue capacity must be positive");
         Self {
             state: Mutex::new(QueueState {
@@ -29,7 +33,7 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 closed: false,
             }),
             changed: Condvar::new(),
-            capacity,
+            metrics: QueueMetrics::new(name, capacity),
         }
     }
 
@@ -40,15 +44,22 @@ impl<R: SessionRequest> BlockingQueue<R> {
 
     /// Admits a caller packet atomically while bounding every unconsumed crop.
     pub fn push_batch(&self, mut requests: Vec<R>) -> Result<(), TaskError> {
-        if requests.is_empty() || requests.len() > self.capacity {
+        if requests.is_empty() || requests.len() > self.metrics.capacity {
             return Err(TaskError::from_message("invalid queue packet size"));
         }
+        let admission = Admission::new(
+            "docparse_queue_admission_wait_seconds",
+            self.metrics.name,
+        );
         let mut state = self
             .state
             .lock()
             .map_err(|error| TaskError::from_message(error.to_string()))?;
+        let blocked = (state.requests.len() + requests.len()
+            > self.metrics.capacity)
+            .then(|| self.metrics.blocked());
         while !state.closed
-            && state.requests.len() + requests.len() > self.capacity
+            && state.requests.len() + requests.len() > self.metrics.capacity
             && !requests.iter().all(SessionRequest::cancelled)
         {
             state = self
@@ -56,7 +67,9 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 .wait(state)
                 .map_err(|error| TaskError::from_message(error.to_string()))?;
         }
+        drop(blocked);
         if state.closed || requests.iter().all(SessionRequest::cancelled) {
+            admission.finish(if state.closed { "closed" } else { "cancelled" });
             let closed = state.closed;
             drop(state);
             for request in &mut requests {
@@ -68,7 +81,12 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 Ok(())
             };
         }
-        state.requests.extend(requests);
+        admission.finish("admitted");
+        state.requests.extend(
+            requests
+                .into_iter()
+                .map(|request| Queued::new(request, &self.metrics)),
+        );
         self.changed.notify_all();
         Ok(())
     }
@@ -96,6 +114,7 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 let Some(request) = state.requests.pop_front() else {
                     break;
                 };
+                let request = request.take("dequeued");
                 if request.cancelled() {
                     canceled.push(request);
                 } else {
@@ -123,7 +142,8 @@ impl<R: SessionRequest> BlockingQueue<R> {
         let discarded = std::mem::take(&mut state.requests);
         self.changed.notify_all();
         drop(state);
-        for mut request in discarded {
+        for request in discarded {
+            let mut request = request.take("discarded");
             request.end_queue();
         }
     }
@@ -147,7 +167,7 @@ mod tests {
     /// Caller packet boundaries cannot leave ready capacity unused or lose an unconsumed tail.
     #[test]
     fn ready_packets_fill_batches_and_preserve_capacity() {
-        let queue = BlockingQueue::new(19);
+        let queue = BlockingQueue::new("test", 19);
         let mut next = 0;
         for size in [2, 8, 3, 6] {
             queue

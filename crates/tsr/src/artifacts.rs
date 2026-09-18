@@ -28,6 +28,14 @@ pub(crate) enum ModelKind {
 }
 
 impl ModelKind {
+    /// Identifies independent structure and cell queues without request-specific labels.
+    pub(crate) fn metric_name(self) -> &'static str {
+        match self {
+            Self::Structure(_) => "tsr_structure",
+            Self::Cells(_) => "tsr_cells",
+        }
+    }
+
     /// Matches only approved immutable official ONNX exports.
     pub(crate) fn contract(self) -> ModelContract {
         let (repository, revision, model, config) = match self {

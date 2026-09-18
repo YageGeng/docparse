@@ -77,6 +77,7 @@ pub struct PdfiumPool {
     available: Mutex<mpsc::UnboundedReceiver<Lease>>,
     stopping: CancellationToken,
     finished: watch::Receiver<Option<Result<(), String>>>,
+    _capacity: docparse_common::telemetry::Activity,
 }
 
 impl Drop for PdfiumPool {
@@ -113,6 +114,11 @@ impl PdfiumPool {
         let (completed, finished) = watch::channel(None);
         let pool = Arc::new(
             Self::builder()
+                ._capacity(docparse_common::telemetry::Activity::new(
+                    "docparse_pdfium_workers_configured",
+                    ("pool", "render"),
+                    max_processes as f64,
+                ))
                 .returned(available.clone())
                 .available(Mutex::new(leases))
                 .stopping(stopping.clone())
@@ -262,6 +268,11 @@ impl PdfiumPool {
         available: mpsc::UnboundedSender<Lease>,
         stopping: CancellationToken,
     ) -> Result<(), PdfiumRuntimeError> {
+        let mut alive = Some(docparse_common::telemetry::Activity::new(
+            "docparse_pdfium_workers_alive",
+            ("pool", "render"),
+            1.0,
+        ));
         let mut lease_id = 0_u64;
         let mut replacement = false;
         loop {
@@ -290,6 +301,7 @@ impl PdfiumPool {
                 result = async { available.send(lease) } => result.is_ok(),
             };
             let mut active_page = None;
+            let mut occupied = None;
             let mut completed = false;
             let mut rejected = false;
             if offered {
@@ -316,6 +328,26 @@ impl PdfiumPool {
                     };
                     let closing = matches!(call.command, Command::Close);
                     let opening = matches!(call.command, Command::Open(_));
+                    if opening && occupied.is_none() {
+                        occupied =
+                            Some(docparse_common::telemetry::Activity::new(
+                                "docparse_pdfium_documents_active",
+                                ("pool", "render"),
+                                1.0,
+                            ));
+                    }
+                    // The supervisor scope includes the real IPC, even if the caller abandons its reply.
+                    let operation = match &call.command {
+                        Command::Open(_) => "open",
+                        Command::Close => "close",
+                        Command::Render { .. } => "render",
+                        _ => "extract",
+                    };
+                    let measured = docparse_common::telemetry::Timer::new(
+                        "docparse_pdfium_operation_seconds",
+                        "operation",
+                        operation,
+                    );
                     active_page = call.page_lease.clone();
                     let exchange = process.exchange(
                         lease_id,
@@ -341,6 +373,7 @@ impl PdfiumPool {
                             outcome
                         },
                     };
+                    drop(measured);
                     rejected = opening
                         && matches!(
                             &outcome,
@@ -393,6 +426,8 @@ impl PdfiumPool {
             // Cancellation requests a bounded graceful exit even while a document is open.
             // Broken transports and crashed children cannot acknowledge shutdown.
             process.stop(!failed).await?;
+            drop(alive.take());
+            drop(occupied.take());
             drop(active_page);
             if stopping.is_cancelled() || available.is_closed() {
                 return Ok(());
@@ -411,6 +446,12 @@ impl PdfiumPool {
                 Err(_cancelled) if stopping.is_cancelled() => return Ok(()),
                 Err(error) => return Err(error),
             };
+            alive = Some(docparse_common::telemetry::Activity::new(
+                "docparse_pdfium_workers_alive",
+                ("pool", "render"),
+                1.0,
+            ));
+            metrics::counter!("docparse_pdfium_restarts_total").increment(1);
             // Intentional cancellation neither consumes nor restores an existing crash budget.
             replacement |= failed;
         }

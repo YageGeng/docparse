@@ -3,6 +3,7 @@ pub mod queue;
 mod runtime;
 mod task_set;
 pub use task_set::{TaskSet, spawn};
+pub mod telemetry;
 mod thread;
 mod timeout;
 pub mod timing;

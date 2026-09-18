@@ -22,6 +22,7 @@ use utoipa_axum::router::OpenApiRouter;
 #[derive(OpenApi)]
 #[openapi(
     info(title = "DocParse API", description = "Durable PDF parsing jobs with JSON results and reconnectable SSE progress. Authentication and browser CORS policy are supplied by the deployment ingress."),
+    components(schemas(crate::model::monitoring::Chart)),
     tags(
         (name = jobs::TAG, description = "Submit PDFs, inspect progress, and retrieve durable results"),
         (name = common::TAG, description = "Process and shared-dependency health"),
@@ -41,6 +42,7 @@ pub fn router(
     let routes = OpenApiRouter::new()
         .merge(jobs::router())
         .merge(common::router())
+        .merge(crate::routers::monitoring::router())
         .merge(docs::router());
     let root = OpenApiRouter::with_openapi(ApiDoc::openapi());
 
@@ -52,6 +54,10 @@ pub fn router(
     let (router, document) = router.split_for_parts();
 
     Ok(router
+        .route(
+            "/metrics",
+            axum::routing::get(crate::routers::monitoring::metrics),
+        )
         // Routing failures produce typed errors before serialization, preserving Axum's Allow header.
         .fallback(|| async {
             RequestSnafu {

@@ -25,7 +25,7 @@ fn image() -> Arc<PageImage> {
 async fn canceled_model_request_retains_page_delivery() {
     let pages = docparse_common::PageQueue::new(1);
     let lease = pages.reserve().await.expect("page slot");
-    let (queue, receiver) = FormulaQueue::new(1);
+    let (queue, receiver) = FormulaQueue::new("test", 1);
     let crop = image();
     let caller = tokio::spawn(async move {
         lease.scope(queue.run(vec![crop], Timings::default())).await
@@ -46,7 +46,7 @@ async fn canceled_model_request_retains_page_delivery() {
 /// A bad crop in a merged batch cannot discard another caller's completed formula.
 #[tokio::test]
 async fn merged_callers_keep_independent_results() {
-    let (queue, receiver) = FormulaQueue::new(2);
+    let (queue, receiver) = FormulaQueue::new("test", 2);
     let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
     let mut second = Box::pin(queue.run(vec![image()], Timings::default()));
     // Polling once publishes each request before awaiting its response; no scheduler sleep is needed.
@@ -67,7 +67,7 @@ async fn merged_callers_keep_independent_results() {
 /// A partial ready batch is immediately usable and canceled crops do not consume its limit.
 #[tokio::test]
 async fn shared_queue_flushes_ready_work_and_routes_results() {
-    let (queue, receiver) = FormulaQueue::new(4);
+    let (queue, receiver) = FormulaQueue::new("test", 4);
     let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
     assert!(futures_util::poll!(&mut first).is_pending());
     let batch = receiver.recv().await.expect("first").take_ready(4);
