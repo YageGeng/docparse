@@ -4,74 +4,76 @@ use crate::{FormulaResult, ModelRegionId, PageResult, PageWarning};
 use docparse_config::ValidatedConfig;
 use docparse_formula::{FormulaEngine, FormulaError};
 use docparse_layout::{
-    Bbox, LayoutDetection, LayoutLabel, PageImage, PageImageInput, Point,
-    timing::Timings,
+    Bbox, LayoutDetection, LayoutLabel, PageImage, timing::Timings,
 };
 use std::sync::Arc;
 
-/// A viewport formula box paired with the already rendered page raster.
-struct FormulaCrop<'a> {
-    bbox: Bbox,
-    rendered: &'a RenderedPage,
-}
-
-impl TryFrom<FormulaCrop<'_>> for PageImage {
-    type Error = FormulaError;
-
-    /// Uses the same viewport-to-pixel transform as layout, including rotation and crop-box offsets.
-    #[allow(clippy::cast_sign_loss)] // Coordinates are clamped to the validated raster before conversion.
-    fn try_from(crop: FormulaCrop<'_>) -> Result<Self, Self::Error> {
-        let image = &crop.rendered.image;
-        let transform = &crop.rendered.transform;
-        if transform.render_size() != (image.width(), image.height()) {
-            return Err(FormulaError::Invalid(
-                "formula image/transform mismatch".into(),
-            ));
-        }
-        let start = transform
-            .viewport_to_rendered(Point::new(crop.bbox.left, crop.bbox.top));
-        let end = transform.viewport_to_rendered(Point::new(
-            crop.bbox.right,
-            crop.bbox.bottom,
-        ));
-        let left = start.x.floor().clamp(0.0, image.width() as f64) as u32;
-        let top = start.y.floor().clamp(0.0, image.height() as f64) as u32;
-        let right = end.x.ceil().clamp(0.0, image.width() as f64) as u32;
-        let bottom = end.y.ceil().clamp(0.0, image.height() as f64) as u32;
-        if left >= right || top >= bottom {
-            return Err(FormulaError::Invalid(
-                "formula crop is outside the page".into(),
-            ));
-        }
-        let row_bytes = (right - left) as usize * 3;
-        let mut pixels =
-            Vec::with_capacity(row_bytes * (bottom - top) as usize);
-        for y in top..bottom {
-            let offset =
-                (y as usize * image.width() as usize + left as usize) * 3;
-            pixels.extend_from_slice(
-                image.data().get(offset..offset + row_bytes).ok_or_else(
-                    || {
-                        FormulaError::Invalid(
-                            "formula crop exceeds raster".into(),
-                        )
-                    },
-                )?,
-            );
-        }
-        PageImage::try_from(
-            PageImageInput::builder()
-                .width(right - left)
-                .height(bottom - top)
-                .pixel_format(image.pixel_format())
-                .data(Arc::from(pixels))
-                .build(),
-        )
-        .map_err(|error| FormulaError::Invalid(error.to_string()))
-    }
-}
+mod crop;
+use crop::FormulaCrop;
 
 impl FormulaResult {
+    /// Stops raster expansion before unrelated text rows, including rows already grazing the detector edge.
+    fn background_limits(&self, page: &PageResult) -> Option<Bbox> {
+        if self.label != LayoutLabel::InlineFormula {
+            return None;
+        }
+        let seed = self.crop_bbox.unwrap_or(self.bbox);
+        let mut limit = match Bbox::try_from([
+            0.0,
+            0.0,
+            page.width,
+            page.height,
+        ]) {
+            Ok(limit) => limit,
+            Err(error) => {
+                tracing::warn!(
+                    "cannot bound inline formula {} background search on page {}: {}",
+                    self.id.as_str(),
+                    page.page_number,
+                    error
+                );
+                return None;
+            }
+        };
+        for line in page.blocks.iter().flat_map(|block| &block.lines) {
+            if self.line_id.as_ref() == Some(&line.id) {
+                continue;
+            }
+            // Reject geometrically irrelevant rows before scanning their text-item ownership.
+            let mut candidate = limit;
+            let neighbor = line.bbox;
+            if neighbor.left < seed.right && neighbor.right > seed.left {
+                if (neighbor.top + neighbor.bottom) * 0.5 < seed.top {
+                    candidate.top =
+                        candidate.top.max(neighbor.bottom.min(seed.top));
+                } else if (neighbor.top + neighbor.bottom) * 0.5 > seed.bottom {
+                    candidate.bottom =
+                        candidate.bottom.min(neighbor.top.max(seed.bottom));
+                }
+            }
+            if neighbor.top < seed.bottom && neighbor.bottom > seed.top {
+                if (neighbor.left + neighbor.right) * 0.5 < seed.left {
+                    candidate.left =
+                        candidate.left.max(neighbor.right.min(seed.left));
+                } else if (neighbor.left + neighbor.right) * 0.5 > seed.right {
+                    candidate.right =
+                        candidate.right.min(neighbor.left.max(seed.right));
+                }
+            }
+            // Confirmed cross-line scripts cannot exclude their own formula, even when their row would tighten a limit.
+            if candidate != limit
+                && !line.text_items.iter().any(|item| {
+                    self.text_spans
+                        .iter()
+                        .any(|span| span.text_item_id == item.id)
+                })
+            {
+                limit = candidate;
+            }
+        }
+        Some(limit)
+    }
+
     /// Completes measured glyphs and their unambiguous scripts without adding unrelated neighboring prose.
     fn refine_crop(&mut self, page: &PageResult) {
         if self.line_id.is_none() || self.text_spans.is_empty() {
@@ -489,11 +491,24 @@ impl PageResult {
             let mut images = Vec::new();
             let mut positions = Vec::new();
             for (index, formula) in chunk.iter_mut().enumerate() {
-                match PageImage::try_from(FormulaCrop {
-                    bbox: formula.crop_bbox.unwrap_or(formula.bbox),
+                let initial = formula.crop_bbox.unwrap_or(formula.bbox);
+                let mut crop = FormulaCrop {
+                    bbox: initial,
                     rendered,
-                }) {
+                    expansion: formula.background_limits(self),
+                };
+                match PageImage::try_from(&mut crop) {
                     Ok(image) => {
+                        if crop.bbox != initial {
+                            tracing::debug!(
+                                "aligned inline formula {} crop from {:?} to background boundaries {:?}",
+                                formula.id.as_str(),
+                                initial,
+                                crop.bbox
+                            );
+                        }
+                        formula.crop_bbox =
+                            (crop.bbox != formula.bbox).then_some(crop.bbox);
                         images.push(Arc::new(image));
                         positions.push(index);
                     }
@@ -782,6 +797,370 @@ impl PageResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Replays captured production rasters without model inference, recording timings and exact output fingerprints.
+    #[test]
+    #[ignore = "requires FORMULA_CROP_BENCH_PAGE, FORMULA_CROP_BENCH_RASTER and FORMULA_CROP_BENCH_OUTPUT"]
+    fn benchmark_captured_formula_crops() {
+        use docparse_layout::{
+            AffineTransform, PageImageInput, PageRotation, PageTransform,
+            PageTransformInput, PixelFormat,
+        };
+        use sha2::{Digest, Sha256};
+        use std::hint::black_box;
+        let page: PageResult = serde_json::from_slice(
+            &std::fs::read(
+                std::env::var("FORMULA_CROP_BENCH_PAGE").expect("page path"),
+            )
+            .expect("page JSON"),
+        )
+        .expect("page");
+        let raster = image::open(
+            std::env::var("FORMULA_CROP_BENCH_RASTER").expect("raster path"),
+        )
+        .expect("raster")
+        .into_rgb8();
+        let (width, height) = raster.dimensions();
+        let rendered = RenderedPage {
+            page_number: page.page_number,
+            image: Arc::new(
+                PageImage::try_from(
+                    PageImageInput::builder()
+                        .width(width)
+                        .height(height)
+                        .pixel_format(PixelFormat::Rgb8)
+                        .data(Arc::from(raster.into_raw()))
+                        .build(),
+                )
+                .expect("image"),
+            ),
+            transform: PageTransform::try_from(
+                PageTransformInput::builder()
+                    .page_to_viewport(AffineTransform::identity())
+                    .viewport_width(page.width)
+                    .viewport_height(page.height)
+                    .render_width(width)
+                    .render_height(height)
+                    .model_width(width)
+                    .model_height(height)
+                    .rotation(PageRotation::Degrees0)
+                    .build(),
+            )
+            .expect("transform"),
+        };
+        let formulas: Vec<_> = page
+            .formulas
+            .iter()
+            .filter(|formula| formula.label == LayoutLabel::InlineFormula)
+            .cloned()
+            .map(|mut formula| {
+                formula.crop_bbox = None;
+                formula.refine_crop(&page);
+                let expansion = formula.background_limits(&page);
+                (formula, expansion)
+            })
+            .collect();
+        assert!(!formulas.is_empty(), "capture must contain inline formulas");
+        let cases: Vec<_> = formulas.iter().map(|(formula, expansion)| {
+            let seed = formula.crop_bbox.unwrap_or(formula.bbox);
+            let mut crop = FormulaCrop { bbox: seed, rendered: &rendered, expansion: *expansion };
+            let image = PageImage::try_from(&mut crop).expect("crop");
+            serde_json::json!({"id": formula.id, "seed": seed, "limits": expansion, "crop": crop.bbox, "width": image.width(), "height": image.height(), "sha256": Sha256::digest(image.data().as_ref()).iter().map(|byte| format!("{byte:02x}")).collect::<String>()})
+        }).collect();
+        let mut measurements = serde_json::Map::new();
+        for stage in ["limits", "crop", "combined"] {
+            let compute_limits = stage != "crop";
+            let compute_crop = stage != "limits";
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let started = web_time::Instant::now();
+                for _ in 0..1000 {
+                    for (formula, cached) in &formulas {
+                        let formula = black_box(formula);
+                        let expansion = if compute_limits {
+                            formula.background_limits(black_box(&page))
+                        } else {
+                            *cached
+                        };
+                        if compute_crop {
+                            let mut crop = FormulaCrop {
+                                bbox: formula.crop_bbox.unwrap_or(formula.bbox),
+                                rendered: black_box(&rendered),
+                                expansion,
+                            };
+                            black_box(
+                                PageImage::try_from(&mut crop).expect("crop"),
+                            );
+                        } else {
+                            black_box(expansion);
+                        }
+                    }
+                }
+                samples.push(
+                    started.elapsed().as_secs_f64() * 1_000_000.0 / 1000.0,
+                );
+            }
+            samples.sort_by(f64::total_cmp);
+            measurements.insert(stage.into(), serde_json::json!({"median_us_per_page": samples.get(3).expect("median"), "samples_us_per_page": samples}));
+        }
+        let report = serde_json::json!({"inline_formulas": formulas.len(), "measurements": measurements, "cases": cases});
+        std::fs::write(
+            std::env::var("FORMULA_CROP_BENCH_OUTPUT").expect("output path"),
+            serde_json::to_vec_pretty(&report).expect("report"),
+        )
+        .expect("save report");
+        eprintln!(
+            "{} inline formulas: {}",
+            formulas.len(),
+            report.get("measurements").expect("timings")
+        );
+    }
+
+    /// Captures the exact raster passed to recognition without loading a model.
+    struct CropCapture(std::sync::Mutex<Vec<Arc<PageImage>>>);
+
+    impl FormulaEngine for CropCapture {
+        /// Identifies the crop observation boundary in formula results.
+        fn name(&self) -> &str {
+            "crop-capture"
+        }
+
+        /// Records production crop pixels and supplies a minimal successful recognition result.
+        fn recognize(
+            &self,
+            images: Vec<Arc<PageImage>>,
+            _timings: Timings,
+        ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+            '_,
+            Result<Vec<String>, FormulaError>,
+        > {
+            Box::pin(async move {
+                let output = vec!["x".to_owned(); images.len()];
+                *self.0.lock().expect("crops") = images;
+                Ok(output)
+            })
+        }
+    }
+
+    /// Inline crops stop at the first background separators on all sides without including adjacent text.
+    #[tokio::test]
+    async fn inline_crops_follow_raster_background_separators() {
+        use docparse_layout::{
+            AffineTransform, GeometrySource, PageImageInput, PageRotation,
+            PageTransform, PageTransformInput, PixelFormat,
+        };
+        for (background, ink) in [
+            ([255, 255, 255], [0, 0, 0]),
+            ([238, 242, 228], [30, 30, 30]),
+            ([32, 48, 64], [220, 230, 240]),
+        ] {
+            for (scale, rotation) in [
+                (1.0, PageRotation::Degrees0),
+                (2.0, PageRotation::Degrees90),
+            ] {
+                let mut raster =
+                    image::RgbImage::from_pixel(50, 50, image::Rgb(background));
+                // The central ink crosses every detector edge; four unrelated regions sit beyond clear separators.
+                for [left, top, right, bottom] in [
+                    [17, 15, 33, 35],
+                    [15, 10, 35, 13],
+                    [15, 37, 35, 40],
+                    [12, 18, 15, 32],
+                    [35, 18, 38, 32],
+                ] {
+                    for y in top..bottom {
+                        for x in left..right {
+                            raster.put_pixel(x, y, image::Rgb(ink));
+                        }
+                    }
+                }
+                // A faint scanning artifact remains background; a dark one-pixel stroke would not.
+                raster.put_pixel(
+                    19,
+                    14,
+                    image::Rgb(
+                        background
+                            .map(|channel: u8| channel.saturating_sub(10)),
+                    ),
+                );
+                let expected =
+                    image::imageops::crop_imm(&raster, 16, 14, 18, 22)
+                        .to_image();
+                let rendered = RenderedPage {
+                    page_number: 1,
+                    image: Arc::new(
+                        PageImage::try_from(
+                            PageImageInput::builder()
+                                .width(50)
+                                .height(50)
+                                .pixel_format(PixelFormat::Rgb8)
+                                .data(Arc::from(raster.into_raw()))
+                                .build(),
+                        )
+                        .expect("image"),
+                    ),
+                    transform: PageTransform::try_from(
+                        PageTransformInput::builder()
+                            .page_to_viewport(AffineTransform::identity())
+                            .viewport_width(50.0 / scale)
+                            .viewport_height(50.0 / scale)
+                            .render_width(50)
+                            .render_height(50)
+                            .model_width(50)
+                            .model_height(50)
+                            .rotation(rotation)
+                            .build(),
+                    )
+                    .expect("transform"),
+                };
+                for (label, neighbors) in [
+                    (LayoutLabel::InlineFormula, false),
+                    (LayoutLabel::DisplayFormula, false),
+                    (LayoutLabel::InlineFormula, true),
+                ] {
+                    let original = Bbox::try_from([
+                        20.0 / scale,
+                        20.0 / scale,
+                        30.0 / scale,
+                        30.0 / scale,
+                    ])
+                    .expect("box");
+                    let detection = LayoutDetection::builder()
+                        .source_detection_index(0)
+                        .raw_label(label.to_str().to_owned())
+                        .class_id(label.idx().expect("label") as i64)
+                        .label(label.clone())
+                        .confidence(0.9)
+                        .bbox(original)
+                        .geometry_source(GeometrySource::DerivedFromBbox)
+                        .model_order(0)
+                        .metadata(Default::default())
+                        .build();
+                    // Model boxes can graze the previous row's descenders or the following row's ascenders.
+                    let blocks = if neighbors {
+                        let block_id = crate::BlockId::model(1, 99, 0);
+                        let lines = [(0, 15.0, 21.0), (1, 29.0, 40.0)]
+                            .into_iter()
+                            .map(|(index, top, bottom)| {
+                                let bbox = Bbox::try_from([
+                                    17.0 / scale,
+                                    top / scale,
+                                    33.0 / scale,
+                                    bottom / scale,
+                                ])
+                                .expect("neighbor");
+                                crate::Line::builder()
+                                    .id(crate::LineId::new(&block_id, index))
+                                    .text("neighbor".into())
+                                    .bbox(bbox)
+                                    .direction(
+                                        crate::WritingDirection::LeftToRight,
+                                    )
+                                    .text_items(vec![
+                                        crate::TextItem::builder()
+                                            .id(crate::TextItemId::native(
+                                                1, index,
+                                            ))
+                                            .raw_text("neighbor".into())
+                                            .bbox(bbox)
+                                            .source(crate::TextSource::Native)
+                                            .build(),
+                                    ])
+                                    .build()
+                            })
+                            .collect();
+                        vec![
+                            crate::Block::builder()
+                                .id(block_id)
+                                .label(LayoutLabel::Text)
+                                .text("neighbor neighbor".into())
+                                .label_source(crate::LabelSource::Model)
+                                .bbox(
+                                    Bbox::try_from([
+                                        17.0 / scale,
+                                        15.0 / scale,
+                                        33.0 / scale,
+                                        40.0 / scale,
+                                    ])
+                                    .expect("block"),
+                                )
+                                .final_order(0)
+                                .lines(lines)
+                                .build(),
+                        ]
+                    } else {
+                        Vec::new()
+                    };
+                    let mut page = PageResult::builder()
+                        .page_number(1)
+                        .width(50.0 / scale)
+                        .height(50.0 / scale)
+                        .rotation(0)
+                        .blocks(blocks)
+                        .build();
+                    let engine = CropCapture(std::sync::Mutex::new(Vec::new()));
+                    page.recognize_formulas(
+                        vec![detection],
+                        &rendered,
+                        Some(&engine),
+                        &ValidatedConfig::try_from(
+                            docparse_config::RawConfig::default(),
+                        )
+                        .expect("config"),
+                        &Timings::default(),
+                        &Default::default(),
+                    )
+                    .await;
+                    let captured = engine.0.lock().expect("crops");
+                    let captured = captured.first().expect("crop");
+                    let formula = page.formulas.first().expect("formula");
+                    assert_eq!(formula.bbox, original);
+                    if neighbors {
+                        assert_eq!(
+                            (captured.width(), captured.height()),
+                            (18, 10)
+                        );
+                        assert_eq!(
+                            formula.crop_bbox,
+                            Some(
+                                Bbox::try_from([
+                                    16.0 / scale,
+                                    20.0 / scale,
+                                    34.0 / scale,
+                                    30.0 / scale
+                                ])
+                                .expect("guarded box")
+                            )
+                        );
+                    } else if label == LayoutLabel::InlineFormula {
+                        assert_eq!(
+                            (captured.width(), captured.height()),
+                            (18, 22)
+                        );
+                        assert_eq!(captured.data().as_ref(), expected.as_raw());
+                        assert_eq!(
+                            formula.crop_bbox,
+                            Some(
+                                Bbox::try_from([
+                                    16.0 / scale,
+                                    14.0 / scale,
+                                    34.0 / scale,
+                                    36.0 / scale
+                                ])
+                                .expect("expanded box")
+                            )
+                        );
+                    } else {
+                        assert_eq!(
+                            (captured.width(), captured.height()),
+                            (10, 10)
+                        );
+                        assert!(formula.crop_bbox.is_none());
+                    }
+                }
+            }
+        }
+    }
 
     /// A clipped measured overbar belongs to its anchored formula, while nearby text remains outside.
     #[test]

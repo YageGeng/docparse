@@ -4,7 +4,38 @@ Formula records retain the original layout `bbox`. When native glyph metrics
 justify completing a clipped formula or an adjacent script, `crop_bbox` records
 the refined inference bounds and `text_spans` includes the recovered source.
 The original text facts remain unchanged; ambiguous or estimated script geometry
-does not expand the crop.
+does not drive the native-glyph refinement.
+
+Inline recognition crops additionally expand toward the first locally background-colored
+row or column on each side of the existing detector/glyph extent. The probe uses the
+already rendered page raster, estimates the background from a nearby perimeter, and
+requires every pixel of the boundary line to match within a small RGB tolerance.
+The search is bounded to one crop height per side, the page edges and unrelated
+neighboring text rows; a side without a reliable separator stays unchanged. This
+prevents a detector box grazing another row from expanding across that row's ink.
+Confirmed cross-line scripts remain inside the seed. Each side probes independently
+over the seed's original width or height and stops at the first matching line.
+Resolved edges stay fixed, even if another side exposes ink in a corner.
+Display formulas keep their existing cropping policy. `crop_bbox` records the final
+recognition bounds while `bbox` and native text ownership remain unchanged. The final
+RGB crop is copied from the page raster into a contiguous model input; no PDF rerender
+or enlargement of an earlier formula thumbnail is involved.
+
+Background sampling uses a fixed 12-bit RGB histogram. Neighbor rows are checked
+geometrically before inspecting text ownership, and the extra diagnostic perimeter
+scan runs only when DEBUG events are enabled. These optimizations preserve the
+background tolerance, search limits and resulting crop pixels.
+
+The ignored `benchmark_captured_formula_crops` test replays a saved `PageResult`
+JSON and its matching rendered PNG without loading inference models. Set
+`FORMULA_CROP_BENCH_PAGE`, `FORMULA_CROP_BENCH_RASTER`, and
+`FORMULA_CROP_BENCH_OUTPUT` to absolute paths, then run
+`rtk cargo test -p docparse-core --release --lib benchmark_captured_formula_crops -- --ignored --nocapture`.
+The report records seven timing samples per stage and exact crop/limit metadata
+plus RGB SHA-256 fingerprints for before/after comparisons. A local replay of 36
+inline formulas measured 354 to 143 microseconds per page (median, 1,000 replays
+per sample); this measures crop preparation only, excluding PDF rendering, text
+refinement and model inference.
 
 DocParse 的原生 PDF 文本提取、文档上下文、版面/文字融合、异步 parser、稳定 schema、关系和 JSON/Text/Markdown/SVG 输出 crate。
 
