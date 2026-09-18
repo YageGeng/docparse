@@ -32,7 +32,14 @@ type UploadEntry = PendingUpload & {
   job?: Job;
 };
 const storageKey = `docparse.pending-upload:${apiPrefix}`;
-const uploadConcurrency = 100;
+const navigation = performance.getEntriesByType("navigation")[0] as
+  | PerformanceNavigationTiming
+  | undefined;
+// HTTP/1.x uploads share six origin sockets with status reads and SSE; leave two sockets available for those requests.
+const uploadConcurrency =
+  navigation?.nextHopProtocol === "h2" || navigation?.nextHopProtocol === "h3"
+    ? 100
+    : 4;
 const maxRateLimitRetries = 6;
 
 /** Restores pending identities, including the previous single-file format, without retaining PDF bytes. */

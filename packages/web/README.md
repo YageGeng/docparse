@@ -82,9 +82,11 @@ snapshots and release the PDF/result readers, including after deletion in anothe
 - History comes from `GET /jobs/list`, ordered by creation time and UUID. Filename
   search, status filters and cursor pagination run on the server. Older jobs can
   have unknown filenames or sizes.
-- File selection and drag-and-drop accept multiple PDFs. Up to 100 files upload
-  concurrently through the existing single-file API, with independent XHR progress
-  and errors. The backend's `server.max_uploads` independently limits concurrent
+- File selection and drag-and-drop accept multiple PDFs. HTTP/2 and HTTP/3 allow
+  up to 100 concurrent uploads; HTTP/1.x and unknown transports send four at a time
+  so status reads and SSE can use the remaining browser connections. Selection size
+  is unchanged and excess files wait in the application queue, with independent XHR
+  progress and errors. The backend's `server.max_uploads` independently limits concurrent
   uploads across all clients. A failed file does not cancel the remaining queue.
   The history page stays open; each accepted row links to its own task.
   HTTP 429 responses retain the same UUID and retry up to six times with jittered

@@ -95,7 +95,7 @@ tokio = { version = "1", default-features = false, features = ["macros", "sync"]
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 
 # http
-axum = { version = "0.8", features = ["multipart"] }
+axum = { version = "0.8", features = ["http2", "multipart"] }
 http-body = "1"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "fs"] } # CORS is handled at ingress.
