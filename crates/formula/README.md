@@ -118,7 +118,7 @@ Apache-2.0 license notices.
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
 Required `formula.queue_size` sets its capacity independently of sessions and batches.
-`formula.engine.session_size` creates 1–8 independent PP consumers (default 1).
+`formula.engine.session_size` creates a positive, deployment-configured number of independent PP consumers (default 1).
 Native queue executors belong to the engine and survive its construction runtime.
 Each idle owner drains only ready work up to `formula.batch_size`; short tails
 run immediately. The parser reserves crop admission before raster allocation,

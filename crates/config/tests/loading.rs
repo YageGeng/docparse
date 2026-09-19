@@ -1007,3 +1007,41 @@ fn tatr_configuration_accepts_optional_cell_detection() {
         .expect("TATR structure geometry");
     assert_eq!(config.tsr().model, docparse_config::TsrModel::Tatr);
 }
+
+/// Every local model accepts deployment-sized session counts while rejecting zero consumers.
+#[test]
+fn model_session_counts_have_no_policy_ceiling() {
+    let paths = [
+        "/layout/session_size",
+        "/tsr/session_size",
+        "/tsr/cell_detection/session_size",
+        "/ocr/detection/session_size",
+        "/ocr/recognition/session_size",
+        "/ocr/orientation/session_size",
+        "/formula/engine/session_size",
+    ];
+    for engine in ["pp", "texo"] {
+        for count in [16, 64] {
+            let mut value =
+                serde_json::to_value(docparse_config::RawConfig::default())
+                    .expect("defaults");
+            *value.pointer_mut("/formula/engine").expect("engine") =
+                serde_json::json!({"type": engine, "session_size": count});
+            for path in paths {
+                *value.pointer_mut(path).expect("session field") = count.into();
+            }
+            let raw: docparse_config::RawConfig =
+                serde_json::from_value(value.clone()).expect("raw config");
+            docparse_config::ValidatedConfig::try_from(raw)
+                .expect("positive session counts");
+            for path in paths {
+                let mut invalid = value.clone();
+                *invalid.pointer_mut(path).expect("session field") = 0.into();
+                let raw: docparse_config::RawConfig =
+                    serde_json::from_value(invalid).expect("raw config");
+                docparse_config::ValidatedConfig::try_from(raw)
+                    .expect_err("zero consumers");
+            }
+        }
+    }
+}

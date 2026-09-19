@@ -107,7 +107,7 @@ overrides can use `DOCPARSE_RUNTIME__MEMORY_PATTERN`.
 portable runtime helpers, and timing contexts. Model crates retain loading, tensor
 batching, inference, and output conversion.
 
-Every local model has `session_size` (1–8, default 1) independent ONNX owners
+Every local model has `session_size` (positive integer, default 1) independent ONNX owners
 consuming one shared bounded queue. Required `queue_size` independently bounds
 pending inputs; a full queue waits for space. It may be smaller than `batch_size`.
 `batch_size` (1–32) caps the number of ready

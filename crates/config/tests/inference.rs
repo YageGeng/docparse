@@ -268,9 +268,11 @@ fn inference_limits_reject_invalid_counts_and_old_names() {
             value.pointer_mut(path).expect("model")["session_size"] =
                 json!(count);
             let raw: RawConfig = serde_json::from_value(value).expect("schema");
-            assert!(
-                ValidatedConfig::try_from(raw).is_err(),
-                "accepted {path} session_size={count}"
+            // Nine consumers are valid now; zero must still fail before resource allocation.
+            assert_eq!(
+                ValidatedConfig::try_from(raw).is_ok(),
+                count > 0,
+                "unexpected validation for {path} session_size={count}"
             );
         }
     }

@@ -5,9 +5,9 @@ use docparse_config::{
     ValidatedConfig,
 };
 
-/// Texo session capacity defaults conservatively and rejects unbounded or empty pools.
+/// Texo defaults to one consumer and rejects empty pools without imposing a hardware ceiling.
 #[test]
-fn texo_sessions_are_bounded_and_default_to_one() {
+fn texo_sessions_are_positive_and_default_to_one() {
     let mut value = serde_json::to_value(RawConfig::default()).expect("config");
     assert_eq!(
         value.pointer("/formula/engine/session_size"),
@@ -18,7 +18,12 @@ fn texo_sessions_are_bounded_and_default_to_one() {
             .pointer_mut("/formula/engine/session_size")
             .expect("sessions") = count.into();
         let raw = serde_json::from_value(value.clone()).expect("shape");
-        assert_invalid_value(raw, "formula.engine.session_size");
+        // Preserve zero rejection while allowing counts beyond the former eight-session limit.
+        if count == 0 {
+            assert_invalid_value(raw, "formula.engine.session_size");
+        } else {
+            ValidatedConfig::try_from(raw).expect("positive consumer count");
+        }
     }
 }
 

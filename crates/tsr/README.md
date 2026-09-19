@@ -42,7 +42,7 @@ native calls retain their resources until completion. Browser submission remains
 concurrent, but the existing WebGPU execution/readback guard still serializes
 physical runtime access.
 
-Each model owns `session_size` independent consumers (1–8, default 1), configured
+Each model owns `session_size` independent consumers (positive integer, default 1), configured
 separately as `tsr.session_size` and `tsr.cell_detection.session_size`. They consume
 one shared queue per model. `tsr.batch_size` and
 `tsr.cell_detection.batch_size` independently cap ready crops per ONNX invocation

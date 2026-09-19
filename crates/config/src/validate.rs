@@ -145,7 +145,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 });
             }
         }
-        // Session counts are model consumers; batch sizes never alter page admission.
+        // Hardware capacity determines session counts; require a consumer without imposing a deployment ceiling.
         for (value, field) in [
             (config.layout.session_size, "layout.session_size"),
             (config.tsr.session_size, "tsr.session_size"),
@@ -162,10 +162,10 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 "ocr.orientation.session_size",
             ),
         ] {
-            if !(1..=8).contains(&value) {
+            if value == 0 {
                 return Err(ConfigError::InvalidValue {
                     field,
-                    reason: "must be between 1 and 8",
+                    reason: "must be greater than zero",
                 });
             }
         }
@@ -220,10 +220,10 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             "layout.score_threshold",
         )?;
         if let Some(cells) = &config.tsr.cell_detection {
-            if !(1..=8).contains(&cells.session_size) {
+            if cells.session_size == 0 {
                 return Err(ConfigError::InvalidValue {
                     field: "tsr.cell_detection.session_size",
-                    reason: "must be between 1 and 8",
+                    reason: "must be greater than zero",
                 });
             }
             // Bound detector batches independently from structure batches and table admission.
@@ -344,10 +344,10 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             crate::FormulaEngineConfig::Texo(texo) => texo.session_size,
             crate::FormulaEngineConfig::Mineru(_) => 1,
         };
-        if !(1..=8).contains(&session_size) {
+        if session_size == 0 {
             return Err(ConfigError::InvalidValue {
                 field: "formula.engine.session_size",
-                reason: "must be between 1 and 8",
+                reason: "must be greater than zero",
             });
         }
         if !(1..=32).contains(&config.formula.batch_size) {

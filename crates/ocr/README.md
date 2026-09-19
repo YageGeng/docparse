@@ -15,7 +15,7 @@ outputs are validated before decoding, and cancelled callers cannot release
 buffers still used by ONNX Runtime.
 
 Detection, recognition, and orientation each own a shared queue with independently
-configured `session_size` (1–8, default 1), `batch_size` (1–32), and required
+configured `session_size` (positive integer, default 1), `batch_size` (1–32), and required
 `queue_size` (pending inputs) under
 `ocr.detection`, `ocr.recognition`, and `ocr.orientation`. Detection defaults to
 batch 1; recognition and orientation default to 16. The former top-level

@@ -629,7 +629,7 @@ them to use the defaults.
 
 ## Per-model session and batch limits
 
-Use `session_size` (1–8) and `batch_size` (1–32) under `layout`, `tsr`,
+Use `session_size` (positive integer; no fixed upper limit) and `batch_size` (1–32) under `layout`, `tsr`,
 `tsr.cell_detection`, and each of `ocr.detection`, `ocr.recognition`, and
 `ocr.orientation`. Local formula engines use `formula.engine.session_size` and
 `formula.batch_size`. The former `sessions` and top-level `ocr.batch_size` names

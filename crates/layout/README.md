@@ -5,7 +5,7 @@ Supports CPU and mutually exclusive `cuda`, `coreml`, and `openvino` features.
 Explicit accelerator initialization failures are returned without silent fallback.
 Model artifacts and Python output oracles are documented in the root README.
 
-`layout.session_size` creates 1–8 independent consumers (default 1) sharing one
+`layout.session_size` creates a positive, deployment-configured number of independent consumers (default 1) sharing one
 bounded queue. Required `layout.queue_size` bounds pending pages independently
 of sessions. `layout.batch_size` caps ready pages per inference (1–32, default 1).
 An idle consumer takes available pages immediately, combines their tensors, and

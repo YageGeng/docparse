@@ -5,8 +5,8 @@ export function formulaEngineError(value: unknown, enabled = true): string | und
   const engine = value as Record<string, unknown>;
   const keys = engine.type === "mineru" ? ["type", "server_url", "concurrency"] : ["type", "session_size"];
   if (!["pp", "texo", "mineru"].includes(String(engine.type)) || Object.keys(engine).some(key => !keys.includes(key))) return "formula.engine accepts pp, texo, or mineru and its engine-specific settings";
-  // Session count describes independent local model consumers on native and browser backends.
-  if (engine.type !== "mineru" && engine.session_size !== undefined && (typeof engine.session_size !== "number" || !Number.isSafeInteger(engine.session_size) || engine.session_size < 1 || engine.session_size > 8)) return "session_size must be an integer between 1 and 8";
+  // Hardware capacity determines positive session counts; retain only integer representability checks.
+  if (engine.type !== "mineru" && engine.session_size !== undefined && (typeof engine.session_size !== "number" || !Number.isSafeInteger(engine.session_size) || engine.session_size < 1)) return "session_size must be a positive safe integer";
   if (engine.type !== "mineru" || !enabled) return;
   try {
     if (typeof engine.server_url !== "string" || !engine.server_url.trim()) throw new Error("missing URL");

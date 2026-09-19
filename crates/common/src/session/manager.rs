@@ -66,7 +66,8 @@ impl<R: SessionRequest> SessionManager<R> {
         W: FnMut(Vec<R>) + 'static,
         E: From<TaskError> + Send + 'static,
     {
-        if !(1..=8).contains(&session_size)
+        // Deployments choose consumer counts according to their available CPU/GPU memory.
+        if session_size == 0
             || !(1..=32).contains(&batch_size)
             || queue_size == 0
         {
@@ -164,6 +165,42 @@ mod tests {
         }
         /// This test has no timing observer to finish.
         fn end_queue(&mut self) {}
+    }
+
+    /// The shared runtime starts every requested consumer beyond the former eight-session ceiling.
+    #[test]
+    fn session_count_is_positive_without_fixed_ceiling() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let initialized = Arc::clone(&count);
+        let manager =
+            SessionManager::<Request>::start("test", 16, 1, 1, move || {
+                initialized.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, TaskError>(|requests: Vec<Request>| {
+                    for request in requests {
+                        let _ = request.reply.send(1);
+                    }
+                })
+            })
+            .expect("sixteen consumers");
+        assert_eq!(count.load(Ordering::SeqCst), 16);
+        let (reply, response) = std::sync::mpsc::channel();
+        manager
+            .send(Request {
+                canceled: false,
+                reply,
+            })
+            .expect("enqueue");
+        assert_eq!(
+            response
+                .recv_timeout(Duration::from_secs(2))
+                .expect("response"),
+            1
+        );
+        drop(manager);
+        let invalid = SessionManager::<Request>::start("test", 0, 1, 1, || {
+            Ok::<_, TaskError>(|_: Vec<Request>| {})
+        });
+        assert!(invalid.is_err());
     }
 
     /// Two consumers share capacity, skip canceled requests, and outlive their construction runtime.
