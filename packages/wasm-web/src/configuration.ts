@@ -3,10 +3,12 @@ export function formulaEngineError(value: unknown, enabled = true): string | und
   if (value === undefined) return;
   if (!value || typeof value !== "object" || Array.isArray(value)) return "formula.engine must be an object";
   const engine = value as Record<string, unknown>;
-  const keys = engine.type === "mineru" ? ["type", "server_url", "concurrency"] : ["type", "cpu_session_size", "gpu_session_size"];
+  const keys = engine.type === "mineru" ? ["type", "server_url", "concurrency"] : ["type", "cpu_session_size", "gpu_session_size", "cpu_intra_threads"];
   if (!["pp", "texo", "mineru"].includes(String(engine.type)) || Object.keys(engine).some(key => !keys.includes(key))) return "formula.engine accepts pp, texo, or mineru and its engine-specific settings";
   // CPU and GPU counts are independent, with browser defaults of zero CPU and one GPU owner.
   if (engine.type !== "mineru") {
+    // Mirror the native ORT integer contract; the WASM validator rejects non-default CPU threading.
+    if (engine.cpu_intra_threads !== undefined && (typeof engine.cpu_intra_threads !== "number" || !Number.isSafeInteger(engine.cpu_intra_threads) || engine.cpu_intra_threads < 1 || engine.cpu_intra_threads > 2147483647)) return "cpu_intra_threads must be an integer between 1 and 2147483647";
     for (const key of ["cpu_session_size", "gpu_session_size"]) {
       const count = engine[key];
       if (count !== undefined && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)) return `${key} must be a nonnegative safe integer`;

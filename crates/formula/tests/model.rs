@@ -14,6 +14,7 @@ fn shared_pp_sessions_survive_construction_runtime() {
     raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
         docparse_config::PpFormulaConfig::builder()
             .cpu_session_size(1)
+            .cpu_intra_threads(4)
             .gpu_session_size(usize::from(
                 docparse_layout::OnnxBackend::compiled().execution_provider()
                     != docparse_layout::ExecutionProvider::Cpu,

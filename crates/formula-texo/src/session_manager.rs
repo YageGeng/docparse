@@ -116,6 +116,7 @@ impl SessionManager {
             config.queue_size,
         );
         let cpu_count = texo.cpu_session_size;
+        let cpu_intra_threads = texo.cpu_intra_threads;
         run_cpu(move || {
             Self::start(sessions, batch_size, queue_size, move |index| {
                 let backend = backend.formula_worker(index, cpu_count)?;
@@ -127,14 +128,22 @@ impl SessionManager {
                     index,
                     backend.execution_provider()
                 );
+                // CPU consumers use their configured operator pool; CUDA host work stays at one thread.
+                let intra_threads = if backend.execution_provider()
+                    == docparse_layout::ExecutionProvider::Cpu
+                {
+                    cpu_intra_threads
+                } else {
+                    1
+                };
                 // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
+                        .with_intra_threads(intra_threads)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
+                        .with_intra_threads(intra_threads)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,

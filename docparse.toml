@@ -103,6 +103,8 @@ timeout_ms = 120000
 type = "texo"
 # CPU and CUDA owners consume one shared formula queue.
 cpu_session_size = 2
+# Native CPU intra-op threads per session; GPU consumers keep one host thread.
+cpu_intra_threads = 1
 gpu_session_size = 4
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"

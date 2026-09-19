@@ -1072,3 +1072,35 @@ fn formula_cpu_gpu_session_configuration() {
             .expect_err("retired single count");
     }
 }
+
+/// Local formula engines default to one CPU thread and reject ORT auto-threading or integer overflow.
+#[test]
+fn formula_cpu_intra_threads_are_validated() {
+    for engine in ["pp", "texo"] {
+        for (threads, valid) in [
+            (0_u64, false),
+            (1, true),
+            (4, true),
+            (i32::MAX as u64 + 1, false),
+        ] {
+            let mut value =
+                serde_json::to_value(docparse_config::RawConfig::default())
+                    .expect("defaults");
+            *value.pointer_mut("/formula/engine").expect("engine") =
+                serde_json::json!({"type":engine,"cpu_intra_threads":threads});
+            let raw: docparse_config::RawConfig =
+                serde_json::from_value(value).expect("config");
+            assert_eq!(
+                docparse_config::ValidatedConfig::try_from(raw).is_ok(),
+                valid
+            );
+        }
+    }
+    assert_eq!(
+        docparse_config::RawConfig::default()
+            .formula
+            .engine
+            .cpu_intra_threads(),
+        1
+    );
+}

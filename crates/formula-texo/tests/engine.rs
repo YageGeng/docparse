@@ -54,6 +54,7 @@ async fn real_model_batch_parity_and_cancellation() {
     raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
         docparse_config::TexoFormulaConfig::builder()
             .cpu_session_size(1)
+            .cpu_intra_threads(4)
             .gpu_session_size(usize::from(
                 docparse_layout::OnnxBackend::compiled().execution_provider()
                     != docparse_layout::ExecutionProvider::Cpu,

@@ -127,3 +127,10 @@ original regions. Canceled requests do not use batch slots. Native PP execution
 is terminated only when all callers sharing the physical batch have canceled;
 one caller cannot terminate a neighbor's inference. Decoder failures remain
 specific to the affected crop.
+
+`formula.engine.cpu_intra_threads` configures intra-op threads for each native
+CPU session (default 1). Texo applies it to both encoder and decoder; those graphs
+execute sequentially within a consumer. GPU session threading is unchanged.
+Zero is rejected to avoid silently selecting ORT automatic threading. ORT Web
+uses a global WASM thread pool, so browser CPU sessions reject values other than
+1 rather than silently ignoring a native-only per-session setting.

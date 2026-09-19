@@ -28,6 +28,7 @@ timeout_ms = 120000
 type = "texo"
 cpu_session_size = 1
 gpu_session_size = 1
+cpu_intra_threads = 1
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
@@ -177,3 +178,10 @@ Queue capacity, global ORT optimization/memory settings, cancellation, and the
 shared formula batch limit remain unchanged. CPU/GPU token equivalence is covered
 by the pinned real-fixture test on CUDA builds; new documents can still expose
 floating-point differences between providers.
+
+`formula.engine.cpu_intra_threads` configures intra-op threads for each native
+CPU session (default 1). Texo applies it to both encoder and decoder; those graphs
+execute sequentially within a consumer. GPU session threading is unchanged.
+Zero is rejected to avoid silently selecting ORT automatic threading. ORT Web
+uses a global WASM thread pool, so browser CPU sessions reject values other than
+1 rather than silently ignoring a native-only per-session setting.

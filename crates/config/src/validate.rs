@@ -339,6 +339,15 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         {
             mineru.endpoint()?;
         }
+        // ORT accepts a signed 32-bit count; zero would silently enable automatic threading.
+        if !(1..=i32::MAX as usize)
+            .contains(&config.formula.engine.cpu_intra_threads())
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.engine.cpu_intra_threads",
+                reason: "must be between 1 and 2147483647",
+            });
+        }
         let (cpu, gpu) = config.formula.engine.session_counts();
         // Check arithmetic/permit representability without imposing a hardware-dependent session ceiling.
         let capacity = cpu

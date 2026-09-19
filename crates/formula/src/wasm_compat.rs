@@ -30,10 +30,11 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            cpu_session_size: usize,
-            gpu_session_size: usize,
+            sessions: (usize, usize, usize),
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
+            let (cpu_session_size, gpu_session_size, cpu_intra_threads) =
+                sessions;
             let session_size = cpu_session_size + gpu_session_size;
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
@@ -73,7 +74,15 @@ mod platform {
                     } else {
                         SessionBuilder::try_from(backend)?
                     }
-                    .with_intra_threads(1)
+                    .with_intra_threads(
+                        if backend.execution_provider()
+                            == docparse_layout::ExecutionProvider::Cpu
+                        {
+                            cpu_intra_threads
+                        } else {
+                            1
+                        },
+                    )
                     .map_err(ort::Error::from)?;
                     let session = builder.commit_from_memory(&model)?;
                     Ok::<_, FormulaError>((
@@ -231,10 +240,10 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            cpu_session_size: usize,
-            gpu_session_size: usize,
+            sessions: (usize, usize, usize),
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
+            let (cpu_session_size, gpu_session_size, _) = sessions;
             let session_size = cpu_session_size + gpu_session_size;
             let metrics = docparse_common::telemetry::ModelMetrics::new(
                 "formula_pp",

@@ -82,8 +82,11 @@ impl PpFormulaNetEngine {
             backend,
             kind,
             config.formula().batch_size,
-            cpu_session_size,
-            gpu_session_size,
+            (
+                cpu_session_size,
+                gpu_session_size,
+                config.formula().engine.cpu_intra_threads(),
+            ),
             config.formula().queue_size,
         )
         .await

@@ -221,6 +221,15 @@ pub enum FormulaEngineConfig {
 }
 
 impl FormulaEngineConfig {
+    /// Returns the native CPU operator thread count for either local formula family.
+    pub fn cpu_intra_threads(&self) -> usize {
+        match self {
+            Self::Pp(config) => config.cpu_intra_threads,
+            Self::Texo(config) => config.cpu_intra_threads,
+            Self::Mineru(_) => 1,
+        }
+    }
+
     /// Returns pure CPU and accelerated consumer counts without exposing model-specific file fields.
     pub fn session_counts(&self) -> (usize, usize) {
         match self {
@@ -305,6 +314,9 @@ pub struct PpFormulaConfig {
     #[serde(default = "default_session_size")]
     #[builder(default = 1)]
     pub cpu_session_size: usize,
+    /// Intra-op threads per native CPU session; accelerator sessions retain their existing policy.
+    #[builder(default = 1)]
+    pub cpu_intra_threads: usize,
     /// Accelerated consumers share the same queue; zero disables accelerator sessions.
     #[builder(default = 0)]
     pub gpu_session_size: usize,
@@ -336,6 +348,9 @@ pub struct TexoFormulaConfig {
     /// Pure CPU encoder/decoder pairs consuming the shared crop queue.
     #[builder(default = 1)]
     pub cpu_session_size: usize,
+    /// Intra-op threads per native CPU session; accelerator sessions retain their existing policy.
+    #[builder(default = 1)]
+    pub cpu_intra_threads: usize,
     /// Accelerated consumers share the same queue; zero disables accelerator sessions.
     #[builder(default = 0)]
     pub gpu_session_size: usize,
