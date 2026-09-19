@@ -74,6 +74,8 @@ export interface WebParseConfig {
     engine?: FormulaEngineOptions;
     /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
     inline_enabled?: boolean;
+    /** Optional adaptive inline shedding; display formulas continue normally. */
+    backpressure?: { enabled?: boolean; high_watermark?: number; low_watermark?: number; pause_after_secs?: number; resume_after_secs?: number };
     /** Defaults to true; false skips display recognition independently of inline formulas. */
     display_enabled?: boolean;
     batch_size?: number;

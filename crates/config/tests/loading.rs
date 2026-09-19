@@ -1104,3 +1104,37 @@ fn formula_cpu_intra_threads_are_validated() {
         1
     );
 }
+
+/// Partial policy configuration inherits defaults and invalid hysteresis cannot start an engine.
+#[test]
+fn formula_backpressure_policy_defaults_and_validation() {
+    let mut raw = docparse_config::RawConfig::default();
+    assert!(!raw.formula.backpressure.enabled);
+    assert_eq!(raw.formula.backpressure.pause_after_secs, 30);
+    raw.formula.backpressure.enabled = true;
+    docparse_config::ValidatedConfig::try_from(raw.clone())
+        .expect("valid policy");
+    for (high, low, pause, resume) in [
+        (0.5, 0.5, 30, 30),
+        (1.1, 0.5, 30, 30),
+        (0.8, -0.1, 30, 30),
+        (f64::NAN, 0.5, 30, 30),
+        (0.85, 0.5, 0, 30),
+        (0.85, 0.5, 30, 0),
+    ] {
+        let mut invalid = raw.clone();
+        invalid.formula.backpressure =
+            docparse_config::FormulaBackpressureConfig::builder()
+                .high_watermark(high)
+                .low_watermark(low)
+                .pause_after_secs(pause)
+                .resume_after_secs(resume)
+                .build();
+        docparse_config::ValidatedConfig::try_from(invalid)
+            .expect_err("invalid hysteresis");
+    }
+    let policy: docparse_config::FormulaBackpressureConfig =
+        serde_json::from_str(r#"{"enabled":true}"#).expect("partial policy");
+    assert!(policy.enabled);
+    assert!((policy.high_watermark - 0.85).abs() < f64::EPSILON);
+}

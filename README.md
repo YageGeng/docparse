@@ -415,3 +415,42 @@ no fixed hardware ceiling. Native library defaults are CPU=1, GPU=0; GPU consume
 require an accelerator build (for NVIDIA, `--features cuda`). The repository profile
 uses CPU=2, GPU=4; set GPU=0 for CPU-only builds. The retired formula `session_size`
 field is rejected. Other models keep their existing `session_size`.
+
+### Adaptive inline formula admission
+
+```toml
+[formula.backpressure]
+enabled = false
+high_watermark = 0.85
+low_watermark = 0.50
+pause_after_secs = 30
+resume_after_secs = 30
+```
+
+This opt-in policy pauses new inline formula recognition after queue occupancy
+stays strictly above the high watermark for the configured duration. Recovery
+requires occupancy strictly below the low watermark for its own duration. A
+broken condition resets its timer; equality does not satisfy either condition.
+Watermarks must satisfy `0 <= low < high <= 1`, and durations must be positive.
+A high watermark of 1 never triggers and a low watermark of 0 never recovers.
+
+Each engine's real pending queue tracks transitions on enqueue/dequeue/discard.
+A cancellable deadline updates state and telemetry even without new traffic;
+page admission also checks monotonic time in case scheduling delayed the timer.
+Only enabled policies create a timer owner. Native timer ownership survives the
+constructing Tokio runtime; browser timers stay Worker-local. Interval changes
+cancel/rearm the wait, and queue destruction cancels it before clearing state.
+No telemetry recorder or periodic polling is required. One decision covers the page's formula
+stage before crop allocation; existing queued work and display formulas continue.
+Skipped regions retain their existing PDF/OCR source content. Missing source text
+cannot be reconstructed by this policy. Pages carry an `InlineFormulaBackpressure`
+warning with the skipped count, even when diagnostics are disabled. The policy
+never changes `inline_enabled`; explicitly disabled inline recognition stays off.
+
+The metrics endpoint exposes `docparse_formula_inline_paused` (number of paused
+engine instances per queue), `docparse_formula_inline_transitions_total` (action
+`pause`/`resume`), and `docparse_formula_inline_skipped_total`. This is a temporary
+quality reduction, not deferred recognition: restoring load does not revisit
+skipped pages. PP, Texo CPU/GPU pools, and MinerU share the same queue-backed policy;
+custom recognizers without a pressure handle opt out. Browser configuration uses
+`config.formula.backpressure` with the same fields and defaults.

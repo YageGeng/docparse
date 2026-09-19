@@ -24,6 +24,13 @@ mod platform {
     }
 
     impl SessionRunner {
+        /// Returns the same pressure state for native and browser formula queues.
+        pub(crate) fn pressure(
+            &self,
+        ) -> Arc<docparse_common::queue::QueuePressure> {
+            self.queue.pressure()
+        }
+
         /// Loads consumers over an explicitly sized queue, using the CPU compatibility executor on Apple.
         pub(crate) async fn load(
             artifacts: FormulaArtifacts,
@@ -234,6 +241,13 @@ mod platform {
     }
 
     impl SessionRunner {
+        /// Returns the same pressure state for native and browser formula queues.
+        pub(crate) fn pressure(
+            &self,
+        ) -> Arc<docparse_common::queue::QueuePressure> {
+            self.queue.pressure()
+        }
+
         /// Builds one browser actor and retains the global inference/readback exclusion boundary.
         pub(crate) async fn load(
             artifacts: FormulaArtifacts,

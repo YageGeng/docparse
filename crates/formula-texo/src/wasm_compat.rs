@@ -103,6 +103,13 @@ mod platform {
     }
 
     impl SessionRunner {
+        /// Shares the browser pending queue's pressure state with the engine.
+        pub(crate) fn pressure(
+            &self,
+        ) -> Arc<docparse_common::queue::QueuePressure> {
+            self.queue.pressure()
+        }
+
         /// Loads both graphs using the host-initialized ORT Web backend and starts their local owner.
         pub(crate) async fn load(
             artifacts: TexoArtifacts,

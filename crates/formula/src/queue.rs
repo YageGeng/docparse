@@ -15,7 +15,29 @@ pub struct FormulaQueue {
     sender: docparse_common::queue::QueueSender<FormulaRequest>,
 }
 
+/// Connects the formula policy to the actual queue before producer access begins.
+pub fn configure_backpressure(
+    pressure: &docparse_common::queue::QueuePressure,
+    config: &docparse_config::FormulaConfig,
+) -> Result<(), docparse_common::TaskError> {
+    let policy = &config.backpressure;
+    if policy.enabled && config.inline_enabled {
+        pressure.configure(
+            policy.high_watermark,
+            policy.low_watermark,
+            std::time::Duration::from_secs(policy.pause_after_secs),
+            std::time::Duration::from_secs(policy.resume_after_secs),
+        )?;
+    }
+    Ok(())
+}
+
 impl FormulaQueue {
+    /// Shares pressure tracking across every caller of this engine.
+    pub fn pressure(&self) -> Arc<docparse_common::queue::QueuePressure> {
+        self.sender.pressure()
+    }
+
     /// Creates a bounded crop queue; capacity must be positive, as with Tokio channels.
     pub fn new(
         name: &'static str,

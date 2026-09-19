@@ -68,11 +68,11 @@ impl ParseObserver for ProgressObserver {
         self.0.send_replace(Some(progress));
     }
 
-    /// Surfaces slow completed stages at the default log level, retaining the current job correlation.
+    /// Records slow completed stages at TRACE while retaining the current job correlation.
     fn on_timing(&self, timing: docparse_core::Timing) {
-        // Short per-crop stages remain DEBUG-only in the shared timer to keep production logs bounded.
+        // Backpressure commonly exceeds this threshold; require TRACE to avoid flooding production logs.
         if timing.duration_ms >= 1000.0 {
-            tracing::info!(
+            tracing::trace!(
                 "slow parse stage {:?} for page {:?} elapsed {:.3} ms",
                 timing.stage,
                 timing.page_number,

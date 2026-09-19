@@ -98,6 +98,13 @@ pub(crate) struct SessionManager {
 }
 
 impl SessionManager {
+    /// Reads pending pressure from the shared CPU/GPU queue.
+    pub(crate) fn pressure(
+        &self,
+    ) -> Arc<docparse_common::queue::QueuePressure> {
+        self.sessions.pressure()
+    }
+
     /// Builds all session pairs once; verified artifact bytes are shared only during initialization.
     pub(crate) async fn load(
         artifacts: TexoArtifacts,

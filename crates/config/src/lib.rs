@@ -6,12 +6,12 @@ mod validate;
 mod wasm_compat;
 
 pub use config::{
-    DatabaseConfig, FormulaConfig, FormulaEngineConfig, FusionConfig,
-    LayoutConfig, LogConfig, MineruFormulaConfig, ModelFiles, OcrConfig,
-    OcrModelConfig, OcrPolicy, OptimizationLevel, OutputConfig,
-    PpFormulaConfig, RawConfig, RenderConfig, RuntimeConfig, ServerConfig,
-    TableCellConfig, TableCellModel, TableMode, TexoFormulaConfig, TsrConfig,
-    TsrModel,
+    DatabaseConfig, FormulaBackpressureConfig, FormulaConfig,
+    FormulaEngineConfig, FusionConfig, LayoutConfig, LogConfig,
+    MineruFormulaConfig, ModelFiles, OcrConfig, OcrModelConfig, OcrPolicy,
+    OptimizationLevel, OutputConfig, PpFormulaConfig, RawConfig, RenderConfig,
+    RuntimeConfig, ServerConfig, TableCellConfig, TableCellModel, TableMode,
+    TexoFormulaConfig, TsrConfig, TsrModel,
 };
 pub use error::ConfigError;
 

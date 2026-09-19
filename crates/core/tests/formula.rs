@@ -70,8 +70,14 @@ impl LayoutEngine for Layout {
 struct Recognizer {
     batches: Arc<Mutex<Vec<usize>>>,
     fail: bool,
+    pressure: Option<Arc<docparse_common::queue::QueuePressure>>,
 }
 impl FormulaEngine for Recognizer {
+    /// Supplies a real queue pressure handle only for adaptive admission checks.
+    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
+        self.pressure.as_ref().map(Arc::clone)
+    }
+
     /// Returns the test engine identity.
     fn name(&self) -> &str {
         "formula-test-recognizer"
@@ -116,6 +122,7 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
             .formula_engine(Arc::new(Recognizer {
                 batches: Arc::clone(&batches),
                 fail,
+                pressure: None,
             }))
             .build()
             .await
@@ -270,6 +277,7 @@ async fn independent_formula_toggles_preserve_native_source() {
                 .formula_engine(Arc::new(Recognizer {
                     batches: Arc::clone(&batches),
                     fail: false,
+                    pressure: None,
                 }))
                 .build()
                 .await
@@ -316,6 +324,85 @@ async fn independent_formula_toggles_preserve_native_source() {
             } else {
                 original_source = Some(source);
             }
+        }
+    }
+}
+
+/// Shedding skips only inline calls, records per-page warnings, and matches manual-disable source preservation.
+#[tokio::test]
+async fn backpressure_preserves_source_text_and_display_formulas() {
+    struct Pending;
+    impl docparse_common::SessionRequest for Pending {
+        /// The deliberately retained item keeps the test queue overloaded.
+        fn cancelled(&self) -> bool {
+            false
+        }
+        /// No request-local timer is needed for this pressure stimulus.
+        fn end_queue(&mut self) {}
+    }
+    let (sender, _receiver) = docparse_common::Queue::new("formula_test", 1);
+    let pressure = sender.pressure();
+    pressure
+        .configure(
+            0.85,
+            0.5,
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+        )
+        .expect("pressure timer");
+    sender
+        .send(Pending)
+        .await
+        .expect("enqueue pressure stimulus");
+    assert!(pressure.paused());
+    let mut baseline = None;
+    for adaptive in [false, true] {
+        let mut raw = RawConfig::default();
+        raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+        raw.formula.inline_enabled = adaptive;
+        raw.formula.backpressure.enabled = adaptive;
+        let batches = Arc::new(Mutex::new(Vec::new()));
+        let parser = DocParser::builder()
+            .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+            .layout_engine(Arc::new(Layout {
+                display_formulas: true,
+            }))
+            .formula_engine(Arc::new(Recognizer {
+                batches: Arc::clone(&batches),
+                fail: false,
+                pressure: Some(Arc::clone(&pressure)),
+            }))
+            .build()
+            .await
+            .expect("parser");
+        let result = parser
+            .parse_path(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/pdf/multipage_layout.pdf"),
+            )
+            .await
+            .expect("parse");
+        assert_eq!(batches.lock().expect("calls").iter().sum::<usize>(), 6);
+        let mut text = Vec::new();
+        for page in &result.pages {
+            assert_eq!(page.formulas.len(), 2);
+            assert!(page.formulas.iter().all(|formula| formula.label==LayoutLabel::DisplayFormula));
+            assert_eq!(
+                page.warnings
+                    .iter()
+                    .any(|warning| warning.code == "InlineFormulaBackpressure"),
+                adaptive
+            );
+            text.extend(
+                page.blocks
+                    .iter()
+                    .map(|block| (block.text.clone(), block.markdown.clone())),
+            );
+        }
+        if adaptive {
+            assert_eq!(Some(text), baseline);
+        } else {
+            baseline = Some(text);
         }
     }
 }

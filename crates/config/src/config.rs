@@ -158,10 +158,36 @@ impl Default for RawConfig {
     }
 }
 
+/// Optional inline-formula shedding with separate overload and recovery windows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct FormulaBackpressureConfig {
+    #[builder(default = false)]
+    pub enabled: bool,
+    #[builder(default = 0.85)]
+    pub high_watermark: f64,
+    #[builder(default = 0.50)]
+    pub low_watermark: f64,
+    #[builder(default = 30)]
+    pub pause_after_secs: u64,
+    #[builder(default = 30)]
+    pub resume_after_secs: u64,
+}
+impl Default for FormulaBackpressureConfig {
+    /// Keeps adaptive quality changes opt-in and uses conservative hysteresis defaults.
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
 /// Formula engine selection and shared bounded inference policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaConfig {
+    /// Runtime shedding is separate from the user's recognition switches.
+    #[serde(default)]
+    #[builder(default)]
+    pub backpressure: FormulaBackpressureConfig,
     /// Required pending-crop capacity, independent of model sessions and batch size.
     pub queue_size: usize,
     /// Recognize detected inline formulas; false preserves their native text and layout.

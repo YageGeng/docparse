@@ -440,12 +440,34 @@ impl PageResult {
             Vec<crate::TableWord>,
         >,
     ) {
-        if !config.formula().inline_enabled || !config.formula().display_enabled
+        // Decide once per page before admission or crop allocation; existing queued work is never canceled.
+        let pressure = engine.and_then(FormulaEngine::pressure);
+        let paused = config.formula().inline_enabled
+            && config.formula().backpressure.enabled
+            && pressure.as_ref().is_some_and(|pressure| pressure.paused());
+        if paused {
+            let skipped = detections
+                .iter()
+                .filter(|d| d.label == LayoutLabel::InlineFormula)
+                .count();
+            if skipped > 0 {
+                if let Some(pressure) = &pressure {
+                    pressure.record_skipped(skipped);
+                }
+                self.warnings.push(PageWarning { code: "InlineFormulaBackpressure".into(), stage: "formula".into(),
+                    message: format!("Skipped {skipped} inline formula regions due to sustained queue pressure; source text is retained") });
+            }
+        }
+        if paused
+            || !config.formula().inline_enabled
+            || !config.formula().display_enabled
         {
             let count = detections.len();
             // Keep native formula geometry for text assembly, but skip disabled crops and model calls entirely.
             detections.retain(|detection| match detection.label {
-                LayoutLabel::InlineFormula => config.formula().inline_enabled,
+                LayoutLabel::InlineFormula => {
+                    config.formula().inline_enabled && !paused
+                }
                 LayoutLabel::DisplayFormula => config.formula().display_enabled,
                 _ => false,
             });
@@ -456,6 +478,11 @@ impl PageResult {
             );
         }
         if detections.is_empty() {
+            // Inline-only pages can exit before normal projection; keep degradation warnings deterministic.
+            self.warnings.sort_by(|a, b| {
+                (&a.stage, &a.code, &a.message)
+                    .cmp(&(&b.stage, &b.code, &b.message))
+            });
             return;
         }
         let mut formulas: Vec<_> = detections

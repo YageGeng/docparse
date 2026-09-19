@@ -39,6 +39,10 @@ pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
     fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
         None
     }
+    /// Custom engines may opt out when they do not expose an observable pending queue.
+    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
+        None
+    }
     /// Owns crop pixels through completion, including cancellation of the caller.
     fn recognize(
         &self,
@@ -94,6 +98,10 @@ impl PpFormulaNetEngine {
             tracing::error!("formula model initialization failed: {}", error);
             error
         })?;
+        crate::queue::configure_backpressure(
+            &runner.pressure(),
+            config.formula(),
+        )?;
         let provider = if gpu_session_size == 0 {
             "cpu".to_owned()
         } else if cpu_session_size > 0 {
@@ -119,6 +127,11 @@ impl PpFormulaNetEngine {
 }
 
 impl FormulaEngine for PpFormulaNetEngine {
+    /// Exposes the shared queue rather than estimating load from active sessions.
+    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
+        Some(self.runner.pressure())
+    }
+
     /// Reports the fixed supported model family.
     fn name(&self) -> &str {
         &self.name

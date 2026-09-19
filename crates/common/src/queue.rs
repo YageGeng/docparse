@@ -6,6 +6,8 @@ use crate::{
 use std::sync::Arc;
 use tokio::sync::{Mutex, MutexGuard, mpsc};
 
+mod pressure;
+pub use pressure::QueuePressure;
 mod page;
 pub use page::{PageLease, PageQueue};
 
@@ -32,6 +34,11 @@ impl<R> Clone for QueueSender<R> {
     }
 }
 impl<R> QueueSender<R> {
+    /// Shares this queue's pressure state with its owning engine.
+    pub fn pressure(&self) -> Arc<QueuePressure> {
+        Arc::clone(&self.metrics.pressure)
+    }
+
     /// Reserves before recording occupancy so blocked producers are not counted as queued items.
     pub async fn send(
         &self,

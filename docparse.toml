@@ -99,6 +99,14 @@ inline_enabled = true
 display_enabled = true
 timeout_ms = 120000
 
+# Adaptive quality reduction is opt-in; display formulas are never shed.
+[formula.backpressure]
+enabled = false
+high_watermark = 0.85
+low_watermark = 0.50
+pause_after_secs = 30
+resume_after_secs = 30
+
 [formula.engine]
 type = "texo"
 # CPU and CUDA owners consume one shared formula queue.

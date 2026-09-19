@@ -97,6 +97,10 @@ impl TryFrom<&ValidatedConfig> for MineruEngine {
                 "formula_mineru",
                 config.formula().queue_size,
             );
+            docparse_formula::queue::configure_backpressure(
+                &queue.pressure(),
+                config.formula(),
+            )?;
             let concurrency = service.concurrency;
             // One remote execution slot processes one crop at a time.
             let metrics = docparse_common::telemetry::ModelMetrics::new(
@@ -289,6 +293,11 @@ impl HttpService {
 }
 
 impl FormulaEngine for MineruEngine {
+    /// Applies the same pending-queue policy to HTTP formula consumers.
+    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
+        Some(self.queue.pressure())
+    }
+
     /// Identifies the external model independently of the local ONNX provider.
     fn name(&self) -> &str {
         "mineru-2.5-vllm"

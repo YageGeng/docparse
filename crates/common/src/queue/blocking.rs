@@ -24,6 +24,11 @@ pub struct BlockingQueue<R> {
 }
 
 impl<R: SessionRequest> BlockingQueue<R> {
+    /// Shares the exact pending-item pressure state with the model owner.
+    pub fn pressure(&self) -> Arc<super::QueuePressure> {
+        Arc::clone(&self.metrics.pressure)
+    }
+
     /// Creates a bounded crop queue independently of consumer initialization.
     pub fn new(name: &'static str, capacity: usize) -> Self {
         assert!(capacity > 0, "queue capacity must be positive");

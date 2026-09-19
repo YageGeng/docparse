@@ -348,6 +348,20 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "must be between 1 and 2147483647",
             });
         }
+        let pressure = &config.formula.backpressure;
+        if !pressure.high_watermark.is_finite()
+            || !pressure.low_watermark.is_finite()
+            || pressure.low_watermark < 0.0
+            || pressure.high_watermark > 1.0
+            || pressure.low_watermark >= pressure.high_watermark
+            || pressure.pause_after_secs == 0
+            || pressure.resume_after_secs == 0
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.backpressure",
+                reason: "requires 0 <= low_watermark < high_watermark <= 1 and positive pause/resume seconds",
+            });
+        }
         let (cpu, gpu) = config.formula.engine.session_counts();
         // Check arithmetic/permit representability without imposing a hardware-dependent session ceiling.
         let capacity = cpu

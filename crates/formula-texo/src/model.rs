@@ -84,6 +84,10 @@ impl TexoEngine {
                 tracing::error!("Texo initialization failed: {}", error);
                 error
             })?;
+        docparse_formula::queue::configure_backpressure(
+            &runner.pressure(),
+            config.formula(),
+        )?;
         let (cpu_count, gpu_count) = config.formula().engine.session_counts();
         let provider = if gpu_count == 0 {
             "cpu".to_owned()
@@ -110,6 +114,11 @@ impl TexoEngine {
 }
 
 impl FormulaEngine for TexoEngine {
+    /// Shares adaptive admission across all documents using this engine.
+    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
+        Some(self.runner.pressure())
+    }
+
     /// Reports the selected model and registered execution provider.
     fn name(&self) -> &str {
         &self.name

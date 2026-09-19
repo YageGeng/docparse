@@ -33,6 +33,11 @@ impl<R: SessionRequest> Drop for SessionManager<R> {
 }
 
 impl<R: SessionRequest> SessionManager<R> {
+    /// Exposes pressure without sharing session handles or acquiring the queue lock.
+    pub fn pressure(&self) -> Arc<crate::queue::QueuePressure> {
+        self.queue.pressure()
+    }
+
     /// Initializes all consumers before exposing the explicitly sized queue and cleans up partial failures.
     pub async fn load<F, W, E>(
         name: &'static str,
