@@ -3,10 +3,17 @@ export function formulaEngineError(value: unknown, enabled = true): string | und
   if (value === undefined) return;
   if (!value || typeof value !== "object" || Array.isArray(value)) return "formula.engine must be an object";
   const engine = value as Record<string, unknown>;
-  const keys = engine.type === "mineru" ? ["type", "server_url", "concurrency"] : ["type", "session_size"];
+  const keys = engine.type === "mineru" ? ["type", "server_url", "concurrency"] : ["type", "cpu_session_size", "gpu_session_size"];
   if (!["pp", "texo", "mineru"].includes(String(engine.type)) || Object.keys(engine).some(key => !keys.includes(key))) return "formula.engine accepts pp, texo, or mineru and its engine-specific settings";
-  // Hardware capacity determines positive session counts; retain only integer representability checks.
-  if (engine.type !== "mineru" && engine.session_size !== undefined && (typeof engine.session_size !== "number" || !Number.isSafeInteger(engine.session_size) || engine.session_size < 1)) return "session_size must be a positive safe integer";
+  // CPU and GPU counts are independent, with browser defaults of zero CPU and one GPU owner.
+  if (engine.type !== "mineru") {
+    for (const key of ["cpu_session_size", "gpu_session_size"]) {
+      const count = engine[key];
+      if (count !== undefined && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)) return `${key} must be a nonnegative safe integer`;
+    }
+    const total = Number(engine.cpu_session_size ?? 0) + Number(engine.gpu_session_size ?? 1);
+    if (!Number.isSafeInteger(total) || total === 0) return "formula CPU/GPU session counts must have a positive safe total";
+  }
   if (engine.type !== "mineru" || !enabled) return;
   try {
     if (typeof engine.server_url !== "string" || !engine.server_url.trim()) throw new Error("missing URL");

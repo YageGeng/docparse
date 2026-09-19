@@ -220,6 +220,21 @@ pub enum FormulaEngineConfig {
     Mineru(MineruFormulaConfig),
 }
 
+impl FormulaEngineConfig {
+    /// Returns pure CPU and accelerated consumer counts without exposing model-specific file fields.
+    pub fn session_counts(&self) -> (usize, usize) {
+        match self {
+            Self::Pp(config) => {
+                (config.cpu_session_size, config.gpu_session_size)
+            }
+            Self::Texo(config) => {
+                (config.cpu_session_size, config.gpu_session_size)
+            }
+            Self::Mineru(_) => (1, 0),
+        }
+    }
+}
+
 /// Native MinerU service address and the shared limit on in-flight crop requests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -286,10 +301,13 @@ impl Default for FormulaEngineConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct PpFormulaConfig {
-    /// Independent model consumers sharing one crop queue, matching Texo's session policy.
+    /// Pure CPU consumers sharing the formula queue; default one supports CPU-only builds.
     #[serde(default = "default_session_size")]
     #[builder(default = 1)]
-    pub session_size: usize,
+    pub cpu_session_size: usize,
+    /// Accelerated consumers share the same queue; zero disables accelerator sessions.
+    #[builder(default = 0)]
+    pub gpu_session_size: usize,
     /// ONNX graph for the selected PP-FormulaNet variant.
     pub model_path: PathBuf,
     /// Matching ByteLevel BPE tokenizer.
@@ -315,9 +333,12 @@ impl Default for PpFormulaConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TexoFormulaConfig {
-    /// Independent encoder/decoder owners consuming the same crop queue.
+    /// Pure CPU encoder/decoder pairs consuming the shared crop queue.
     #[builder(default = 1)]
-    pub session_size: usize,
+    pub cpu_session_size: usize,
+    /// Accelerated consumers share the same queue; zero disables accelerator sessions.
+    #[builder(default = 0)]
+    pub gpu_session_size: usize,
     /// Image encoder ONNX graph.
     pub encoder_path: PathBuf,
     /// Merged first-step/cached decoder ONNX graph.

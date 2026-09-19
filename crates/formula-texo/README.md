@@ -26,7 +26,8 @@ timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
-session_size = 2
+cpu_session_size = 1
+gpu_session_size = 1
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
@@ -74,15 +75,15 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   to CPU. Dynamic cache outputs receive fresh bindings at each step to avoid
   overwriting still-live inputs. Their allocation device is validated at runtime.
 - Native calls share a bounded crop queue across pages and documents. Each of
-  `formula.engine.session_size` independent owners holds its own encoder, decoder,
+  `formula.engine.cpu_session_size + formula.engine.gpu_session_size` independent owners holds its own encoder, decoder,
   tokenizer, and execution thread. An idle owner drains ready crops up to
   `formula.batch_size`; it never waits to fill a batch. Queue capacity is
   `formula.queue_size` crops, in addition to active batches. Parser crop admission is shared across pages
-  and bounded to `queue_size + session_size * batch_size`. Results return in each caller's original order.
+  and bounded to `queue_size + (cpu_session_size + gpu_session_size) * batch_size`. Results return in each caller's original order.
   Caller packets of at most `min(batch_size, queue_size)` enter atomically. Ready packets may be combined or split to fill
   a model batch, regardless of their original caller boundaries. Canceled crops do not consume
   its batch slots, and unconsumed tails still count toward queue capacity.
-- Session count defaults to one and accepts 1..8 on native targets. Every extra
+- Native defaults are one CPU owner and zero GPU owners, with no fixed upper limit. Every extra
   session duplicates model/runtime resources. Browser sessions share a bounded
   per-crop ready queue under the global inference guard.
 - Core submits crops independently with a shared pre-crop admission budget and
@@ -159,3 +160,20 @@ in Chrome, including the cached decoder branch. Native I/O-binding ownership is
 also tested with real batched model inference on CPU. CUDA compilation and the
 device-location checks are covered, but CUDA hardware execution remains unverified
 on this Apple host.
+
+## Mixed CPU/GPU formula consumers
+
+Each CPU owner has a pure CPU encoder/decoder pair and uses system memory. Each
+GPU owner uses the compiled accelerator; CUDA hidden states and KV caches remain
+in device memory. Both kinds of owner drain the existing shared queue, so there
+is no round-robin routing or separate CPU backlog: whichever owner is free takes
+the next ready batch. Outputs retain caller order even if devices complete out of
+order. Telemetry for `formula_texo` continues to count both groups together.
+
+Set either count to zero to disable that device group; both zero is invalid.
+GPU-only requests fail explicitly on native CPU-only builds. Old
+`formula.engine.session_size` configuration must be migrated to the two fields.
+Queue capacity, global ORT optimization/memory settings, cancellation, and the
+shared formula batch limit remain unchanged. CPU/GPU token equivalence is covered
+by the pinned real-fixture test on CUDA builds; new documents can still expose
+floating-point differences between providers.

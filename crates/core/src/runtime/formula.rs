@@ -483,16 +483,16 @@ impl PageResult {
         let batch_size = config.formula().batch_size;
         let parallelism = match &config.formula().engine {
             docparse_config::FormulaEngineConfig::Texo(texo) => {
-                batch_size * texo.session_size
+                batch_size * (texo.cpu_session_size + texo.gpu_session_size)
             }
             docparse_config::FormulaEngineConfig::Pp(pp) => {
-                batch_size * pp.session_size
+                batch_size * (pp.cpu_session_size + pp.gpu_session_size)
             }
             docparse_config::FormulaEngineConfig::Mineru(mineru) => {
                 mineru.concurrency
             }
         };
-        // Bound crop preparation by active execution plus the explicitly configured pending queue.
+        // Both CPU and GPU consumers contribute to active capacity on the shared formula queue.
         let window = (parallelism + config.formula().queue_size)
             .min(formulas.len())
             .max(1);

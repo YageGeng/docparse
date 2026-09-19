@@ -30,15 +30,20 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            session_size: usize,
+            cpu_session_size: usize,
+            gpu_session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
+            let session_size = cpu_session_size + gpu_session_size;
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
                     backend.execution_provider(),
                     docparse_layout::ExecutionProvider::CoreMl
                         | docparse_layout::ExecutionProvider::Metal
                 );
+            if coreml_incompatible && gpu_session_size > 0 {
+                return Err(FormulaError::Invalid("PP formula GPU sessions are unsupported on Apple; configure cpu_session_size instead".into()));
+            }
             if coreml_incompatible {
                 tracing::warn!(
                     "{} uses the CPU compatibility executor on Apple; accelerated repeated inference is not enabled",
@@ -55,7 +60,9 @@ mod platform {
                 queue,
                 workers: Vec::with_capacity(session_size),
             };
-            for _ in 0..session_size {
+            for index in 0..session_size {
+                let backend =
+                    backend.formula_worker(index, cpu_session_size)?;
                 let model = Arc::clone(&artifacts.model);
                 let tokenizer = Arc::clone(&artifacts.tokenizer);
                 let session = SessionWorker::new(move || {
@@ -224,9 +231,11 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            session_size: usize,
+            cpu_session_size: usize,
+            gpu_session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
+            let session_size = cpu_session_size + gpu_session_size;
             let metrics = docparse_common::telemetry::ModelMetrics::new(
                 "formula_pp",
                 session_size,
@@ -237,7 +246,9 @@ mod platform {
                 queue,
                 workers: Vec::with_capacity(session_size),
             };
-            for _ in 0..session_size {
+            for index in 0..session_size {
+                let backend =
+                    backend.formula_worker(index, cpu_session_size)?;
                 // Browser formula sessions inherit the global graph and memory settings.
                 let mut session = SessionBuilder::try_from(backend)?
                     .commit_from_memory(&artifacts.model)

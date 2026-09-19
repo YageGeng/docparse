@@ -118,7 +118,7 @@ Apache-2.0 license notices.
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
 Required `formula.queue_size` sets its capacity independently of sessions and batches.
-`formula.engine.session_size` creates a positive, deployment-configured number of independent PP consumers (default 1).
+`formula.engine.cpu_session_size` and `formula.engine.gpu_session_size` create pure CPU and accelerated PP consumers over that same queue. Both may be zero individually, but their total must be positive (native defaults: CPU=1, GPU=0). There is no fixed session ceiling. GPU owners require an accelerated backend; PP on Apple requires CPU owners because the existing CoreML compatibility executor is CPU-only.
 Native queue executors belong to the engine and survive its construction runtime.
 Each idle owner drains only ready work up to `formula.batch_size`; short tails
 run immediately. The parser reserves crop admission before raster allocation,

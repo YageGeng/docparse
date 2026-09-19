@@ -110,13 +110,23 @@ impl SessionManager {
                 "Texo session manager requires the Texo engine".into(),
             ));
         };
-        let (sessions, batch_size, queue_size) =
-            (texo.session_size, config.batch_size, config.queue_size);
-        let device = (backend.execution_provider()
-            == docparse_layout::ExecutionProvider::Cuda)
-            .then_some(ort::memory::AllocationDevice::CUDA);
+        let (sessions, batch_size, queue_size) = (
+            texo.cpu_session_size + texo.gpu_session_size,
+            config.batch_size,
+            config.queue_size,
+        );
+        let cpu_count = texo.cpu_session_size;
         run_cpu(move || {
-            Self::start(sessions, batch_size, queue_size, move || {
+            Self::start(sessions, batch_size, queue_size, move |index| {
+                let backend = backend.formula_worker(index, cpu_count)?;
+                let device = (backend.execution_provider()
+                    == docparse_layout::ExecutionProvider::Cuda)
+                    .then_some(ort::memory::AllocationDevice::CUDA);
+                tracing::info!(
+                    "initializing Texo consumer {} on {}",
+                    index,
+                    backend.execution_provider()
+                );
                 // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
@@ -145,16 +155,16 @@ impl SessionManager {
         initialize: F,
     ) -> Result<Arc<Self>, FormulaError>
     where
-        F: Fn() -> Result<W, FormulaError> + Send + Sync + 'static,
+        F: Fn(usize) -> Result<W, FormulaError> + Send + Sync + 'static,
         W: FnMut(&mut Vec<Request>) -> BatchResult + 'static,
     {
-        let owners = SharedSessionManager::start(
+        let owners = SharedSessionManager::start_indexed(
             "formula_texo",
             sessions,
             batch_size,
             queue_size,
-            move || {
-                let mut model = initialize()?;
+            move |index| {
+                let mut model = initialize(index)?;
                 Ok::<_, FormulaError>(move |mut requests: Vec<Request>| {
                     let result = model(&mut requests);
                     Request::complete(requests, result);
@@ -399,7 +409,7 @@ mod tests {
     #[allow(clippy::panic)] // Deliberately exercises the model owner's unwind cleanup.
     async fn panicked_owner_closes_pending_admission() {
         let manager = run_cpu(|| {
-            SessionManager::start(1, 2, 2, || {
+            SessionManager::start(1, 2, 2, |_| {
                 Ok(|_: &mut Vec<Request>| -> BatchResult {
                     panic!("simulated model failure")
                 })
@@ -467,7 +477,7 @@ mod tests {
         let records = Arc::new(Mutex::new(Vec::new()));
         let counts = Arc::clone(&records);
         let manager = run_cpu(move || {
-            SessionManager::start(2, 8, 16, move || {
+            SessionManager::start(2, 8, 16, move |_| {
                 let counts = Arc::clone(&counts);
                 Ok(move |requests: &mut Vec<Request>| {
                     counts.lock().expect("records").push(requests.len());
@@ -658,7 +668,7 @@ mod tests {
         let _release = Release(Arc::clone(&gate));
         let worker_gate = Arc::clone(&gate);
         let manager = run_cpu(move || {
-            SessionManager::start(2, 2, 3, move || {
+            SessionManager::start(2, 2, 3, move |_| {
                 let gate = Arc::clone(&worker_gate);
                 let started = started.clone();
                 Ok(move |requests: &mut Vec<Request>| {
@@ -782,7 +792,7 @@ mod tests {
     #[tokio::test]
     async fn queue_smaller_than_batch_accepts_every_crop() {
         let manager = run_cpu(|| {
-            SessionManager::start(1, 8, 1, || {
+            SessionManager::start(1, 8, 1, |_| {
                 Ok(|requests: &mut Vec<Request>| {
                     Ok(requests
                         .iter()
@@ -829,7 +839,7 @@ mod tests {
         let created = AtomicUsize::new(0);
         let destroyed = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&destroyed);
-        let result = SessionManager::start(2, 2, 4, move || {
+        let result = SessionManager::start(2, 2, 4, move |_| {
             if created.fetch_add(1, Ordering::SeqCst) == 1 {
                 return Err(FormulaError::Invalid("load failure".into()));
             }
@@ -857,7 +867,7 @@ mod tests {
         let artifacts = TexoArtifacts::try_from(&paths).expect("artifacts");
         artifacts.verify().expect("identity");
         let runner = run_cpu(move || {
-            SessionManager::start(2, 4, 8, move || {
+            SessionManager::start(2, 4, 8, move |_| {
                 let backend = OnnxBackend::compiled();
                 // Match production memory policy while exercising the I/O-binding path.
                 let mut model = ModelSessions {

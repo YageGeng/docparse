@@ -129,8 +129,38 @@ impl WebParser {
         auxiliary_artifacts: JsValue,
     ) -> Result<WebParser, JsValue> {
         logging::init();
-        let raw: RawConfig = serde_wasm_bindgen::from_value(options)
+        let mut raw: RawConfig = serde_wasm_bindgen::from_value(options)
             .map_err(|error| WebError::value("InvalidConfig", error))?;
+        // An explicit WASM provider or authorized WebGPU fallback moves all formula consumers to CPU.
+        if !webgpu {
+            match &mut raw.formula.engine {
+                docparse_config::FormulaEngineConfig::Pp(engine) => {
+                    engine.cpu_session_size = engine
+                        .cpu_session_size
+                        .checked_add(engine.gpu_session_size)
+                        .ok_or_else(|| {
+                            WebError::value(
+                                "InvalidConfig",
+                                "formula session total overflows",
+                            )
+                        })?;
+                    engine.gpu_session_size = 0;
+                }
+                docparse_config::FormulaEngineConfig::Texo(engine) => {
+                    engine.cpu_session_size = engine
+                        .cpu_session_size
+                        .checked_add(engine.gpu_session_size)
+                        .ok_or_else(|| {
+                            WebError::value(
+                                "InvalidConfig",
+                                "formula session total overflows",
+                            )
+                        })?;
+                    engine.gpu_session_size = 0;
+                }
+                docparse_config::FormulaEngineConfig::Mineru(_) => {}
+            }
+        }
         let output = raw.output.clone();
         // The Worker capability selects one backend for every model without serialized provider fields.
         let validated = ValidatedConfig::try_from(raw)
@@ -449,6 +479,13 @@ pub fn default_config() -> Result<JsValue, JsValue> {
     raw.tsr.model_config_path = "models/tatr-v1.1-all/inference.yml".into();
     raw.tsr.model_manifest_path =
         "models/tatr-v1.1-all/model-manifest.json".into();
+    // Browser defaults retain accelerated formula recognition; native library defaults stay CPU-only.
+    if let docparse_config::FormulaEngineConfig::Texo(engine) =
+        &mut raw.formula.engine
+    {
+        engine.cpu_session_size = 0;
+        engine.gpu_session_size = 1;
+    }
     raw.layout.session_size = 1;
     raw.render.workers = 1;
     raw.render.queue_size = 2;

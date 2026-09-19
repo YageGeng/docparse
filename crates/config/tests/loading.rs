@@ -1018,15 +1018,14 @@ fn model_session_counts_have_no_policy_ceiling() {
         "/ocr/detection/session_size",
         "/ocr/recognition/session_size",
         "/ocr/orientation/session_size",
-        "/formula/engine/session_size",
+        "/formula/engine/cpu_session_size",
     ];
     for engine in ["pp", "texo"] {
         for count in [16, 64] {
             let mut value =
                 serde_json::to_value(docparse_config::RawConfig::default())
                     .expect("defaults");
-            *value.pointer_mut("/formula/engine").expect("engine") =
-                serde_json::json!({"type": engine, "session_size": count});
+            *value.pointer_mut("/formula/engine").expect("engine") = serde_json::json!({"type": engine, "cpu_session_size": count, "gpu_session_size": 0});
             for path in paths {
                 *value.pointer_mut(path).expect("session field") = count.into();
             }
@@ -1043,5 +1042,33 @@ fn model_session_counts_have_no_policy_ceiling() {
                     .expect_err("zero consumers");
             }
         }
+    }
+}
+
+/// Formula CPU/GPU counts permit either device alone or both, but never an empty pool or retired field.
+#[test]
+fn formula_cpu_gpu_session_configuration() {
+    for engine in ["pp", "texo"] {
+        for (cpu, gpu, valid) in
+            [(0, 0, false), (16, 0, true), (0, 16, true), (16, 16, true)]
+        {
+            let mut value =
+                serde_json::to_value(docparse_config::RawConfig::default())
+                    .expect("defaults");
+            *value.pointer_mut("/formula/engine").expect("engine") = serde_json::json!({"type":engine,"cpu_session_size":cpu,"gpu_session_size":gpu});
+            let raw: docparse_config::RawConfig =
+                serde_json::from_value(value).expect("split fields");
+            assert_eq!(
+                docparse_config::ValidatedConfig::try_from(raw).is_ok(),
+                valid
+            );
+        }
+        let mut value =
+            serde_json::to_value(docparse_config::RawConfig::default())
+                .expect("defaults");
+        *value.pointer_mut("/formula/engine").expect("engine") =
+            serde_json::json!({"type":engine,"session_size":2});
+        serde_json::from_value::<docparse_config::RawConfig>(value)
+            .expect_err("retired single count");
     }
 }

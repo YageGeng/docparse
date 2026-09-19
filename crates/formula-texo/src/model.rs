@@ -84,26 +84,27 @@ impl TexoEngine {
                 tracing::error!("Texo initialization failed: {}", error);
                 error
             })?;
+        let (cpu_count, gpu_count) = config.formula().engine.session_counts();
+        let provider = if gpu_count == 0 {
+            "cpu".to_owned()
+        } else if cpu_count > 0 {
+            format!("cpu+{}", backend.execution_provider())
+        } else {
+            backend.execution_provider().to_string()
+        };
         tracing::info!(
-            "loaded Texo ONNX sessions with registered provider {}",
-            backend.execution_provider()
+            "loaded Texo with {} CPU and {} GPU session pairs ({})",
+            cpu_count,
+            gpu_count,
+            provider
         );
         Ok(Self {
             runner,
             admission: Arc::new(tokio::sync::Semaphore::new(
                 config.formula().queue_size
-                    + config.formula().batch_size
-                        * match &config.formula().engine {
-                            docparse_config::FormulaEngineConfig::Texo(
-                                texo,
-                            ) => texo.session_size,
-                            _ => 1,
-                        },
+                    + config.formula().batch_size * (cpu_count + gpu_count),
             )),
-            name: format!(
-                "texo-transfer-onnx-{}",
-                backend.execution_provider()
-            ),
+            name: format!("texo-transfer-onnx-{provider}"),
         })
     }
 }

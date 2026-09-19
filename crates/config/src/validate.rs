@@ -339,15 +339,17 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         {
             mineru.endpoint()?;
         }
-        let session_size = match &config.formula.engine {
-            crate::FormulaEngineConfig::Pp(pp) => pp.session_size,
-            crate::FormulaEngineConfig::Texo(texo) => texo.session_size,
-            crate::FormulaEngineConfig::Mineru(_) => 1,
-        };
-        if session_size == 0 {
+        let (cpu, gpu) = config.formula.engine.session_counts();
+        // Check arithmetic/permit representability without imposing a hardware-dependent session ceiling.
+        let capacity = cpu
+            .checked_add(gpu)
+            .filter(|total| *total > 0)
+            .and_then(|total| total.checked_mul(config.formula.batch_size))
+            .and_then(|active| active.checked_add(config.formula.queue_size));
+        if capacity.is_none_or(|capacity| capacity > (usize::MAX >> 3)) {
             return Err(ConfigError::InvalidValue {
-                field: "formula.engine.session_size",
-                reason: "must be greater than zero",
+                field: "formula.engine",
+                reason: "CPU/GPU session counts must have a positive total and fit the admission capacity",
             });
         }
         if !(1..=32).contains(&config.formula.batch_size) {

@@ -49,7 +49,7 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
       if (engine === undefined || invalidEngine) throw Object.assign(new Error(invalidEngine ?? "formula.engine must be an object"), { code: "InvalidConfig" });
       // Replace the tagged object; paths belonging to the other default variant must not leak across.
       // Omit inactive service settings, including NaN from a cleared input, before Rust deserialization.
-      merged.engine = !formulaEnabled && (engine as { type: string }).type === "mineru" ? { type: "mineru" } : engine;
+      merged.engine = !formulaEnabled && (engine as { type: string }).type === "mineru" ? { type: "mineru" } : (engine as { type: string }).type === "mineru" ? engine : { cpu_session_size: 0, gpu_session_size: 1, ...(engine as object) };
     }
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
       const cells = (values as Record<string, unknown>).cell_detection;

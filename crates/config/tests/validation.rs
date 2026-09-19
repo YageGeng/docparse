@@ -10,17 +10,17 @@ use docparse_config::{
 fn texo_sessions_are_positive_and_default_to_one() {
     let mut value = serde_json::to_value(RawConfig::default()).expect("config");
     assert_eq!(
-        value.pointer("/formula/engine/session_size"),
+        value.pointer("/formula/engine/cpu_session_size"),
         Some(&1.into())
     );
     for count in [0, 9] {
         *value
-            .pointer_mut("/formula/engine/session_size")
+            .pointer_mut("/formula/engine/cpu_session_size")
             .expect("sessions") = count.into();
         let raw = serde_json::from_value(value.clone()).expect("shape");
         // Preserve zero rejection while allowing counts beyond the former eight-session limit.
         if count == 0 {
-            assert_invalid_value(raw, "formula.engine.session_size");
+            assert_invalid_value(raw, "formula.engine");
         } else {
             ValidatedConfig::try_from(raw).expect("positive consumer count");
         }

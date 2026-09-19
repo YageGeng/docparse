@@ -13,7 +13,11 @@ fn shared_pp_sessions_survive_construction_runtime() {
     raw.formula.batch_size = 3;
     raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
         docparse_config::PpFormulaConfig::builder()
-            .session_size(2)
+            .cpu_session_size(1)
+            .gpu_session_size(usize::from(
+                docparse_layout::OnnxBackend::compiled().execution_provider()
+                    != docparse_layout::ExecutionProvider::Cpu,
+            ))
             .model_path(directory.join("inference.onnx"))
             .tokenizer_path(directory.join("tokenizer.json"))
             .model_manifest_path(directory.join("model-manifest.json"))

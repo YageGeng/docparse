@@ -73,17 +73,17 @@ impl PpFormulaNetEngine {
             backend.execution_provider(),
             config.formula().batch_size
         );
-        let session_size = match &config.formula().engine {
-            docparse_config::FormulaEngineConfig::Pp(pp) => pp.session_size,
-            _ => 1,
-        };
+        let (cpu_session_size, gpu_session_size) =
+            config.formula().engine.session_counts();
+        let session_size = cpu_session_size + gpu_session_size;
         // Each local model owns the configured number of consumers, independently of batching.
         let runner = SessionRunner::load(
             artifacts,
             backend,
             kind,
             config.formula().batch_size,
-            session_size,
+            cpu_session_size,
+            gpu_session_size,
             config.formula().queue_size,
         )
         .await
@@ -91,10 +91,12 @@ impl PpFormulaNetEngine {
             tracing::error!("formula model initialization failed: {}", error);
             error
         })?;
-        let provider = match backend.execution_provider() {
-            docparse_layout::ExecutionProvider::CoreMl
-            | docparse_layout::ExecutionProvider::Metal => "cpu",
-            provider => provider.as_str(),
+        let provider = if gpu_session_size == 0 {
+            "cpu".to_owned()
+        } else if cpu_session_size > 0 {
+            format!("cpu+{}", backend.execution_provider())
+        } else {
+            backend.execution_provider().to_string()
         };
         tracing::info!(
             "loaded {} with actual executor {} (requested {})",

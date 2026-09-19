@@ -107,7 +107,7 @@ overrides can use `DOCPARSE_RUNTIME__MEMORY_PATTERN`.
 portable runtime helpers, and timing contexts. Model crates retain loading, tensor
 batching, inference, and output conversion.
 
-Every local model has `session_size` (positive integer, default 1) independent ONNX owners
+Local models have independent ONNX owners configured by `session_size` (positive integer, default 1), except formula engines which split CPU/GPU counts,
 consuming one shared bounded queue. Required `queue_size` independently bounds
 pending inputs; a full queue waits for space. It may be smaller than `batch_size`.
 `batch_size` (1–32) caps the number of ready
@@ -117,7 +117,7 @@ waits to fill it. Additional sessions duplicate model/runtime resources.
 | Model | Session count | Batch limit | Required queue capacity |
 | --- | --- | --- | --- |
 | Layout | `layout.session_size` | `layout.batch_size` | `layout.queue_size` |
-| PP / Texo formula | `formula.engine.session_size` | `formula.batch_size` | `formula.queue_size` |
+| PP / Texo formula | `formula.engine.cpu_session_size` + `formula.engine.gpu_session_size` | `formula.batch_size` | `formula.queue_size` |
 | Table structure | `tsr.session_size` | `tsr.batch_size` | `tsr.queue_size` |
 | Table cells | `tsr.cell_detection.session_size` | `tsr.cell_detection.batch_size` | `tsr.cell_detection.queue_size` |
 | OCR detection | `ocr.detection.session_size` | `ocr.detection.batch_size` | `ocr.detection.queue_size` |
@@ -407,3 +407,11 @@ strongly invalid native mappings; original facts remain in
 OCR retains its quadrilateral, rotation, confidence and estimated font size;
 line, paragraph and table composition use the ordinary parser pipeline.
 The WebUI defaults to automatic OCR; the SDK and native library default to off.
+
+Formula engines use separate nonnegative `cpu_session_size` and `gpu_session_size`
+under `[formula.engine]`; their sum must be positive. Both groups consume the same
+bounded `formula.queue_size` queue using the same `formula.batch_size`. Counts have
+no fixed hardware ceiling. Native library defaults are CPU=1, GPU=0; GPU consumers
+require an accelerator build (for NVIDIA, `--features cuda`). The repository profile
+uses CPU=2, GPU=4; set GPU=0 for CPU-only builds. The retired formula `session_size`
+field is rejected. Other models keep their existing `session_size`.

@@ -631,7 +631,7 @@ them to use the defaults.
 
 Use `session_size` (positive integer; no fixed upper limit) and `batch_size` (1–32) under `layout`, `tsr`,
 `tsr.cell_detection`, and each of `ocr.detection`, `ocr.recognition`, and
-`ocr.orientation`. Local formula engines use `formula.engine.session_size` and
+`ocr.orientation`. Local formula engines use `formula.engine.cpu_session_size` / `formula.engine.gpu_session_size` and
 `formula.batch_size`. The former `sessions` and top-level `ocr.batch_size` names
 are rejected. Each model shares one ready-input queue among its sessions. Short
 batches run immediately. OCR combines equal tensor dimensions without changing
@@ -661,3 +661,10 @@ The browser default TSR model is `tatr`. Provision it with
 its ONNX/config/manifest through `tsrArtifacts`. Cell detection continues to use
 `tsrCellArtifacts` independently. To use SLANet+ explicitly, set
 `config.tsr.model = "slanet_plus"` and supply the matching SLANet+ artifacts.
+
+Formula CPU/GPU session counts share one queue. The browser defaults to CPU=0,
+GPU=1; native library defaults are CPU=1, GPU=0. Explicit `executionProvider:
+"wasm"` or an authorized WebGPU fallback converts all requested formula owners
+to CPU owners. Mixed WebGPU/WASM owners retain the existing browser inference
+and readback guard, so this does not promise simultaneous browser GPU/CPU calls.
+The old formula `session_size` field is rejected; other model counts are unchanged.

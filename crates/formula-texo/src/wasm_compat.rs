@@ -119,7 +119,10 @@ mod platform {
             let batch_size = config.batch_size;
             let (queue, receiver) =
                 FormulaQueue::new("formula_texo", config.queue_size);
-            for _ in 0..texo.session_size {
+            for index in 0..(texo.cpu_session_size + texo.gpu_session_size) {
+                // Each browser owner selects its device while consuming the same queue.
+                let backend =
+                    backend.formula_worker(index, texo.cpu_session_size)?;
                 // Apply the shared runtime settings to both graphs, including their memory policy.
                 let mut encoder_builder = SessionBuilder::try_from(backend)?;
                 let mut decoder_builder = SessionBuilder::try_from(backend)?;

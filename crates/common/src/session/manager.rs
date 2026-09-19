@@ -66,6 +66,28 @@ impl<R: SessionRequest> SessionManager<R> {
         W: FnMut(Vec<R>) + 'static,
         E: From<TaskError> + Send + 'static,
     {
+        Self::start_indexed(
+            name,
+            session_size,
+            batch_size,
+            queue_size,
+            move |_| initialize(),
+        )
+    }
+
+    /// Initializes heterogeneous consumers by stable index while retaining one shared queue and lifecycle.
+    pub fn start_indexed<F, W, E>(
+        name: &'static str,
+        session_size: usize,
+        batch_size: usize,
+        queue_size: usize,
+        initialize: F,
+    ) -> Result<Arc<Self>, E>
+    where
+        F: Fn(usize) -> Result<W, E> + Send + Sync + 'static,
+        W: FnMut(Vec<R>) + 'static,
+        E: From<TaskError> + Send + 'static,
+    {
         // Deployments choose consumer counts according to their available CPU/GPU memory.
         if session_size == 0
             || !(1..=32).contains(&batch_size)
@@ -100,7 +122,7 @@ impl<R: SessionRequest> SessionManager<R> {
                 move || {
                     let _exit = SessionExit(Arc::clone(&queue));
                     tracing::dispatcher::with_default(&dispatch, || {
-                        let mut model = match initialize() {
+                        let mut model = match initialize(index) {
                             Ok(model) => model,
                             Err(error) => {
                                 let _ = ready.send(Err(error));
@@ -165,6 +187,63 @@ mod tests {
         }
         /// This test has no timing observer to finish.
         fn end_queue(&mut self) {}
+    }
+
+    /// Heterogeneous initializers each consume the same queue even when their work overlaps.
+    #[test]
+    fn indexed_consumers_share_one_queue() {
+        let gate =
+            Arc::new((std::sync::Mutex::new(0), std::sync::Condvar::new()));
+        let started = Arc::clone(&gate);
+        let manager = SessionManager::<Request>::start_indexed(
+            "test",
+            2,
+            1,
+            2,
+            move |index| {
+                let started = Arc::clone(&started);
+                Ok::<_, TaskError>(move |requests: Vec<Request>| {
+                    let mut count = started.0.lock().expect("gate");
+                    *count += 1;
+                    started.1.notify_all();
+                    let (_count, _) = started
+                        .1
+                        .wait_timeout_while(
+                            count,
+                            Duration::from_secs(2),
+                            |count| *count < 2,
+                        )
+                        .expect("peer");
+                    for request in requests {
+                        let _ = request.reply.send(index);
+                    }
+                })
+            },
+        )
+        .expect("indexed owners");
+        let (reply, response) = std::sync::mpsc::channel();
+        manager
+            .send_batch(vec![
+                Request {
+                    canceled: false,
+                    reply: reply.clone(),
+                },
+                Request {
+                    canceled: false,
+                    reply,
+                },
+            ])
+            .expect("packet");
+        let mut indices = vec![
+            response
+                .recv_timeout(Duration::from_secs(3))
+                .expect("first"),
+            response
+                .recv_timeout(Duration::from_secs(3))
+                .expect("second"),
+        ];
+        indices.sort_unstable();
+        assert_eq!(indices, vec![0, 1]);
     }
 
     /// The shared runtime starts every requested consumer beyond the former eight-session ceiling.

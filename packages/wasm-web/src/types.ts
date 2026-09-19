@@ -40,8 +40,8 @@ export type ModelSource =
 
 /** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
 export type FormulaEngineOptions =
-  | { type: "pp"; session_size?: number }
-  | { type: "texo"; session_size?: number }
+  | { type: "pp"; cpu_session_size?: number; gpu_session_size?: number }
+  | { type: "texo"; cpu_session_size?: number; gpu_session_size?: number }
   | { type: "mineru"; server_url: string; concurrency?: number };
 
 /** Explicit model resources. Omitted type retains the existing PP-only source shape. */
