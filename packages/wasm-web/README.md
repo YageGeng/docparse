@@ -1,6 +1,6 @@
 # DocParse WASM Web
 
-Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3, SLANet_plus and PaddleOCR models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
+Run Rust DocParse, PDFium, and the pinned PP-DocLayoutV3, TATR and PaddleOCR models inside a dedicated module Worker. By default, PDFs and models are processed locally in the browser, producing the same `DocumentResult` schema as native builds without a parsing server.
 
 Run every shell command in this guide from the repository root. Select this
 package with `--prefix packages/wasm-web`; use its npm scripts for builds,
@@ -53,9 +53,9 @@ const parser = await prepareModels({
   },
   tsrArtifacts: {
     kind: "urls",
-    model: "/models/slanet-plus/inference.onnx",
-    config: "/models/slanet-plus/inference.yml",
-    manifest: "/models/slanet-plus/model-manifest.json",
+    model: "/models/tatr-v1.1-all/inference.onnx",
+    config: "/models/tatr-v1.1-all/inference.yml",
+    manifest: "/models/tatr-v1.1-all/model-manifest.json",
   },
   tsrCellArtifacts: {
     kind: "urls",
@@ -85,9 +85,9 @@ try {
 Table recovery defaults to `config.tsr.mode = "fallback"`: local rules run first,
 then the built-in TSR processes unresolved tables. Use `"tsr_only"` to send
 all tables to TSR, or `"rules_only"` to omit TSR artifacts and model loading.
-The default combination is SLANet+ with wireless RT-DETR cell detection.
+The default combination is TATR with wireless RT-DETR cell detection.
 `tsrArtifacts` and `tsrCellArtifacts` use the same URLs/bytes contract as `artifacts`.
-Set `config.tsr.cell_detection.enabled = false` to use SLANet+ alone and omit
+Set `config.tsr.cell_detection.enabled = false` to use TATR alone and omit
 `tsrCellArtifacts`. All models use the same selected backend, defaulting to WebGPU.
 
 Here, `file` is a caller-selected File. To manage authentication or caching, obtain the model yourself and pass `{kind: "bytes", model, config, manifest}` with three Uint8Array values. The library does not detach caller-owned PDF or model buffers.
@@ -364,7 +364,7 @@ Recovery is limited to already-detected table layouts. It uses existing native t
 
 ## Caller-supplied table structure
 
-Parsing uses the local SLANet_plus model by default. A per-call `onTableStructure`
+Parsing uses the local TATR model by default. A per-call `onTableStructure`
 callback can override it for regions already identified by layout. For callback-only
 integrations, initialize with `config.tsr.mode = "rules_only"` to omit built-in
 artifacts, then select `fallback` or `tsr_only` on the parse call.
@@ -452,7 +452,7 @@ const modelSource = name => ({
 });
 const parser = await createParser({
   artifacts: modelSource("pp-doclayout-v3"),
-  tsrArtifacts: modelSource("slanet-plus"),
+  tsrArtifacts: modelSource("tatr-v1.1-all"),
   tsrCellArtifacts: modelSource("rtdetr-table-cell-wireless"),
   ocrArtifacts: {
     detection: modelSource("pp-ocrv6-medium-det"),
@@ -655,3 +655,9 @@ requires one PDFium Worker and supports multiple unfinished pages. The previous
 Run `rtk node crates/web/tests/render_backpressure.mjs` from the repository root
 after building the SDK. It checks real three-page layout inference with render
 capacities 1 and 2, active cancellation, and successful parser recreation.
+
+The browser default TSR model is `tatr`. Provision it with
+`uv run --locked scripts/download_models.py --model tatr-v1.1-all`, and supply
+its ONNX/config/manifest through `tsrArtifacts`. Cell detection continues to use
+`tsrCellArtifacts` independently. To use SLANet+ explicitly, set
+`config.tsr.model = "slanet_plus"` and supply the matching SLANet+ artifacts.

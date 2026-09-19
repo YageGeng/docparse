@@ -1,6 +1,6 @@
 # docparse-tsr
 
-Paddle SLANet+ / SLANeXt structure recognition and optional RT-DETR cell detection for layout-owned table crops.
+Paddle SLANet+ / SLANeXt and Microsoft TATR structure recognition and optional RT-DETR cell detection for layout-owned table crops.
 Models stay external. Layout and TSR reuse the same ONNX execution-provider
 registration: CPU, CUDA, CoreML, OpenVINO, and browser WebGPU. Native layout, OCR
 and TSR share the backend selected by Cargo features, defaulting to CPU. Enable
@@ -8,7 +8,7 @@ one of `cuda`, `coreml`, `metal`, or `openvino`; no runtime provider configurati
 is accepted. `metal` uses CoreML with `CPUAndGPU` compute units (no separate Metal EP).
 Native sessions specialize each graph to its actual input contract before
 initialization: 488 pixels for SLANet+, 512 for SLANeXt, and 640 for RT-DETR,
-including CoreML shape inference.
+including CoreML shape inference. TATR keeps spatial axes dynamic and resizes the longest edge to 800.
 WASM defaults to WebGPU, and the Web SDK applies its selected backend to all
 models. Unsupported operators may still execute on CPU inside an accelerated
 session; unavailable requested providers fail explicitly.
@@ -33,6 +33,14 @@ segments cannot introduce another column-header section.
 Artifact: [PaddlePaddle/SLANet_plus_onnx](https://huggingface.co/PaddlePaddle/SLANet_plus_onnx/tree/7dbe640e127602bf506815e822c09758de73c482),
 Apache-2.0, revision `7dbe640e127602bf506815e822c09758de73c482`. Preprocessing and
 vocabulary follow its inference.yml and the [PaddleX reference implementation](https://github.com/PaddlePaddle/PaddleX/tree/develop/paddlex/inference/models/table_structure_recognition).
+
+Structure recognition and enabled cell detection are submitted concurrently for
+one table. The detector receives the original whole-table crop once, while only
+structure recognition performs segmented retries. Both results must succeed
+before geometry matching; failure drops the peer waiter while already-running
+native calls retain their resources until completion. Browser submission remains
+concurrent, but the existing WebGPU execution/readback guard still serializes
+physical runtime access.
 
 Each model owns `session_size` independent consumers (1–8, default 1), configured
 separately as `tsr.session_size` and `tsr.cell_detection.session_size`. They consume
@@ -67,7 +75,7 @@ A high structure confidence is not a guarantee of correct table semantics.
 The repository configuration uses `tsr_only`. The former `external_only` spelling
 is no longer accepted. Library defaults retain rules-first fallback.
 Both use SLANet+ with wireless RT-DETR cell detection by default.
-`[tsr].model` selects `slanet_plus`, `slanext_wired`, or `slanext_wireless`.
+`[tsr].model` selects `slanet_plus`, `slanext_wired`, `slanext_wireless`, or `tatr`.
 SLANeXt uses a 512-pixel input and its invalid position head is discarded.
 Its structure tokens require an independent cell detector.
 
@@ -130,3 +138,70 @@ Real-model regression tests exercise structure and detector predictions with
 singleton and batched requests. Detector preprocessing, inference and postprocessing
 have separate timing stages. The real-PDF comparison test records crops, raw model
 outputs, structured tables and warnings; failures remain in its report.
+
+## TATR with shared cell detection
+
+Select the verified local export of Microsoft TATR v1.1-All by changing the
+structure model and artifact paths in the existing TSR section. Keep the existing
+`[tsr.cell_detection]` section: both structure families use the same RT-DETR
+configuration, independent queue/session manager, concurrent execution and
+geometry matching. The default structure model remains SLANet+.
+
+```toml
+[tsr]
+mode = "tsr_only"
+model = "tatr"
+model_path = "models/tatr-v1.1-all/inference.onnx"
+model_config_path = "models/tatr-v1.1-all/inference.yml"
+model_manifest_path = "models/tatr-v1.1-all/model-manifest.json"
+queue_size = 8
+session_size = 1
+batch_size = 2
+timeout_ms = 30000
+```
+
+Provision TATR through the shared model installer:
+
+```sh
+rtk uv run --locked scripts/download_models.py --model tatr-v1.1-all
+rtk uv run --locked scripts/download_models.py --model tatr-v1.1-all --verify-only
+```
+
+The installer downloads SHA-256-verified checkpoint/config files from the pinned
+Microsoft revision, then invokes `scripts/export_tatr.py` in uv's isolated Python
+3.12 environment with pinned CPU dependencies. No CUDA or local test fixtures are
+required for export. The generated graph must match the Rust contract's fixed
+SHA-256 before installation. Valid artifacts are reused; failures leave existing
+files intact and the manifest is published last. `--model all` includes TATR.
+The preprocessor JSON is retained byte-for-byte as `inference.yml` (JSON is valid
+YAML). First-time installation requires network access and uv, and downloads the
+CPU PyTorch export dependencies. For parity/benchmark details see
+[the export report](../../docs/reports/2026-09-19-tatr-onnx/README.md).
+
+TATR uses RGB ImageNet normalization, an antialiased bilinear longest-edge resize,
+and a per-image int64 validity mask. Ready batches pad to their maximum height
+and width, keeping masked padding zero after normalization. Native and WASM
+runners share the same mixed-type input and output adapters. Global ORT graph
+optimization and memory-pattern settings continue to apply to both sessions.
+The telemetry series remain `tsr_structure` and `tsr_cells`.
+
+The geometry-only adapter accepts six object classes at confidence 0.5, suppresses
+duplicate rows/columns, aligns merged cells to grid intervals, shrinks conflicting
+spans, and keeps merges from crossing the header/body boundary. It emits existing
+HTML structure tokens and row-major pixel boxes, so the core text/cell-matching
+pipeline is unchanged. Model confidence is the mean retained row/column score;
+it is not Microsoft's OCR-token coverage score. Invalid grids fail explicitly;
+TATR does not use Paddle's autoregressive EOS/segmented retry path. Independent
+cell detection remains optional because TATR also provides usable grid geometry.
+
+`TsrEngine` is a model-neutral alias; `SlanetPlusEngine` and `PaddleTsrEngine`
+remain compatible. The adapter implements grid geometry, not Microsoft's OCR
+text-assignment API; header selection merges adjacent/overlapping intervals into one prefix and stops at the first gap.
+The real-model regression compares topology and coordinates against the pinned
+Python fixture and requires nonempty shared-detector results.
+
+```sh
+rtk cargo test -p docparse-tsr --test inference tatr_recognizes -- --ignored
+rtk cargo test -p docparse-tsr --features cuda --test inference tatr_recognizes -- --ignored
+rtk cargo check -p docparse-tsr --target wasm32-unknown-unknown --features wasm
+```

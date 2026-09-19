@@ -29,6 +29,29 @@ def load_script_module():
 class DownloadModelsTest(unittest.TestCase):
     """Exercises downloads without accessing the network."""
 
+    def test_tatr_export_install_repair_and_hash_failure(self):
+        """TATR uses export only when needed and never publishes a mismatched graph."""
+        self.assertIn("tatr-v1.1-all", self.module.MODEL_NAMES)
+        model = self.module.Model.from_name("tatr-v1.1-all")
+        self.assertEqual(model.license, "MIT")
+        payloads = {"inference.onnx": b"exported-graph", "inference.yml": b"preprocessor"}
+        model = replace(model, artifacts=tuple(replace(artifact,
+            sha256=hashlib.sha256(payloads[artifact.filename]).hexdigest()) for artifact in model.artifacts))
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "tatr"
+            with mock.patch.object(self.module, "export_tatr", side_effect=lambda path: path.write_bytes(payloads["inference.onnx"])) as export, mock.patch.object(self.module, "urlopen", return_value=io.BytesIO(payloads["inference.yml"])):
+                self.assertTrue(self.module.install_model(output, False, model))
+                export.assert_called_once()
+            self.module.verify_installation(output, model)
+            (output / "model-manifest.json").unlink()
+            with mock.patch.object(self.module, "export_tatr", side_effect=AssertionError("unexpected export")), mock.patch.object(self.module, "urlopen", side_effect=AssertionError("unexpected network")):
+                self.assertTrue(self.module.install_model(output, False, model))
+                self.assertFalse(self.module.install_model(output, False, model))
+            with mock.patch.object(self.module, "export_tatr", side_effect=lambda path: path.write_bytes(b"wrong")):
+                with self.assertRaisesRegex(self.module.ModelDownloadError, "hash mismatch"):
+                    self.module.install_model(output, True, model)
+            self.module.verify_installation(output, model)
+
     def test_texo_command_installs_and_verifies_its_three_assets(self):
         """Texo provisioning includes both graphs and its tokenizer with model-specific provenance."""
         self.assertIn("texo", self.module.MODEL_NAMES)

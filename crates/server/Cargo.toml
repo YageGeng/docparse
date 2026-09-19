@@ -35,7 +35,8 @@ tokio-util.workspace = true
 # http
 axum.workspace = true
 http-body.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls"] }
+# reqwest 0.13 gates query serialization separately from JSON and renamed the Rustls feature.
+reqwest = { workspace = true, features = ["query", "rustls"] }
 tower-http.workspace = true
 
 # api documentation

@@ -409,7 +409,8 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
     delete ui.engine.dataset.provider;
     current = await prepareModels({
       artifacts: modelSource(),
-      tsrArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("slanet-plus"),
+      // Match the browser default structure model while retaining the independent detector.
+      tsrArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("tatr-v1.1-all"),
       tsrCellArtifacts: ui.tableMode.value === "rules_only" ? undefined : modelSource("rtdetr-table-cell-wireless"),
       ocrArtifacts: ui.ocrPolicy.value === "disabled" ? undefined : {
         detection: modelSource("pp-ocrv6-medium-det"), recognition: modelSource("pp-ocrv6-medium-rec"),

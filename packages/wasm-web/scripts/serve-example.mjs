@@ -9,6 +9,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const routes = new Map([
   ["/example/", resolve(packageRoot, "example")],
   ["/dist/", resolve(packageRoot, "dist")],
+  // Specific TATR assets must precede the generic layout-model route.
+  ["/models/tatr-v1.1-all/", resolve(packageRoot, "../../models/tatr-v1.1-all")],
   ["/models/slanet-plus/", resolve(packageRoot, "../../models/slanet-plus")],
   ["/models/rtdetr-table-cell-wireless/", resolve(packageRoot, "../../models/rtdetr-table-cell-wireless")],
   ["/models/pp-formulanet-plus-s/", resolve(packageRoot, "../../models/pp-formulanet-plus-s")],

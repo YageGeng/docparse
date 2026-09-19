@@ -99,3 +99,14 @@ Run the discoverable Python correctness checks with:
 ```sh
 rtk uv run --locked --group dev python -m unittest discover -s crates/core/tests/python -p '*test.py'
 ```
+
+### TATR provisioning
+
+`uv run --locked scripts/download_models.py --model tatr-v1.1-all` downloads the
+pinned Microsoft checkpoint and exports ONNX with `export_tatr.py` in an isolated
+Python 3.12 CPU environment managed by uv. Both source files and exported ONNX
+are checked against fixed SHA-256 digests before publishing the model manifest.
+`--verify-only`, `--force`, `--output`, and `--models-dir` use the same semantics
+as other models; `all` includes TATR. A verified installation needs no exporter
+or network for subsequent verification. Initial export requires uv and network
+access for the pinned Python dependencies; it does not require CUDA.

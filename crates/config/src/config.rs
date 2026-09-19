@@ -638,6 +638,8 @@ pub enum TsrModel {
     SlanetPlus,
     SlanextWired,
     SlanextWireless,
+    /// Microsoft TATR v1.1 recognizes structure alongside the shared cell detector.
+    Tatr,
 }
 
 /// Selects the dedicated detector for the table image family under evaluation.

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { request } from "@/api/client";
 import {
   projectSnapshot,
+  projectHistory,
   type Chart,
   type Matrix,
   type Snapshot,
@@ -38,6 +39,8 @@ export function useMonitoringHistory(
     queryKey: ["monitoring", "history", chart, seconds],
     queryFn: ({ signal }) =>
       request<Matrix>("monitoring/history", { chart, seconds }, signal),
+    // Project a stable display order while preserving the raw query cache.
+    select: projectHistory,
     enabled,
     refetchInterval: 30000,
     retry: false,

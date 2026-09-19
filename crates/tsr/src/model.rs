@@ -51,6 +51,7 @@ pub struct TsrPrediction {
 pub(crate) enum ModelResult {
     Structure(ModelOutputs),
     Cells(Array2<f32>),
+    Tatr(crate::tatr::TatrOutput),
 }
 
 impl ModelResult {
@@ -67,6 +68,13 @@ impl ModelResult {
             return Err(invalid("invalid TSR output batch size"));
         }
         match kind {
+            // Decode TATR's fixed object queries independently of Paddle's token sequence.
+            ModelKind::Structure(docparse_config::TsrModel::Tatr) => {
+                Ok(crate::tatr::TatrOutput::from_batch(outputs, batch)?
+                    .into_iter()
+                    .map(Self::Tatr)
+                    .collect())
+            }
             ModelKind::Structure(_) => {
                 let outputs = ModelOutputs::try_from(outputs)?;
                 if outputs.locations.len_of(Axis(0)) != batch {
@@ -409,6 +417,10 @@ impl SlanetPlusEngine {
         let (artifacts, dictionary) = docparse_common::run_cpu(move || {
             let contract = kind.contract();
             artifacts.verify_against(&contract)?;
+            // The pinned TATR preprocessor JSON is valid YAML but has no Paddle token dictionary.
+            if model == docparse_config::TsrModel::Tatr {
+                return Ok((artifacts, Vec::new()));
+            }
             let config: InferenceConfig =
                 serde_yml::from_slice(&artifacts.config).map_err(|error| {
                     TsrError::InvalidModel {
@@ -458,6 +470,7 @@ impl SlanetPlusEngine {
         })?;
         tracing::info!("loaded TSR ONNX with provider {}", provider);
         let model_label = match model {
+            docparse_config::TsrModel::Tatr => "tatr-v1.1-all",
             docparse_config::TsrModel::SlanetPlus => "slanet-plus",
             docparse_config::TsrModel::SlanextWired => "slanext-wired",
             docparse_config::TsrModel::SlanextWireless => "slanext-wireless",
@@ -531,13 +544,31 @@ impl SlanetPlusEngine {
         &self.name
     }
 
-    /// Runs a real model on the supplied crop; geometry remains in that crop's original pixel frame.
+    /// Runs independent models concurrently and combines their crop-relative predictions.
     pub async fn predict(
         &self,
         image: Arc<PageImage>,
         timings: Timings,
     ) -> Result<TsrPrediction, TsrError> {
-        let original = Arc::clone(&image);
+        // Keep orchestration separate from model-specific retries and detection filtering.
+        let (mut prediction, detected_cell_bboxes) = tokio::try_join!(
+            self.predict_structure(Arc::clone(&image), &timings),
+            self.detect_cells(image, &timings),
+        )?;
+        prediction.detected_cell_bboxes = detected_cell_bboxes;
+        Ok(prediction)
+    }
+
+    /// Retries incomplete structure predictions on image segments and restores original crop coordinates.
+    async fn predict_structure(
+        &self,
+        image: Arc<PageImage>,
+        timings: &Timings,
+    ) -> Result<TsrPrediction, TsrError> {
+        // TATR has no autoregressive truncation; splitting malformed outputs would hide model errors.
+        if self.model == docparse_config::TsrModel::Tatr {
+            return self.predict_once(image, timings.clone()).await;
+        }
         let mut pending = vec![crate::tiles::TableSlice::new(image)];
         let mut parts = Vec::new();
         while let Some(slice) = pending.pop() {
@@ -575,59 +606,67 @@ impl SlanetPlusEngine {
                 }
             }
         }
-        let mut prediction = TsrPrediction::from_segments(parts)?;
-        if let Some((detector, threshold)) = &self.detector {
-            let timer = timings.start(TimingStage::TableCellPreprocess);
-            let crop = Arc::clone(&original);
-            let input = docparse_common::run_cpu(move || {
-                CellInput::try_from(crop.as_ref())
-            })
-            .await??;
-            drop(timer);
-            let output = Arc::clone(detector)
-                .run(ModelInput::Cells(input), timings.clone())
-                .await?;
-            let _postprocess = timings.start(TimingStage::TableCellPostprocess);
-            let ModelResult::Cells(boxes) = output else {
+        TsrPrediction::from_segments(parts)
+    }
+
+    /// Detects cells once on the original whole-table crop and filters boxes independently of structure retries.
+    async fn detect_cells(
+        &self,
+        image: Arc<PageImage>,
+        timings: &Timings,
+    ) -> Result<Vec<Vec<f64>>, TsrError> {
+        let Some((detector, threshold)) = &self.detector else {
+            return Ok(Vec::new());
+        };
+        let mut detected_cell_bboxes = Vec::new();
+        let timer = timings.start(TimingStage::TableCellPreprocess);
+        let crop = Arc::clone(&image);
+        let input = docparse_common::run_cpu(move || {
+            CellInput::try_from(crop.as_ref())
+        })
+        .await??;
+        drop(timer);
+        let output = Arc::clone(detector)
+            .run(ModelInput::Cells(input), timings.clone())
+            .await?;
+        let _postprocess = timings.start(TimingStage::TableCellPostprocess);
+        let ModelResult::Cells(boxes) = output else {
+            return Err(TsrError::InvalidInput {
+                reason: "cell session returned structure outputs".to_owned(),
+            });
+        };
+        for cell in boxes.outer_iter() {
+            let Some(&[class, score, left, top, right, bottom]) =
+                cell.as_slice()
+            else {
                 return Err(TsrError::InvalidInput {
-                    reason: "cell session returned structure outputs"
-                        .to_owned(),
+                    reason: "non-contiguous detector row".to_owned(),
                 });
             };
-            for cell in boxes.outer_iter() {
-                let Some(&[class, score, left, top, right, bottom]) =
-                    cell.as_slice()
-                else {
-                    return Err(TsrError::InvalidInput {
-                        reason: "non-contiguous detector row".to_owned(),
-                    });
-                };
-                if f64::from(score) < *threshold || class != 0.0 {
-                    continue;
-                }
-                let bbox = [
-                    f64::from(left).max(0.0),
-                    f64::from(top).max(0.0),
-                    f64::from(right).min(f64::from(original.width())),
-                    f64::from(bottom).min(f64::from(original.height())),
-                ];
-                if docparse_layout::Bbox::try_from(bbox).is_ok() {
-                    prediction.detected_cell_bboxes.push(bbox.to_vec());
-                }
+            if f64::from(score) < *threshold || class != 0.0 {
+                continue;
             }
-            tracing::info!(
-                "detected {} independent table cells for {:?}",
-                prediction.detected_cell_bboxes.len(),
-                self.model
-            );
-            if prediction.detected_cell_bboxes.is_empty() {
-                return Err(TsrError::InvalidInput {
-                    reason: "cell detector returned no accepted boxes"
-                        .to_owned(),
-                });
+            let bbox = [
+                f64::from(left).max(0.0),
+                f64::from(top).max(0.0),
+                f64::from(right).min(f64::from(image.width())),
+                f64::from(bottom).min(f64::from(image.height())),
+            ];
+            if docparse_layout::Bbox::try_from(bbox).is_ok() {
+                detected_cell_bboxes.push(bbox.to_vec());
             }
         }
-        Ok(prediction)
+        tracing::info!(
+            "detected {} independent table cells for {:?}",
+            detected_cell_bboxes.len(),
+            self.model
+        );
+        if detected_cell_bboxes.is_empty() {
+            return Err(TsrError::InvalidInput {
+                reason: "cell detector returned no accepted boxes".to_owned(),
+            });
+        }
+        Ok(detected_cell_bboxes)
     }
 
     /// Executes exactly one bounded decoder run, retaining the actual failure for segmented retries.
@@ -638,18 +677,27 @@ impl SlanetPlusEngine {
     ) -> Result<TsrPrediction, TsrError> {
         let (width, height) = (image.width(), image.height());
         let preparing = timings.clone();
-        let edge = ModelKind::Structure(self.model).edge();
+        let model = self.model;
+        let edge = ModelKind::Structure(model).edge();
         let input = docparse_common::run_cpu(move || {
             let _timer = preparing.start(TimingStage::TsrPreprocess);
-            SlanetInput::try_from((image.as_ref(), edge))
+            // TATR consumes aspect-preserving RGB tensors and masks instead of Paddle BGR squares.
+            if model == docparse_config::TsrModel::Tatr {
+                crate::tatr::TatrInput::try_from(image.as_ref())
+                    .map(ModelInput::Tatr)
+            } else {
+                SlanetInput::try_from((image.as_ref(), edge))
+                    .map(ModelInput::Structure)
+            }
         })
         .await??;
         tracing::debug!("starting TSR inference for {}x{} crop", width, height);
-        let output = Arc::clone(&self.runner)
-            .run(ModelInput::Structure(input), timings.clone())
-            .await;
+        let output = Arc::clone(&self.runner).run(input, timings.clone()).await;
         let result = output.and_then(|output| {
             let _timer = timings.start(TimingStage::TsrPostprocess);
+            if let ModelResult::Tatr(output) = output {
+                return output.decode(width, height);
+            }
             let ModelResult::Structure(output) = output else {
                 return Err(TsrError::InvalidInput {
                     reason: "structure session returned detector outputs"

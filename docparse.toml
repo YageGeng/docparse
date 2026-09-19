@@ -48,10 +48,11 @@ session_size = 2
 batch_size = 1
 queue_size = 16
 timeout_ms = 60000
-model = "slanet_plus"
-model_path = "models/slanet-plus/inference.onnx"
-model_config_path = "models/slanet-plus/inference.yml"
-model_manifest_path = "models/slanet-plus/model-manifest.json"
+# Use the verified TATR export while retaining the shared cell detector.
+model = "tatr"
+model_path = "models/tatr-v1.1-all/inference.onnx"
+model_config_path = "models/tatr-v1.1-all/inference.yml"
+model_manifest_path = "models/tatr-v1.1-all/model-manifest.json"
 
 [tsr.cell_detection]
 enabled = true

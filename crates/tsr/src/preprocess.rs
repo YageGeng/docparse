@@ -172,6 +172,7 @@ impl TryFrom<&PageImage> for CellInput {
 pub(crate) enum ModelInput {
     Structure(SlanetInput),
     Cells(CellInput),
+    Tatr(crate::tatr::TatrInput),
 }
 
 impl ModelInput {
@@ -184,11 +185,23 @@ impl ModelInput {
         if inputs.is_empty() || inputs.len() > 32 {
             return Err(invalid());
         }
+        // TATR batches need per-crop masks because their resized spatial dimensions differ.
+        if inputs.iter().any(|input| matches!(input, Self::Tatr(_))) {
+            let tatr = inputs
+                .iter()
+                .map(|input| match input {
+                    Self::Tatr(input) => Ok(input),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return crate::tatr::TatrInput::batch(&tatr).map(Self::Tatr);
+        }
         let mut images = Vec::with_capacity(inputs.len());
         let mut shapes = Vec::new();
         let mut scales = Vec::new();
         for input in inputs {
             let image = match input {
+                Self::Tatr(_) => return Err(invalid()),
                 Self::Structure(input) => &input.0,
                 Self::Cells(input) => {
                     if input.image_shape.dim() != (1, 2)
@@ -226,23 +239,29 @@ impl ModelInput {
         }
     }
 
-    /// Borrows named tensors only for the duration of an actual session run.
+    /// Borrows mixed float/int tensors so TATR masks share the native and browser session path.
     pub(crate) fn values(
         &self,
-    ) -> Result<Vec<(&'static str, ort::value::TensorRef<'_, f32>)>, ort::Error>
-    {
+    ) -> Result<
+        Vec<(
+            std::borrow::Cow<'static, str>,
+            ort::session::SessionInputValue<'_>,
+        )>,
+        ort::Error,
+    > {
         use ort::value::TensorRef;
         Ok(match self {
             Self::Structure(input) => {
-                vec![("x", TensorRef::from_array_view(&input.0)?)]
+                ort::inputs!["x" => TensorRef::from_array_view(&input.0)?]
             }
-            Self::Cells(input) => vec![
-                ("image", TensorRef::from_array_view(&input.image)?),
-                ("im_shape", TensorRef::from_array_view(&input.image_shape)?),
-                (
-                    "scale_factor",
-                    TensorRef::from_array_view(&input.scale_factor)?,
-                ),
+            Self::Cells(input) => ort::inputs![
+                "image" => TensorRef::from_array_view(&input.image)?,
+                "im_shape" => TensorRef::from_array_view(&input.image_shape)?,
+                "scale_factor" => TensorRef::from_array_view(&input.scale_factor)?,
+            ],
+            Self::Tatr(input) => ort::inputs![
+                "pixel_values" => TensorRef::from_array_view(&input.pixels)?,
+                "pixel_mask" => TensorRef::from_array_view(&input.mask)?,
             ],
         })
     }

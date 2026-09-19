@@ -101,7 +101,7 @@ tokio-util = { version = "0.7", features = ["io", "rt"] }
 # http
 axum = { version = "0.8", features = ["http2", "multipart"] }
 http-body = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "fs"] } # CORS is handled at ingress.
 url = "2"
@@ -120,7 +120,7 @@ tempfile = "3"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # config and serialization
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 rmp = "0.8"
@@ -148,7 +148,7 @@ tokenizers = { version = "=0.22.2", default-features = false, features = ["fancy
 # cli and diagnostics
 clap = { version = "4", features = ["derive"] }
 log = { version = "0.4", features = ["serde"] }
-metrics = "0.24.5"
+metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 prometheus-parse = "0.2.5"
 tracing = "0.1"

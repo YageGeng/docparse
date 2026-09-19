@@ -1,4 +1,4 @@
-import { formatMetric as number, type Matrix } from "./metrics";
+import { formatMetric as number, type History } from "./metrics";
 
 const colors = [
   "#2563eb",
@@ -17,7 +17,7 @@ export function HistoryChart({
   title,
   unit,
 }: {
-  data: Matrix;
+  data: History;
   title: string;
   unit: string;
 }) {
@@ -91,7 +91,7 @@ export function HistoryChart({
             .join(" ");
           return (
             <path
-              key={index}
+              key={series.name}
               d={path}
               stroke={colors[index % colors.length]}
               strokeWidth="2"
@@ -119,14 +119,12 @@ export function HistoryChart({
             {data.result.map((series, index) => {
               const latest = series.values.at(-1);
               return (
-                <tr key={index}>
+                <tr key={series.name}>
                   <th scope="row">
                     <span style={{ color: colors[index % colors.length] }}>
                       ●{" "}
                     </span>
-                    {Object.entries(series.metric)
-                      .map(([key, val]) => `${key}=${val}`)
-                      .join(" · ") || "全部"}
+                    {series.name}
                   </th>
                   <td>{number(latest ? Number(latest[1]) : undefined)}</td>
                   <td>

@@ -82,7 +82,7 @@ export interface WebParseConfig {
   /** Independent layout sessions share one ready-page queue; ORT Web calls remain globally guarded. */
   layout: { queue_size: number; score_threshold?: number; session_size?: number; batch_size?: number };
   /** Structure and detector batch_size independently cap ready crops per ONNX invocation. */
-  tsr: TableOptions & { queue_size: number; session_size?: number; batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless"; cell_detection: { queue_size: number; enabled?: boolean; session_size?: number; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
+  tsr: TableOptions & { queue_size: number; session_size?: number; batch_size?: number; model?: "slanet_plus" | "slanext_wired" | "slanext_wireless" | "tatr"; cell_detection: { queue_size: number; enabled?: boolean; session_size?: number; batch_size?: number; model?: "wired" | "wireless"; score_threshold?: number } };
   /** Page failures may preserve native content; render controls all scheduling capacity. */
   runtime?: {
     continue_on_error?: boolean;

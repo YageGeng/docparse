@@ -439,10 +439,16 @@ impl ParseObserver for BrowserObserver {
     }
 }
 
-/// Exposes native business defaults with explicit single-Worker concurrency defaults.
+/// Exposes browser defaults with TATR and explicit single-Worker concurrency.
 #[wasm_bindgen]
 pub fn default_config() -> Result<JsValue, JsValue> {
     let mut raw = RawConfig::default();
+    // Browser defaults select the same verified TATR artifacts as the local application.
+    raw.tsr.model = docparse_config::TsrModel::Tatr;
+    raw.tsr.model_path = "models/tatr-v1.1-all/inference.onnx".into();
+    raw.tsr.model_config_path = "models/tatr-v1.1-all/inference.yml".into();
+    raw.tsr.model_manifest_path =
+        "models/tatr-v1.1-all/model-manifest.json".into();
     raw.layout.session_size = 1;
     raw.render.workers = 1;
     raw.render.queue_size = 2;

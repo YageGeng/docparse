@@ -995,3 +995,15 @@ sqlx_slow_statements_threshold_ms = 250
         assert!(ConfigLoader::new(&path).load_raw().is_err(), "{field}");
     }
 }
+
+/// TATR selection preserves geometry-only operation without imposing SLANeXt's detector requirement.
+#[test]
+fn tatr_configuration_accepts_optional_cell_detection() {
+    let mut raw = docparse_config::RawConfig::default();
+    raw.tsr.model = serde_json::from_str("\"tatr\"").expect("TATR selection");
+    raw.tsr.mode = docparse_config::TableMode::TsrOnly;
+    raw.tsr.cell_detection = None;
+    let config = docparse_config::ValidatedConfig::try_from(raw)
+        .expect("TATR structure geometry");
+    assert_eq!(config.tsr().model, docparse_config::TsrModel::Tatr);
+}

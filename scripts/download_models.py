@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ MODEL_NAMES = (
     "pp-formulanet-plus-l",
     "pp-doclayout-v3",
     "slanet-plus",
+    "tatr-v1.1-all",
     "slanext-wired",
     "slanext-wireless",
     "rtdetr-table-cell-wired",
@@ -44,6 +46,15 @@ class Artifact:
     filename: str
     url: str
     sha256: str
+
+
+TATR_REPOSITORY = "microsoft/table-transformer-structure-recognition-v1.1-all"
+TATR_REVISION = "7587a7ef111d9dcbf8ac695f1376ab7014340a0c"
+TATR_BASE = f"https://huggingface.co/{TATR_REPOSITORY}/resolve/{TATR_REVISION}"
+TATR_SOURCES = tuple(Artifact(name, f"{TATR_BASE}/{name}", digest) for name, digest in [
+    ("model.safetensors", "9df416575a3a36ebd0129342d4f597f14d6e5170268f3d52d28584ab4466a501"),
+    ("config.json", "17a8a6edfb9e394263fa6ba9b82176ebccdfcc5d6cd29121ec91572c7d6be22c"),
+])
 
 
 ARTIFACTS = (
@@ -74,6 +85,12 @@ class Model:
     @classmethod
     def from_name(cls, name: str) -> Model:
         """Selects a pinned contract for either complete or targeted provisioning."""
+        if name == "tatr-v1.1-all":
+            # No hosted ONNX export exists: an empty URL marks the verified CPU export step.
+            return cls(name, TATR_REPOSITORY, TATR_REVISION, (
+                Artifact("inference.onnx", "", "ef7b679634f4693f4c0b6eecd1cd255d9cc5b844a3e5802b5e5456c8b9f1820e"),
+                Artifact("inference.yml", f"{TATR_BASE}/preprocessor_config.json", "eead409bb80e36ae85b8377642c54550f0504f65688ba3a4967950cafe461df2"),
+            ), license="MIT")
         if name == "texo":
             # Pin the corrected output-shape export and match docparse-formula-texo's enforced hashes.
             repository = "alephpi/FormulaNet"
@@ -232,6 +249,23 @@ def download_artifact(artifact: Artifact, destination: Path) -> None:
         ) from error
 
 
+def export_tatr(destination: Path) -> None:
+    """Download verified checkpoint inputs and export in uv's isolated pinned CPU environment."""
+    with tempfile.TemporaryDirectory(prefix="tatr-source-", dir=destination.parent) as temporary:
+        directory = Path(temporary)
+        for artifact in TATR_SOURCES:
+            path = directory / artifact.filename
+            download_artifact(artifact, path)
+            if sha256_file(path) != artifact.sha256:
+                raise ModelDownloadError(f"TATR source hash mismatch: {artifact.filename}")
+        exporter = Path(__file__).with_name("export_tatr.py")
+        try:
+            subprocess.run(["uv", "run", "--script", str(exporter),
+                            str(directory), str(destination)], check=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise ModelDownloadError(f"TATR CPU export failed (uv is required): {error}") from error
+
+
 def write_manifest(directory: Path, model: Model | None = None) -> None:
     """Writes model-specific provenance plus an informational UTC generation time."""
     model = model or Model.from_name("pp-doclayout-v3")
@@ -269,7 +303,10 @@ def install_model(output: Path, force: bool, model: Model | None = None) -> bool
             if not force and existing.is_file() and sha256_file(existing) == artifact.sha256:
                 continue
             destination = temporary_path / artifact.filename
-            download_artifact(artifact, destination)
+            if model.name == "tatr-v1.1-all" and artifact.filename == "inference.onnx":
+                export_tatr(destination)
+            else:
+                download_artifact(artifact, destination)
             actual_hash = sha256_file(destination)
             if actual_hash != artifact.sha256:
                 raise ModelDownloadError(

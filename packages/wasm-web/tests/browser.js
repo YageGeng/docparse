@@ -95,7 +95,7 @@ async function verifyReferenceInput(bytes, name) {
 
 const base = new URL("../../../", import.meta.url);
 const options = { artifacts: { kind: "urls", model: new URL("models/pp-doclayout-v3/inference.onnx", base).href, config: new URL("models/pp-doclayout-v3/inference.yml", base).href, manifest: new URL("models/pp-doclayout-v3/model-manifest.json", base).href } };
-options.tsrArtifacts = { kind: "urls", model: new URL("models/slanet-plus/inference.onnx", base).href, config: new URL("models/slanet-plus/inference.yml", base).href, manifest: new URL("models/slanet-plus/model-manifest.json", base).href };
+options.tsrArtifacts = { kind: "urls", model: new URL("models/tatr-v1.1-all/inference.onnx", base).href, config: new URL("models/tatr-v1.1-all/inference.yml", base).href, manifest: new URL("models/tatr-v1.1-all/model-manifest.json", base).href };
 options.config = { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } }, formula: { queue_size: 4, inline_enabled: false, display_enabled: false } };
 options.executionProvider = parameters.get("provider") === "webgpu" ? "webgpu" : "wasm";
 if (parameters.has("fallback")) options.allowCpuFallback = true;

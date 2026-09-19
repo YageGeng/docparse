@@ -161,7 +161,9 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
             labels,
           ),
         };
-      }),
+      })
+      // Recorder iteration order is unspecified; names keep rows stable across refreshes.
+      .sort((a, b) => a.name.localeCompare(b.name, "en")),
     models: samples
       .filter((sample) => sample.name === "docparse_model_workers_configured")
       .map((sample) => {
@@ -173,7 +175,8 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
           busy: value(samples, "docparse_model_workers_busy", labels),
           batchLimit: value(samples, "docparse_model_batch_limit", labels),
         };
-      }),
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "en")),
     inference: samples
       .filter((sample) => sample.name === "docparse_onnx_active_calls")
       .map((sample) => {
@@ -212,6 +215,40 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
               outcome: "error",
             }) ?? 0,
         };
+      })
+      .sort(
+        (a, b) =>
+          a.model.localeCompare(b.model, "en") ||
+          a.graph.localeCompare(b.graph, "en"),
+      ),
+  };
+}
+
+/** Canonicalizes label order and series names without mutating cached API data or timestamp order. */
+export function projectHistory(data: Matrix) {
+  return {
+    ...data,
+    result: data.result
+      .map((series) => ({
+        ...series,
+        name:
+          Object.entries(series.metric)
+            .sort(([a], [b]) => a.localeCompare(b, "en"))
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" · ") || "全部",
+      }))
+      .sort((a, b) => {
+        // Aggregated series have no __name__; use their model or queue identity first.
+        const first =
+          a.metric.model ?? a.metric.queue ?? a.metric.__name__ ?? "";
+        const second =
+          b.metric.model ?? b.metric.queue ?? b.metric.__name__ ?? "";
+        return (
+          first.localeCompare(second, "en") ||
+          a.name.localeCompare(b.name, "en")
+        );
       }),
   };
 }
+
+export type History = ReturnType<typeof projectHistory>;

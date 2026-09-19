@@ -238,8 +238,13 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 "tsr.cell_detection.score_threshold",
             )?;
         }
+        // Only SLANeXt lacks usable structure geometry; TATR can also run without a detector.
         if config.tsr.mode != crate::TableMode::RulesOnly
-            && config.tsr.model != crate::TsrModel::SlanetPlus
+            && matches!(
+                config.tsr.model,
+                crate::TsrModel::SlanextWired
+                    | crate::TsrModel::SlanextWireless
+            )
             && !config
                 .tsr
                 .cell_detection

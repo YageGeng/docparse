@@ -36,7 +36,7 @@ impl ModelKind {
         }
     }
 
-    /// Matches only approved immutable official ONNX exports.
+    /// Matches approved immutable model artifacts, including the verified local TATR export.
     pub(crate) fn contract(self) -> ModelContract {
         let (repository, revision, model, config) = match self {
             Self::Structure(TsrModel::SlanetPlus) => (
@@ -57,6 +57,16 @@ impl ModelKind {
                 "5c79ee87cce6712f8f640394decce72157bd1df13c9bccf86d071bd07a6e9f97",
                 "58d1d7fdffd3e58cfec98571b817ea012f2107d644bd4f8e4607fae84f1923a6",
             ),
+            // Keep the local export's identity separate from official Paddle artifacts.
+            Self::Structure(TsrModel::Tatr) => {
+                return ModelContract::builder()
+                .repository("microsoft/table-transformer-structure-recognition-v1.1-all".to_owned())
+                .revision("7587a7ef111d9dcbf8ac695f1376ab7014340a0c".to_owned())
+                .license("MIT".to_owned())
+                .model_sha256("ef7b679634f4693f4c0b6eecd1cd255d9cc5b844a3e5802b5e5456c8b9f1820e".to_owned())
+                .config_sha256("eead409bb80e36ae85b8377642c54550f0504f65688ba3a4967950cafe461df2".to_owned())
+                .build();
+            }
             Self::Cells(TableCellModel::Wired) => (
                 "RT-DETR-L_wired_table_cell_det_onnx",
                 "b2c0720b5fe6f1c0dd40f8a7993a3f28e04252f8",
@@ -83,6 +93,7 @@ impl ModelKind {
     pub(crate) fn edge(self) -> usize {
         match self {
             Self::Structure(TsrModel::SlanetPlus) => 488,
+            Self::Structure(TsrModel::Tatr) => 800,
             Self::Structure(_) => 512,
             Self::Cells(_) => 640,
         }
