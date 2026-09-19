@@ -122,7 +122,8 @@
   gap: 8px;
   font-size: 13px;
 }
-.monitoring-history-controls select {
+.monitoring-history-controls select,
+.monitoring-refresh select {
   border: 1px solid #cbd5e1;
   padding: 9px 12px;
   border-radius: 8px;
@@ -159,4 +160,18 @@
   color: #64748b;
   font-size: 13px;
   margin-bottom: 18px;
+}
+
+/* Reuse history controls while keeping the live cadence selector compact and labeled. */
+.monitoring-refresh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.monitoring-refresh select {
+  min-width: 80px;
+}
+.monitoring-toolbar {
+  flex-wrap: wrap;
 }

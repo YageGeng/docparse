@@ -9,8 +9,8 @@ import {
   type Snapshot,
 } from "./metrics";
 
-/** Polls one local recorder and resets counter differences when the responding process changes. */
-export function useMonitoringSnapshot() {
+/** Polls at the selected interval without resetting counter differences when the interval changes. */
+export function useMonitoringSnapshot(refreshSeconds = 5) {
   const previous = useRef<Snapshot | undefined>(undefined);
   return useQuery({
     queryKey: ["monitoring", "live"],
@@ -24,7 +24,7 @@ export function useMonitoringSnapshot() {
       previous.current = current;
       return view;
     },
-    refetchInterval: 5000,
+    refetchInterval: refreshSeconds * 1000,
     retry: false,
   });
 }

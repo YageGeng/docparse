@@ -300,6 +300,12 @@ button:disabled {
   border-collapse: collapse;
   table-layout: fixed;
 }
+@media (min-width: 1024px) {
+  .jobs-table {
+    /* Size desktop columns by content so additional timing columns cannot squeeze progress text. */
+    table-layout: auto;
+  }
+}
 .jobs-table th {
   background: #fafbfd;
   border-block: 1px solid #edf1f6;

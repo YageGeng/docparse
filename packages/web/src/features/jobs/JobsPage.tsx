@@ -21,7 +21,7 @@ import { request, type Job, type JobList, type JobStatus } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { fileSize, jobDuration, jobProgress } from "@/lib/format";
+import { fileSize, jobDuration, jobProgress, jobQueueDuration, jobTime } from "@/lib/format";
 import { useJobs } from "./queries";
 import { UploadPanel } from "./UploadPanel";
 
@@ -48,6 +48,8 @@ export function JobsPage() {
     return () => clearTimeout(timer);
   }, [search]);
   const jobs = useJobs(status, query);
+  // Track each successful poll even when task data is unchanged, refreshing live queue waits.
+  const queueNow = jobs.dataUpdatedAt || Date.now();
   const items = jobs.data?.pages.flatMap((page) => page.items) ?? [];
   const deletion = useMutation({
     // Reject offline actions immediately instead of queuing a paused mutation that locks the modal until reconnect.
@@ -199,9 +201,11 @@ export function JobsPage() {
                 <tr>
                   <th>文档名称</th>
                   <th>状态</th>
-                  <th className="hidden lg:table-cell">当前进度</th>
+                  <th className="hidden min-w-44 whitespace-nowrap lg:table-cell">当前进度</th>
+                  <th className="hidden sm:table-cell" title="创建任务至首次开始解析的等待时间">排队耗时</th>
                   <th className="hidden sm:table-cell">解析耗时</th>
                   <th className="hidden sm:table-cell">创建时间</th>
+                  <th className="hidden sm:table-cell">完成时间</th>
                   <th className="text-right">
                     <span className="sr-only">操作</span>
                   </th>
@@ -234,9 +238,15 @@ export function JobsPage() {
                               {job.id.slice(0, 8)}
                             </span>
                           </p>
-                          {/* Keep duration visible on narrow screens without adding another table column. */}
+                          {/* Keep queue and completion metadata available when narrow screens hide their columns. */}
+                          <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden" title="创建任务至首次开始解析的等待时间">
+                            排队耗时 {jobQueueDuration(job, queueNow)}
+                          </p>
                           <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden">
                             解析耗时 {jobDuration(job)}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden">
+                            完成时间 {jobTime(job.finished_at)}
                           </p>
                         </div>
                       </div>
@@ -244,19 +254,20 @@ export function JobsPage() {
                     <td>
                       <StatusBadge status={job.status} />
                     </td>
-                    <td className="hidden text-xs text-muted-foreground lg:table-cell">
+                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
                       {jobProgress(job).label}
+                    </td>
+                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground tabular-nums sm:table-cell">
+                      {jobQueueDuration(job, queueNow)}
                     </td>
                     <td className="hidden whitespace-nowrap text-xs text-muted-foreground tabular-nums sm:table-cell">
                       {jobDuration(job)}
                     </td>
                     <td className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell">
-                      {new Date(job.created_at).toLocaleString("zh-CN", {
-                        month: "2-digit",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {jobTime(job.created_at)}
+                    </td>
+                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell">
+                      {jobTime(job.finished_at)}
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">

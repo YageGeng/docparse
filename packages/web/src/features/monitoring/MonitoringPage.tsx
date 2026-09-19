@@ -18,7 +18,9 @@ export function MonitoringPage() {
   const [mode, setMode] = useState<"live" | "history">("live");
   const [chart, setChart] = useState<Chart>("backlog");
   const [seconds, setSeconds] = useState(3600);
-  const live = useMonitoringSnapshot();
+  // Keep the selected cadence across live/history switches without creating a new query cache.
+  const [refreshSeconds, setRefreshSeconds] = useState(5);
+  const live = useMonitoringSnapshot(refreshSeconds);
   const history = useMonitoringHistory(chart, seconds, mode === "history");
   const view = live.data ?? emptyView;
   const { process, hasWorker, dbStale, queues, models } = view;
@@ -47,12 +49,25 @@ export function MonitoringPage() {
             历史指标
           </Button>
         </div>
+        {mode === "live" && (
+          <label className="monitoring-refresh">
+            刷新间隔
+            <select
+              value={refreshSeconds}
+              onChange={(event) => setRefreshSeconds(Number(event.target.value))}
+            >
+              {[1, 3, 5].map((seconds) => (
+                <option key={seconds} value={seconds}>{seconds}s</option>
+              ))}
+            </select>
+          </label>
+        )}
         <span>
           <Clock3 size={15} aria-hidden="true" />
           {view.collectedAt !== undefined
             ? `采集于 ${new Date(view.collectedAt! * 1000).toLocaleTimeString()}`
             : "等待首次采集"}{" "}
-          · 每 5 秒刷新
+          · 每 {refreshSeconds} 秒刷新
         </span>
       </div>
       <p className="monitoring-scope" role="status">

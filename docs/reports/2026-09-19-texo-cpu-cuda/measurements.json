@@ -1,0 +1,1002 @@
+{
+  "local": {
+    "cpu1": {
+      "host": "archlinux",
+      "runtime": "1.29.0",
+      "provider": "CPUExecutionProvider",
+      "threads": 1,
+      "cache_device": "cpu",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 414.2974679998588,
+              "encoder_ms": 111.03978900064249,
+              "decoder_ms": 295.34915902331704,
+              "steps": 433
+            },
+            {
+              "total_ms": 471.5512549955747,
+              "encoder_ms": 115.02650000329595,
+              "decoder_ms": 347.09009289508685,
+              "steps": 433
+            },
+            {
+              "total_ms": 405.6005539969192,
+              "encoder_ms": 113.57395500090206,
+              "decoder_ms": 284.76729396061273,
+              "steps": 433
+            },
+            {
+              "total_ms": 389.24060900171753,
+              "encoder_ms": 110.16163699969184,
+              "decoder_ms": 272.1509859256912,
+              "steps": 433
+            },
+            {
+              "total_ms": 382.67366999934893,
+              "encoder_ms": 110.35804199491395,
+              "decoder_ms": 265.5881839309586,
+              "steps": 433
+            }
+          ],
+          "total_ms": 405.6005539969192,
+          "encoder_ms": 111.03978900064249,
+          "decoder_ms": 284.76729396061273
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 142.16603399836458,
+              "encoder_ms": 109.61845899873879,
+              "decoder_ms": 31.599239016941283,
+              "steps": 52
+            },
+            {
+              "total_ms": 142.47486100066453,
+              "encoder_ms": 110.49043799721403,
+              "decoder_ms": 31.046834999870043,
+              "steps": 52
+            },
+            {
+              "total_ms": 142.6313010015292,
+              "encoder_ms": 110.16384499816922,
+              "decoder_ms": 31.53587297128979,
+              "steps": 52
+            },
+            {
+              "total_ms": 153.44419200118864,
+              "encoder_ms": 112.07750400353689,
+              "decoder_ms": 40.01618001348106,
+              "steps": 52
+            },
+            {
+              "total_ms": 160.26440000132425,
+              "encoder_ms": 117.09785199491307,
+              "decoder_ms": 41.75668899551965,
+              "steps": 52
+            }
+          ],
+          "total_ms": 142.6313010015292,
+          "encoder_ms": 110.49043799721403,
+          "decoder_ms": 31.599239016941283
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 189.74714700016193,
+              "encoder_ms": 111.28922900388716,
+              "decoder_ms": 76.29049396928167,
+              "steps": 134
+            },
+            {
+              "total_ms": 188.345290000143,
+              "encoder_ms": 110.75495099794352,
+              "decoder_ms": 75.42358096543467,
+              "steps": 134
+            },
+            {
+              "total_ms": 190.24736800201936,
+              "encoder_ms": 111.65509599959478,
+              "decoder_ms": 76.40367604471976,
+              "steps": 134
+            },
+            {
+              "total_ms": 188.11530800303444,
+              "encoder_ms": 110.4005369998049,
+              "decoder_ms": 75.56440898042638,
+              "steps": 134
+            },
+            {
+              "total_ms": 184.92497999977786,
+              "encoder_ms": 109.95511100190924,
+              "decoder_ms": 72.89552600559546,
+              "steps": 134
+            }
+          ],
+          "total_ms": 188.345290000143,
+          "encoder_ms": 110.75495099794352,
+          "decoder_ms": 75.56440898042638
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 1063.6059000025853,
+              "encoder_ms": 450.9668549944763,
+              "decoder_ms": 601.2912281730678,
+              "steps": 433
+            },
+            {
+              "total_ms": 1134.940898999048,
+              "encoder_ms": 451.34739999775775,
+              "decoder_ms": 670.4151449230267,
+              "steps": 433
+            },
+            {
+              "total_ms": 1137.9996780015063,
+              "encoder_ms": 457.2113169997465,
+              "decoder_ms": 667.9900110320887,
+              "steps": 433
+            },
+            {
+              "total_ms": 1135.4713940017973,
+              "encoder_ms": 452.8062649987987,
+              "decoder_ms": 669.807037927967,
+              "steps": 433
+            },
+            {
+              "total_ms": 1140.8513589994982,
+              "encoder_ms": 448.57518700155197,
+              "decoder_ms": 678.9723939436954,
+              "steps": 433
+            }
+          ],
+          "total_ms": 1135.4713940017973,
+          "encoder_ms": 451.34739999775775,
+          "decoder_ms": 669.807037927967
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    },
+    "cpu4": {
+      "host": "archlinux",
+      "runtime": "1.29.0",
+      "provider": "CPUExecutionProvider",
+      "threads": 4,
+      "cache_device": "cpu",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 197.87725199421402,
+              "encoder_ms": 34.7984850013745,
+              "decoder_ms": 156.82363003725186,
+              "steps": 433
+            },
+            {
+              "total_ms": 198.01771600032225,
+              "encoder_ms": 34.035693999612704,
+              "decoder_ms": 157.59970602812245,
+              "steps": 433
+            },
+            {
+              "total_ms": 201.19027599866968,
+              "encoder_ms": 34.019926002656575,
+              "decoder_ms": 160.46790505060926,
+              "steps": 433
+            },
+            {
+              "total_ms": 201.19636899471516,
+              "encoder_ms": 34.494277999328915,
+              "decoder_ms": 160.13142489100574,
+              "steps": 433
+            },
+            {
+              "total_ms": 207.60957300080918,
+              "encoder_ms": 34.684477002883796,
+              "decoder_ms": 166.16574396175565,
+              "steps": 433
+            }
+          ],
+          "total_ms": 201.19027599866968,
+          "encoder_ms": 34.494277999328915,
+          "decoder_ms": 160.13142489100574
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 54.61698900035117,
+              "encoder_ms": 34.35405700292904,
+              "decoder_ms": 19.25307601777604,
+              "steps": 52
+            },
+            {
+              "total_ms": 54.12058300134959,
+              "encoder_ms": 34.09772500162944,
+              "decoder_ms": 19.0785009690444,
+              "steps": 52
+            },
+            {
+              "total_ms": 53.65128799894592,
+              "encoder_ms": 33.88168400124414,
+              "decoder_ms": 18.901909970736597,
+              "steps": 52
+            },
+            {
+              "total_ms": 55.27551100385608,
+              "encoder_ms": 35.19775399763603,
+              "decoder_ms": 19.180846997187473,
+              "steps": 52
+            },
+            {
+              "total_ms": 54.31137900450267,
+              "encoder_ms": 34.32036999583943,
+              "decoder_ms": 19.124180005746894,
+              "steps": 52
+            }
+          ],
+          "total_ms": 54.31137900450267,
+          "encoder_ms": 34.32036999583943,
+          "decoder_ms": 19.124180005746894
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 82.78730900201481,
+              "encoder_ms": 34.0239590004785,
+              "decoder_ms": 46.721840983082075,
+              "steps": 134
+            },
+            {
+              "total_ms": 82.31077700474998,
+              "encoder_ms": 34.18660399620421,
+              "decoder_ms": 46.066912975220475,
+              "steps": 134
+            },
+            {
+              "total_ms": 84.96007000212558,
+              "encoder_ms": 33.942769005079754,
+              "decoder_ms": 48.797419032780454,
+              "steps": 134
+            },
+            {
+              "total_ms": 84.99769199988805,
+              "encoder_ms": 32.756562999566086,
+              "decoder_ms": 49.998786962532904,
+              "steps": 134
+            },
+            {
+              "total_ms": 83.84790099808015,
+              "encoder_ms": 33.84758400352439,
+              "decoder_ms": 47.75265003263485,
+              "steps": 134
+            }
+          ],
+          "total_ms": 83.84790099808015,
+          "encoder_ms": 33.942769005079754,
+          "decoder_ms": 47.75265003263485
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 434.4802650011843,
+              "encoder_ms": 136.3069840008393,
+              "decoder_ms": 289.2270430602366,
+              "steps": 433
+            },
+            {
+              "total_ms": 426.3195870007621,
+              "encoder_ms": 133.80777300335467,
+              "decoder_ms": 283.4628920754767,
+              "steps": 433
+            },
+            {
+              "total_ms": 427.55574799957685,
+              "encoder_ms": 132.506502995966,
+              "decoder_ms": 286.07310895313276,
+              "steps": 433
+            },
+            {
+              "total_ms": 433.8026129989885,
+              "encoder_ms": 134.60347200452816,
+              "decoder_ms": 289.98513113037916,
+              "steps": 433
+            },
+            {
+              "total_ms": 416.2275039998349,
+              "encoder_ms": 133.7768830053392,
+              "decoder_ms": 273.47988198744133,
+              "steps": 433
+            }
+          ],
+          "total_ms": 427.55574799957685,
+          "encoder_ms": 133.80777300335467,
+          "decoder_ms": 286.07310895313276
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    },
+    "cuda": {
+      "host": "archlinux",
+      "runtime": "1.29.0",
+      "provider": "CUDAExecutionProvider",
+      "threads": 1,
+      "cache_device": "cuda",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 193.56143800541759,
+              "encoder_ms": 4.417400996317156,
+              "decoder_ms": 182.26747199514648,
+              "steps": 433
+            },
+            {
+              "total_ms": 179.29077699955087,
+              "encoder_ms": 3.4516129962867126,
+              "decoder_ms": 168.75961992627708,
+              "steps": 433
+            },
+            {
+              "total_ms": 185.12935799662955,
+              "encoder_ms": 3.447276998485904,
+              "decoder_ms": 174.6547579750768,
+              "steps": 433
+            },
+            {
+              "total_ms": 181.1579349960084,
+              "encoder_ms": 3.5948220029240474,
+              "decoder_ms": 170.46824098360958,
+              "steps": 433
+            },
+            {
+              "total_ms": 185.90150200179778,
+              "encoder_ms": 3.4209160003229044,
+              "decoder_ms": 175.61523803306045,
+              "steps": 433
+            }
+          ],
+          "total_ms": 185.12935799662955,
+          "encoder_ms": 3.4516129962867126,
+          "decoder_ms": 174.6547579750768
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 23.86535600089701,
+              "encoder_ms": 3.357771005539689,
+              "decoder_ms": 19.63870997133199,
+              "steps": 52
+            },
+            {
+              "total_ms": 25.958739999623504,
+              "encoder_ms": 3.414484002860263,
+              "decoder_ms": 21.686747008061502,
+              "steps": 52
+            },
+            {
+              "total_ms": 29.018426001130138,
+              "encoder_ms": 3.6518669949145988,
+              "decoder_ms": 24.297853946336545,
+              "steps": 52
+            },
+            {
+              "total_ms": 24.188194998714607,
+              "encoder_ms": 3.460776999418158,
+              "decoder_ms": 19.83664599538315,
+              "steps": 52
+            },
+            {
+              "total_ms": 24.6046589963953,
+              "encoder_ms": 3.429700998822227,
+              "decoder_ms": 20.260340032109525,
+              "steps": 52
+            }
+          ],
+          "total_ms": 24.6046589963953,
+          "encoder_ms": 3.429700998822227,
+          "decoder_ms": 20.260340032109525
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 59.76831400039373,
+              "encoder_ms": 3.436605999013409,
+              "decoder_ms": 54.194474025280215,
+              "steps": 134
+            },
+            {
+              "total_ms": 57.199378999939654,
+              "encoder_ms": 3.465089001110755,
+              "decoder_ms": 51.571150979725644,
+              "steps": 134
+            },
+            {
+              "total_ms": 58.63596099516144,
+              "encoder_ms": 3.430277000006754,
+              "decoder_ms": 53.059555000800174,
+              "steps": 134
+            },
+            {
+              "total_ms": 57.233275001635775,
+              "encoder_ms": 3.3532019951962866,
+              "decoder_ms": 51.68822698033182,
+              "steps": 134
+            },
+            {
+              "total_ms": 57.33292799413903,
+              "encoder_ms": 3.386800002772361,
+              "decoder_ms": 51.75992497970583,
+              "steps": 134
+            }
+          ],
+          "total_ms": 57.33292799413903,
+          "encoder_ms": 3.430277000006754,
+          "decoder_ms": 51.75992497970583
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 236.30408899771282,
+              "encoder_ms": 13.153898995369673,
+              "decoder_ms": 215.00163590098964,
+              "steps": 433
+            },
+            {
+              "total_ms": 231.54389500268735,
+              "encoder_ms": 13.08484799665166,
+              "decoder_ms": 210.2143420415814,
+              "steps": 433
+            },
+            {
+              "total_ms": 231.5630390003207,
+              "encoder_ms": 13.086487997497898,
+              "decoder_ms": 210.3100840904517,
+              "steps": 433
+            },
+            {
+              "total_ms": 240.05662600393407,
+              "encoder_ms": 13.31775399739854,
+              "decoder_ms": 218.6979839898413,
+              "steps": 433
+            },
+            {
+              "total_ms": 226.2904909948702,
+              "encoder_ms": 13.255257006676402,
+              "decoder_ms": 204.7910390610923,
+              "steps": 433
+            }
+          ],
+          "total_ms": 231.5630390003207,
+          "encoder_ms": 13.153898995369673,
+          "decoder_ms": 210.3100840904517
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    }
+  },
+  "remote": {
+    "cpu1": {
+      "host": "gpuhub-container-d3gx2zvrdd-7e7724c9",
+      "runtime": "1.29.0",
+      "provider": "CPUExecutionProvider",
+      "threads": 1,
+      "cache_device": "cpu",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 931.7219965159893,
+              "encoder_ms": 169.04249228537083,
+              "decoder_ms": 739.7847175598145,
+              "steps": 433
+            },
+            {
+              "total_ms": 907.7172856777906,
+              "encoder_ms": 154.86964024603367,
+              "decoder_ms": 730.0318032503128,
+              "steps": 433
+            },
+            {
+              "total_ms": 884.6929781138897,
+              "encoder_ms": 154.53537926077843,
+              "decoder_ms": 708.1747017800808,
+              "steps": 433
+            }
+          ],
+          "total_ms": 907.7172856777906,
+          "encoder_ms": 154.86964024603367,
+          "decoder_ms": 730.0318032503128
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 234.55805517733097,
+              "encoder_ms": 154.76855263113976,
+              "decoder_ms": 77.01862417161465,
+              "steps": 52
+            },
+            {
+              "total_ms": 250.8968599140644,
+              "encoder_ms": 163.29317726194859,
+              "decoder_ms": 84.53256823122501,
+              "steps": 52
+            },
+            {
+              "total_ms": 267.9705582559109,
+              "encoder_ms": 171.71262949705124,
+              "decoder_ms": 93.18320453166962,
+              "steps": 52
+            }
+          ],
+          "total_ms": 250.8968599140644,
+          "encoder_ms": 163.29317726194859,
+          "decoder_ms": 84.53256823122501
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 370.4957216978073,
+              "encoder_ms": 155.92056326568127,
+              "decoder_ms": 207.49957859516144,
+              "steps": 134
+            },
+            {
+              "total_ms": 359.0519167482853,
+              "encoder_ms": 153.4187514334917,
+              "decoder_ms": 198.53512942790985,
+              "steps": 134
+            },
+            {
+              "total_ms": 388.92143219709396,
+              "encoder_ms": 168.8234694302082,
+              "decoder_ms": 212.91028335690498,
+              "steps": 134
+            }
+          ],
+          "total_ms": 370.4957216978073,
+          "encoder_ms": 155.92056326568127,
+          "decoder_ms": 207.49957859516144
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 2192.5635673105717,
+              "encoder_ms": 663.144776597619,
+              "decoder_ms": 1495.5360293388367,
+              "steps": 433
+            },
+            {
+              "total_ms": 2385.6399934738874,
+              "encoder_ms": 676.4432452619076,
+              "decoder_ms": 1674.903443083167,
+              "steps": 433
+            },
+            {
+              "total_ms": 2410.2057088166475,
+              "encoder_ms": 673.1901038438082,
+              "decoder_ms": 1682.5169194489717,
+              "steps": 433
+            }
+          ],
+          "total_ms": 2385.6399934738874,
+          "encoder_ms": 673.1901038438082,
+          "decoder_ms": 1674.903443083167
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    },
+    "cpu4": {
+      "host": "gpuhub-container-d3gx2zvrdd-7e7724c9",
+      "runtime": "1.29.0",
+      "provider": "CPUExecutionProvider",
+      "threads": 4,
+      "cache_device": "cpu",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 623.8553840667009,
+              "encoder_ms": 98.14065508544445,
+              "decoder_ms": 504.59445640444756,
+              "steps": 433
+            },
+            {
+              "total_ms": 762.1890883892775,
+              "encoder_ms": 98.31085428595543,
+              "decoder_ms": 641.9661045074463,
+              "steps": 433
+            },
+            {
+              "total_ms": 823.0971712619066,
+              "encoder_ms": 119.17652562260628,
+              "decoder_ms": 681.2737192958593,
+              "steps": 433
+            }
+          ],
+          "total_ms": 762.1890883892775,
+          "encoder_ms": 98.31085428595543,
+          "decoder_ms": 641.9661045074463
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 189.1247145831585,
+              "encoder_ms": 96.06287628412247,
+              "decoder_ms": 90.07054008543491,
+              "steps": 52
+            },
+            {
+              "total_ms": 121.67060747742653,
+              "encoder_ms": 68.35215166211128,
+              "decoder_ms": 50.663430243730545,
+              "steps": 52
+            },
+            {
+              "total_ms": 161.82066313922405,
+              "encoder_ms": 73.04986007511616,
+              "decoder_ms": 85.7823546975851,
+              "steps": 52
+            }
+          ],
+          "total_ms": 161.82066313922405,
+          "encoder_ms": 73.04986007511616,
+          "decoder_ms": 85.7823546975851
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 325.12814551591873,
+              "encoder_ms": 86.33049204945564,
+              "decoder_ms": 196.64457999169827,
+              "steps": 134
+            },
+            {
+              "total_ms": 324.58727806806564,
+              "encoder_ms": 108.07783529162407,
+              "decoder_ms": 209.41735245287418,
+              "steps": 134
+            },
+            {
+              "total_ms": 393.8200678676367,
+              "encoder_ms": 111.94670014083385,
+              "decoder_ms": 196.23105973005295,
+              "steps": 134
+            }
+          ],
+          "total_ms": 325.12814551591873,
+          "encoder_ms": 108.07783529162407,
+          "decoder_ms": 196.64457999169827
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 1156.025990843773,
+              "encoder_ms": 287.8130506724119,
+              "decoder_ms": 842.2543723136187,
+              "steps": 433
+            },
+            {
+              "total_ms": 1018.2358864694834,
+              "encoder_ms": 241.82273633778095,
+              "decoder_ms": 747.4088724702597,
+              "steps": 433
+            },
+            {
+              "total_ms": 936.4976994693279,
+              "encoder_ms": 196.1839385330677,
+              "decoder_ms": 713.2559567689896,
+              "steps": 433
+            }
+          ],
+          "total_ms": 1018.2358864694834,
+          "encoder_ms": 241.82273633778095,
+          "decoder_ms": 747.4088724702597
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    },
+    "cuda": {
+      "host": "gpuhub-container-d3gx2zvrdd-7e7724c9",
+      "runtime": "1.29.0",
+      "provider": "CUDAExecutionProvider",
+      "threads": 1,
+      "cache_device": "cuda",
+      "optimization": "all",
+      "memory_pattern": true,
+      "cases": [
+        {
+          "images": [
+            "formula_multi.png"
+          ],
+          "batch": 1,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 1208.8824417442083,
+              "encoder_ms": 12.583548203110695,
+              "decoder_ms": 1172.3505705595016,
+              "steps": 433
+            },
+            {
+              "total_ms": 1096.9879683107138,
+              "encoder_ms": 32.208263874053955,
+              "decoder_ms": 1042.5199028104544,
+              "steps": 433
+            },
+            {
+              "total_ms": 898.0767112225294,
+              "encoder_ms": 3.4450795501470566,
+              "decoder_ms": 872.3839484155178,
+              "steps": 433
+            }
+          ],
+          "total_ms": 1096.9879683107138,
+          "encoder_ms": 12.583548203110695,
+          "decoder_ms": 1042.5199028104544
+        },
+        {
+          "images": [
+            "formula_single.png"
+          ],
+          "batch": 1,
+          "steps": 52,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 96.03789635002613,
+              "encoder_ms": 14.765670523047447,
+              "decoder_ms": 78.61112989485264,
+              "steps": 52
+            },
+            {
+              "total_ms": 89.6801557391882,
+              "encoder_ms": 3.978963941335678,
+              "decoder_ms": 83.04598741233349,
+              "steps": 52
+            },
+            {
+              "total_ms": 81.53032697737217,
+              "encoder_ms": 4.411943256855011,
+              "decoder_ms": 74.33873414993286,
+              "steps": 52
+            }
+          ],
+          "total_ms": 89.6801557391882,
+          "encoder_ms": 4.411943256855011,
+          "decoder_ms": 78.61112989485264
+        },
+        {
+          "images": [
+            "formula_single2.png"
+          ],
+          "batch": 1,
+          "steps": 134,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 241.2798758596182,
+              "encoder_ms": 3.1612087041139603,
+              "decoder_ms": 231.227595359087,
+              "steps": 134
+            },
+            {
+              "total_ms": 266.09139516949654,
+              "encoder_ms": 3.8718432188034058,
+              "decoder_ms": 254.2458139359951,
+              "steps": 134
+            },
+            {
+              "total_ms": 309.48186106979847,
+              "encoder_ms": 9.873338043689728,
+              "decoder_ms": 292.19977743923664,
+              "steps": 134
+            }
+          ],
+          "total_ms": 266.09139516949654,
+          "encoder_ms": 3.8718432188034058,
+          "decoder_ms": 254.2458139359951
+        },
+        {
+          "images": [
+            "formula_single.png",
+            "formula_single2.png",
+            "formula_multi.png",
+            "formula_single.png"
+          ],
+          "batch": 4,
+          "steps": 433,
+          "exact_tokens": true,
+          "samples": [
+            {
+              "total_ms": 1010.2924108505249,
+              "encoder_ms": 13.321541249752045,
+              "decoder_ms": 973.0816911906004,
+              "steps": 433
+            },
+            {
+              "total_ms": 958.7716273963451,
+              "encoder_ms": 8.764810860157013,
+              "decoder_ms": 926.4993444085121,
+              "steps": 433
+            },
+            {
+              "total_ms": 925.135463476181,
+              "encoder_ms": 5.996940657496452,
+              "decoder_ms": 895.6184480339289,
+              "steps": 433
+            }
+          ],
+          "total_ms": 958.7716273963451,
+          "encoder_ms": 8.764810860157013,
+          "decoder_ms": 926.4993444085121
+        }
+      ],
+      "model_sha256": {
+        "encoder_model.onnx": "fbd69cf63cf833db1e2ef40013d859b560671c1253278441a01bde4516b624ae",
+        "decoder_model_merged.onnx": "61d4e9e60e3caa62af3f28a15a22bc13567eb4e618c87917d9597461e54c46be"
+      }
+    }
+  }
+}

@@ -47,10 +47,39 @@ export function jobDuration(job: Job): string {
   const ms = job.duration_ms;
   if ((job.status !== "succeeded" && job.status !== "failed") || ms == null)
     return "—";
+  // Share duration units with queue waiting time so both columns remain consistent.
+  return duration(ms);
+}
+
+/** Formats measured intervals consistently and leaves invalid legacy timestamps unknown. */
+function duration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
   if (ms < 1000) return `${ms} 毫秒`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${(ms / 1000).toFixed(1)} 秒`;
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+/** Measures initial queue wait only; retries must not include earlier parsing time as waiting. */
+export function jobQueueDuration(job: Job, now: number): string {
+  const end = job.started_at
+    ? Date.parse(job.started_at)
+    : job.status === "queued" && job.attempts === 0
+      ? now
+      : NaN;
+  return duration(end - Date.parse(job.created_at));
+}
+
+/** Uses the same local timestamp precision for creation and completion, including mobile summaries. */
+export function jobTime(value?: string | null): string {
+  if (!value || !Number.isFinite(Date.parse(value))) return "—";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 /** Presents the real pipeline stage; percentages apply only within stages with a measurable page count. */
