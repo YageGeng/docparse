@@ -79,9 +79,7 @@ mod platform {
                         backend.cpu_builder()?
                     } else {
                         SessionBuilder::try_from(backend)?
-                    }
-                    .with_intra_threads(1)
-                    .map_err(ort::Error::from)?;
+                    };
                     let session = builder.commit_from_memory(&model)?;
                     Ok::<_, FormulaError>((
                         session,

@@ -143,8 +143,6 @@ mod platform {
             let manager = SessionManager::load(kind.metric_name(), session_size, batch_size, queue_size, move || {
                 // Inherit the global session policy instead of overriding memory patterns per model.
                 let mut session = SessionBuilder::try_from(backend)?
-                    .with_intra_threads(1)
-                    .map_err(ort::Error::from)?
                     .commit_from_memory(&bytes)?;
                 kind.validate_session(&session)?;
                 Ok::<_, OcrError>(move |requests: Vec<Request>| {

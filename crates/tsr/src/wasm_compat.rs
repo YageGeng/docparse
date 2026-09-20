@@ -253,9 +253,7 @@ mod platform {
                 batch_size,
                 queue_size,
                 move || {
-                    let mut builder = SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?;
+                    let mut builder = SessionBuilder::try_from(backend)?;
                     if matches!(
                         kind,
                         ModelKind::Structure(

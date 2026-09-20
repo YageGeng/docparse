@@ -129,12 +129,8 @@ impl SessionManager {
                 // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
@@ -807,12 +803,8 @@ mod tests {
                 // Both graphs inherit the compiled provider and shared session defaults.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(1)
-                        .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };

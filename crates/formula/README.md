@@ -130,5 +130,5 @@ is terminated only when all callers sharing the physical batch have canceled;
 one caller cannot terminate a neighbor's inference. Decoder failures remain
 specific to the affected crop.
 
-Native sessions use one intra-op thread each. Browser sessions use the ORT Web
-runtime's global thread settings.
+Native sessions leave intra-op threading at the ORT default. Browser sessions use
+the ORT Web runtime's global thread settings.

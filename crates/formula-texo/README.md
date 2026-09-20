@@ -168,6 +168,6 @@ queue. Native standard runs return hidden states and KV caches to host memory.
 Outputs retain caller order even if consumers complete out of order.
 
 Separate CPU/GPU consumer counts and per-CPU-consumer thread settings are removed.
-CPU-only builds still use their compiled CPU backend. Native sessions use one
-intra-op thread each. Queue capacity, global ORT optimization/memory settings,
-cancellation, and the shared formula batch limit remain independent of the count.
+CPU-only builds still use their compiled CPU backend. Native sessions leave
+intra-op threading at the ORT default. Queue capacity, global ORT optimization/memory
+settings, cancellation, and the shared formula batch limit remain independent of the count.
