@@ -88,25 +88,18 @@ impl TexoEngine {
             &runner.pressure(),
             config.formula(),
         )?;
-        let (cpu_count, gpu_count) = config.formula().engine.session_counts();
-        let provider = if gpu_count == 0 {
-            "cpu".to_owned()
-        } else if cpu_count > 0 {
-            format!("cpu+{}", backend.execution_provider())
-        } else {
-            backend.execution_provider().to_string()
-        };
+        let session_size = config.formula().engine.session_size();
+        let provider = backend.execution_provider();
         tracing::info!(
-            "loaded Texo with {} CPU and {} GPU session pairs ({})",
-            cpu_count,
-            gpu_count,
+            "loaded Texo with {} session pairs on {}",
+            session_size,
             provider
         );
         Ok(Self {
             runner,
             admission: Arc::new(tokio::sync::Semaphore::new(
                 config.formula().queue_size
-                    + config.formula().batch_size * (cpu_count + gpu_count),
+                    + config.formula().batch_size * session_size,
             )),
             name: format!("texo-transfer-onnx-{provider}"),
         })

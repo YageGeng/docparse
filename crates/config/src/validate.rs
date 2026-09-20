@@ -339,15 +339,6 @@ impl TryFrom<RawConfig> for ValidatedConfig {
         {
             mineru.endpoint()?;
         }
-        // ORT accepts a signed 32-bit count; zero would silently enable automatic threading.
-        if !(1..=i32::MAX as usize)
-            .contains(&config.formula.engine.cpu_intra_threads())
-        {
-            return Err(ConfigError::InvalidValue {
-                field: "formula.engine.cpu_intra_threads",
-                reason: "must be between 1 and 2147483647",
-            });
-        }
         let pressure = &config.formula.backpressure;
         if !pressure.high_watermark.is_finite()
             || !pressure.low_watermark.is_finite()
@@ -362,17 +353,17 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                 reason: "requires 0 <= low_watermark < high_watermark <= 1 and positive pause/resume seconds",
             });
         }
-        let (cpu, gpu) = config.formula.engine.session_counts();
-        // Check arithmetic/permit representability without imposing a hardware-dependent session ceiling.
-        let capacity = cpu
-            .checked_add(gpu)
-            .filter(|total| *total > 0)
-            .and_then(|total| total.checked_mul(config.formula.batch_size))
+        let sessions = config.formula.engine.session_size();
+        // Check permit representability without imposing a hardware-dependent session ceiling.
+        let capacity = sessions
+            .checked_mul(config.formula.batch_size)
             .and_then(|active| active.checked_add(config.formula.queue_size));
-        if capacity.is_none_or(|capacity| capacity > (usize::MAX >> 3)) {
+        if sessions == 0
+            || capacity.is_none_or(|capacity| capacity > (usize::MAX >> 3))
+        {
             return Err(ConfigError::InvalidValue {
-                field: "formula.engine",
-                reason: "CPU/GPU session counts must have a positive total and fit the admission capacity",
+                field: "formula.engine.session_size",
+                reason: "must be positive and fit the admission capacity",
             });
         }
         if !(1..=32).contains(&config.formula.batch_size) {

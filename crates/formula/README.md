@@ -118,7 +118,9 @@ Apache-2.0 license notices.
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
 Required `formula.queue_size` sets its capacity independently of sessions and batches.
-`formula.engine.cpu_session_size` and `formula.engine.gpu_session_size` create pure CPU and accelerated PP consumers over that same queue. Both may be zero individually, but their total must be positive (native defaults: CPU=1, GPU=0). There is no fixed session ceiling. GPU owners require an accelerated backend; PP on Apple requires CPU owners because the existing CoreML compatibility executor is CPU-only.
+`formula.engine.session_size` creates consumers on the selected backend (default 1,
+positive, with no fixed upper limit). PP retains its CPU compatibility executor for
+unsupported CoreML graphs on Apple. There is no separate CPU consumer group.
 Native queue executors belong to the engine and survive its construction runtime.
 Each idle owner drains only ready work up to `formula.batch_size`; short tails
 run immediately. The parser reserves crop admission before raster allocation,
@@ -128,9 +130,5 @@ is terminated only when all callers sharing the physical batch have canceled;
 one caller cannot terminate a neighbor's inference. Decoder failures remain
 specific to the affected crop.
 
-`formula.engine.cpu_intra_threads` configures intra-op threads for each native
-CPU session (default 1). Texo applies it to both encoder and decoder; those graphs
-execute sequentially within a consumer. GPU session threading is unchanged.
-Zero is rejected to avoid silently selecting ORT automatic threading. ORT Web
-uses a global WASM thread pool, so browser CPU sessions reject values other than
-1 rather than silently ignoring a native-only per-session setting.
+Native sessions use one intra-op thread each. Browser sessions use the ORT Web
+runtime's global thread settings.

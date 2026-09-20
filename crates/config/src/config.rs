@@ -247,25 +247,12 @@ pub enum FormulaEngineConfig {
 }
 
 impl FormulaEngineConfig {
-    /// Returns the native CPU operator thread count for either local formula family.
-    pub fn cpu_intra_threads(&self) -> usize {
+    /// Returns the consumer count for a local formula engine using the selected backend.
+    pub fn session_size(&self) -> usize {
         match self {
-            Self::Pp(config) => config.cpu_intra_threads,
-            Self::Texo(config) => config.cpu_intra_threads,
+            Self::Pp(config) => config.session_size,
+            Self::Texo(config) => config.session_size,
             Self::Mineru(_) => 1,
-        }
-    }
-
-    /// Returns pure CPU and accelerated consumer counts without exposing model-specific file fields.
-    pub fn session_counts(&self) -> (usize, usize) {
-        match self {
-            Self::Pp(config) => {
-                (config.cpu_session_size, config.gpu_session_size)
-            }
-            Self::Texo(config) => {
-                (config.cpu_session_size, config.gpu_session_size)
-            }
-            Self::Mineru(_) => (1, 0),
         }
     }
 }
@@ -336,16 +323,9 @@ impl Default for FormulaEngineConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct PpFormulaConfig {
-    /// Pure CPU consumers sharing the formula queue; default one supports CPU-only builds.
-    #[serde(default = "default_session_size")]
+    /// Consumers sharing the formula queue on the selected execution backend.
     #[builder(default = 1)]
-    pub cpu_session_size: usize,
-    /// Intra-op threads per native CPU session; accelerator sessions retain their existing policy.
-    #[builder(default = 1)]
-    pub cpu_intra_threads: usize,
-    /// Accelerated consumers share the same queue; zero disables accelerator sessions.
-    #[builder(default = 0)]
-    pub gpu_session_size: usize,
+    pub session_size: usize,
     /// ONNX graph for the selected PP-FormulaNet variant.
     pub model_path: PathBuf,
     /// Matching ByteLevel BPE tokenizer.
@@ -371,15 +351,9 @@ impl Default for PpFormulaConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
 pub struct TexoFormulaConfig {
-    /// Pure CPU encoder/decoder pairs consuming the shared crop queue.
+    /// Consumers sharing the formula queue on the selected execution backend.
     #[builder(default = 1)]
-    pub cpu_session_size: usize,
-    /// Intra-op threads per native CPU session; accelerator sessions retain their existing policy.
-    #[builder(default = 1)]
-    pub cpu_intra_threads: usize,
-    /// Accelerated consumers share the same queue; zero disables accelerator sessions.
-    #[builder(default = 0)]
-    pub gpu_session_size: usize,
+    pub session_size: usize,
     /// Image encoder ONNX graph.
     pub encoder_path: PathBuf,
     /// Merged first-step/cached decoder ONNX graph.

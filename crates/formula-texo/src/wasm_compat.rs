@@ -64,27 +64,6 @@ mod platform {
             })
         }
     }
-
-    impl Generation {
-        /// Fails rather than silently accepting host-resident caches in the CUDA execution path.
-        pub(crate) fn verify_device(
-            &self,
-            device: ort::memory::AllocationDevice,
-        ) -> Result<(), FormulaError> {
-            for value in std::iter::once(&self.hidden).chain(&self.cache) {
-                let tensor =
-                    value.downcast_ref::<ort::value::TensorValueType<f32>>()?;
-                if tensor.memory_info().allocation_device() != device {
-                    return Err(FormulaError::Invalid(format!(
-                        "Texo expected cached tensor on {}, got {}",
-                        device.as_str(),
-                        tensor.memory_info().allocation_device().as_str()
-                    )));
-                }
-            }
-            Ok(())
-        }
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -126,10 +105,7 @@ mod platform {
             let batch_size = config.batch_size;
             let (queue, receiver) =
                 FormulaQueue::new("formula_texo", config.queue_size);
-            for index in 0..(texo.cpu_session_size + texo.gpu_session_size) {
-                // Each browser owner selects its device while consuming the same queue.
-                let backend =
-                    backend.formula_worker(index, texo.cpu_session_size)?;
+            for _ in 0..texo.session_size {
                 // Apply the shared runtime settings to both graphs, including their memory policy.
                 let mut encoder_builder = SessionBuilder::try_from(backend)?;
                 let mut decoder_builder = SessionBuilder::try_from(backend)?;

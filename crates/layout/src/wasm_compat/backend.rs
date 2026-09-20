@@ -56,26 +56,6 @@ impl OnnxBackend {
         self.provider
     }
 
-    /// Selects pure CPU owners first, then the compiled accelerator, without changing global graph settings.
-    pub fn formula_worker(
-        self,
-        index: usize,
-        cpu_count: usize,
-    ) -> Result<Self, LayoutError> {
-        if index < cpu_count {
-            return Ok(Self {
-                provider: ExecutionProvider::Cpu,
-                ..self
-            });
-        }
-        if self.provider == ExecutionProvider::Cpu {
-            return Err(LayoutError::ExecutionProviderUnavailable {
-                provider: "gpu",
-            });
-        }
-        Ok(self)
-    }
-
     /// Chooses the compiled native provider with the shared configuration's default graph level.
     #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
     pub fn compiled() -> Self {
@@ -265,29 +245,6 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// CPU formula consumers override only the provider and retain global numerical policies.
-    #[test]
-    fn formula_cpu_selection_preserves_global_settings() {
-        let backend = OnnxBackend {
-            provider: ExecutionProvider::Cuda,
-            optimization_level: OptimizationLevel::All,
-            memory_pattern: true,
-        };
-        let cpu = backend.formula_worker(0, 1).expect("CPU owner");
-        assert_eq!(cpu.execution_provider(), ExecutionProvider::Cpu);
-        assert_eq!(cpu.optimization_level, OptimizationLevel::All);
-        assert!(cpu.memory_pattern);
-        assert_eq!(
-            backend
-                .formula_worker(1, 1)
-                .expect("GPU owner")
-                .execution_provider(),
-            ExecutionProvider::Cuda
-        );
-        cpu.formula_worker(0, 0)
-            .expect_err("GPU request on CPU-only backend");
-    }
 
     /// Every native model receives the compiled backend even when built from code-default configuration.
     #[test]

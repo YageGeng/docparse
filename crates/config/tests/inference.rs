@@ -230,7 +230,7 @@ fn every_model_has_independent_inference_limits() {
         .expect("engine")
         .remove("sessions");
     *value
-        .pointer_mut("/formula/engine/cpu_session_size")
+        .pointer_mut("/formula/engine/session_size")
         .expect("session size") = json!(2);
     let raw: RawConfig =
         serde_json::from_value(value.clone()).expect("new inference settings");
@@ -265,13 +265,8 @@ fn inference_limits_reject_invalid_counts_and_old_names() {
     ] {
         for count in [0, 9] {
             let mut value = defaults.clone();
-            // Formula pools now validate the total of their explicit CPU/GPU counts.
-            let key = if path == "/formula/engine" {
-                "cpu_session_size"
-            } else {
-                "session_size"
-            };
-            value.pointer_mut(path).expect("model")[key] = json!(count);
+            value.pointer_mut(path).expect("model")["session_size"] =
+                json!(count);
             let raw: RawConfig = serde_json::from_value(value).expect("schema");
             // Nine consumers are valid now; zero must still fail before resource allocation.
             assert_eq!(

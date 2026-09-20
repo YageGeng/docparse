@@ -53,12 +53,7 @@ async fn real_model_batch_parity_and_cancellation() {
     let mut raw = docparse_config::RawConfig::default();
     raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
         docparse_config::TexoFormulaConfig::builder()
-            .cpu_session_size(1)
-            .cpu_intra_threads(4)
-            .gpu_session_size(usize::from(
-                docparse_layout::OnnxBackend::compiled().execution_provider()
-                    != docparse_layout::ExecutionProvider::Cpu,
-            ))
+            .session_size(2)
             .encoder_path(dir.join("encoder_model.onnx"))
             .decoder_path(dir.join("decoder_model_merged.onnx"))
             .tokenizer_path(dir.join("tokenizer.json"))

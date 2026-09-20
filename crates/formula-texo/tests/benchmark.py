@@ -13,11 +13,10 @@ from reference import preprocess
 
 
 class Runner:
-    """Own one encoder/decoder pair and retain CUDA hidden states and caches on the GPU."""
+    """Match native standard runs with host-resident hidden states and caches."""
 
-    def __init__(self, directory, provider, threads, device_cache):
+    def __init__(self, directory, provider, threads):
         """Match the service's All optimization and memory-pattern settings for each provider."""
-        self.device = "cuda" if provider == "CUDAExecutionProvider" and device_cache else "cpu"
         options = ort.SessionOptions()
         options.intra_op_num_threads = threads
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -32,14 +31,9 @@ class Runner:
         batch = len(pixels)
         total_started = time.perf_counter()
         started = time.perf_counter()
-        binding = self.encoder.io_binding()
-        binding.bind_cpu_input("pixel_values", pixels)
-        binding.bind_output("last_hidden_state", self.device)
-        self.encoder.run_with_iobinding(binding)
-        binding.synchronize_outputs()
-        hidden = binding.get_outputs()[0]
+        hidden = self.encoder.run(["last_hidden_state"], {"pixel_values": pixels})[0]
         encoder_ms = (time.perf_counter()-started)*1000
-        cache = {value.name: ort.OrtValue.ortvalue_from_numpy(np.zeros((batch,16,0,24),dtype=np.float32))
+        cache = {value.name: np.zeros((batch,16,0,24),dtype=np.float32)
                  for value in self.decoder.get_inputs() if value.name.startswith("past_key_values")}
         names = [value.name for value in self.decoder.get_outputs()]
         tokens = [[0] for _ in range(batch)]
@@ -48,19 +42,11 @@ class Runner:
         decoder_ms = 0.0
         for step in range(1023):
             started = time.perf_counter()
-            binding = self.decoder.io_binding()
-            binding.bind_cpu_input("input_ids", next_ids)
-            binding.bind_cpu_input("use_cache_branch", np.array([step > 0]))
-            binding.bind_ortvalue_input("encoder_hidden_states", hidden)
-            for name,value in cache.items():
-                binding.bind_ortvalue_input(name,value)
-            for name in names:
-                binding.bind_output(name, "cpu" if name == "logits" else self.device)
-            self.decoder.run_with_iobinding(binding)
-            binding.synchronize_outputs()
-            outputs = dict(zip(names,binding.get_outputs()))
+            inputs = {"input_ids": next_ids, "use_cache_branch": np.array([step > 0]),
+                      "encoder_hidden_states": hidden, **cache}
+            outputs = dict(zip(names, self.decoder.run(names, inputs)))
             decoder_ms += (time.perf_counter()-started)*1000
-            best = outputs["logits"].numpy()[:, -1].argmax(-1)
+            best = outputs["logits"][:, -1].argmax(-1)
             next_ids = best[:,None].astype(np.int64)
             for index, token in enumerate(best):
                 if done[index]:
@@ -73,8 +59,6 @@ class Runner:
             for name in cache:
                 if step == 0 or ".decoder." in name:
                     cache[name] = outputs[name.replace("past_key_values", "present")]
-            assert hidden.device_name() == self.device
-            assert all(value.device_name() == self.device for value in cache.values())
         assert done.all(), "decoder did not reach EOS"
         return {"total_ms":(time.perf_counter()-total_started)*1000,"encoder_ms":encoder_ms,
                 "decoder_ms":decoder_ms,"steps":step+1,"tokens":tokens}
@@ -87,7 +71,6 @@ def main():
     parser.add_argument("--provider",choices=["cpu","cuda"],required=True)
     parser.add_argument("--threads",type=int,default=1)
     parser.add_argument("--repeats",type=int,default=5)
-    parser.add_argument("--host-cache",action="store_true")
     parser.add_argument("--output",type=Path,required=True)
     args=parser.parse_args()
     if args.threads < 1 or args.repeats < 1: parser.error("threads and repeats must be positive")
@@ -95,11 +78,11 @@ def main():
     golden={case["image"]:case["tokens"] for case in json.loads((fixtures/"reference.json").read_text())["cases"]}
     pixels={name:preprocess(fixtures/name) for name in golden}
     provider="CPUExecutionProvider" if args.provider=="cpu" else "CUDAExecutionProvider"
-    runner=Runner(args.model_dir,provider,args.threads,not args.host_cache)
+    runner=Runner(args.model_dir,provider,args.threads)
     groups=[[name] for name in golden]
     groups.append(["formula_single.png","formula_single2.png","formula_multi.png","formula_single.png"])
     report={"host":platform.node(),"runtime":ort.__version__,"provider":provider,"threads":args.threads,
-            "cache_device":runner.device,"optimization":"all","memory_pattern":True,"cases":[],
+            "cache_device":"cpu","execution":"standard_run","optimization":"all","memory_pattern":True,"cases":[],
             "model_sha256":{name:hashlib.sha256((args.model_dir/name).read_bytes()).hexdigest()
                             for name in ["encoder_model.onnx","decoder_model_merged.onnx"]}}
     for names in groups:

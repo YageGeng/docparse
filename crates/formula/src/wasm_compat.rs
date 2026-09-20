@@ -21,6 +21,8 @@ mod platform {
         // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
         workers: Vec<docparse_common::ThreadManager>,
+        /// Actual executor, including the native Apple compatibility path.
+        pub(crate) provider: docparse_layout::ExecutionProvider,
     }
 
     impl SessionRunner {
@@ -37,21 +39,15 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            sessions: (usize, usize, usize),
+            session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
-            let (cpu_session_size, gpu_session_size, cpu_intra_threads) =
-                sessions;
-            let session_size = cpu_session_size + gpu_session_size;
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
                     backend.execution_provider(),
                     docparse_layout::ExecutionProvider::CoreMl
                         | docparse_layout::ExecutionProvider::Metal
                 );
-            if coreml_incompatible && gpu_session_size > 0 {
-                return Err(FormulaError::Invalid("PP formula GPU sessions are unsupported on Apple; configure cpu_session_size instead".into()));
-            }
             if coreml_incompatible {
                 tracing::warn!(
                     "{} uses the CPU compatibility executor on Apple; accelerated repeated inference is not enabled",
@@ -67,10 +63,13 @@ mod platform {
             let mut runner = Self {
                 queue,
                 workers: Vec::with_capacity(session_size),
+                provider: if coreml_incompatible {
+                    docparse_layout::ExecutionProvider::Cpu
+                } else {
+                    backend.execution_provider()
+                },
             };
-            for index in 0..session_size {
-                let backend =
-                    backend.formula_worker(index, cpu_session_size)?;
+            for _ in 0..session_size {
                 let model = Arc::clone(&artifacts.model);
                 let tokenizer = Arc::clone(&artifacts.tokenizer);
                 let session = SessionWorker::new(move || {
@@ -81,15 +80,7 @@ mod platform {
                     } else {
                         SessionBuilder::try_from(backend)?
                     }
-                    .with_intra_threads(
-                        if backend.execution_provider()
-                            == docparse_layout::ExecutionProvider::Cpu
-                        {
-                            cpu_intra_threads
-                        } else {
-                            1
-                        },
-                    )
+                    .with_intra_threads(1)
                     .map_err(ort::Error::from)?;
                     let session = builder.commit_from_memory(&model)?;
                     Ok::<_, FormulaError>((
@@ -238,6 +229,8 @@ mod platform {
         // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
         workers: Vec<docparse_common::ThreadManager>,
+        /// Actual executor, including the native Apple compatibility path.
+        pub(crate) provider: docparse_layout::ExecutionProvider,
     }
 
     impl SessionRunner {
@@ -254,11 +247,9 @@ mod platform {
             backend: OnnxBackend,
             kind: ModelKind,
             batch_size: usize,
-            sessions: (usize, usize, usize),
+            session_size: usize,
             queue_size: usize,
         ) -> Result<Arc<Self>, FormulaError> {
-            let (cpu_session_size, gpu_session_size, _) = sessions;
-            let session_size = cpu_session_size + gpu_session_size;
             let metrics = docparse_common::telemetry::ModelMetrics::new(
                 "formula_pp",
                 session_size,
@@ -268,10 +259,9 @@ mod platform {
             let mut runner = Self {
                 queue,
                 workers: Vec::with_capacity(session_size),
+                provider: backend.execution_provider(),
             };
-            for index in 0..session_size {
-                let backend =
-                    backend.formula_worker(index, cpu_session_size)?;
+            for _ in 0..session_size {
                 // Browser formula sessions inherit the global graph and memory settings.
                 let mut session = SessionBuilder::try_from(backend)?
                     .commit_from_memory(&artifacts.model)

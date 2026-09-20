@@ -1018,14 +1018,15 @@ fn model_session_counts_have_no_policy_ceiling() {
         "/ocr/detection/session_size",
         "/ocr/recognition/session_size",
         "/ocr/orientation/session_size",
-        "/formula/engine/cpu_session_size",
+        "/formula/engine/session_size",
     ];
     for engine in ["pp", "texo"] {
         for count in [16, 64] {
             let mut value =
                 serde_json::to_value(docparse_config::RawConfig::default())
                     .expect("defaults");
-            *value.pointer_mut("/formula/engine").expect("engine") = serde_json::json!({"type": engine, "cpu_session_size": count, "gpu_session_size": 0});
+            *value.pointer_mut("/formula/engine").expect("engine") =
+                serde_json::json!({"type": engine, "session_size": count});
             for path in paths {
                 *value.pointer_mut(path).expect("session field") = count.into();
             }
@@ -1045,64 +1046,40 @@ fn model_session_counts_have_no_policy_ceiling() {
     }
 }
 
-/// Formula CPU/GPU counts permit either device alone or both, but never an empty pool or retired field.
+/// Formula pools use one positive count and reject removed CPU/GPU settings.
 #[test]
-fn formula_cpu_gpu_session_configuration() {
+fn formula_session_configuration() {
     for engine in ["pp", "texo"] {
-        for (cpu, gpu, valid) in
-            [(0, 0, false), (16, 0, true), (0, 16, true), (16, 16, true)]
-        {
-            let mut value =
-                serde_json::to_value(docparse_config::RawConfig::default())
-                    .expect("defaults");
-            *value.pointer_mut("/formula/engine").expect("engine") = serde_json::json!({"type":engine,"cpu_session_size":cpu,"gpu_session_size":gpu});
-            let raw: docparse_config::RawConfig =
-                serde_json::from_value(value).expect("split fields");
-            assert_eq!(
-                docparse_config::ValidatedConfig::try_from(raw).is_ok(),
-                valid
-            );
-        }
-        let mut value =
-            serde_json::to_value(docparse_config::RawConfig::default())
-                .expect("defaults");
-        *value.pointer_mut("/formula/engine").expect("engine") =
-            serde_json::json!({"type":engine,"session_size":2});
-        serde_json::from_value::<docparse_config::RawConfig>(value)
-            .expect_err("retired single count");
-    }
-}
-
-/// Local formula engines default to one CPU thread and reject ORT auto-threading or integer overflow.
-#[test]
-fn formula_cpu_intra_threads_are_validated() {
-    for engine in ["pp", "texo"] {
-        for (threads, valid) in [
-            (0_u64, false),
-            (1, true),
-            (4, true),
-            (i32::MAX as u64 + 1, false),
-        ] {
+        for count in [0_usize, 1, 28, 64, usize::MAX] {
             let mut value =
                 serde_json::to_value(docparse_config::RawConfig::default())
                     .expect("defaults");
             *value.pointer_mut("/formula/engine").expect("engine") =
-                serde_json::json!({"type":engine,"cpu_intra_threads":threads});
+                serde_json::json!({"type": engine, "session_size": count});
             let raw: docparse_config::RawConfig =
-                serde_json::from_value(value).expect("config");
+                serde_json::from_value(value).expect("single session count");
             assert_eq!(
                 docparse_config::ValidatedConfig::try_from(raw).is_ok(),
-                valid
+                count > 0 && count < usize::MAX,
+                "{engine} count {count}",
             );
         }
+        for field in
+            ["cpu_session_size", "gpu_session_size", "cpu_intra_threads"]
+        {
+            let mut value =
+                serde_json::to_value(docparse_config::RawConfig::default())
+                    .expect("defaults");
+            let mut settings = serde_json::json!({"type": engine});
+            settings
+                .as_object_mut()
+                .expect("engine settings")
+                .insert(field.into(), 1.into());
+            *value.pointer_mut("/formula/engine").expect("engine") = settings;
+            serde_json::from_value::<docparse_config::RawConfig>(value)
+                .expect_err("removed CPU/GPU setting");
+        }
     }
-    assert_eq!(
-        docparse_config::RawConfig::default()
-            .formula
-            .engine
-            .cpu_intra_threads(),
-        1
-    );
 }
 
 /// Partial policy configuration inherits defaults and invalid hysteresis cannot start an engine.

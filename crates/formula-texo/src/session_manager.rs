@@ -98,7 +98,7 @@ pub(crate) struct SessionManager {
 }
 
 impl SessionManager {
-    /// Reads pending pressure from the shared CPU/GPU queue.
+    /// Reads pending pressure from the shared model queue.
     pub(crate) fn pressure(
         &self,
     ) -> Arc<docparse_common::queue::QueuePressure> {
@@ -117,47 +117,28 @@ impl SessionManager {
                 "Texo session manager requires the Texo engine".into(),
             ));
         };
-        let (sessions, batch_size, queue_size) = (
-            texo.cpu_session_size + texo.gpu_session_size,
-            config.batch_size,
-            config.queue_size,
-        );
-        let cpu_count = texo.cpu_session_size;
-        let cpu_intra_threads = texo.cpu_intra_threads;
+        let (sessions, batch_size, queue_size) =
+            (texo.session_size, config.batch_size, config.queue_size);
         run_cpu(move || {
             Self::start(sessions, batch_size, queue_size, move |index| {
-                let backend = backend.formula_worker(index, cpu_count)?;
-                let device = (backend.execution_provider()
-                    == docparse_layout::ExecutionProvider::Cuda)
-                    .then_some(ort::memory::AllocationDevice::CUDA);
                 tracing::info!(
-                    "initializing Texo consumer {} on {}",
+                    "initializing Texo consumer {} on {} with standard runs and host outputs",
                     index,
                     backend.execution_provider()
                 );
-                // CPU consumers use their configured operator pool; CUDA host work stays at one thread.
-                let intra_threads = if backend.execution_provider()
-                    == docparse_layout::ExecutionProvider::Cpu
-                {
-                    cpu_intra_threads
-                } else {
-                    1
-                };
                 // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(intra_threads)
+                        .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.encoder)?,
                     decoder: SessionBuilder::try_from(backend)?
-                        .with_intra_threads(intra_threads)
+                        .with_intra_threads(1)
                         .map_err(ort::Error::from)?
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
-                Ok(move |requests: &mut Vec<Request>| {
-                    model.recognize(requests, device)
-                })
+                Ok(move |requests: &mut Vec<Request>| model.recognize(requests))
             })
         })
         .await?
@@ -251,11 +232,7 @@ impl SessionManager {
 
 impl ModelSessions {
     /// Keeps each batch's KV cache local to its owner; canceled peers cannot terminate another page's generation.
-    fn recognize(
-        &mut self,
-        requests: &mut Vec<Request>,
-        device: Option<ort::memory::AllocationDevice>,
-    ) -> BatchResult {
+    fn recognize(&mut self, requests: &mut Vec<Request>) -> BatchResult {
         let mut values = Vec::new();
         // Validate and prepare each crop separately so malformed input from one PDF cannot fail its batch peers.
         for request in std::mem::take(requests) {
@@ -298,51 +275,24 @@ impl ModelSessions {
         let options = ort::session::RunOptions::new()?;
         let generation =
             Request::measure(requests, TimingStage::FormulaInference, || {
-                let memory = device
-                    .map(|device| {
-                        ort::memory::MemoryInfo::new(
-                            device,
-                            0,
-                            ort::memory::AllocatorType::Device,
-                            ort::memory::MemoryType::Default,
-                        )
-                    })
-                    .transpose()?;
                 let pixels = Tensor::from_array(input.0)?;
-                let hidden = if let Some(memory) = &memory {
-                    let mut binding = self.encoder.create_binding()?;
-                    binding.bind_input("pixel_values", &pixels)?;
-                    binding
-                        .bind_output_to_device("last_hidden_state", memory)?;
-                    let physical = docparse_common::telemetry::Inference::new(
-                        "formula_texo",
-                        "encoder",
-                        requests.len(),
-                    );
-                    let outputs = self
-                        .encoder
-                        .run_binding_with_options(&binding, &options);
-                    physical.finish(outputs.is_ok());
-                    let mut outputs = outputs?;
-                    binding.synchronize_outputs()?;
-                    outputs.remove("last_hidden_state")
-                } else {
-                    let physical = docparse_common::telemetry::Inference::new(
-                        "formula_texo",
-                        "encoder",
-                        requests.len(),
-                    );
-                    let outputs = self.encoder.run_with_options(
-                        ort::inputs!["pixel_values" => pixels],
-                        &options,
-                    );
-                    physical.finish(outputs.is_ok());
-                    let mut outputs = outputs?;
-                    outputs.remove("last_hidden_state")
-                }
-                .ok_or_else(|| {
-                    FormulaError::Invalid("missing Texo image features".into())
-                })?;
+                // Standard runs return host outputs and let ORT manage transfers and completion.
+                let physical = docparse_common::telemetry::Inference::new(
+                    "formula_texo",
+                    "encoder",
+                    requests.len(),
+                );
+                let outputs = self.encoder.run_with_options(
+                    ort::inputs!["pixel_values" => pixels],
+                    &options,
+                );
+                physical.finish(outputs.is_ok());
+                let hidden =
+                    outputs?.remove("last_hidden_state").ok_or_else(|| {
+                        FormulaError::Invalid(
+                            "missing Texo image features".into(),
+                        )
+                    })?;
                 let mut generation = Generation::new(hidden, requests.len())?;
                 for _ in 1..MAX_LENGTH {
                     if requests.iter().all(Request::cancelled) {
@@ -355,53 +305,18 @@ impl ModelSessions {
                     {
                         break;
                     }
-                    let output = if let Some(memory) = &memory {
-                        // Growing caches need fresh output bindings; inputs must not be overwritten by the same decode step.
-                        let mut binding = self.decoder.create_binding()?;
-                        for (name, value) in generation.inputs()? {
-                            binding.bind_input(name, &*value)?;
-                        }
-                        for name in crate::model::PRESENT_NAMES {
-                            binding.bind_output_to_device(name, memory)?;
-                        }
-                        let cpu = ort::memory::MemoryInfo::new(
-                            ort::memory::AllocationDevice::CPU,
-                            0,
-                            ort::memory::AllocatorType::Device,
-                            ort::memory::MemoryType::Default,
-                        )?;
-                        binding.bind_output_to_device("logits", &cpu)?;
-                        let physical =
-                            docparse_common::telemetry::Inference::new(
-                                "formula_texo",
-                                "decoder",
-                                requests.len(),
-                            );
-                        let outputs = self
-                            .decoder
-                            .run_binding_with_options(&binding, &options);
-                        physical.finish(outputs.is_ok());
-                        let outputs = outputs?;
-                        binding.synchronize_outputs()?;
-                        StepOutput::try_from(outputs)?
-                    } else {
-                        let inputs = generation.inputs()?;
-                        let physical =
-                            docparse_common::telemetry::Inference::new(
-                                "formula_texo",
-                                "decoder",
-                                requests.len(),
-                            );
-                        let outputs =
-                            self.decoder.run_with_options(inputs, &options);
-                        physical.finish(outputs.is_ok());
-                        StepOutput::try_from(outputs?)?
-                    };
+                    let inputs = generation.inputs()?;
+                    let physical = docparse_common::telemetry::Inference::new(
+                        "formula_texo",
+                        "decoder",
+                        requests.len(),
+                    );
+                    let outputs =
+                        self.decoder.run_with_options(inputs, &options);
+                    physical.finish(outputs.is_ok());
+                    let output = StepOutput::try_from(outputs?)?;
                     if generation.advance(output)? {
                         break;
-                    }
-                    if let Some(device) = device {
-                        generation.verify_device(device)?;
                     }
                 }
                 Ok::<_, FormulaError>(generation)
@@ -869,12 +784,16 @@ mod tests {
         assert_eq!(destroyed.load(Ordering::SeqCst), 1);
     }
 
-    /// Exercise the same growing-cache I/O-binding path on CPU when CUDA hardware is absent.
+    /// Standard runs must preserve growing caches across mixed batches and repeated inference.
     #[tokio::test]
     #[ignore = "requires models/texo"]
-    async fn bound_outputs_preserve_batched_and_repeated_results() {
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../models/texo");
+    async fn standard_runs_preserve_batched_and_repeated_results() {
+        let directory = std::env::var_os("DOCPARSE_TEXO_MODELS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../models/texo")
+            });
         let paths = docparse_config::TexoFormulaConfig::builder()
             .encoder_path(directory.join("encoder_model.onnx"))
             .decoder_path(directory.join("decoder_model_merged.onnx"))
@@ -885,7 +804,7 @@ mod tests {
         let runner = run_cpu(move || {
             SessionManager::start(2, 4, 8, move |_| {
                 let backend = OnnxBackend::compiled();
-                // Match production memory policy while exercising the I/O-binding path.
+                // Both graphs inherit the compiled provider and shared session defaults.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
                         .with_intra_threads(1)
@@ -897,12 +816,7 @@ mod tests {
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
-                Ok(move |requests: &mut Vec<Request>| {
-                    model.recognize(
-                        requests,
-                        Some(ort::memory::AllocationDevice::CPU),
-                    )
-                })
+                Ok(move |requests: &mut Vec<Request>| model.recognize(requests))
             })
         })
         .await
@@ -956,7 +870,7 @@ mod tests {
                 Arc::clone(&runner)
                     .run(images.clone(), Timings::default())
                     .await
-                    .expect("bound batch"),
+                    .expect("standard batch"),
                 expected
             );
         }

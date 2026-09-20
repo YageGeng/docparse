@@ -26,9 +26,7 @@ timeout_ms = 120000
 
 [formula.engine]
 type = "texo"
-cpu_session_size = 1
-gpu_session_size = 1
-cpu_intra_threads = 1
+session_size = 2
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
@@ -71,20 +69,20 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   them and replace only self-attention caches; no cache is shared across requests.
 - Runtime tensor handles are retained between steps rather than extracting KV
   buffers into Rust. WebGPU sessions request `gpu-buffer` for hidden features and
-  caches, and `cpu` for logits; Rust synchronizes only logits. CUDA binds hidden
-  features and caches to device memory, returning only logits
-  to CPU. Dynamic cache outputs receive fresh bindings at each step to avoid
-  overwriting still-live inputs. Their allocation device is validated at runtime.
+  caches, and `cpu` for logits; Rust synchronizes only logits. Native sessions use
+  standard `run_with_options` calls without I/O Binding or explicit device-wide
+  synchronization. Hidden features, logits, and KV outputs return to host memory;
+  ORT manages transfers to the selected accelerator on subsequent calls.
 - Native calls share a bounded crop queue across pages and documents. Each of
-  `formula.engine.cpu_session_size + formula.engine.gpu_session_size` independent owners holds its own encoder, decoder,
+  `formula.engine.session_size` independent owners holds its own encoder, decoder,
   tokenizer, and execution thread. An idle owner drains ready crops up to
   `formula.batch_size`; it never waits to fill a batch. Queue capacity is
   `formula.queue_size` crops, in addition to active batches. Parser crop admission is shared across pages
-  and bounded to `queue_size + (cpu_session_size + gpu_session_size) * batch_size`. Results return in each caller's original order.
+  and bounded to `queue_size + session_size * batch_size`. Results return in each caller's original order.
   Caller packets of at most `min(batch_size, queue_size)` enter atomically. Ready packets may be combined or split to fill
   a model batch, regardless of their original caller boundaries. Canceled crops do not consume
   its batch slots, and unconsumed tails still count toward queue capacity.
-- Native defaults are one CPU owner and zero GPU owners, with no fixed upper limit. Every extra
+- Native defaults are one owner on the selected backend, with no fixed upper limit. Every extra
   session duplicates model/runtime resources. Browser sessions share a bounded
   per-crop ready queue under the global inference guard.
 - Core submits crops independently with a shared pre-crop admission budget and
@@ -157,31 +155,19 @@ input produces 144. Some ORT distributions log a shape warning; generation uses
 runtime tensor handles rather than allocating against that stale metadata.
 
 The GPU-residency regression asserts actual output and next-step input locations
-in Chrome, including the cached decoder branch. Native I/O-binding ownership is
-also tested with real batched model inference on CPU. CUDA compilation and the
-device-location checks are covered, but CUDA hardware execution remains unverified
-on this Apple host.
+in Chrome, including the cached decoder branch. Native standard runs are covered
+by real batched and repeated model inference tests. CUDA hardware execution must
+be checked on a CUDA host; CPU parity alone does not validate GPU performance.
 
-## Mixed CPU/GPU formula consumers
+## Formula consumers
 
-Each CPU owner has a pure CPU encoder/decoder pair and uses system memory. Each
-GPU owner uses the compiled accelerator; CUDA hidden states and KV caches remain
-in device memory. Both kinds of owner drain the existing shared queue, so there
-is no round-robin routing or separate CPU backlog: whichever owner is free takes
-the next ready batch. Outputs retain caller order even if devices complete out of
-order. Telemetry for `formula_texo` continues to count both groups together.
+`formula.engine.session_size` selects the number of encoder/decoder owners
+(default 1, positive, with no fixed upper limit). Every owner uses the compiled
+native accelerator or the browser-selected backend and drains the same bounded
+queue. Native standard runs return hidden states and KV caches to host memory.
+Outputs retain caller order even if consumers complete out of order.
 
-Set either count to zero to disable that device group; both zero is invalid.
-GPU-only requests fail explicitly on native CPU-only builds. Old
-`formula.engine.session_size` configuration must be migrated to the two fields.
-Queue capacity, global ORT optimization/memory settings, cancellation, and the
-shared formula batch limit remain unchanged. CPU/GPU token equivalence is covered
-by the pinned real-fixture test on CUDA builds; new documents can still expose
-floating-point differences between providers.
-
-`formula.engine.cpu_intra_threads` configures intra-op threads for each native
-CPU session (default 1). Texo applies it to both encoder and decoder; those graphs
-execute sequentially within a consumer. GPU session threading is unchanged.
-Zero is rejected to avoid silently selecting ORT automatic threading. ORT Web
-uses a global WASM thread pool, so browser CPU sessions reject values other than
-1 rather than silently ignoring a native-only per-session setting.
+Separate CPU/GPU consumer counts and per-CPU-consumer thread settings are removed.
+CPU-only builds still use their compiled CPU backend. Native sessions use one
+intra-op thread each. Queue capacity, global ORT optimization/memory settings,
+cancellation, and the shared formula batch limit remain independent of the count.

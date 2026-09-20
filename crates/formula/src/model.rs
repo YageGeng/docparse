@@ -77,20 +77,14 @@ impl PpFormulaNetEngine {
             backend.execution_provider(),
             config.formula().batch_size
         );
-        let (cpu_session_size, gpu_session_size) =
-            config.formula().engine.session_counts();
-        let session_size = cpu_session_size + gpu_session_size;
+        let session_size = config.formula().engine.session_size();
         // Each local model owns the configured number of consumers, independently of batching.
         let runner = SessionRunner::load(
             artifacts,
             backend,
             kind,
             config.formula().batch_size,
-            (
-                cpu_session_size,
-                gpu_session_size,
-                config.formula().engine.cpu_intra_threads(),
-            ),
+            session_size,
             config.formula().queue_size,
         )
         .await
@@ -102,16 +96,11 @@ impl PpFormulaNetEngine {
             &runner.pressure(),
             config.formula(),
         )?;
-        let provider = if gpu_session_size == 0 {
-            "cpu".to_owned()
-        } else if cpu_session_size > 0 {
-            format!("cpu+{}", backend.execution_provider())
-        } else {
-            backend.execution_provider().to_string()
-        };
+        let provider = runner.provider;
         tracing::info!(
-            "loaded {} with actual executor {} (requested {})",
+            "loaded {} with {} sessions on {} (requested {})",
             kind.as_str(),
+            session_size,
             provider,
             backend.execution_provider()
         );

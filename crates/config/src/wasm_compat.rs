@@ -351,15 +351,6 @@ mod platform {
         pub(crate) fn validate_platform(
             config: &crate::RawConfig,
         ) -> Result<(), crate::ConfigError> {
-            // ORT Web controls WASM threads globally, not through native per-session intra-op settings.
-            if config.formula.engine.session_counts().0 > 0
-                && config.formula.engine.cpu_intra_threads() != 1
-            {
-                return Err(crate::ConfigError::UnsupportedWebConcurrency {
-                    field: "formula.engine.cpu_intra_threads",
-                    value: config.formula.engine.cpu_intra_threads(),
-                });
-            }
             // One browser Worker owns one PDFium instance; page work may still overlap through its bounded queue.
             if config.render.workers != 1 {
                 return Err(crate::ConfigError::UnsupportedWebConcurrency {

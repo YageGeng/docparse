@@ -631,7 +631,7 @@ them to use the defaults.
 
 Use `session_size` (positive integer; no fixed upper limit) and `batch_size` (1–32) under `layout`, `tsr`,
 `tsr.cell_detection`, and each of `ocr.detection`, `ocr.recognition`, and
-`ocr.orientation`. Local formula engines use `formula.engine.cpu_session_size` / `formula.engine.gpu_session_size` and
+`ocr.orientation`. Local formula engines use `formula.engine.session_size` and
 `formula.batch_size`. The former `sessions` and top-level `ocr.batch_size` names
 are rejected. Each model shares one ready-input queue among its sessions. Short
 batches run immediately. OCR combines equal tensor dimensions without changing
