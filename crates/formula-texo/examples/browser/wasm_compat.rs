@@ -38,9 +38,10 @@ mod browser {
                     .map_err(|error| JsValue::from_str(&error.to_string()))?,
             );
             let mut raw = RawConfig::default();
-            raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
-                docparse_config::TexoFormulaConfig::default(),
-            );
+            raw.formula.engine =
+                vec![docparse_config::FormulaEngineConfig::Texo(
+                    docparse_config::TexoFormulaConfig::default(),
+                )];
             raw.render.workers = 1;
             raw.render.queue_size = 2;
             let config = ValidatedConfig::try_from(raw)

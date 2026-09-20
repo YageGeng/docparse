@@ -34,13 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("supply 1..32 formula images".into());
     }
     let mut config = RawConfig::default();
-    config.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+    config.formula.engine = vec![docparse_config::FormulaEngineConfig::Texo(
         docparse_config::TexoFormulaConfig::builder()
             .encoder_path(directory.join("encoder_model.onnx"))
             .decoder_path(directory.join("decoder_model_merged.onnx"))
             .tokenizer_path(directory.join("tokenizer.json"))
             .build(),
-    );
+    )];
     let loading = Instant::now();
     let engine =
         TexoEngine::from_config(Arc::new(ValidatedConfig::try_from(config)?))

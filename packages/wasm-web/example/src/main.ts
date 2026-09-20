@@ -17,9 +17,11 @@ const ui = {
   displayFormulaEnabled: document.querySelector<HTMLInputElement>("#display-formula-enabled")!,
   inlineFormulaEnabled: document.querySelector<HTMLInputElement>("#inline-formula-enabled")!,
   formulaEngine: document.querySelector<HTMLSelectElement>("#formula-engine")!,
-  mineruSettings: document.querySelector<HTMLElement>("#mineru-settings")!,
-  mineruUrl: document.querySelector<HTMLInputElement>("#mineru-server-url")!,
-  mineruConcurrency: document.querySelector<HTMLInputElement>("#mineru-concurrency")!,
+  httpSettings: document.querySelector<HTMLElement>("#http-settings")!,
+  httpUrl: document.querySelector<HTMLInputElement>("#http-server-url")!,
+  httpWorkers: document.querySelector<HTMLInputElement>("#http-workers")!,
+  httpPrompt: document.querySelector<HTMLInputElement>("#http-prompt")!,
+  httpModel: document.querySelector<HTMLInputElement>("#http-model")!,
   privacy: document.querySelector<HTMLElement>("#privacy-label")!,
   processingLocation: document.querySelector<HTMLElement>("#processing-location")!,
   formulas: document.querySelector<HTMLElement>("#formula-results")!,
@@ -108,12 +110,14 @@ function controls(): void {
   ui.displayFormulaEnabled.disabled = busy;
   ui.inlineFormulaEnabled.disabled = busy;
   ui.formulaEngine.disabled = busy;
-  const remoteFormula = ui.formulaEngine.value === "mineru" && (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked);
-  ui.mineruSettings.hidden = ui.formulaEngine.value !== "mineru";
-  ui.mineruUrl.disabled = busy || !remoteFormula;
-  ui.mineruConcurrency.disabled = busy || !remoteFormula;
+  const remoteFormula = ui.formulaEngine.value.split(",").includes("http") && (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked);
+  ui.httpSettings.hidden = !ui.formulaEngine.value.split(",").includes("http");
+  ui.httpUrl.disabled = busy || !remoteFormula;
+  ui.httpWorkers.disabled = busy || !remoteFormula;
+  ui.httpPrompt.disabled = busy || !remoteFormula;
+  ui.httpModel.disabled = busy || !remoteFormula || !ui.httpPrompt.value.trim();
   ui.privacy.textContent = remoteFormula ? "External formula service" : "Local & private";
-  ui.processingLocation.textContent = remoteFormula ? "Formula images are sent to your MinerU server" : "Your files stay on your device";
+  ui.processingLocation.textContent = remoteFormula ? "Formula images are sent to your HTTP formula server" : "Your files stay on your device";
   ui.cancel.hidden = !busy;
   ui.parse.hidden = busy;
   ui.previous.disabled = !previews.has(pageNumber - 1);
@@ -401,7 +405,6 @@ function modelSource(name = ""): import("../../dist/index.js").ModelSource {
 async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser> {
   let current = parser;
   if (!current) {
-    const remoteFormula = ui.formulaEngine.value === "mineru" && (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked);
     // A retry starts a new preparation observation, while repeated parses reuse the existing one.
     for (const key of timingTotals.keys()) if (key.startsWith("Preparation · ")) timingTotals.delete(key);
     ui.timingDetails.disabled = timingTotals.size === 0;
@@ -419,7 +422,7 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
       // Request acceleration explicitly; show the actual backend if CPU fallback is needed.
       executionProvider: ui.provider.value === "webgpu" ? "webgpu" : "wasm",
       allowCpuFallback: true,
-      config: { layout: { queue_size: 1 }, render: { workers: 1, queue_size: 2, dpi: 144, max_long_edge_pixels: 2000 }, tsr: { queue_size: 4, cell_detection: { queue_size: 4 }, mode: ui.tableMode.value as TableMode }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 }, policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { queue_size: 4, engine: ui.formulaEngine.value === "mineru" ? { type: "mineru", server_url: ui.mineruUrl.value.trim(), concurrency: ui.mineruConcurrency.valueAsNumber } : { type: ui.formulaEngine.value === "pp" ? "pp" : "texo" }, batch_size: remoteFormula ? Math.min(32, Math.max(1, ui.mineruConcurrency.valueAsNumber)) : 4, display_enabled: ui.displayFormulaEnabled.checked, inline_enabled: ui.inlineFormulaEnabled.checked } },
+      config: { layout: { queue_size: 1 }, render: { workers: 1, queue_size: 2, dpi: 144, max_long_edge_pixels: 2000 }, tsr: { queue_size: 4, cell_detection: { queue_size: 4 }, mode: ui.tableMode.value as TableMode }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 }, policy: ui.ocrPolicy.value as "disabled" | "missing_regions" | "always" }, formula: { queue_size: 4, engine: ui.formulaEngine.value.split(",").map(type => type === "http" ? { type: "http", server_url: ui.httpUrl.value.trim(), worker_size: ui.httpWorkers.valueAsNumber, ...(ui.httpPrompt.value.trim() ? { prompt: ui.httpPrompt.value, ...(ui.httpModel.value.trim() ? { model: ui.httpModel.value.trim() } : {}) } : {}) } : { type: type === "pp" ? "pp" : "texo", worker_size: 1, batch_size: 4 }), display_enabled: ui.displayFormulaEnabled.checked, inline_enabled: ui.inlineFormulaEnabled.checked } },
       signal, onProgress: event => { if (run === generation) progress(event); },
       onTiming: event => { if (run === generation) recordTiming("Preparation", event); },
     });
@@ -434,7 +437,7 @@ async function ensureParser(run: number, signal: AbortSignal): Promise<DocParser
 /** Runs one cancellable operation while keeping stale callbacks from replacing a newer document. */
 async function runOperation(mode: "prepare" | "parse"): Promise<void> {
   if (operation || (mode === "parse" && !selectedFile) || (mode === "prepare" && parser)) return;
-  if (ui.formulaEngine.value === "mineru" && (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked) && (!ui.mineruUrl.reportValidity() || !ui.mineruConcurrency.reportValidity())) return;
+  if (ui.formulaEngine.value.split(",").includes("http") && (ui.inlineFormulaEnabled.checked || ui.displayFormulaEnabled.checked) && (!ui.httpUrl.reportValidity() || !ui.httpWorkers.reportValidity())) return;
   const file = selectedFile;
   if (mode === "parse") clearDocument();
   operation = mode; controls();
@@ -584,8 +587,10 @@ ui.ocrPolicy.addEventListener("change", modelSettingsChanged);
 ui.displayFormulaEnabled.addEventListener("change", modelSettingsChanged);
 ui.inlineFormulaEnabled.addEventListener("change", modelSettingsChanged);
 ui.formulaEngine.addEventListener("change", modelSettingsChanged);
-ui.mineruUrl.addEventListener("input", modelSettingsChanged);
-ui.mineruConcurrency.addEventListener("input", modelSettingsChanged);
+ui.httpUrl.addEventListener("input", modelSettingsChanged);
+ui.httpWorkers.addEventListener("input", modelSettingsChanged);
+ui.httpPrompt.addEventListener("input", modelSettingsChanged);
+ui.httpModel.addEventListener("input", modelSettingsChanged);
 ui.previous.addEventListener("click", () => showPage(pageNumber - 1));
 ui.next.addEventListener("click", () => showPage(pageNumber + 1));
 ui.select.addEventListener("change", () => selectBlock(ui.select.value));

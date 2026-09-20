@@ -51,14 +51,14 @@ async fn real_model_batch_parity_and_cancellation() {
                 .join("../../models/texo")
         });
     let mut raw = docparse_config::RawConfig::default();
-    raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+    raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Texo(
         docparse_config::TexoFormulaConfig::builder()
-            .session_size(2)
+            .worker_size(2)
             .encoder_path(dir.join("encoder_model.onnx"))
             .decoder_path(dir.join("decoder_model_merged.onnx"))
             .tokenizer_path(dir.join("tokenizer.json"))
             .build(),
-    );
+    )];
     let config = Arc::new(
         docparse_config::ValidatedConfig::try_from(raw).expect("config"),
     );

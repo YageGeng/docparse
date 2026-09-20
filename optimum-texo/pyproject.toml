@@ -1,0 +1,34 @@
+[project]
+name = "optimum-texo"
+version = "0.1.0"
+description = "Texo formula recognition with Optimum, ONNX Runtime CUDA, and server-side batching"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.135.1",
+  "huggingface-hub==0.36.2",
+  "numpy==2.3.5",
+  "onnx==1.23.0",
+  "onnxruntime-gpu==1.26.0",
+  "optimum-onnx==0.1.0",
+  "pillow==12.1.1",
+  "python-multipart==0.0.22",
+  "torch==2.11.0",
+  "transformers==4.40.2",
+  "uvicorn==0.42.0",
+]
+
+[dependency-groups]
+dev = ["requests==2.34.2"]
+
+[tool.uv]
+package = false
+# The deployed CUDA runtime targets NVIDIA GPUs on Linux x86_64.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }

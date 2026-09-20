@@ -94,7 +94,6 @@ model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
 
 [formula]
 queue_size = 32
-batch_size = 4
 inline_enabled = true
 display_enabled = true
 timeout_ms = 120000
@@ -107,10 +106,11 @@ low_watermark = 0.50
 pause_after_secs = 30
 resume_after_secs = 30
 
-[formula.engine]
+[[formula.engine]]
+batch_size = 4
 type = "texo"
 # All owners use the selected backend and consume one shared formula queue.
-session_size = 4
+worker_size = 4
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"

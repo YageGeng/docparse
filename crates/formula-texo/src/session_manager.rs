@@ -1,132 +1,56 @@
-//! Native Texo owners share a bounded ready-crop queue across pages and documents.
+//! Native Texo sessions consume the same ready-crop queue as other formula engines.
 use super::{Generation, MAX_LENGTH, ModelSessions, StepOutput};
 use crate::TexoArtifacts;
-use docparse_common::timing::TimingContext;
-use docparse_common::timing::{StageTimer, TimingStage, Timings};
-use docparse_common::{
-    SessionManager as SharedSessionManager, SessionRequest, run_cpu,
+use docparse_common::timing::{TimingStage, Timings};
+use docparse_formula::{
+    FormulaError,
+    queue::{FormulaQueue, FormulaRequest as Request, FormulaWorkers},
 };
-use docparse_formula::FormulaError;
-use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
+use docparse_layout::{
+    PageImage,
+    wasm_compat::{OnnxBackend, SessionWorker},
+};
 use ort::{session::builder::SessionBuilder, value::Tensor};
 use std::sync::Arc;
-use tokio::sync::oneshot;
 
 type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
 
-/// One crop keeps its caller lifetime and attribution even when neighboring crops belong to other PDFs.
-#[derive(typed_builder::TypedBuilder)]
-struct Request {
-    // Keep the render delivery occupied until actual inference and input cleanup finish.
-    #[builder(default = docparse_common::PageLease::current())]
-    _page_lease: Option<docparse_common::PageLease>,
-    image: Arc<PageImage>,
-    response: oneshot::Sender<Result<String, FormulaError>>,
-    caller: Arc<oneshot::Sender<()>>,
-    context: TimingContext,
-    #[builder(default)]
-    queued: Option<StageTimer>,
-}
-
-impl Request {
-    /// Blocking response receivers outlive canceled async callers, so both lifetimes must be checked.
-    fn cancelled(&self) -> bool {
-        self.response.is_closed() || self.caller.is_closed()
-    }
-
-    /// Ends admission timing outside the queue mutex while retaining the original tracing context.
-    fn end_queue(&mut self) {
-        let queued = self.queued.take();
-        self.context.in_scope(|| drop(queued));
-    }
-
-    /// Attributes shared execution time to each original crop while preserving its page and tracing context.
-    fn measure<T>(
-        requests: &[Self],
-        stage: TimingStage,
-        operation: impl FnOnce() -> T,
-    ) -> T {
-        let timings: docparse_common::timing::BatchTimings =
-            requests.iter().map(|request| &request.context).collect();
-        let _timers = timings.start(stage);
-        operation()
-    }
-
-    /// Maps each ordered result to its original caller; only model-wide failures affect the entire batch.
-    fn complete(requests: Vec<Self>, result: BatchResult) {
-        let mut outputs = result.and_then(|outputs| {
-            if outputs.len() != requests.len() {
-                return Err(FormulaError::Invalid(
-                    "Texo batch result count mismatch".into(),
-                ));
-            }
-            Ok(outputs.into_iter())
-        });
-        for request in requests {
-            let cancelled = request.cancelled();
-            let result = match &mut outputs {
-                Ok(outputs) => outputs.next().expect("validated result count"),
-                Err(error) => Err(FormulaError::Invalid(format!(
-                    "Texo batch failed: {error}"
-                ))),
-            };
-            request.context.in_scope(|| {
-                if !cancelled && let Err(error) = &result {
-                    tracing::warn!("Texo crop failed: {}", error);
-                }
-                let _ = request.response.send(result);
-            });
-        }
-    }
-}
-
-impl SessionRequest for Request {
-    /// Shares cancellation filtering with every native model queue.
-    fn cancelled(&self) -> bool {
-        self.cancelled()
-    }
-    /// Keeps original request attribution when the shared queue releases admission.
-    fn end_queue(&mut self) {
-        self.end_queue();
-    }
-}
-
-/// Texo-specific generation policy delegates queue and thread ownership to common.
+/// Queue ownership is separate from native session ownership so heterogeneous groups can compete directly.
 pub(crate) struct SessionManager {
-    sessions: Arc<SharedSessionManager<Request>>,
-    packet_size: usize,
+    queue: FormulaQueue,
+    _workers: FormulaWorkers,
 }
 
 impl SessionManager {
-    /// Reads pending pressure from the shared model queue.
+    /// Exposes pressure from the same channel consumed by every configured engine.
     pub(crate) fn pressure(
         &self,
     ) -> Arc<docparse_common::queue::QueuePressure> {
-        self.sessions.pressure()
+        self.queue.pressure()
     }
 
-    /// Builds all session pairs once; verified artifact bytes are shared only during initialization.
+    /// Loads each pair on its dedicated native owner and attaches it to the selected queue.
     pub(crate) async fn load(
         artifacts: TexoArtifacts,
         backend: OnnxBackend,
         config: &docparse_config::FormulaConfig,
+        shared: Option<FormulaQueue>,
     ) -> Result<Arc<Self>, FormulaError> {
-        let docparse_config::FormulaEngineConfig::Texo(texo) = &config.engine
-        else {
-            return Err(FormulaError::Invalid(
-                "Texo session manager requires the Texo engine".into(),
-            ));
-        };
-        let (sessions, batch_size, queue_size) =
-            (texo.session_size, config.batch_size, config.queue_size);
-        run_cpu(move || {
-            Self::start(sessions, batch_size, queue_size, move |index| {
+        let settings = config.single_engine()?;
+        let queue = shared.unwrap_or_else(|| {
+            FormulaQueue::new("formula_texo", config.queue_size).0
+        });
+        Self::start(
+            settings.worker_size(),
+            settings.batch_size(),
+            queue,
+            format!("texo-transfer-onnx-{}", backend.execution_provider()),
+            move |index| {
                 tracing::info!(
-                    "initializing Texo consumer {} on {} with standard runs and host outputs",
+                    "initializing Texo consumer {} on {}",
                     index,
                     backend.execution_provider()
                 );
-                // Both graphs inherit the global graph and memory settings without decoder overrides.
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
                         .commit_from_memory(&artifacts.encoder)?,
@@ -135,94 +59,77 @@ impl SessionManager {
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
                 Ok(move |requests: &mut Vec<Request>| model.recognize(requests))
-            })
-        })
-        .await?
+            },
+        )
+        .await
     }
 
-    /// Initializes each owner on its execution thread and releases the queue mutex before model work.
-    fn start<F, W>(
-        sessions: usize,
+    /// Initializes all owners before exposing readiness and safely drops partial groups on failure.
+    async fn start<F, W>(
+        worker_size: usize,
         batch_size: usize,
-        queue_size: usize,
+        queue: FormulaQueue,
+        name: String,
         initialize: F,
     ) -> Result<Arc<Self>, FormulaError>
     where
         F: Fn(usize) -> Result<W, FormulaError> + Send + Sync + 'static,
         W: FnMut(&mut Vec<Request>) -> BatchResult + 'static,
     {
-        let owners = SharedSessionManager::start_indexed(
+        let receiver = queue.receiver();
+        let mut workers = FormulaWorkers::default();
+        let initialize = Arc::new(initialize);
+        let metrics = docparse_common::telemetry::ModelMetrics::new(
             "formula_texo",
-            sessions,
+            worker_size,
             batch_size,
-            queue_size,
-            move |index| {
-                let mut model = initialize(index)?;
-                Ok::<_, FormulaError>(move |mut requests: Vec<Request>| {
-                    let result = model(&mut requests);
-                    Request::complete(requests, result);
-                })
-            },
-        )?;
+        );
+        for index in 0..worker_size {
+            let initialize = Arc::clone(&initialize);
+            let session = SessionWorker::new(move || initialize(index)).await?;
+            let receiver = receiver.clone();
+            let name = name.clone();
+            let metrics = Arc::clone(&metrics);
+            workers.spawn(Box::pin(async move {
+                let _alive = metrics.alive(1);
+                while let Some(batch) = receiver.recv().await {
+                    let mut requests = batch.take_ready(batch_size);
+                    if requests.is_empty() {
+                        continue;
+                    }
+                    for request in &mut requests {
+                        request.engine.clone_from(&name);
+                    }
+                    let _batch = metrics.batch();
+                    // The native owner retains requests and observes their original response cancellation through every decoder step.
+                    if let Err(error) = session
+                        .run(move |model| {
+                            let result = model(&mut requests);
+                            Request::complete_batch(requests, result);
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            "Texo consumer execution failed: {}",
+                            error
+                        );
+                    }
+                }
+            }))?;
+        }
         Ok(Arc::new(Self {
-            sessions: owners,
-            // Atomic producer packets must fit even when capacity is smaller than one inference batch.
-            packet_size: batch_size.min(queue_size),
+            queue,
+            _workers: workers,
         }))
     }
 
-    /// Publishes ready caller batches atomically and reconstructs crop order across independently completed model batches.
+    /// Keeps direct single-engine callers on the same ordered and cancelable queue protocol.
     pub(crate) async fn run(
         self: Arc<Self>,
         images: Vec<Arc<PageImage>>,
         timings: Timings,
     ) -> Result<Vec<String>, FormulaError> {
-        let (caller, _lifetime) = oneshot::channel();
-        let caller = Arc::new(caller);
-        // Start every crop's queue interval before blocking-pool admission or bounded-channel backpressure.
-        let requests: Vec<_> = images
-            .into_iter()
-            .map(|image| {
-                let (response, receiver) = oneshot::channel();
-                let request = Request::builder()
-                    .image(image)
-                    .response(response)
-                    .caller(Arc::clone(&caller))
-                    .queued(Some(timings.start(TimingStage::FormulaQueue)))
-                    .context(TimingContext::new(timings.clone()))
-                    .build();
-                (request, receiver)
-            })
-            .collect();
-        // Retain the last manager owner off the inference/async threads through finite native work, including cancellation.
-        run_cpu(move || {
-            let mut responses = Vec::with_capacity(requests.len());
-            let mut packet = Vec::with_capacity(self.packet_size);
-            for (request, receiver) in requests {
-                if caller.is_closed() {
-                    break;
-                }
-                packet.push(request);
-                responses.push(receiver);
-                if packet.len() == self.packet_size {
-                    self.sessions.send_batch(std::mem::take(&mut packet))?;
-                }
-            }
-            if !packet.is_empty() {
-                self.sessions.send_batch(packet)?;
-            }
-            responses
-                .into_iter()
-                .map(|response| {
-                    response.blocking_recv().map_err(|error| {
-                        FormulaError::Invalid(format!(
-                            "Texo response lost: {error}"
-                        ))
-                    })?
-                })
-                .collect()
-        })
-        .await?
+        self.queue.run(images, timings).await
     }
 }
 
@@ -246,7 +153,7 @@ impl ModelSessions {
                     requests.push(request);
                 }
                 Err(error) => {
-                    Request::complete(vec![request], Ok(vec![Err(error)]))
+                    Request::complete_batch(vec![request], Ok(vec![Err(error)]))
                 }
             }
         }
@@ -328,543 +235,39 @@ impl ModelSessions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use docparse_common::queue::BlockingQueue as BatchQueue;
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// A failed owner must wake callers blocked on either bounded admission or an unprocessed reply.
+    /// Partial startup drops already-created native owners even while a shared producer remains alive.
     #[tokio::test]
-    #[allow(clippy::panic)] // Deliberately exercises the model owner's unwind cleanup.
-    async fn panicked_owner_closes_pending_admission() {
-        let manager = run_cpu(|| {
-            SessionManager::start(1, 2, 2, |_| {
-                Ok(|_: &mut Vec<Request>| -> BatchResult {
-                    panic!("simulated model failure")
-                })
-            })
-        })
-        .await
-        .expect("task")
-        .expect("manager");
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            Arc::clone(&manager)
-                .run(vec![request(1).0.image; 8], Timings::default()),
-        )
-        .await;
-        // Always unblock the producer before asserting, including when testing a broken owner-exit path.
-        manager.sessions.close();
-        result
-            .expect("owner failure must release queued callers")
-            .expect_err("failed worker");
-        run_cpu(move || drop(manager)).await.expect("shutdown");
-    }
-
-    /// Ready crops fill the limit across caller packet boundaries without escaping capacity accounting.
-    #[test]
-    fn full_batches_and_tail_spills_preserve_queue_accounting() {
-        let queue = BatchQueue::new("test", 19);
-        let mut lifetimes = Vec::new();
-        let mut replies = Vec::new();
-        let mut value = 0;
-        for size in [2, 8, 3, 6] {
-            let mut packet = Vec::new();
-            for _ in 0..size {
-                let (request, reply, lifetime) = request(value);
-                value += 1;
-                packet.push(request);
-                replies.push(reply);
-                lifetimes.push(lifetime);
-            }
-            queue.push_batch(packet).expect("capacity");
-        }
-        for size in [8, 8, 3] {
-            let requests = queue.pop(8).expect("ready batch");
-            assert_eq!(requests.len(), size);
-            let output = requests
-                .iter()
-                .map(|request| {
-                    Ok(request.image.data().first().expect("pixel").to_string())
-                })
-                .collect();
-            Request::complete(requests, Ok(output));
-        }
-        queue.close();
-        assert!(queue.pop(8).is_none());
-        for (value, reply) in replies.into_iter().enumerate() {
-            assert_eq!(
-                reply.blocking_recv().expect("reply").expect("result"),
-                value.to_string()
-            );
-        }
-    }
-
-    /// one already-ready caller batch should not need additional model invocations.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn ready_call_batches_remain_whole() {
-        let records = Arc::new(Mutex::new(Vec::new()));
-        let counts = Arc::clone(&records);
-        let manager = run_cpu(move || {
-            SessionManager::start(2, 8, 16, move |_| {
-                let counts = Arc::clone(&counts);
-                Ok(move |requests: &mut Vec<Request>| {
-                    counts.lock().expect("records").push(requests.len());
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                    Ok(requests.iter().map(|_| Ok("x".to_owned())).collect())
-                })
-            })
-        })
-        .await
-        .expect("task")
-        .expect("manager");
-        let image = request(1).0.image;
-        let mut split = 0;
-        let mut examples = Vec::new();
-        for _ in 0..300 {
-            records.lock().expect("records").clear();
-            let result = Arc::clone(&manager)
-                .run(vec![Arc::clone(&image); 8], Timings::default())
-                .await
-                .expect("result");
-            assert_eq!(result.len(), 8);
-            let sizes = records.lock().expect("records").clone();
-            if sizes.len() > 1 {
-                split += 1;
-                if examples.len() < 10 {
-                    examples.push(sizes);
-                }
-            }
-        }
-        run_cpu(move || drop(manager)).await.expect("shutdown");
-        assert_eq!(
-            split, 0,
-            "already-ready caller batches were fragmented: {examples:?}"
-        );
-    }
-
-    /// Merged work keeps separate document timing sinks and rejects truncated result arrays for every caller.
-    #[test]
-    fn batch_timings_and_result_count_preserve_caller_boundaries() {
-        let mut requests = Vec::new();
-        let mut observations = Vec::new();
-        let mut replies = Vec::new();
-        let mut lifetimes = Vec::new();
-        for page in [3, 7] {
-            let (mut request, reply, lifetime) = request(page);
-            let (timings, receiver) = Timings::channel();
-            request.context.timings = timings.for_page(u32::from(page));
-            requests.push(request);
-            observations.push(receiver);
-            replies.push(reply);
-            lifetimes.push(lifetime);
-        }
-        Request::measure(&requests, TimingStage::FormulaInference, || ());
-        for (mut events, page) in observations.into_iter().zip([3, 7]) {
-            let event = events.try_recv().expect("original timing sink");
-            assert_eq!(event.page_number, Some(page));
-            assert_eq!(event.stage, TimingStage::FormulaInference);
-            events
-                .try_recv()
-                .expect_err("exactly one timing observation");
-        }
-        Request::complete(requests, Ok(vec![Ok("missing peer".into())]));
-        for reply in replies {
-            let error = reply
-                .blocking_recv()
-                .expect("response")
-                .expect_err("count mismatch");
-            assert!(error.to_string().contains("count mismatch"));
-        }
-    }
-
-    /// Constructs distinguishable crops with independent page attribution and caller lifetimes.
-    fn request(
-        value: u8,
-    ) -> (
-        Request,
-        oneshot::Receiver<Result<String, FormulaError>>,
-        oneshot::Receiver<()>,
-    ) {
-        let image = Arc::new(
-            PageImage::try_from(
-                docparse_layout::PageImageInput::builder()
-                    .width(1)
-                    .height(1)
-                    .pixel_format(docparse_layout::PixelFormat::Rgb8)
-                    .data(Arc::from(vec![value; 3]))
-                    .build(),
-            )
-            .expect("image"),
-        );
-        let (response, reply) = oneshot::channel();
-        let (caller, lifetime) = oneshot::channel();
-        (
-            Request::builder()
-                .image(image)
-                .response(response)
-                .caller(Arc::new(caller))
-                .context(TimingContext::new(
-                    Timings::default().for_page(u32::from(value)),
-                ))
-                .build(),
-            reply,
-            lifetime,
-        )
-    }
-
-    /// Cross-page batches skip canceled crops, flush short tails, and isolate sequence failures.
-    #[test]
-    fn ready_crops_preserve_order_and_isolate_errors() {
-        let queue = BatchQueue::new("test", 5);
-        let mut replies = Vec::new();
-        let mut lifetimes = Vec::new();
-        for value in 0..5 {
-            let (request, reply, lifetime) = request(value);
-            queue.push_batch(vec![request]).expect("capacity");
-            replies.push(reply);
-            if value != 1 {
-                lifetimes.push(lifetime);
-            }
-        }
-        let requests = queue.pop(3).expect("first");
-        assert_eq!(
-            requests
-                .iter()
-                .map(|request| *request.image.data().first().expect("pixel"))
-                .collect::<Vec<_>>(),
-            vec![0, 2, 3]
-        );
-        Request::complete(
-            requests,
-            Ok(vec![
-                Ok("zero".into()),
-                Err(FormulaError::Invalid("unfinished peer".into())),
-                Ok("three".into()),
-            ]),
-        );
-        assert_eq!(
-            replies
-                .remove(0)
-                .blocking_recv()
-                .expect("reply")
-                .expect("success"),
-            "zero"
-        );
-        assert!(
-            replies.remove(0).blocking_recv().is_err(),
-            "canceled work is discarded"
-        );
-        replies
-            .remove(0)
-            .blocking_recv()
-            .expect("reply")
-            .expect_err("isolated failure");
-        assert_eq!(
-            replies
-                .remove(0)
-                .blocking_recv()
-                .expect("reply")
-                .expect("result"),
-            "three"
-        );
-        let requests = queue.pop(3).expect("tail");
-        assert_eq!(requests.len(), 1);
-        Request::complete(requests, Ok(vec![Ok("four".into())]));
-        for (reply, expected) in replies.into_iter().zip(["four"]) {
-            assert_eq!(
-                reply.blocking_recv().expect("reply").expect("success"),
-                expected
-            );
-        }
-        queue.close();
-        assert!(queue.pop(3).is_none());
-    }
-
-    /// Two owners execute concurrently, bounded admission backpressures, and canceling one caller preserves its peer.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn session_owners_share_capacity_without_sharing_cancellation() {
-        let (started, mut events) = std::sync::mpsc::channel();
-        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-        struct Release(Arc<(Mutex<bool>, std::sync::Condvar)>);
-        impl Drop for Release {
-            /// Releases test workers during unwinding so a failed assertion cannot hang runtime shutdown.
-            fn drop(&mut self) {
-                *self.0.0.lock().expect("gate") = true;
-                self.0.1.notify_all();
-            }
-        }
-        let _release = Release(Arc::clone(&gate));
-        let worker_gate = Arc::clone(&gate);
-        let manager = run_cpu(move || {
-            SessionManager::start(2, 2, 3, move |_| {
-                let gate = Arc::clone(&worker_gate);
-                let started = started.clone();
-                Ok(move |requests: &mut Vec<Request>| {
-                    started
-                        .send((std::thread::current().id(), requests.len()))
-                        .expect("observation");
-                    let (mutex, wake) = &*gate;
-                    let mut released = mutex.lock().expect("gate");
-                    while !*released {
-                        released = wake.wait(released).expect("release");
-                    }
-                    Ok(requests
-                        .iter()
-                        .map(|request| {
-                            Ok(request
-                                .image
-                                .data()
-                                .first()
-                                .expect("pixel")
-                                .to_string())
-                        })
-                        .collect())
-                })
-            })
-        })
-        .await
-        .expect("task")
-        .expect("manager");
-        let mut tasks = Vec::new();
-        let mut owners = Vec::new();
-        for value in [10, 11] {
-            let image = request(value).0.image;
-            let owner = Arc::clone(&manager);
-            tasks.push(tokio::spawn(async move {
-                owner.run(vec![image], Timings::default()).await
-            }));
-            // Wait for one owner to block before submitting its peer, otherwise the two requests may correctly coalesce.
-            let (receiver, owner) = run_cpu(move || {
-                let event = events
-                    .recv_timeout(std::time::Duration::from_secs(5))
-                    .expect("owner running");
-                (events, event.0)
-            })
-            .await
-            .expect("observation");
-            events = receiver;
-            owners.push(owner);
-        }
-        assert_ne!(
-            owners.first(),
-            owners.get(1),
-            "independent execution threads"
-        );
-        let mut queued = Vec::new();
-        let mut lifetimes = Vec::new();
-        for value in 20..23 {
-            let (request, reply, lifetime) = request(value);
-            manager
-                .sessions
-                .send_batch(vec![request])
-                .expect("bounded capacity");
-            queued.push(reply);
-            lifetimes.push(lifetime);
-        }
-        let mut packet = Vec::new();
-        for value in 23..24 {
-            let (request, reply, lifetime) = request(value);
-            packet.push(request);
-            queued.push(reply);
-            lifetimes.push(lifetime);
-        }
-        let queue = Arc::clone(&manager.sessions);
-        let (entered, waiting) = oneshot::channel();
-        let mut blocked = tokio::task::spawn_blocking(move || {
-            let _ = entered.send(());
-            queue.send_batch(packet)
-        });
-        waiting.await.expect("producer started");
-        // Three configured slots must block a fourth crop even though two sessions times two batch slots equals four.
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                &mut blocked
-            )
-            .await
-            .is_err(),
-            "a full queue must backpressure the complete packet"
-        );
-        let canceled = tasks.remove(0);
-        canceled.abort();
-        assert!(canceled.await.expect_err("cancelled caller").is_cancelled());
-        *gate.0.lock().expect("gate") = true;
-        gate.1.notify_all();
-        assert_eq!(
-            tasks.remove(0).await.expect("task").expect("peer result"),
-            vec!["11"]
-        );
-        blocked
-            .await
-            .expect("producer")
-            .expect("admitted after capacity release");
-        for (reply, expected) in queued.into_iter().zip(20..24) {
-            assert_eq!(
-                reply.await.expect("reply").expect("crop"),
-                expected.to_string()
-            );
-        }
-        assert!(
-            events.try_iter().any(|(_, size)| size == 2),
-            "ready crops from different pages are merged"
-        );
-        let output = Arc::clone(&manager)
-            .run(vec![request(30).0.image], Timings::default())
-            .await
-            .expect("reuse after cancellation");
-        assert_eq!(output, vec!["30"]);
-        run_cpu(move || drop(manager)).await.expect("shutdown");
-    }
-
-    /// Producer packets split at queue capacity without losing order when one inference batch is larger.
-    #[tokio::test]
-    async fn queue_smaller_than_batch_accepts_every_crop() {
-        let manager = run_cpu(|| {
-            SessionManager::start(1, 8, 1, |_| {
-                Ok(|requests: &mut Vec<Request>| {
-                    Ok(requests
-                        .iter()
-                        .map(|request| {
-                            Ok(request
-                                .image
-                                .data()
-                                .first()
-                                .expect("pixel")
-                                .to_string())
-                        })
-                        .collect())
-                })
-            })
-        })
-        .await
-        .expect("startup task")
-        .expect("manager");
-        let output = Arc::clone(&manager)
-            .run(
-                (0..12).map(|value| request(value).0.image).collect(),
-                Timings::default(),
-            )
-            .await
-            .expect("all crops");
-        assert_eq!(
-            output,
-            (0..12).map(|value| value.to_string()).collect::<Vec<_>>()
-        );
-        run_cpu(move || drop(manager)).await.expect("shutdown");
-    }
-
-    /// A partially initialized pool closes admission and drops earlier owners when a later model fails to load.
-    #[test]
-    fn failed_initialization_releases_existing_sessions() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    async fn failed_initialization_releases_existing_sessions() {
         struct Owner(Arc<AtomicUsize>);
         impl Drop for Owner {
-            /// Records destruction on the owning worker even when it never receives a request.
+            /// Records native model teardown.
             fn drop(&mut self) {
                 self.0.fetch_add(1, Ordering::SeqCst);
             }
         }
-        let created = AtomicUsize::new(0);
         let destroyed = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&destroyed);
-        let result = SessionManager::start(2, 2, 4, move |_| {
-            if created.fetch_add(1, Ordering::SeqCst) == 1 {
-                return Err(FormulaError::Invalid("load failure".into()));
-            }
-            let owner = Owner(Arc::clone(&observed));
-            Ok(move |_: &mut Vec<Request>| {
-                let _ = &owner;
-                Ok(Vec::new())
-            })
-        });
-        assert!(result.is_err());
+        let (queue, _) = FormulaQueue::new("test", 4);
+        let result = SessionManager::start(
+            2,
+            2,
+            queue.consumer(),
+            "test".into(),
+            move |index| {
+                if index == 1 {
+                    return Err(FormulaError::Invalid("load failure".into()));
+                }
+                let owner = Owner(Arc::clone(&observed));
+                Ok(move |_: &mut Vec<Request>| {
+                    let _ = &owner;
+                    Ok(Vec::new())
+                })
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(FormulaError::Invalid(_))));
         assert_eq!(destroyed.load(Ordering::SeqCst), 1);
-    }
-
-    /// Standard runs must preserve growing caches across mixed batches and repeated inference.
-    #[tokio::test]
-    #[ignore = "requires models/texo"]
-    async fn standard_runs_preserve_batched_and_repeated_results() {
-        let directory = std::env::var_os("DOCPARSE_TEXO_MODELS")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../models/texo")
-            });
-        let paths = docparse_config::TexoFormulaConfig::builder()
-            .encoder_path(directory.join("encoder_model.onnx"))
-            .decoder_path(directory.join("decoder_model_merged.onnx"))
-            .tokenizer_path(directory.join("tokenizer.json"))
-            .build();
-        let artifacts = TexoArtifacts::try_from(&paths).expect("artifacts");
-        artifacts.verify().expect("identity");
-        let runner = run_cpu(move || {
-            SessionManager::start(2, 4, 8, move |_| {
-                let backend = OnnxBackend::compiled();
-                // Both graphs inherit the compiled provider and shared session defaults.
-                let mut model = ModelSessions {
-                    encoder: SessionBuilder::try_from(backend)?
-                        .commit_from_memory(&artifacts.encoder)?,
-                    decoder: SessionBuilder::try_from(backend)?
-                        .commit_from_memory(&artifacts.decoder)?,
-                    tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
-                };
-                Ok(move |requests: &mut Vec<Request>| model.recognize(requests))
-            })
-        })
-        .await
-        .expect("task")
-        .expect("sessions");
-        let reference: serde_json::Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/reference.json"
-        ))
-        .expect("reference");
-        let mut images = Vec::new();
-        let mut expected = Vec::new();
-        for case in reference
-            .get("cases")
-            .expect("cases")
-            .as_array()
-            .expect("array")
-        {
-            let image = image::open(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures")
-                    .join(
-                        case.get("image")
-                            .expect("image")
-                            .as_str()
-                            .expect("string"),
-                    ),
-            )
-            .expect("PNG")
-            .to_rgb8();
-            images.push(Arc::new(
-                PageImage::try_from(
-                    docparse_layout::PageImageInput::builder()
-                        .width(image.width())
-                        .height(image.height())
-                        .pixel_format(docparse_layout::PixelFormat::Rgb8)
-                        .data(Arc::from(image.into_raw()))
-                        .build(),
-                )
-                .expect("pixels"),
-            ));
-            expected.push(
-                case.get("latex")
-                    .expect("latex")
-                    .as_str()
-                    .expect("string")
-                    .to_owned(),
-            );
-        }
-        for _ in 0..2 {
-            assert_eq!(
-                Arc::clone(&runner)
-                    .run(images.clone(), Timings::default())
-                    .await
-                    .expect("standard batch"),
-                expected
-            );
-        }
     }
 }

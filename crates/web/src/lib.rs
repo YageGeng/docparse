@@ -68,6 +68,34 @@ struct AuxiliaryArtifacts {
     formula: Option<ArtifactBytes>,
     #[builder(default)]
     texo_formula: Option<TexoArtifactBytes>,
+    /// Model bytes aligned with the entire formula consumer list.
+    #[serde(default)]
+    #[builder(default)]
+    formula_engines: Vec<Option<FormulaEngineBytes>>,
+}
+
+/// Tagged model bytes belonging to one local formula consumer group.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum FormulaEngineBytes {
+    Pp(ArtifactBytes),
+    Texo(TexoArtifactBytes),
+}
+
+impl From<FormulaEngineBytes> for docparse_core::FormulaModelArtifacts {
+    /// Moves every preloaded buffer into its matching native consumer slot.
+    fn from(bytes: FormulaEngineBytes) -> Self {
+        match bytes {
+            FormulaEngineBytes::Pp(bytes) => {
+                Self::Pp(docparse_formula::FormulaArtifacts {
+                    model: Arc::from(bytes.model),
+                    tokenizer: Arc::from(bytes.config),
+                    manifest: Arc::from(bytes.manifest),
+                })
+            }
+            FormulaEngineBytes::Texo(bytes) => Self::Texo(bytes.into()),
+        }
+    }
 }
 
 /// Texo's two ONNX graphs and tokenizer are supplied explicitly by the browser host.
@@ -196,6 +224,13 @@ impl WebParser {
                     }
                 }))
                 .texo_formula(auxiliary.texo_formula.map(Into::into))
+                .formula_engines(
+                    auxiliary
+                        .formula_engines
+                        .into_iter()
+                        .map(|bytes| bytes.map(Into::into))
+                        .collect(),
+                )
                 .build(),
         )
         .await

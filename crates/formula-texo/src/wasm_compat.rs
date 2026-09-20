@@ -3,7 +3,7 @@ use crate::{
     TexoArtifacts, TexoEngine,
     model::{Generation, MAX_LENGTH, ModelSessions, StepOutput},
 };
-use docparse_formula::FormulaError;
+use docparse_formula::{FormulaError, queue::FormulaQueue};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,8 +20,16 @@ mod platform {
         pub async fn from_config(
             config: Arc<docparse_config::ValidatedConfig>,
         ) -> Result<Self, FormulaError> {
+            Self::from_config_on_queue(config, None).await
+        }
+
+        /// Loads this group's artifacts and attaches its sessions to the shared queue.
+        pub async fn from_config_on_queue(
+            config: Arc<docparse_config::ValidatedConfig>,
+            queue: Option<FormulaQueue>,
+        ) -> Result<Self, FormulaError> {
             let docparse_config::FormulaEngineConfig::Texo(paths) =
-                config.formula().engine.clone()
+                config.formula().single_engine()?.clone()
             else {
                 tracing::error!(
                     "Texo loader requires formula.engine.type = texo"
@@ -34,7 +42,7 @@ mod platform {
                 TexoArtifacts::try_from(&paths)
             })
             .await??;
-            Self::from_artifacts(config, artifacts).await
+            Self::from_artifacts_on_queue(config, artifacts, queue).await
         }
     }
     impl TryFrom<&docparse_config::TexoFormulaConfig> for TexoArtifacts {
@@ -71,7 +79,7 @@ mod platform {
     use super::*;
     use crate::preprocess::FormulaInput;
     use docparse_common::timing::{TimingStage, Timings};
-    use docparse_formula::queue::{BatchTimings, FormulaQueue, FormulaRequest};
+    use docparse_formula::queue::{BatchTimings, FormulaRequest};
     use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
     use ort::{session::builder::SessionBuilder, value::Tensor};
     use ort_web::{SyncDirection, ValueExt};
@@ -79,6 +87,7 @@ mod platform {
     /// One bounded crop queue is shared by all callers in the browser Worker.
     pub(crate) struct SessionRunner {
         queue: FormulaQueue,
+        _workers: docparse_formula::queue::FormulaWorkers,
     }
 
     impl SessionRunner {
@@ -94,18 +103,23 @@ mod platform {
             artifacts: TexoArtifacts,
             backend: OnnxBackend,
             config: &docparse_config::FormulaConfig,
+            shared: Option<FormulaQueue>,
         ) -> Result<Arc<Self>, FormulaError> {
             let docparse_config::FormulaEngineConfig::Texo(texo) =
-                &config.engine
+                config.single_engine()?
             else {
                 return Err(FormulaError::Invalid(
                     "Texo session manager requires the Texo engine".into(),
                 ));
             };
-            let batch_size = config.batch_size;
-            let (queue, receiver) =
-                FormulaQueue::new("formula_texo", config.queue_size);
-            for _ in 0..texo.session_size {
+            let batch_size = texo.batch_size;
+            let queue = shared.unwrap_or_else(|| {
+                FormulaQueue::new("formula_texo", config.queue_size).0
+            });
+            let receiver = queue.receiver();
+            let mut workers =
+                docparse_formula::queue::FormulaWorkers::default();
+            for _ in 0..texo.worker_size {
                 // Apply the shared runtime settings to both graphs, including their memory policy.
                 let mut encoder_builder = SessionBuilder::try_from(backend)?;
                 let mut decoder_builder = SessionBuilder::try_from(backend)?;
@@ -148,12 +162,11 @@ mod platform {
                 };
                 let options = ort::session::RunOptions::new()?;
                 let receiver = receiver.clone();
-                docparse_common::ThreadManager::spawn_async(Box::pin(
+                workers.spawn(Box::pin(
                     async move {
                         while let Some(batch) = receiver.recv().await {
-                            // Drain after acquiring the browser runtime so ready requests can accumulate during another model's work.
-                            let _guard = OnnxBackend::inference_guard().await;
-                            let requests = batch.take_ready(batch_size);
+                            let mut requests = batch.take_ready(batch_size);
+                            for request in &mut requests { request.engine = format!("texo-transfer-onnx-{}", backend.execution_provider()); }
                             if requests.is_empty() {
                                 continue;
                             }
@@ -165,6 +178,10 @@ mod platform {
                                 .iter()
                                 .map(|request| &request.context)
                                 .collect();
+                            // Waiting for another local model must not exclude HTTP consumers from the shared queue.
+                            let queued = timings.start(TimingStage::FormulaQueue);
+                            let _guard = OnnxBackend::inference_guard().await;
+                            drop(queued);
                             tracing::debug!(
                                 "browser Texo session running {} ready crops",
                                 images.len()
@@ -197,7 +214,10 @@ mod platform {
                     },
                 ))?;
             }
-            Ok(Arc::new(Self { queue }))
+            Ok(Arc::new(Self {
+                queue,
+                _workers: workers,
+            }))
         }
 
         /// Publishes crops independently while preserving the caller's original output order.
@@ -219,6 +239,13 @@ mod platform {
                 "browser Texo initialization requires explicit artifacts"
             );
             Err(FormulaError::ArtifactsRequired)
+        }
+        /// Browser consumers require explicit bytes rather than filesystem access.
+        pub async fn from_config_on_queue(
+            config: Arc<docparse_config::ValidatedConfig>,
+            _queue: Option<FormulaQueue>,
+        ) -> Result<Self, FormulaError> {
+            Self::from_config(config).await
         }
     }
 }

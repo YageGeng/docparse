@@ -199,13 +199,9 @@ pub struct FormulaConfig {
     #[builder(default = true)]
     pub display_enabled: bool,
     /// Explicit recognizer selection; model paths or service settings belong to its variant.
-    #[serde(default)]
-    #[builder(default)]
-    pub engine: FormulaEngineConfig,
-    /// Maximum ready crops per local model invocation; MinerU uses its HTTP concurrency limit.
-    #[serde(default = "FormulaConfig::default_batch_size")]
-    #[builder(default = 4)]
-    pub batch_size: usize,
+    #[serde(default = "FormulaConfig::default_engines")]
+    #[builder(default = Self::default_engines())]
+    pub engine: Vec<FormulaEngineConfig>,
     /// Per-crop parser deadline including pre-crop admission and shared model queue time.
     #[serde(default = "FormulaConfig::default_timeout_ms")]
     #[builder(default = 120_000)]
@@ -217,9 +213,30 @@ impl FormulaConfig {
     const fn default_enabled() -> bool {
         true
     }
-    /// Preserves the existing batch default independently of the required queue capacity.
-    const fn default_batch_size() -> usize {
-        4
+    /// Retains one local Texo consumer when no engine list is supplied.
+    fn default_engines() -> Vec<FormulaEngineConfig> {
+        vec![FormulaEngineConfig::default()]
+    }
+
+    /// Sums the validated active crop capacity across heterogeneous consumer groups.
+    pub fn active_capacity(&self) -> usize {
+        self.engine
+            .iter()
+            .map(|engine| engine.worker_size() * engine.batch_size())
+            .sum()
+    }
+
+    /// Single-engine constructors must never silently ignore additional configured groups.
+    pub fn single_engine(
+        &self,
+    ) -> Result<&FormulaEngineConfig, crate::ConfigError> {
+        match self.engine.as_slice() {
+            [engine] => Ok(engine),
+            _ => Err(crate::ConfigError::InvalidValue {
+                field: "formula.engine",
+                reason: "this constructor requires exactly one consumer group",
+            }),
+        }
     }
     /// Preserves the existing deadline for partial serialized formula options.
     const fn default_timeout_ms() -> u64 {
@@ -242,48 +259,78 @@ pub enum FormulaEngineConfig {
     Pp(PpFormulaConfig),
     /// Texo's encoder and cached decoder with the matching WordLevel tokenizer.
     Texo(TexoFormulaConfig),
-    /// External MinerU vLLM service; no local formula model files are required.
-    Mineru(MineruFormulaConfig),
+    /// External image-only or prompted HTTP service; no local model files are required.
+    Http(HttpFormulaConfig),
 }
 
 impl FormulaEngineConfig {
     /// Returns the consumer count for a local formula engine using the selected backend.
-    pub fn session_size(&self) -> usize {
+    pub fn worker_size(&self) -> usize {
         match self {
-            Self::Pp(config) => config.session_size,
-            Self::Texo(config) => config.session_size,
-            Self::Mineru(_) => 1,
+            Self::Pp(config) => config.worker_size,
+            Self::Texo(config) => config.worker_size,
+            Self::Http(config) => config.worker_size,
+        }
+    }
+    /// Returns the maximum number of ready crops consumed in one invocation.
+    pub fn batch_size(&self) -> usize {
+        match self {
+            Self::Pp(config) => config.batch_size,
+            Self::Texo(config) => config.batch_size,
+            Self::Http(_) => 1,
         }
     }
 }
 
-/// Native MinerU service address and the shared limit on in-flight crop requests.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// HTTP transport settings and the shared consumer limit across all pages and documents.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(default, deny_unknown_fields)]
-pub struct MineruFormulaConfig {
-    /// HTTP(S) service root or OpenAI API base ending in `/v1`.
+pub struct HttpFormulaConfig {
+    /// HTTP(S) service root or API base ending in `/v1`.
+    #[builder(default = "http://127.0.0.1:6008".into())]
     pub server_url: String,
     /// Maximum concurrent HTTP requests across all pages using one engine.
-    pub concurrency: usize,
+    #[builder(default = 1)]
+    pub worker_size: usize,
+    /// Selects chat completions when present; absence selects PNG upload and a JSON text response.
+    #[builder(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Served model identifier for chat completions; ignored by the image-only upload protocol.
+    #[builder(default = "MinerU2.5-2509-1.2B".into())]
+    pub model: String,
 }
 
-impl Default for MineruFormulaConfig {
-    /// Matches the separately deployed MinerU vLLM service without selecting it by default.
+impl Default for HttpFormulaConfig {
+    /// Uses the image-only HTTP service unless a prompt explicitly selects chat completions.
     fn default() -> Self {
-        Self {
-            server_url: "http://127.0.0.1:8000".into(),
-            concurrency: 8,
-        }
+        Self::builder().build()
     }
 }
 
-impl MineruFormulaConfig {
+impl HttpFormulaConfig {
     /// Validates service settings and preserves reverse-proxy prefixes when building the endpoint.
     pub fn endpoint(&self) -> Result<url::Url, crate::ConfigError> {
-        if !(1..=1024).contains(&self.concurrency) {
+        if !(1..=1024).contains(&self.worker_size) {
             return Err(crate::ConfigError::InvalidValue {
-                field: "formula.engine.concurrency",
+                field: "formula.engine.worker_size",
                 reason: "must be between 1 and 1024",
+            });
+        }
+        if self
+            .prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.trim().is_empty())
+        {
+            return Err(crate::ConfigError::InvalidValue {
+                field: "formula.engine.prompt",
+                reason: "must be non-empty when configured; omit it for image-only services",
+            });
+        }
+        if self.prompt.is_some() && self.model.trim().is_empty() {
+            return Err(crate::ConfigError::InvalidValue {
+                field: "formula.engine.model",
+                reason: "must be non-empty for chat completions",
             });
         }
         let invalid_url = || crate::ConfigError::InvalidValue {
@@ -302,10 +349,15 @@ impl MineruFormulaConfig {
             return Err(invalid_url());
         }
         let base = endpoint.path().trim_end_matches('/');
-        let path = if base.ends_with("/v1") {
-            format!("{base}/chat/completions")
+        let operation = if self.prompt.is_some() {
+            "chat/completions"
         } else {
-            format!("{base}/v1/chat/completions")
+            "predictions/upload"
+        };
+        let path = if base.ends_with("/v1") {
+            format!("{base}/{operation}")
+        } else {
+            format!("{base}/v1/{operation}")
         };
         endpoint.set_path(&path);
         Ok(endpoint)
@@ -325,7 +377,10 @@ impl Default for FormulaEngineConfig {
 pub struct PpFormulaConfig {
     /// Consumers sharing the formula queue on the selected execution backend.
     #[builder(default = 1)]
-    pub session_size: usize,
+    pub worker_size: usize,
+    /// Maximum ready crops processed by each consumer in one batch.
+    #[builder(default = 4)]
+    pub batch_size: usize,
     /// ONNX graph for the selected PP-FormulaNet variant.
     pub model_path: PathBuf,
     /// Matching ByteLevel BPE tokenizer.
@@ -353,7 +408,10 @@ impl Default for PpFormulaConfig {
 pub struct TexoFormulaConfig {
     /// Consumers sharing the formula queue on the selected execution backend.
     #[builder(default = 1)]
-    pub session_size: usize,
+    pub worker_size: usize,
+    /// Maximum ready crops processed by each consumer in one batch.
+    #[builder(default = 4)]
+    pub batch_size: usize,
     /// Image encoder ONNX graph.
     pub encoder_path: PathBuf,
     /// Merged first-step/cached decoder ONNX graph.

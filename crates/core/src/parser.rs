@@ -166,6 +166,13 @@ impl fmt::Debug for DocParser {
     }
 }
 
+/// Per-group model bytes aligned with the formula engine list; HTTP entries need no bytes.
+#[derive(Clone)]
+pub enum FormulaModelArtifacts {
+    Pp(docparse_formula::FormulaArtifacts),
+    Texo(docparse_formula_texo::TexoArtifacts),
+}
+
 /// Explicit model bytes for filesystem-independent parser construction on native and Web.
 #[derive(Clone, TypedBuilder)]
 pub struct ParserArtifacts {
@@ -179,9 +186,12 @@ pub struct ParserArtifacts {
     /// Required when formula recognition is enabled without an injected recognizer.
     #[builder(default)]
     pub formula: Option<docparse_formula::FormulaArtifacts>,
-    /// Alternative Texo encoder/decoder/tokenizer bytes; mutually exclusive with `formula`.
+    /// Optional Texo encoder/decoder/tokenizer bytes for legacy artifact callers.
     #[builder(default)]
     pub texo_formula: Option<docparse_formula_texo::TexoArtifacts>,
+    /// Ordered per-group artifacts; None corresponds to an HTTP consumer group.
+    #[builder(default)]
+    pub formula_engines: Vec<Option<FormulaModelArtifacts>>,
 }
 
 impl From<docparse_layout::ModelArtifacts> for ParserArtifacts {
@@ -286,6 +296,7 @@ impl DocParserBuilder {
         injected: Option<Arc<dyn docparse_formula::FormulaEngine>>,
         pp_artifacts: Option<docparse_formula::FormulaArtifacts>,
         texo_artifacts: Option<docparse_formula_texo::TexoArtifacts>,
+        artifacts: Vec<Option<FormulaModelArtifacts>>,
     ) -> Result<Option<Arc<dyn docparse_formula::FormulaEngine>>, DocParseError>
     {
         if let Some(engine) = injected {
@@ -295,52 +306,62 @@ impl DocParserBuilder {
         {
             return Ok(None);
         }
-        let engine: Arc<dyn docparse_formula::FormulaEngine> = match &config
-            .formula()
-            .engine
-        {
-            docparse_config::FormulaEngineConfig::Texo(_) => {
-                Arc::new(match texo_artifacts {
-                    Some(artifacts) => {
-                        docparse_formula_texo::TexoEngine::from_artifacts(
-                            Arc::clone(config),
-                            artifacts,
-                        )
-                        .await?
+        let mut pool = docparse_formula::queue::FormulaPool::new(config)?;
+        for (index, selection) in config.formula().engine.iter().enumerate() {
+            let selected = Arc::new(
+                config
+                    .for_formula_engine(index)
+                    .map_err(docparse_formula::FormulaError::from)?,
+            );
+            let shared = Some(pool.consumer());
+            let model = artifacts.get(index).and_then(Option::as_ref);
+            tracing::info!(
+                "preloading formula consumer group {} with {} workers and batch size {}",
+                index,
+                selection.worker_size(),
+                selection.batch_size()
+            );
+            let engine: Arc<dyn docparse_formula::FormulaEngine> =
+                match selection {
+                    docparse_config::FormulaEngineConfig::Texo(_) => {
+                        let bytes = match model {
+                            Some(FormulaModelArtifacts::Texo(bytes)) => {
+                                Some(bytes.clone())
+                            }
+                            _ => texo_artifacts.clone(),
+                        };
+                        Arc::new(match bytes {
+                        Some(bytes) => docparse_formula_texo::TexoEngine::from_artifacts_on_queue(selected, bytes, shared).await?,
+                        None => docparse_formula_texo::TexoEngine::from_config_on_queue(selected, shared).await?,
+                    })
                     }
-                    None => {
-                        docparse_formula_texo::TexoEngine::from_config(
-                            Arc::clone(config),
-                        )
-                        .await?
+                    docparse_config::FormulaEngineConfig::Pp(_) => {
+                        let bytes = match model {
+                            Some(FormulaModelArtifacts::Pp(bytes)) => {
+                                Some(bytes.clone())
+                            }
+                            _ => pp_artifacts.clone(),
+                        };
+                        Arc::new(match bytes {
+                        Some(bytes) => docparse_formula::PpFormulaNetEngine::from_artifacts_on_queue(selected, bytes, shared).await?,
+                        None => docparse_formula::PpFormulaNetEngine::from_config_on_queue(selected, shared).await?,
+                    })
                     }
-                })
-            }
-            docparse_config::FormulaEngineConfig::Pp(_) => {
-                Arc::new(match pp_artifacts {
-                    Some(artifacts) => {
-                        docparse_formula::PpFormulaNetEngine::from_artifacts(
-                            Arc::clone(config),
-                            artifacts,
+                    docparse_config::FormulaEngineConfig::Http(_) => Arc::new(
+                        docparse_formula_http::HttpEngine::on_queue(
+                            &selected, shared,
                         )
-                        .await?
-                    }
-                    None => {
-                        docparse_formula::PpFormulaNetEngine::from_config(
-                            Arc::clone(config),
-                        )
-                        .await?
-                    }
-                })
-            }
-            docparse_config::FormulaEngineConfig::Mineru(_) => Arc::new(
-                docparse_formula_mineru::MineruEngine::try_from(
-                    config.as_ref(),
-                )
-                .map_err(docparse_formula::FormulaError::from)?,
-            ),
-        };
-        Ok(Some(engine))
+                        .map_err(docparse_formula::FormulaError::from)?,
+                    ),
+                };
+            tracing::info!(
+                "ready formula consumer group {}: {}",
+                index,
+                engine.name()
+            );
+            pool.add(engine);
+        }
+        Ok(Some(Arc::new(pool)))
     }
 
     /// Loads layout and enabled OCR/table models once, preserving explicitly injected engines.
@@ -348,58 +369,60 @@ impl DocParserBuilder {
         let config = self.config.ok_or(DocParseError::MissingConfiguration)?;
         let formula_enabled =
             config.formula().inline_enabled || config.formula().display_enabled;
-        // Remote formula recognition consumes crops only; byte-backed parsers need no local formula artifacts.
-        let local_formula_enabled = formula_enabled
-            && !matches!(
-                config.formula().engine,
-                docparse_config::FormulaEngineConfig::Mineru(_)
-            );
-        if local_formula_enabled
+        // Validate every artifact slot before loading any model, so later groups cannot silently fall back to unrelated bytes.
+        if formula_enabled
             && self.formula_engine.is_none()
-            && self.artifacts.as_ref().is_some_and(|artifacts| {
-                artifacts.formula.is_none() && artifacts.texo_formula.is_none()
-            })
-        {
-            tracing::error!(
-                "parser artifact set is missing the enabled formula model/tokenizer"
-            );
-            return Err(DocParseError::MissingFormulaArtifacts);
-        }
-        if self.formula_engine.is_none()
-            && local_formula_enabled
-            && self.artifacts.as_ref().is_some_and(|artifacts| {
-                artifacts.formula.is_some() && artifacts.texo_formula.is_some()
-            })
-        {
-            tracing::error!(
-                "parser artifact set contains two formula models; select PP-FormulaNet or Texo"
-            );
-            return Err(docparse_formula::FormulaError::Artifacts(
-                "select either formula or texo_formula artifacts".into(),
-            )
-            .into());
-        }
-        if self.formula_engine.is_none()
-            && local_formula_enabled
             && let Some(artifacts) = &self.artifacts
         {
-            let selected_present = match config.formula().engine {
-                docparse_config::FormulaEngineConfig::Pp(_) => {
-                    artifacts.formula.is_some()
-                }
-                docparse_config::FormulaEngineConfig::Texo(_) => {
-                    artifacts.texo_formula.is_some()
-                }
-                docparse_config::FormulaEngineConfig::Mineru(_) => true,
-            };
-            if !selected_present {
-                tracing::error!(
-                    "formula artifacts do not match the explicitly configured engine"
-                );
+            if !artifacts.formula_engines.is_empty()
+                && artifacts.formula_engines.len()
+                    != config.formula().engine.len()
+            {
                 return Err(docparse_formula::FormulaError::Artifacts(
-                    "formula artifacts do not match formula.engine.type".into(),
+                    "formula artifact count must match formula.engine".into(),
                 )
                 .into());
+            }
+            for (index, selection) in config.formula().engine.iter().enumerate()
+            {
+                let present = if artifacts.formula_engines.is_empty() {
+                    match selection {
+                        docparse_config::FormulaEngineConfig::Pp(_) => {
+                            artifacts.formula.is_some()
+                        }
+                        docparse_config::FormulaEngineConfig::Texo(_) => {
+                            artifacts.texo_formula.is_some()
+                        }
+                        docparse_config::FormulaEngineConfig::Http(_) => true,
+                    }
+                } else {
+                    matches!(
+                        (
+                            selection,
+                            artifacts
+                                .formula_engines
+                                .get(index)
+                                .and_then(Option::as_ref)
+                        ),
+                        (
+                            docparse_config::FormulaEngineConfig::Pp(_),
+                            Some(FormulaModelArtifacts::Pp(_))
+                        ) | (
+                            docparse_config::FormulaEngineConfig::Texo(_),
+                            Some(FormulaModelArtifacts::Texo(_))
+                        ) | (
+                            docparse_config::FormulaEngineConfig::Http(_),
+                            None
+                        )
+                    )
+                };
+                if !present {
+                    tracing::error!(
+                        "formula consumer group {} has missing or mismatched model artifacts",
+                        index
+                    );
+                    return Err(DocParseError::MissingFormulaArtifacts);
+                }
             }
         }
         let table_enabled = config.tsr().mode != crate::TableMode::RulesOnly;
@@ -432,8 +455,9 @@ impl DocParserBuilder {
             ocr_artifacts,
             formula_artifacts,
             texo_artifacts,
+            formula_engines,
         ) = self.artifacts.map_or(
-            (None, None, None, None, None),
+            (None, None, None, None, None, Vec::new()),
             |artifacts| {
                 (
                     Some(artifacts.layout),
@@ -441,6 +465,7 @@ impl DocParserBuilder {
                     artifacts.ocr,
                     artifacts.formula,
                     artifacts.texo_formula,
+                    artifacts.formula_engines,
                 )
             },
         );
@@ -501,6 +526,7 @@ impl DocParserBuilder {
             self.formula_engine,
             formula_artifacts,
             texo_artifacts,
+            formula_engines,
         )
         .await?;
         Ok(DocParser::with_engines()
@@ -760,9 +786,9 @@ mod tests {
     #[tokio::test]
     async fn texo_artifacts_select_the_texo_loader() {
         let mut raw = docparse_config::RawConfig::default();
-        raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+        raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Texo(
             docparse_config::TexoFormulaConfig::default(),
-        );
+        )];
         raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
         raw.tsr.mode = crate::TableMode::RulesOnly;
         let empty: Arc<[u8]> = Arc::from([]);
@@ -791,12 +817,13 @@ mod tests {
 
     /// An external formula engine needs neither model files nor formula bytes in an explicit artifact set.
     #[tokio::test]
-    async fn mineru_loads_without_formula_artifacts() {
+    async fn http_loads_without_formula_artifacts() {
         for explicit in [false, true] {
             let mut raw = docparse_config::RawConfig::default();
-            raw.formula.engine = docparse_config::FormulaEngineConfig::Mineru(
-                docparse_config::MineruFormulaConfig::default(),
-            );
+            raw.formula.engine =
+                vec![docparse_config::FormulaEngineConfig::Http(
+                    docparse_config::HttpFormulaConfig::default(),
+                )];
             raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
             raw.tsr.mode = crate::TableMode::RulesOnly;
             let mut builder = DocParser::builder()
@@ -823,9 +850,145 @@ mod tests {
                     .as_ref()
                     .expect("formula engine")
                     .name(),
-                "mineru-2.5-vllm"
+                "formula-pool"
             );
         }
+    }
+
+    /// Preloading must visit later groups and tear down earlier HTTP consumers when a local model fails.
+    #[tokio::test]
+    async fn formula_preload_validates_every_group() {
+        let mut raw = docparse_config::RawConfig::default();
+        raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+        raw.tsr.mode = crate::TableMode::RulesOnly;
+        raw.formula.engine = vec![
+            docparse_config::FormulaEngineConfig::Http(
+                docparse_config::HttpFormulaConfig::default(),
+            ),
+            docparse_config::FormulaEngineConfig::Texo(
+                docparse_config::TexoFormulaConfig::default(),
+            ),
+        ];
+        let empty: Arc<[u8]> = Arc::from([]);
+        let builder = DocParser::builder()
+            .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+            .layout_engine(Arc::new(UnusedLayout))
+            .artifacts(
+                ParserArtifacts::builder()
+                    .layout(docparse_layout::ModelArtifacts {
+                        model: Arc::clone(&empty),
+                        config: Arc::clone(&empty),
+                        manifest: Arc::clone(&empty),
+                    })
+                    .formula_engines(vec![
+                        None,
+                        Some(FormulaModelArtifacts::Texo(
+                            docparse_formula_texo::TexoArtifacts {
+                                encoder: Arc::clone(&empty),
+                                decoder: Arc::clone(&empty),
+                                tokenizer: empty,
+                            },
+                        )),
+                    ])
+                    .build(),
+            );
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            builder.build(),
+        )
+        .await
+        .expect("partial initialization shuts down")
+        .expect_err("second group's invalid weights must fail");
+        assert!(error.to_string().contains("SHA-256 mismatch"));
+    }
+
+    /// Every local family is preloaded before a mixed queue can accept real formula crops.
+    #[tokio::test]
+    #[ignore = "requires pinned Texo and PP-FormulaNet Plus-S model files"]
+    async fn preloads_mixed_local_formula_models() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut raw =
+            docparse_config::ConfigLoader::new(root.join("docparse.toml"))
+                .load_raw()
+                .expect("config");
+        raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+        raw.tsr.mode = crate::TableMode::RulesOnly;
+        let texo_dir = std::env::var_os("DOCPARSE_TEXO_MODELS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| root.join("models/texo"));
+        let texo = docparse_config::TexoFormulaConfig::builder()
+            .encoder_path(texo_dir.join("encoder_model.onnx"))
+            .decoder_path(texo_dir.join("decoder_model_merged.onnx"))
+            .tokenizer_path(texo_dir.join("tokenizer.json"))
+            .batch_size(2)
+            .build();
+        let pp = docparse_config::PpFormulaConfig::builder()
+            .model_path(root.join("models/pp-formulanet-plus-s/inference.onnx"))
+            .tokenizer_path(
+                root.join("models/pp-formulanet-plus-s/tokenizer.json"),
+            )
+            .model_manifest_path(
+                root.join("models/pp-formulanet-plus-s/model-manifest.json"),
+            )
+            .batch_size(1)
+            .build();
+        raw.formula.engine = vec![
+            docparse_config::FormulaEngineConfig::Texo(texo),
+            docparse_config::FormulaEngineConfig::Pp(pp),
+        ];
+        let parser = DocParser::builder()
+            .config(Arc::new(
+                ValidatedConfig::try_from(raw).expect("validated"),
+            ))
+            .layout_engine(Arc::new(UnusedLayout))
+            .build()
+            .await
+            .expect("both models ready");
+        let fixture = root.join("crates/formula-texo/tests/fixtures");
+        let reference: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture.join("reference.json"))
+                .expect("reference"),
+        )
+        .expect("JSON");
+        let name = reference
+            .pointer("/cases/0/image")
+            .and_then(serde_json::Value::as_str)
+            .expect("fixture");
+        let image = image::open(fixture.join(name)).expect("image").to_rgb8();
+        let image = Arc::new(
+            docparse_layout::PageImage::try_from(
+                docparse_layout::PageImageInput::builder()
+                    .width(image.width())
+                    .height(image.height())
+                    .pixel_format(docparse_layout::PixelFormat::Rgb8)
+                    .data(Arc::from(image.into_raw()))
+                    .build(),
+            )
+            .expect("crop"),
+        );
+        let output = parser
+            .formula_engine
+            .as_ref()
+            .expect("pool")
+            .recognize_named(
+                vec![image; 12],
+                docparse_common::timing::Timings::default(),
+            )
+            .await
+            .expect("mixed inference");
+        assert_eq!(output.len(), 12);
+        assert!(output.iter().all(|result| !result.latex.is_empty()));
+        assert!(
+            output
+                .iter()
+                .any(|result| result.engine.starts_with("texo-"))
+        );
+        assert!(
+            output
+                .iter()
+                .any(|result| result.engine.starts_with("pp-formulanet-"))
+        );
     }
 
     /// Native configuration and explicit bytes both initialize the real Texo engine.
@@ -837,13 +1000,13 @@ mod tests {
         let mut raw = docparse_config::RawConfig::default();
         raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
         raw.tsr.mode = crate::TableMode::RulesOnly;
-        raw.formula.engine = docparse_config::FormulaEngineConfig::Texo(
+        raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Texo(
             docparse_config::TexoFormulaConfig::builder()
                 .encoder_path(dir.join("encoder_model.onnx"))
                 .decoder_path(dir.join("decoder_model_merged.onnx"))
                 .tokenizer_path(dir.join("tokenizer.json"))
                 .build(),
-        );
+        )];
         let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
         for explicit in [false, true] {
             let mut builder = DocParser::builder()
@@ -859,7 +1022,7 @@ mod tests {
                             manifest: empty,
                         })
                         .texo_formula(Some(
-                            docparse_formula_texo::TexoArtifacts::try_from(match &config.formula().engine { docparse_config::FormulaEngineConfig::Texo(paths) => paths, _ => unreachable!("Texo config") })
+                            docparse_formula_texo::TexoArtifacts::try_from(match config.formula().single_engine().expect("single engine") { docparse_config::FormulaEngineConfig::Texo(paths) => paths, _ => unreachable!("Texo config") })
                             .expect("assets"),
                         ))
                         .build(),
@@ -872,7 +1035,7 @@ mod tests {
                     .as_ref()
                     .expect("formula engine")
                     .name()
-                    .starts_with("texo-transfer-onnx-")
+                    .starts_with("formula-pool")
             );
         }
     }

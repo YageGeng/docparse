@@ -1200,7 +1200,7 @@ dependencies = [
  "docparse-common",
  "docparse-config",
  "docparse-formula",
- "docparse-formula-mineru",
+ "docparse-formula-http",
  "docparse-formula-texo",
  "docparse-layout",
  "docparse-ocr",
@@ -1272,7 +1272,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "docparse-formula-mineru"
+name = "docparse-formula-http"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -3718,6 +3718,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",

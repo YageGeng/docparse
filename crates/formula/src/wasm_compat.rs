@@ -20,7 +20,7 @@ mod platform {
     pub(crate) struct SessionRunner {
         // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
-        workers: Vec<docparse_common::ThreadManager>,
+        workers: crate::queue::FormulaWorkers,
         /// Actual executor, including the native Apple compatibility path.
         pub(crate) provider: docparse_layout::ExecutionProvider,
     }
@@ -41,6 +41,7 @@ mod platform {
             batch_size: usize,
             session_size: usize,
             queue_size: usize,
+            shared: Option<FormulaQueue>,
         ) -> Result<Arc<Self>, FormulaError> {
             let coreml_incompatible = cfg!(target_os = "macos")
                 && matches!(
@@ -59,16 +60,20 @@ mod platform {
                 session_size,
                 batch_size,
             );
-            let (queue, receiver) = FormulaQueue::new("formula_pp", queue_size);
+            let queue = shared.unwrap_or_else(|| {
+                FormulaQueue::new("formula_pp", queue_size).0
+            });
+            let receiver = queue.receiver();
             let mut runner = Self {
                 queue,
-                workers: Vec::with_capacity(session_size),
+                workers: crate::queue::FormulaWorkers::default(),
                 provider: if coreml_incompatible {
                     docparse_layout::ExecutionProvider::Cpu
                 } else {
                     backend.execution_provider()
                 },
             };
+            let provider = runner.provider;
             for _ in 0..session_size {
                 let model = Arc::clone(&artifacts.model);
                 let tokenizer = Arc::clone(&artifacts.tokenizer);
@@ -89,13 +94,14 @@ mod platform {
                 .await?;
                 let receiver = receiver.clone();
                 let metrics = Arc::clone(&metrics);
-                runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                runner.workers.spawn(Box::pin(async move {
                 let _alive = metrics.alive(1);
                 while let Some(batch) = receiver.recv().await {
                     let mut requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
                     }
+                    for request in &mut requests { request.engine = format!("{}-onnx-{}", kind.as_str(), provider); }
                     let _batch = metrics.batch();
                     let images = requests
                         .iter()
@@ -155,7 +161,7 @@ mod platform {
                     );
                 }
                 tracing::debug!("closed native PP formula queue");
-            }))?);
+            }))?;
             }
             Ok(Arc::new(runner))
         }
@@ -191,8 +197,16 @@ mod platform {
         pub async fn from_config(
             config: Arc<docparse_config::ValidatedConfig>,
         ) -> Result<Self, FormulaError> {
+            Self::from_config_on_queue(config, None).await
+        }
+
+        /// Loads this group's files while registering consumers on the supplied queue.
+        pub async fn from_config_on_queue(
+            config: Arc<docparse_config::ValidatedConfig>,
+            queue: Option<FormulaQueue>,
+        ) -> Result<Self, FormulaError> {
             let docparse_config::FormulaEngineConfig::Pp(paths) =
-                config.formula().engine.clone()
+                config.formula().single_engine()?.clone()
             else {
                 tracing::error!("PP loader requires formula.engine.type = pp");
                 return Err(FormulaError::Invalid(
@@ -215,7 +229,7 @@ mod platform {
                 })
             })
             .await??;
-            Self::from_artifacts(config, artifacts).await
+            Self::from_artifacts_on_queue(config, artifacts, queue).await
         }
     }
 }
@@ -226,7 +240,7 @@ mod platform {
     pub(crate) struct SessionRunner {
         // Drop the sender before joining consumers so idle owners can exit.
         queue: FormulaQueue,
-        workers: Vec<docparse_common::ThreadManager>,
+        workers: crate::queue::FormulaWorkers,
         /// Actual executor, including the native Apple compatibility path.
         pub(crate) provider: docparse_layout::ExecutionProvider,
     }
@@ -247,18 +261,23 @@ mod platform {
             batch_size: usize,
             session_size: usize,
             queue_size: usize,
+            shared: Option<FormulaQueue>,
         ) -> Result<Arc<Self>, FormulaError> {
             let metrics = docparse_common::telemetry::ModelMetrics::new(
                 "formula_pp",
                 session_size,
                 batch_size,
             );
-            let (queue, receiver) = FormulaQueue::new("formula_pp", queue_size);
+            let queue = shared.unwrap_or_else(|| {
+                FormulaQueue::new("formula_pp", queue_size).0
+            });
+            let receiver = queue.receiver();
             let mut runner = Self {
                 queue,
-                workers: Vec::with_capacity(session_size),
+                workers: crate::queue::FormulaWorkers::default(),
                 provider: backend.execution_provider(),
             };
+            let provider = runner.provider;
             for _ in 0..session_size {
                 // Browser formula sessions inherit the global graph and memory settings.
                 let mut session = SessionBuilder::try_from(backend)?
@@ -268,20 +287,24 @@ mod platform {
                 let options = ort::session::RunOptions::new()?;
                 let receiver = receiver.clone();
                 let metrics = Arc::clone(&metrics);
-                runner.workers.push(docparse_common::ThreadManager::spawn_async(Box::pin(async move {
+                runner.workers.spawn(Box::pin(async move {
                 let _alive = metrics.alive(1);
                 while let Some(batch) = receiver.recv().await {
-                    let _guard = OnnxBackend::inference_guard().await;
-                    let requests = batch.take_ready(batch_size);
+                    let mut requests = batch.take_ready(batch_size);
                     if requests.is_empty() {
                         continue;
                     }
+                    for request in &mut requests { request.engine = format!("{}-onnx-{}", kind.as_str(), provider); }
                     let _batch = metrics.batch();
                     let images = requests
                         .iter()
                         .map(|request| Arc::clone(&request.image))
                         .collect::<Vec<_>>();
                     let timings: BatchTimings = requests.iter().map(|request| &request.context).collect();
+                    // Release the shared formula receiver before waiting for ORT so HTTP consumers can keep draining it.
+                    let queued = timings.start(TimingStage::FormulaQueue);
+                    let _guard = OnnxBackend::inference_guard().await;
+                    drop(queued);
                     tracing::debug!(
                         "browser PP formula session running {} ready crops",
                         images.len()
@@ -301,7 +324,7 @@ mod platform {
                     FormulaRequest::complete_batch(requests, result);
                 }
                 tracing::debug!("closed browser PP formula queue");
-            }))?);
+            }))?;
             }
             Ok(Arc::new(runner))
         }
@@ -322,6 +345,13 @@ mod platform {
             _config: Arc<docparse_config::ValidatedConfig>,
         ) -> Result<Self, FormulaError> {
             Err(FormulaError::ArtifactsRequired)
+        }
+        /// Browser consumers require explicit artifacts for every local engine.
+        pub async fn from_config_on_queue(
+            config: Arc<docparse_config::ValidatedConfig>,
+            _queue: Option<FormulaQueue>,
+        ) -> Result<Self, FormulaError> {
+            Self::from_config(config).await
         }
     }
 }

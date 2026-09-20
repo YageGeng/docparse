@@ -158,23 +158,10 @@ mod platform {
 
         /// Replaces model-specific defaults when a higher-priority layer switches the tagged engine.
         fn merge_source(
-            mut base: Figment,
+            base: Figment,
             source: impl figment::Provider,
         ) -> Result<Figment, Box<figment::Error>> {
-            let source = Figment::from(source);
-            let incoming =
-                source.extract_inner::<String>("formula.engine.type").ok();
-            let previous =
-                base.extract_inner::<String>("formula.engine.type").ok();
-            if incoming.is_some() && incoming != previous {
-                let mut values: Dict = base.extract().map_err(Box::new)?;
-                if let Some(figment::value::Value::Dict(_, formula)) =
-                    values.get_mut("formula")
-                {
-                    formula.remove("engine");
-                }
-                base = Figment::from(Serialized::defaults(values));
-            }
+            // Arrays replace the previous consumer list atomically; individual tagged entries must not be merged by index.
             Ok(base.merge(source))
         }
 
@@ -265,22 +252,24 @@ mod platform {
                     }
                 }
             }
-            let formula_paths: &mut [_] = match &mut self.formula.engine {
-                crate::FormulaEngineConfig::Pp(paths) => &mut [
-                    &mut paths.model_path,
-                    &mut paths.tokenizer_path,
-                    &mut paths.model_manifest_path,
-                ],
-                crate::FormulaEngineConfig::Texo(paths) => &mut [
-                    &mut paths.encoder_path,
-                    &mut paths.decoder_path,
-                    &mut paths.tokenizer_path,
-                ],
-                crate::FormulaEngineConfig::Mineru(_) => &mut [],
-            };
-            for path in formula_paths {
-                if path.is_relative() {
-                    **path = base_directory.join(&**path);
+            for engine in &mut self.formula.engine {
+                let formula_paths: &mut [_] = match engine {
+                    crate::FormulaEngineConfig::Pp(paths) => &mut [
+                        &mut paths.model_path,
+                        &mut paths.tokenizer_path,
+                        &mut paths.model_manifest_path,
+                    ],
+                    crate::FormulaEngineConfig::Texo(paths) => &mut [
+                        &mut paths.encoder_path,
+                        &mut paths.decoder_path,
+                        &mut paths.tokenizer_path,
+                    ],
+                    crate::FormulaEngineConfig::Http(_) => &mut [],
+                };
+                for path in formula_paths {
+                    if path.is_relative() {
+                        **path = base_directory.join(&**path);
+                    }
                 }
             }
             for path in [

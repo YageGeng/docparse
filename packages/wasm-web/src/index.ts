@@ -71,16 +71,22 @@ class WorkerParser implements DocParser {
   async initialize(options: WebParserOptions): Promise<void> {
     const invalidQueues = queueSizesError(options.config);
     if (invalidQueues) throw new DocParseError("InvalidConfig", invalidQueues);
-    const suppliedFormula = options.formulaArtifacts;
+    const supplied = options.formulaArtifacts;
+    const suppliedFormula = supplied === undefined ? undefined : Array.isArray(supplied) ? supplied : [supplied];
     const formulaEnabled = options.config?.formula?.inline_enabled !== false || options.config?.formula?.display_enabled !== false;
     const explicitEngine = options.config?.formula?.engine;
     const invalidEngine = formulaEngineError(explicitEngine, formulaEnabled);
     if (invalidEngine) throw new DocParseError("InvalidConfig", invalidEngine);
-    const sourceType = suppliedFormula?.type ?? "pp";
-    const selectedType = explicitEngine?.type ?? (suppliedFormula ? sourceType : "texo");
-    if (!["pp", "texo", "mineru"].includes(selectedType) || (suppliedFormula && !["pp", "texo"].includes(sourceType))) throw new DocParseError("InvalidConfig", "Unknown formula engine type");
-    if (formulaEnabled && suppliedFormula && selectedType !== sourceType) throw new DocParseError("InvalidConfig", "formula.engine.type must match formulaArtifacts.type");
-    const formulaSource = selectedType === "mineru" ? undefined : suppliedFormula ?? formulaPresets[selectedType];
+    const engines = explicitEngine ?? (suppliedFormula ? suppliedFormula.map(source => {
+      if (!source) throw new DocParseError("InvalidConfig", "HTTP artifact slots require an explicit engine list");
+      return { type: source.type ?? "pp" } as import("./types.js").FormulaEngineOptions;
+    }) : [{ type: "texo" as const }]);
+    if (formulaEnabled && suppliedFormula && suppliedFormula.length !== engines.length) throw new DocParseError("InvalidConfig", "formulaArtifacts must align with formula.engine");
+    const formulaSources = engines.map((engine, index) => {
+      const source = suppliedFormula?.[index];
+      if (formulaEnabled && source && engine.type !== (source.type ?? "pp")) throw new DocParseError("InvalidConfig", "formulaArtifacts type must match its consumer group");
+      return engine.type === "http" ? null : source ?? formulaPresets[engine.type];
+    });
     const transfers: Transferable[] = [];
     const artifacts = WorkerParser.transferSource(options.artifacts, transfers);
     const tsrEnabled = options.config?.tsr?.mode !== "rules_only";
@@ -97,8 +103,8 @@ class WorkerParser implements DocParser {
       recognition: WorkerParser.transferSource(options.ocrArtifacts.recognition, transfers),
       orientation: options.config?.ocr?.classify_orientation !== false && options.ocrArtifacts.orientation ? WorkerParser.transferSource(options.ocrArtifacts.orientation, transfers) : undefined,
     } : undefined;
-    const formulaArtifacts = formulaEnabled && formulaSource ? WorkerParser.transferFormulaSource(formulaSource, transfers) : undefined;
-    const config: WebParseConfig = { ...options.config, formula: { ...options.config?.formula, engine: explicitEngine ?? { type: suppliedFormula ? sourceType : "texo" } } };
+    const formulaArtifacts = formulaEnabled ? formulaSources.map(source => source ? WorkerParser.transferFormulaSource(source, transfers) : null) : undefined;
+    const config: WebParseConfig = { ...options.config, formula: { ...options.config?.formula, engine: engines } };
     const runtimeBase = options.runtimeBaseUrl ? new URL(options.runtimeBaseUrl, location.href) : undefined;
     if (runtimeBase && !runtimeBase.pathname.endsWith("/")) runtimeBase.pathname += "/";
     const payload: WorkerOperations["init"]["payload"] = { artifacts, tsrArtifacts, tsrCellArtifacts, ocrArtifacts, formulaArtifacts, config, executionProvider: options.executionProvider ?? "webgpu", allowCpuFallback: options.allowCpuFallback ?? false, runtimeBaseUrl: runtimeBase?.href, observeProgress: Boolean(options.onProgress), observeTiming: Boolean(options.onTiming) };

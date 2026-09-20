@@ -37,8 +37,8 @@ pub use ocr::{
     OcrContentStatus, OcrEngine, OcrError, OcrRequest, OcrResult, OcrTextItem,
 };
 pub use parser::{
-    DocParseError, DocParser, DocParserBuilder, PageInput, ParseOptions,
-    ParserArtifacts,
+    DocParseError, DocParser, DocParserBuilder, FormulaModelArtifacts,
+    PageInput, ParseOptions, ParserArtifacts,
 };
 pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{

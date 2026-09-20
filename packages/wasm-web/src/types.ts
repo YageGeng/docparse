@@ -40,9 +40,9 @@ export type ModelSource =
 
 /** Formula model selection matches the tagged native configuration; browser paths live in artifacts. */
 export type FormulaEngineOptions =
-  | { type: "pp"; session_size?: number }
-  | { type: "texo"; session_size?: number }
-  | { type: "mineru"; server_url: string; concurrency?: number };
+  | { type: "pp"; worker_size?: number; batch_size?: number }
+  | { type: "texo"; worker_size?: number; batch_size?: number }
+  | { type: "http"; server_url: string; worker_size?: number; prompt?: string; model?: string };
 
 /** Explicit model resources. Omitted type retains the existing PP-only source shape. */
 export type FormulaSource =
@@ -70,15 +70,14 @@ export interface WebParseConfig {
   formula: {
     /** Required pending-crop capacity, shared by the selected formula engine. */
     queue_size: number;
-    /** Defaults to Texo; custom formulaArtifacts select their type when this option is omitted. */
-    engine?: FormulaEngineOptions;
+    /** Consumer groups share one queue; omitted groups are inferred from artifacts or default to Texo. */
+    engine?: FormulaEngineOptions[];
     /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
     inline_enabled?: boolean;
     /** Optional adaptive inline shedding; display formulas continue normally. */
     backpressure?: { enabled?: boolean; high_watermark?: number; low_watermark?: number; pause_after_secs?: number; resume_after_secs?: number };
     /** Defaults to true; false skips display recognition independently of inline formulas. */
     display_enabled?: boolean;
-    batch_size?: number;
     timeout_ms?: number;
   };
   /** Independent layout sessions share one ready-page queue; ORT Web calls remain globally guarded. */
@@ -112,8 +111,8 @@ export interface WebParserOptions {
   tsrCellArtifacts?: ModelSource;
   /** Required when OCR is enabled; orientation is optional only with classify_orientation = false. */
   ocrArtifacts?: OcrArtifacts;
-  /** Optional local model resources; MinerU uses server_url and does not download formula artifacts. */
-  formulaArtifacts?: FormulaSource;
+  /** Optional local model resources; HTTP uses server_url and does not download formula artifacts. */
+  formulaArtifacts?: FormulaSource | (FormulaSource | null)[];
   runtimeBaseUrl?: string;
   /** Defaults to WebGPU for both layout, TSR and OCR; select wasm explicitly for CPU. */
   executionProvider?: ExecutionProvider;

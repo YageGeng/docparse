@@ -455,8 +455,8 @@ consume memory. Keep result collection and publication moving; completed PDFium
 leases do not cap documents still in post-processing.
 
 Native Texo uses a shared ready-crop queue across documents and pages. The
-`formula.engine.session_size` independent encoder/decoder pairs drain batches up to
-`formula.batch_size` without waiting to fill them. The session count defaults to
+`formula.engine[].worker_size` independent encoder/decoder pairs drain batches up to
+`formula.engine[].batch_size` without waiting to fill them. The session count defaults to
 one; the sample configuration selects two owners and batches of eight. Admission
 queues at most `formula.queue_size` crops in addition to active batches and
 existing page tasks. Increasing sessions duplicates model resources; measure

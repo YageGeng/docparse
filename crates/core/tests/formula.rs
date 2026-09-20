@@ -111,7 +111,11 @@ async fn batch_recognition_covers_every_layout_formula_and_preserves_failures()
     for fail in [false, true] {
         let mut raw = RawConfig::default();
         raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-        raw.formula.batch_size = 2;
+        if let docparse_config::FormulaEngineConfig::Texo(engine) =
+            raw.formula.engine.first_mut().expect("engine")
+        {
+            engine.batch_size = 2;
+        }
         raw.render.queue_size = 1;
         let batches = Arc::new(Mutex::new(Vec::new()));
         let parser = DocParser::builder()
@@ -208,7 +212,11 @@ impl FormulaEngine for RefillingRecognizer {
 async fn slow_crop_does_not_block_subsequent_submission() {
     let mut raw = RawConfig::default();
     raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-    raw.formula.batch_size = 1;
+    if let docparse_config::FormulaEngineConfig::Texo(engine) =
+        raw.formula.engine.first_mut().expect("engine")
+    {
+        engine.batch_size = 1;
+    }
     raw.formula.timeout_ms = 500;
     raw.render.queue_size = 1;
     let parser = DocParser::builder()
@@ -251,7 +259,11 @@ async fn independent_formula_toggles_preserve_native_source() {
         {
             let mut raw = RawConfig::default();
             raw.tsr.mode = docparse_config::TableMode::RulesOnly;
-            raw.formula.batch_size = 2;
+            if let docparse_config::FormulaEngineConfig::Texo(engine) =
+                raw.formula.engine.first_mut().expect("engine")
+            {
+                engine.batch_size = 2;
+            }
             raw.render.queue_size = 1;
             let mut value = serde_json::to_value(raw).expect("config JSON");
             value

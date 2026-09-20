@@ -10,15 +10,15 @@ fn shared_pp_sessions_survive_construction_runtime() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let directory = root.join("models/pp-formulanet-plus-s");
     let mut raw = docparse_config::RawConfig::default();
-    raw.formula.batch_size = 3;
-    raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+    raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Pp(
         docparse_config::PpFormulaConfig::builder()
-            .session_size(2)
+            .worker_size(2)
+            .batch_size(3)
             .model_path(directory.join("inference.onnx"))
             .tokenizer_path(directory.join("tokenizer.json"))
             .model_manifest_path(directory.join("model-manifest.json"))
             .build(),
-    );
+    )];
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -114,13 +114,13 @@ async fn real_formula_batches_preserve_cardinality_and_content() {
         let model = std::env::var("FORMULA_TEST_MODEL")
             .unwrap_or_else(|_| "pp-formulanet-plus-s".into());
         let directory = root.join("models").join(model);
-        raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+        raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Pp(
             docparse_config::PpFormulaConfig::builder()
                 .model_path(directory.join("inference.onnx"))
                 .tokenizer_path(directory.join("tokenizer.json"))
                 .model_manifest_path(directory.join("model-manifest.json"))
                 .build(),
-        );
+        )];
     }
     eprintln!("loading real formula engine");
     let engine = PpFormulaNetEngine::from_config(Arc::new(

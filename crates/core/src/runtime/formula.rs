@@ -1,17 +1,146 @@
 //! Formula enrichment retains native ownership and one result for every original model region.
 use super::RenderedPage;
 use crate::{FormulaResult, ModelRegionId, PageResult, PageWarning};
-use docparse_common::timing::Timings;
-use docparse_config::ValidatedConfig;
-use docparse_formula::{FormulaEngine, FormulaError};
+use docparse_common::timing::{TimingStage, Timings};
+use docparse_config::{FormulaConfig, ValidatedConfig};
+use docparse_formula::{FormulaEngine, FormulaError, queue::FormulaOutput};
 use docparse_layout::{Bbox, LayoutDetection, LayoutLabel, PageImage};
 use futures_util::{StreamExt, stream};
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+    sync::Arc,
+    time::Duration,
+};
 
 mod crop;
 use crop::FormulaCrop;
 
 impl FormulaResult {
+    /// Applies one crop's deadline and records its result without affecting neighboring formulas.
+    async fn recognize(
+        &mut self,
+        page: &PageResult,
+        rendered: &RenderedPage,
+        engine: Option<&dyn FormulaEngine>,
+        timeout: Duration,
+        timings: &Timings,
+    ) {
+        let result = crate::wasm_compat::timeout(
+            timeout,
+            self.recognize_crop(page, rendered, engine, timings),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| {
+            Err(FormulaError::Invalid(format!(
+                "formula request exceeded {} ms",
+                timeout.as_millis()
+            )))
+        })
+        .and_then(|output| {
+            let [output]: [FormulaOutput; 1] =
+                output.try_into().map_err(|output: Vec<FormulaOutput>| {
+                    FormulaError::Invalid(format!(
+                        "request returned {} formulas for one crop",
+                        output.len()
+                    ))
+                })?;
+            Ok(output)
+        });
+        match result {
+            Ok(output) => {
+                self.engine = output.engine;
+                let latex = output.latex.trim();
+                let latex = latex
+                    .strip_prefix("$$")
+                    .and_then(|text| text.strip_suffix("$$"))
+                    .or_else(|| {
+                        latex
+                            .strip_prefix('$')
+                            .and_then(|text| text.strip_suffix('$'))
+                    })
+                    .unwrap_or(latex)
+                    .trim();
+                if latex.is_empty() {
+                    self.error =
+                        Some("formula model returned empty LaTeX".into());
+                    tracing::warn!(
+                        "formula {} returned empty LaTeX",
+                        self.id.as_str()
+                    );
+                } else {
+                    self.latex = Some(latex.to_owned());
+                    self.markdown =
+                        Some(if self.label == LayoutLabel::InlineFormula {
+                            format!("${latex}$")
+                        } else {
+                            format!("$$\n{latex}\n$$")
+                        });
+                    self.retain_unrecognized_punctuation(page);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "formula {} failed on page {}: {}",
+                    self.id.as_str(),
+                    page.page_number,
+                    error
+                );
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    /// Holds shared admission across raster cropping and inference, keeping retained pixels bounded.
+    async fn recognize_crop(
+        &mut self,
+        page: &PageResult,
+        rendered: &RenderedPage,
+        engine: Option<&dyn FormulaEngine>,
+        timings: &Timings,
+    ) -> Result<Vec<FormulaOutput>, FormulaError> {
+        let engine = engine.ok_or_else(|| {
+            FormulaError::Invalid("formula recognizer unavailable".into())
+        })?;
+        let _admission = if let Some(admission) = engine.admission() {
+            let queued = timings.start(TimingStage::FormulaQueue);
+            let permit = admission.acquire_owned().await.map_err(|error| {
+                FormulaError::Invalid(format!(
+                    "formula admission closed: {error}"
+                ))
+            })?;
+            drop(queued);
+            Some(permit)
+        } else {
+            None
+        };
+        let initial = self.crop_bbox.unwrap_or(self.bbox);
+        let mut crop = FormulaCrop {
+            bbox: initial,
+            rendered,
+            expansion: self.background_limits(page),
+        };
+        let image = PageImage::try_from(&mut crop).inspect_err(|error| {
+            tracing::warn!(
+                "formula {} crop failed: {}",
+                self.id.as_str(),
+                error
+            );
+        })?;
+        if crop.bbox != initial {
+            tracing::debug!(
+                "aligned inline formula {} crop from {:?} to background boundaries {:?}",
+                self.id.as_str(),
+                initial,
+                crop.bbox
+            );
+        }
+        self.crop_bbox = (crop.bbox != self.bbox).then_some(crop.bbox);
+        engine
+            .recognize_named(vec![Arc::new(image)], timings.clone())
+            .await
+    }
+
     /// Stops raster expansion before unrelated text rows, including rows already grazing the detector edge.
     fn background_limits(&self, page: &PageResult) -> Option<Bbox> {
         if self.label != LayoutLabel::InlineFormula {
@@ -86,68 +215,8 @@ impl FormulaResult {
         else {
             return;
         };
-        let mut fragments = Vec::new();
-        let mut spans = Vec::new();
-        let mut included = std::collections::BTreeSet::new();
-        for item in block
-            .lines
-            .iter()
-            .flat_map(|line| &line.text_items)
-            .filter(|item| item.source == crate::TextSource::Native)
-        {
-            // Split an already selected mixed text run at its exact source boundaries.
-            let mut parts: Vec<_> = self
-                .text_spans
-                .iter()
-                .filter(|span| span.text_item_id == item.id)
-                .cloned()
-                .collect();
-            let selected = !parts.is_empty();
-            if !selected {
-                let start =
-                    item.raw_text.len() - item.raw_text.trim_start().len();
-                let end = item.raw_text.trim_end().len();
-                if start >= end {
-                    continue;
-                }
-                parts.push(crate::TableTextSpan {
-                    text_item_id: item.id.clone(),
-                    byte_range: start..end,
-                    bbox: item.bbox,
-                });
-            }
-            for span in parts {
-                let Some(text) = item.raw_text.get(span.byte_range.clone())
-                else {
-                    continue;
-                };
-                let mut glyph = item.clone();
-                glyph.raw_text = text.to_owned();
-                glyph.bbox = span.bbox;
-                if let Some(baseline) = &mut glyph.baseline {
-                    baseline.start.x = span.bbox.left;
-                    baseline.end.x = span.bbox.right;
-                }
-                match crate::line::LineFragment::from_items(
-                    vec![glyph],
-                    page.width,
-                ) {
-                    Ok(fragment) => {
-                        if selected {
-                            included.insert(fragments.len());
-                        }
-                        fragments.push(fragment);
-                        spans.push(span);
-                    }
-                    Err(error) => tracing::debug!(
-                        "cannot refine formula {} from text item {}: {}",
-                        self.id.as_str(),
-                        item.id.as_str(),
-                        error
-                    ),
-                }
-            }
-        }
+        let (fragments, spans, mut included) =
+            self.crop_fragments(block, page.width);
         // Reuse the line assembler's font/baseline/distance rules and ambiguity guard.
         // Compute parents before growing the crop so expansion cannot recruit an unrelated text row.
         let parents: Vec<_> = fragments
@@ -210,6 +279,81 @@ impl FormulaResult {
         }
     }
 
+    /// Builds measured glyph fragments and remembers which source slices already belong to this formula.
+    fn crop_fragments(
+        &self,
+        block: &crate::Block,
+        page_width: f64,
+    ) -> (
+        Vec<crate::line::LineFragment>,
+        Vec<crate::TableTextSpan>,
+        BTreeSet<usize>,
+    ) {
+        let mut fragments = Vec::new();
+        let mut spans = Vec::new();
+        let mut included = BTreeSet::new();
+        for item in block
+            .lines
+            .iter()
+            .flat_map(|line| &line.text_items)
+            .filter(|item| item.source == crate::TextSource::Native)
+        {
+            // Split an already selected mixed text run at its exact source boundaries.
+            let mut parts: Vec<_> = self
+                .text_spans
+                .iter()
+                .filter(|span| span.text_item_id == item.id)
+                .cloned()
+                .collect();
+            let selected = !parts.is_empty();
+            if !selected {
+                let start =
+                    item.raw_text.len() - item.raw_text.trim_start().len();
+                let end = item.raw_text.trim_end().len();
+                if start >= end {
+                    continue;
+                }
+                parts.push(crate::TableTextSpan {
+                    text_item_id: item.id.clone(),
+                    byte_range: start..end,
+                    bbox: item.bbox,
+                });
+            }
+            for span in parts {
+                let Some(text) = item.raw_text.get(span.byte_range.clone())
+                else {
+                    continue;
+                };
+                let mut glyph = item.clone();
+                glyph.raw_text = text.to_owned();
+                glyph.bbox = span.bbox;
+                if let Some(baseline) = &mut glyph.baseline {
+                    baseline.start.x = span.bbox.left;
+                    baseline.end.x = span.bbox.right;
+                }
+                match crate::line::LineFragment::from_items(
+                    vec![glyph],
+                    page_width,
+                ) {
+                    Ok(fragment) => {
+                        if selected {
+                            included.insert(fragments.len());
+                        }
+                        fragments.push(fragment);
+                        spans.push(span);
+                    }
+                    Err(error) => tracing::debug!(
+                        "cannot refine formula {} from text item {}: {}",
+                        self.id.as_str(),
+                        item.id.as_str(),
+                        error
+                    ),
+                }
+            }
+        }
+        (fragments, spans, included)
+    }
+
     /// Uses existing measured words to preserve prose sharing a PDF text item with a formula.
     fn bind_text_spans(
         &mut self,
@@ -219,91 +363,21 @@ impl FormulaResult {
             Vec<crate::TableWord>,
         >,
     ) {
-        for block in page
-            .blocks
-            .iter()
-            .filter(|block| self.block_id.as_ref() == Some(&block.id))
-        {
+        for block in &page.blocks {
+            if self.block_id.as_ref() != Some(&block.id) {
+                continue;
+            }
             // Superscripts and subscripts may have separate source lines; geometry still bounds every slice.
             for line in &block.lines {
                 for (item_index, item) in line.text_items.iter().enumerate() {
                     if let Some(measured) = words.get(&item.id) {
-                        for word in measured {
-                            let Some(text) =
-                                item.raw_text.get(word.byte_range.clone())
-                            else {
-                                continue;
-                            };
-                            let overlap =
-                                self.bbox.intersection_area(word.bbox);
-                            // Only the anchor line may contribute a lightly clipped delimiter; neighboring rows still need majority coverage.
-                            let anchor_line =
-                                self.line_id.as_ref() == Some(&line.id);
-                            let punctuation = anchor_line
-                                && !text.trim().is_empty()
-                                && text
-                                    .trim()
-                                    .chars()
-                                    .all(|ch| ch.is_ascii_punctuation());
-                            // TeX overbars are separate, full-size glyphs whose thin ink can lie above the detector box.
-                            // Require the existing inline ownership range and measured nearby ink, never neighboring rows or prose.
-                            let overbar = anchor_line
-                                && item.source == crate::TextSource::Native
-                                && matches!(
-                                    text.trim(),
-                                    "¯" | "\u{0304}" | "\u{0305}"
-                                )
-                                && self.text_item_range.is_some_and(|range| {
-                                    (range.start..range.end)
-                                        .contains(&item_index)
-                                })
-                                && word.bbox.left >= self.bbox.left
-                                && word.bbox.right <= self.bbox.right
-                                && item.style.as_ref().is_some_and(|style| {
-                                    !style.font_size_estimated
-                                        && style.font_size.is_some_and(|size| {
-                                            size.is_finite()
-                                                && size > 0.0
-                                                && word.bbox.height()
-                                                    <= size * 0.2
-                                                && word.bbox.top < self.bbox.top
-                                                && word.bbox.bottom
-                                                    <= self.bbox.top
-                                                        + size * 0.2
-                                                && self.bbox.top
-                                                    - word.bbox.bottom
-                                                    <= size * 0.5
-                                        })
-                                });
-                            if !overbar
-                                && (overlap <= 0.0
-                                    || (overlap
-                                        / word.bbox.area().max(f64::EPSILON)
-                                        < 0.5
-                                        && !punctuation))
-                            {
-                                continue;
-                            }
-                            if overbar {
-                                tracing::debug!(
-                                    "including clipped overbar {} in formula {} on page {}",
-                                    item.id.as_str(),
-                                    self.id.as_str(),
-                                    page.page_number
-                                );
-                            }
-                            let start = word.byte_range.start + text.len()
-                                - text.trim_start().len();
-                            let end = word.byte_range.end
-                                - (text.len() - text.trim_end().len());
-                            if start < end {
-                                self.text_spans.push(crate::TableTextSpan {
-                                    text_item_id: item.id.clone(),
-                                    byte_range: start..end,
-                                    bbox: word.bbox,
-                                });
-                            }
-                        }
+                        self.bind_measured_words(
+                            line,
+                            item_index,
+                            item,
+                            measured,
+                            page.page_number,
+                        );
                     } else if self.bbox.contains_bbox(item.bbox) {
                         self.text_spans.push(crate::TableTextSpan {
                             text_item_id: item.id.clone(),
@@ -341,6 +415,77 @@ impl FormulaResult {
             && let Some(range) = &mut self.text_item_range
         {
             range.end = range.start;
+        }
+    }
+
+    /// Binds measured words, clipped delimiters, and anchored overbars while retaining exact UTF-8 ranges.
+    fn bind_measured_words(
+        &mut self,
+        line: &crate::Line,
+        item_index: usize,
+        item: &crate::TextItem,
+        measured: &[crate::TableWord],
+        page_number: u32,
+    ) {
+        for word in measured {
+            let Some(text) = item.raw_text.get(word.byte_range.clone()) else {
+                continue;
+            };
+            let overlap = self.bbox.intersection_area(word.bbox);
+            // Only the anchor line may contribute a lightly clipped delimiter; neighboring rows still need majority coverage.
+            let anchor_line = self.line_id.as_ref() == Some(&line.id);
+            let punctuation = anchor_line
+                && !text.trim().is_empty()
+                && text.trim().chars().all(|ch| ch.is_ascii_punctuation());
+            // TeX overbars are separate, full-size glyphs whose thin ink can lie above the detector box.
+            // Require the existing inline ownership range and measured nearby ink, never neighboring rows or prose.
+            let overbar = anchor_line
+                && item.source == crate::TextSource::Native
+                && matches!(text.trim(), "¯" | "\u{0304}" | "\u{0305}")
+                && self.text_item_range.is_some_and(|range| {
+                    (range.start..range.end).contains(&item_index)
+                })
+                && word.bbox.left >= self.bbox.left
+                && word.bbox.right <= self.bbox.right
+                && item.style.as_ref().is_some_and(|style| {
+                    !style.font_size_estimated
+                        && style.font_size.is_some_and(|size| {
+                            size.is_finite()
+                                && size > 0.0
+                                && word.bbox.height() <= size * 0.2
+                                && word.bbox.top < self.bbox.top
+                                && word.bbox.bottom
+                                    <= self.bbox.top + size * 0.2
+                                && self.bbox.top - word.bbox.bottom
+                                    <= size * 0.5
+                        })
+                });
+            if !overbar
+                && (overlap <= 0.0
+                    || (overlap / word.bbox.area().max(f64::EPSILON) < 0.5
+                        && !punctuation))
+            {
+                continue;
+            }
+            if overbar {
+                tracing::debug!(
+                    "including clipped overbar {} in formula {} on page {}",
+                    item.id.as_str(),
+                    self.id.as_str(),
+                    page_number
+                );
+            }
+            let start =
+                word.byte_range.start + text.len() - text.trim_start().len();
+            let end =
+                word.byte_range.end - (text.len() - text.trim_end().len());
+            if start < end {
+                self.text_spans.push(crate::TableTextSpan {
+                    text_item_id: item.id.clone(),
+                    byte_range: start..end,
+                    bbox: word.bbox,
+                });
+            }
         }
     }
 
@@ -427,23 +572,17 @@ impl FormulaResult {
 }
 
 impl PageResult {
-    /// Continuously submits independent crops to shared engines and isolates failures by region.
-    pub(crate) async fn recognize_formulas(
+    /// Applies user switches and queue-pressure shedding once, before allocating any crop pixels.
+    fn filter_formula_detections(
         &mut self,
-        mut detections: Vec<LayoutDetection>,
-        rendered: &RenderedPage,
+        detections: &mut Vec<LayoutDetection>,
         engine: Option<&dyn FormulaEngine>,
-        config: &ValidatedConfig,
-        timings: &Timings,
-        words: &std::collections::BTreeMap<
-            crate::TextItemId,
-            Vec<crate::TableWord>,
-        >,
+        config: &FormulaConfig,
     ) {
         // Decide once per page before admission or crop allocation; existing queued work is never canceled.
         let pressure = engine.and_then(FormulaEngine::pressure);
-        let paused = config.formula().inline_enabled
-            && config.formula().backpressure.enabled
+        let paused = config.inline_enabled
+            && config.backpressure.enabled
             && pressure.as_ref().is_some_and(|pressure| pressure.paused());
         if paused {
             let skipped = detections
@@ -458,17 +597,12 @@ impl PageResult {
                     message: format!("Skipped {skipped} inline formula regions due to sustained queue pressure; source text is retained") });
             }
         }
-        if paused
-            || !config.formula().inline_enabled
-            || !config.formula().display_enabled
-        {
+        if paused || !config.inline_enabled || !config.display_enabled {
             let count = detections.len();
             // Keep native formula geometry for text assembly, but skip disabled crops and model calls entirely.
             detections.retain(|detection| match detection.label {
-                LayoutLabel::InlineFormula => {
-                    config.formula().inline_enabled && !paused
-                }
-                LayoutLabel::DisplayFormula => config.formula().display_enabled,
+                LayoutLabel::InlineFormula => config.inline_enabled && !paused,
+                LayoutLabel::DisplayFormula => config.display_enabled,
                 _ => false,
             });
             tracing::debug!(
@@ -477,6 +611,26 @@ impl PageResult {
                 self.page_number
             );
         }
+    }
+
+    /// Continuously submits independent crops to shared engines and isolates failures by region.
+    pub(crate) async fn recognize_formulas(
+        &mut self,
+        mut detections: Vec<LayoutDetection>,
+        rendered: &RenderedPage,
+        engine: Option<&dyn FormulaEngine>,
+        config: &ValidatedConfig,
+        timings: &Timings,
+        words: &std::collections::BTreeMap<
+            crate::TextItemId,
+            Vec<crate::TableWord>,
+        >,
+    ) {
+        self.filter_formula_detections(
+            &mut detections,
+            engine,
+            config.formula(),
+        );
         if detections.is_empty() {
             // Inline-only pages can exit before normal projection; keep degradation warnings deterministic.
             self.warnings.sort_by(|a, b| {
@@ -507,18 +661,7 @@ impl PageResult {
                 formula
             })
             .collect();
-        let batch_size = config.formula().batch_size;
-        let parallelism = match &config.formula().engine {
-            docparse_config::FormulaEngineConfig::Texo(texo) => {
-                batch_size * texo.session_size
-            }
-            docparse_config::FormulaEngineConfig::Pp(pp) => {
-                batch_size * pp.session_size
-            }
-            docparse_config::FormulaEngineConfig::Mineru(mineru) => {
-                mineru.concurrency
-            }
-        };
+        let parallelism = config.formula().active_capacity();
         // All consumers contribute to active capacity on the shared formula queue.
         let window = (parallelism + config.formula().queue_size)
             .min(formulas.len())
@@ -531,56 +674,13 @@ impl PageResult {
         );
         {
             let page = &*self;
-            let requests: Vec<_> = formulas.iter_mut().map(|formula| async move {
-                let result = crate::wasm_compat::timeout(std::time::Duration::from_millis(config.formula().timeout_ms), async {
-                let engine = engine.ok_or_else(|| FormulaError::Invalid("formula recognizer unavailable".into()))?;
-                let _admission = if let Some(admission) = engine.admission() {
-                    let queued = timings.start(docparse_common::timing::TimingStage::FormulaQueue);
-                    let permit = admission.acquire_owned().await.map_err(|error| FormulaError::Invalid(format!("formula admission closed: {error}")))?;
-                    drop(queued);
-                    Some(permit)
-                } else { None };
-                let initial = formula.crop_bbox.unwrap_or(formula.bbox);
-                let mut crop = FormulaCrop { bbox: initial, rendered, expansion: formula.background_limits(page) };
-                let image = match PageImage::try_from(&mut crop) {
-                    Ok(image) => {
-                        if crop.bbox != initial {
-                            tracing::debug!("aligned inline formula {} crop from {:?} to background boundaries {:?}", formula.id.as_str(), initial, crop.bbox);
-                        }
-                        formula.crop_bbox = (crop.bbox != formula.bbox).then_some(crop.bbox);
-                        Arc::new(image)
-                    }
-                    Err(error) => {
-                        tracing::warn!("formula {} crop failed: {}", formula.id.as_str(), error);
-                        return Err(error);
-                    }
-                };
-                engine.recognize(vec![image], timings.clone()).await
-                }).await.unwrap_or_else(|_elapsed| Err(FormulaError::Invalid(format!("formula request exceeded {} ms", config.formula().timeout_ms))));
-                let result = result.and_then(|output| {
-                    let [latex]: [String; 1] = output.try_into().map_err(|output: Vec<String>| FormulaError::Invalid(format!("request returned {} formulas for one crop", output.len())))?;
-                    Ok(latex)
-                });
-                match result {
-                    Ok(latex) => {
-                        let latex = latex.trim();
-                        let latex = latex.strip_prefix("$$").and_then(|s| s.strip_suffix("$$"))
-                            .or_else(|| latex.strip_prefix('$').and_then(|s| s.strip_suffix('$'))).unwrap_or(latex).trim();
-                        if latex.is_empty() {
-                            formula.error = Some("formula model returned empty LaTeX".into());
-                            tracing::warn!("formula {} returned empty LaTeX", formula.id.as_str());
-                        } else {
-                            formula.latex = Some(latex.to_owned());
-                            formula.markdown = Some(if formula.label == LayoutLabel::InlineFormula { format!("${latex}$") } else { format!("$$\n{latex}\n$$") });
-                            formula.retain_unrecognized_punctuation(page);
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!("formula {} failed on page {}: {}", formula.id.as_str(), page.page_number, error);
-                        formula.error = Some(error.to_string());
-                    }
-                }
-            }).collect();
+            let timeout = Duration::from_millis(config.formula().timeout_ms);
+            let requests: Vec<_> = formulas
+                .iter_mut()
+                .map(|formula| {
+                    formula.recognize(page, rendered, engine, timeout, timings)
+                })
+                .collect();
             let requests = stream::iter(requests).buffer_unordered(window);
             tokio::pin!(requests);
             while requests.next().await.is_some() {}
@@ -608,57 +708,22 @@ impl PageResult {
         });
     }
 
-    /// Enriches paragraph and cell presentation while keeping canonical source spans and text unchanged.
+    /// Delegates presentation to the owning block or cell while leaving canonical source text unchanged.
     fn project_formulas(&mut self, placeholder: &str) {
         for block in &mut self.blocks {
             block.markdown = None;
             let Some(table) = &mut block.table else {
-                let inline: Vec<_> = self
-                    .formulas
-                    .iter()
-                    .filter(|formula| {
-                        formula.block_id.as_ref() == Some(&block.id)
-                            && formula.label == LayoutLabel::InlineFormula
-                        && formula.line_id.is_some()
-                        && formula.markdown.is_some()
-                        && (!formula.text_spans.is_empty()
-                            || formula.text_item_range.is_some_and(|range| range.start < range.end)
-                            || block.lines.iter().any(|line| {
-                                formula.line_id.as_ref() == Some(&line.id)
-                                    && line.inline_spans.iter().any(|span| {
-                                        span.bbox == formula.bbox
-                                            && span.content_status == crate::InlineContentStatus::Missing
-                                    })
-                            }))
-                    })
-                    .collect();
-                if !inline.is_empty() {
-                    // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
-                    block.markdown = Some(
-                        block
-                            .lines
-                            .iter()
-                            .map(|line| {
-                                line.render_markdown_formulas(
-                                    placeholder,
-                                    &inline,
-                                    true,
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    );
-                }
+                block.project_inline_formulas(&self.formulas, placeholder);
                 continue;
             };
-            let sources: std::collections::BTreeMap<_, _> = block
+            let sources: BTreeMap<_, _> = block
                 .lines
                 .iter()
                 .flat_map(|line| &line.text_items)
                 .map(|item| (&item.id, item.raw_text.as_str()))
                 .collect();
             for cell in &mut table.cells {
-                let mut formulas: Vec<_> = self
+                let formulas = self
                     .formulas
                     .iter()
                     .filter(|formula| {
@@ -668,104 +733,162 @@ impl PageResult {
                             && formula.latex.is_some()
                     })
                     .collect();
-                if formulas.is_empty() {
-                    continue;
-                }
-                formulas.sort_by(|a, b| {
-                    a.bbox
-                        .top
-                        .total_cmp(&b.bbox.top)
-                        .then_with(|| a.bbox.left.total_cmp(&b.bbox.left))
-                });
-                let source = cell
-                    .lines
-                    .iter()
-                    .map(|line| line.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let mut mapped = Vec::new();
-                let mut line_offset = 0;
-                for line in &cell.lines {
-                    let mut searched = 0;
-                    for span in &line.spans {
-                        let Some(raw) = sources
-                            .get(&span.text_item_id)
-                            .and_then(|text| text.get(span.byte_range.clone()))
-                        else {
-                            continue;
-                        };
-                        let token = raw.trim();
-                        if token.is_empty() {
-                            continue;
-                        }
-                        let Some(found) = line
-                            .text
-                            .get(searched..)
-                            .and_then(|text| text.find(token))
-                        else {
-                            continue;
-                        };
-                        let position = searched + found;
-                        let start = span.byte_range.start + raw.len()
-                            - raw.trim_start().len();
-                        mapped.push((
-                            &span.text_item_id,
-                            start..start + token.len(),
-                            line_offset + position,
-                        ));
-                        searched = position + token.len();
-                    }
-                    line_offset += line.text.len() + 1;
-                }
-                let values: Vec<_> = formulas
-                    .iter()
-                    .filter_map(|formula| {
-                        formula
-                            .latex
-                            .as_ref()
-                            .map(|latex| (formula, format!("${latex}$")))
-                    })
-                    .collect();
-                let mut replacements = Vec::new();
-                let mut unanchored = Vec::new();
-                for (formula, markdown) in &values {
-                    let mut ranges = Vec::new();
-                    for span in &formula.text_spans {
-                        for (id, native, offset) in &mapped {
-                            if **id != span.text_item_id {
-                                continue;
-                            }
-                            let start = native.start.max(span.byte_range.start);
-                            let end = native.end.min(span.byte_range.end);
-                            if start < end {
-                                ranges.push(
-                                    offset + start - native.start
-                                        ..offset + end - native.start,
-                                );
-                            }
-                        }
-                    }
-                    if !ranges.is_empty() {
-                        replacements.push((ranges, markdown.as_str()));
-                    } else {
-                        unanchored.push(markdown.as_str());
-                    }
-                }
-                let mut markdown = crate::render::replace_formula_ranges(
-                    &source,
-                    replacements,
-                    true,
-                );
-                // A scanned formula can exist without native spans; retain all existing cell prose.
-                for formula in unanchored {
-                    if !markdown.is_empty() {
-                        markdown.push(' ');
-                    }
-                    markdown.push_str(formula);
-                }
-                cell.markdown = Some(markdown);
+                cell.project_formulas(formulas, &sources);
             }
         }
+    }
+}
+
+impl crate::Block {
+    /// Projects only anchored inline formulas, preserving literal prose and source ownership.
+    fn project_inline_formulas(
+        &mut self,
+        formulas: &[FormulaResult],
+        placeholder: &str,
+    ) {
+        let inline: Vec<_> = formulas.iter()
+            .filter(|formula| {
+                formula.block_id.as_ref() == Some(&self.id)
+                    && formula.label == LayoutLabel::InlineFormula
+                && formula.line_id.is_some()
+                && formula.markdown.is_some()
+                && (!formula.text_spans.is_empty()
+                    || formula.text_item_range.is_some_and(|range| range.start < range.end)
+                    || self.lines.iter().any(|line| {
+                        formula.line_id.as_ref() == Some(&line.id)
+                            && line.inline_spans.iter().any(|span| {
+                                span.bbox == formula.bbox
+                                    && span.content_status == crate::InlineContentStatus::Missing
+                            })
+                    }))
+            })
+            .collect();
+        if !inline.is_empty() {
+            // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
+            self.markdown = Some(
+                self.lines
+                    .iter()
+                    .map(|line| {
+                        line.render_markdown_formulas(
+                            placeholder,
+                            &inline,
+                            true,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+    }
+}
+
+impl crate::TableCell {
+    /// Replaces exact formula slices and appends scanned formulas that have no native text anchor.
+    fn project_formulas(
+        &mut self,
+        mut formulas: Vec<&FormulaResult>,
+        sources: &BTreeMap<&crate::TextItemId, &str>,
+    ) {
+        if formulas.is_empty() {
+            return;
+        }
+        formulas.sort_by(|a, b| {
+            a.bbox
+                .top
+                .total_cmp(&b.bbox.top)
+                .then_with(|| a.bbox.left.total_cmp(&b.bbox.left))
+        });
+        let source = self
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mapped = self.formula_source_positions(sources);
+        let values: Vec<_> = formulas
+            .iter()
+            .filter_map(|formula| {
+                formula
+                    .latex
+                    .as_ref()
+                    .map(|latex| (formula, format!("${latex}$")))
+            })
+            .collect();
+        let mut replacements = Vec::new();
+        let mut unanchored = Vec::new();
+        for (formula, markdown) in &values {
+            let mut ranges = Vec::new();
+            for span in &formula.text_spans {
+                for (id, native, offset) in &mapped {
+                    if **id != span.text_item_id {
+                        continue;
+                    }
+                    let start = native.start.max(span.byte_range.start);
+                    let end = native.end.min(span.byte_range.end);
+                    if start < end {
+                        ranges.push(
+                            offset + start - native.start
+                                ..offset + end - native.start,
+                        );
+                    }
+                }
+            }
+            if !ranges.is_empty() {
+                replacements.push((ranges, markdown.as_str()));
+            } else {
+                unanchored.push(markdown.as_str());
+            }
+        }
+        let mut markdown =
+            crate::render::replace_formula_ranges(&source, replacements, true);
+        // A scanned formula can exist without native spans; retain all existing cell prose.
+        for formula in unanchored {
+            if !markdown.is_empty() {
+                markdown.push(' ');
+            }
+            markdown.push_str(formula);
+        }
+        self.markdown = Some(markdown);
+    }
+
+    /// Maps source-item byte ranges into the cell's flattened text without confusing repeated tokens.
+    fn formula_source_positions(
+        &self,
+        sources: &BTreeMap<&crate::TextItemId, &str>,
+    ) -> Vec<(&crate::TextItemId, Range<usize>, usize)> {
+        let mut mapped = Vec::new();
+        let mut line_offset = 0;
+        for line in &self.lines {
+            let mut searched = 0;
+            for span in &line.spans {
+                let Some(raw) = sources
+                    .get(&span.text_item_id)
+                    .and_then(|text| text.get(span.byte_range.clone()))
+                else {
+                    continue;
+                };
+                let token = raw.trim();
+                if token.is_empty() {
+                    continue;
+                }
+                let Some(found) =
+                    line.text.get(searched..).and_then(|text| text.find(token))
+                else {
+                    continue;
+                };
+                let position = searched + found;
+                let start =
+                    span.byte_range.start + raw.len() - raw.trim_start().len();
+                mapped.push((
+                    &span.text_item_id,
+                    start..start + token.len(),
+                    line_offset + position,
+                ));
+                searched = position + token.len();
+            }
+            line_offset += line.text.len() + 1;
+        }
+        mapped
     }
 }
 

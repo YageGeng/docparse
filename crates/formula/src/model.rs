@@ -22,6 +22,8 @@ pub enum FormulaError {
     #[error("formula tokenizer failed: {0}")]
     Tokenizer(String),
     #[error(transparent)]
+    Config(#[from] docparse_config::ConfigError),
+    #[error(transparent)]
     Onnx(#[from] ort::Error),
     #[error(transparent)]
     Layout(#[from] docparse_layout::LayoutError),
@@ -42,6 +44,27 @@ pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
     /// Custom engines may opt out when they do not expose an observable pending queue.
     fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
         None
+    }
+    /// Preserves the actual consumer identity for mixed formula pools.
+    fn recognize_named(
+        &self,
+        images: Vec<Arc<PageImage>>,
+        timings: Timings,
+    ) -> WasmBoxedFuture<
+        '_,
+        Result<Vec<crate::queue::FormulaOutput>, FormulaError>,
+    > {
+        Box::pin(async move {
+            Ok(self
+                .recognize(images, timings)
+                .await?
+                .into_iter()
+                .map(|latex| crate::queue::FormulaOutput {
+                    latex,
+                    engine: self.name().to_owned(),
+                })
+                .collect())
+        })
     }
     /// Owns crop pixels through completion, including cancellation of the caller.
     fn recognize(
@@ -64,6 +87,15 @@ impl PpFormulaNetEngine {
         config: Arc<ValidatedConfig>,
         artifacts: FormulaArtifacts,
     ) -> Result<Self, FormulaError> {
+        Self::from_artifacts_on_queue(config, artifacts, None).await
+    }
+
+    /// Attaches execution owners to an existing shared queue, or creates a standalone queue.
+    pub async fn from_artifacts_on_queue(
+        config: Arc<ValidatedConfig>,
+        artifacts: FormulaArtifacts,
+        queue: Option<crate::queue::FormulaQueue>,
+    ) -> Result<Self, FormulaError> {
         let (artifacts, kind) = docparse_common::run_cpu(move || {
             let kind = artifacts.verify()?;
             Ok::<_, FormulaError>((artifacts, kind))
@@ -75,27 +107,31 @@ impl PpFormulaNetEngine {
             "loading {} with provider {} and configured batch size {}",
             kind.as_str(),
             backend.execution_provider(),
-            config.formula().batch_size
+            config.formula().single_engine()?.batch_size()
         );
-        let session_size = config.formula().engine.session_size();
+        let session_size = config.formula().single_engine()?.worker_size();
         // Each local model owns the configured number of consumers, independently of batching.
+        let shared = queue.is_some();
         let runner = SessionRunner::load(
             artifacts,
             backend,
             kind,
-            config.formula().batch_size,
+            config.formula().single_engine()?.batch_size(),
             session_size,
             config.formula().queue_size,
+            queue,
         )
         .await
         .map_err(|error| {
             tracing::error!("formula model initialization failed: {}", error);
             error
         })?;
-        crate::queue::configure_backpressure(
-            &runner.pressure(),
-            config.formula(),
-        )?;
+        if !shared {
+            crate::queue::configure_backpressure(
+                &runner.pressure(),
+                config.formula(),
+            )?;
+        }
         let provider = runner.provider;
         tracing::info!(
             "loaded {} with {} sessions on {} (requested {})",
@@ -108,7 +144,7 @@ impl PpFormulaNetEngine {
             runner,
             name: format!("{}-onnx-{provider}", kind.as_str()),
             admission: Arc::new(tokio::sync::Semaphore::new(
-                config.formula().batch_size * session_size
+                config.formula().single_engine()?.batch_size() * session_size
                     + config.formula().queue_size,
             )),
         })

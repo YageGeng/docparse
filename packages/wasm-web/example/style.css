@@ -50,11 +50,11 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400
 .engine-bar span { color: #7f8e73; }
 .formula-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .formula-toggle input { accent-color: var(--accent); }
-.mineru-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 5px 0; color: #697c5e; font-size: 11px; }
-.mineru-settings input { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid #dce3d7; border-radius: 6px; font: inherit; }
-.mineru-settings input[type="url"] { flex: 1 1 240px; }
-.mineru-settings input[type="number"] { width: 72px; }
-.mineru-settings p { flex-basis: 100%; margin: 0; }
+.http-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 5px 0; color: #697c5e; font-size: 11px; }
+.http-settings input { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid #dce3d7; border-radius: 6px; font: inherit; }
+.http-settings input[type="url"] { flex: 1 1 240px; }
+.http-settings input[type="number"] { width: 72px; }
+.http-settings p { flex-basis: 100%; margin: 0; }
 .status-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 65px; padding: 12px 5px; }
 .status-copy { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .status-symbol { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e8eee0; color: #7c936c; font-size: 15px; flex-shrink: 0; }

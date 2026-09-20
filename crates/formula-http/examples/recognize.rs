@@ -1,10 +1,10 @@
-//! Recognize formula crops using SERVER_URL CONCURRENCY IMAGE... without local model files.
+//! Recognize formula crops using SERVER_URL WORKER_SIZE IMAGE... without local model files.
 use docparse_common::timing::Timings;
 use docparse_config::{
-    FormulaEngineConfig, MineruFormulaConfig, RawConfig, ValidatedConfig,
+    FormulaEngineConfig, HttpFormulaConfig, RawConfig, ValidatedConfig,
 };
 use docparse_formula::FormulaEngine;
-use docparse_formula_mineru::MineruEngine;
+use docparse_formula_http::HttpEngine;
 use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use std::sync::Arc;
 
@@ -14,14 +14,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let server_url = args
         .next()
-        .ok_or("usage: recognize SERVER_URL CONCURRENCY IMAGE...")?;
-    let concurrency = args.next().ok_or("missing concurrency")?.parse()?;
+        .ok_or("usage: recognize SERVER_URL WORKER_SIZE IMAGE...")?;
+    let worker_size = args.next().ok_or("missing worker_size")?.parse()?;
     let mut raw = RawConfig::default();
-    raw.formula.engine = FormulaEngineConfig::Mineru(MineruFormulaConfig {
-        server_url,
-        concurrency,
-    });
-    let engine = MineruEngine::try_from(&ValidatedConfig::try_from(raw)?)?;
+    raw.formula.engine = vec![FormulaEngineConfig::Http(
+        HttpFormulaConfig::builder()
+            .server_url(server_url)
+            .worker_size(worker_size)
+            .prompt(std::env::var("FORMULA_PROMPT").ok())
+            .model(
+                std::env::var("FORMULA_MODEL")
+                    .unwrap_or_else(|_| HttpFormulaConfig::default().model),
+            )
+            .build(),
+    )];
+    let engine = HttpEngine::try_from(&ValidatedConfig::try_from(raw)?)?;
     let mut images = Vec::new();
     for path in args {
         let image = image::open(path)?.to_rgb8();

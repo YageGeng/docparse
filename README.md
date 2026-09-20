@@ -117,7 +117,7 @@ waits to fill it. Additional sessions duplicate model/runtime resources.
 | Model | Session count | Batch limit | Required queue capacity |
 | --- | --- | --- | --- |
 | Layout | `layout.session_size` | `layout.batch_size` | `layout.queue_size` |
-| PP / Texo formula | `formula.engine.session_size` | `formula.batch_size` | `formula.queue_size` |
+| PP / Texo formula | `formula.engine[].worker_size` | `formula.engine[].batch_size` | `formula.queue_size` |
 | Table structure | `tsr.session_size` | `tsr.batch_size` | `tsr.queue_size` |
 | Table cells | `tsr.cell_detection.session_size` | `tsr.cell_detection.batch_size` | `tsr.cell_detection.queue_size` |
 | OCR detection | `ocr.detection.session_size` | `ocr.detection.batch_size` | `ocr.detection.queue_size` |
@@ -131,8 +131,8 @@ to 1. OCR has no separate page concurrency gate; each model uses its session
 count and queue backpressure. Table requests
 have no separate `table_jobs` limit and use provider-owned queue backpressure.
 Replace old `sessions` keys with `session_size`, and replace `ocr.batch_size` with
-the three model-specific settings above. MinerU remains an external HTTP service
-configured with `formula.engine.concurrency` and the same required `formula.queue_size`.
+the three model-specific settings above. HTTP formula recognition remains an external service
+configured with `formula.engine[].worker_size` and the same required `formula.queue_size`.
 All seven model queue capacities, plus render.workers and render.queue_size, must be supplied by configuration files or overrides;
 missing values and zero are rejected, including for disabled model sections.
 Rust callers can explicitly choose `RawConfig::default()` as a complete preset.
@@ -154,24 +154,24 @@ same page or cause unrelated formulas to fail. Table requests are submitted conc
 their separate ready-only queues.
 
 To evaluate Plus-M, provision `--model pp-formulanet-plus-m` and update the existing
-`[formula.engine]` selection in `docparse.toml`:
+`[[formula.engine]]` selection in `docparse.toml`:
 
 ```toml
 [formula]
 inline_enabled = true
 display_enabled = true
 
-[formula.engine]
+[[formula.engine]]
 type = "pp"
 model_path = "models/pp-formulanet-plus-m/inference.onnx"
 tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
 model_manifest_path = "models/pp-formulanet-plus-m/model-manifest.json"
 ```
 
-To select Texo explicitly, keep the shared `[formula]` policy and replace its engine object:
+To select Texo explicitly, keep the shared `[formula]` policy and replace its consumer list:
 
 ```toml
-[formula.engine]
+[[formula.engine]]
 type = "texo"
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
@@ -183,21 +183,37 @@ and `model_manifest_path` keys are rejected. Engine selection does not depend on
 filenames. Profile/environment switches replace the previous variant's paths.
 See `crates/formula-texo/README.md` for downloads and backend validation.
 
-Native CLI/server and WASM builds can instead call an external MinerU vLLM service without
-local formula weights. Replace the engine section with:
+Native CLI/server and WASM builds can instead call an external HTTP formula service
+without local formula weights. For an image-only service such as Texo Optimum:
+
+The [included Optimum CUDA server](optimum-texo/README.md) provides this API and is managed with `uv`.
 
 ```toml
-[formula.engine]
-type = "mineru"
-server_url = "http://127.0.0.1:8000"
-concurrency = 8
+[[formula.engine]]
+type = "http"
+server_url = "http://127.0.0.1:6008"
+worker_size = 32
 ```
 
-`concurrency` limits in-flight HTTP requests across all pages and documents sharing
-one parser engine. `formula.batch_size` caps local-model batches; MinerU continuously fills its
-HTTP concurrency budget. `formula.timeout_ms` includes admission and HTTP inference.
-See [the MinerU crate](crates/formula-mineru/README.md) for address formats,
+With no `prompt`, the adapter uploads a PNG to `/v1/predictions/upload` and reads
+`{"text":"..."}`. To use an image-and-text chat model such as MinerU, set
+`prompt = "\nFormula Recognition:"`, `model = "MinerU2.5-2509-1.2B"`, and its
+service URL; requests then go to `/v1/chat/completions`.
+
+`worker_size` controls consumers of the shared `FormulaQueue` across all pages and
+documents using one engine. Each available consumer takes the next crop immediately.
+`formula.queue_size` limits pending crops, each local entry has its own `batch_size`,
+and `formula.timeout_ms` includes admission and HTTP inference.
+The former `type = "mineru"` is replaced by `type = "http"` with an explicit prompt.
+See [the HTTP formula crate](crates/formula-http/README.md) for protocols,
 environment overrides, and a direct formula-image example.
+
+Multiple `[[formula.engine]]` entries may mix Texo, PP, and HTTP or repeat a model
+with different settings. One shared queue feeds all groups. `worker_size` selects
+each group's consumer count; local entries also select `batch_size` (default 4).
+HTTP workers process one crop each and reject a `batch_size` setting. Model loading
+visits every list entry before the parser becomes ready. `queue_size`, the two
+recognition switches, and `timeout_ms` remain shared under `[formula]`.
 
 Start the server or CLI with this configuration. Plus-M uses
 the same 384-pixel input edge as Plus-S; it is an optional quality comparison,
@@ -408,11 +424,11 @@ OCR retains its quadrilateral, rotation, confidence and estimated font size;
 line, paragraph and table composition use the ordinary parser pipeline.
 The WebUI defaults to automatic OCR; the SDK and native library default to off.
 
-Formula engines use a positive `session_size` under `[formula.engine]` (default 1).
+Formula engines use a positive `worker_size` under `[[formula.engine]]` (default 1).
 All consumers use the selected execution backend and share the bounded
-`formula.queue_size` queue with `formula.batch_size`. There is no fixed hardware
+`formula.queue_size` queue with `formula.engine[].batch_size`. There is no fixed hardware
 ceiling. CUDA builds run formula consumers on CUDA; CPU-only builds use CPU.
-The repository profile uses `session_size = 4`. Separate CPU/GPU consumer counts
+Each list entry owns its worker and batch settings. Separate CPU/GPU consumer counts
 and per-CPU-consumer thread settings are no longer accepted.
 
 ### Adaptive inline formula admission
@@ -450,6 +466,6 @@ The metrics endpoint exposes `docparse_formula_inline_paused` (number of paused
 engine instances per queue), `docparse_formula_inline_transitions_total` (action
 `pause`/`resume`), and `docparse_formula_inline_skipped_total`. This is a temporary
 quality reduction, not deferred recognition: restoring load does not revisit
-skipped pages. PP, Texo, and MinerU share the same queue-backed policy;
+skipped pages. PP, Texo, and HTTP share the same queue-backed policy;
 custom recognizers without a pressure handle opt out. Browser configuration uses
 `config.formula.backpressure` with the same fields and defaults.

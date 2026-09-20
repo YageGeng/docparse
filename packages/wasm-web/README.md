@@ -68,7 +68,7 @@ const parser = await prepareModels({
     layout: { queue_size: 1 },
     tsr: { queue_size: 4, cell_detection: { queue_size: 4 } },
     ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
-    formula: { queue_size: 4, engine: { type: "texo" } },
+    formula: { queue_size: 4, engine: [{ type: "texo" }] },
   },
 });
 
@@ -106,7 +106,7 @@ the execution provider change. Native callers already prepare their sessions in
 | TSR cell detection | Initialized alongside TSR unless `config.tsr.cell_detection.enabled = false`. |
 | OCR detection and recognition | Initialized for `missing_regions` and `always`; skipped for `config.ocr.policy = "disabled"`. The SDK defaults to disabled unless a policy is selected; the example explicitly selects automatic OCR. |
 | OCR orientation | Initialized only when OCR is enabled and `config.ocr.classify_orientation` is not `false`. |
-| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Choose `config.formula.engine.type`: local `texo` (default) or `pp` loads same-origin `/models/` presets; `mineru` sends formula crops to the configured `server_url`. `formulaArtifacts` overrides local resources only. |
+| Formula recognition | Inline and display recognition have independent switches, both defaulting to on. Choose `config.formula.engine[].type`: local `texo` (default) or `pp` loads same-origin `/models/` presets; `http` sends formula crops to the configured `server_url`. `formulaArtifacts` overrides local resources only. |
 
 Disabled models do not require artifact sources and are not downloaded or
 initialized, even if sources are supplied. Preparation accepts `signal`,
@@ -492,15 +492,15 @@ initialization failure never masquerades as successful text recovery.
 ## Formula artifacts and output
 
 The example exposes a **Formula model** selector: **Texo** (default),
-**PP-FormulaNet**, or **MinerU · external service**. No local formula paths need to be entered. Changing the selection
+**PP-FormulaNet**, or **HTTP · external service**. No local formula paths need to be entered. Changing the selection
 closes the prepared parser and clears the previous result; prepare or parse again
 to load the selected model. Independent inline/display switches are retained.
 
-Selecting MinerU reveals **MinerU server URL** and **Concurrency** fields.
-Changing either setting disposes the prepared parser so the next preparation
+Selecting HTTP reveals **HTTP server URL**, **Concurrency**, **Prompt**, and **Chat model** fields.
+Changing any service setting disposes the prepared parser so the next preparation
 uses the new values. Formula crops are sent to the selected service; the PDF,
 layout processing, and other local stages stay in the Worker. Local formula
-models are neither downloaded nor loaded for MinerU.
+models are neither downloaded nor loaded for HTTP.
 
 ```ts
 const parser = await createParser({
@@ -512,24 +512,28 @@ const parser = await createParser({
     ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
     formula: {
       queue_size: 8,
-      engine: { type: "mineru", server_url: "https://mineru.example.com/v1", concurrency: 8 },
-      batch_size: 8,
+      engine: [{ type: "http", server_url: "https://formulas.example.com/v1", worker_size: 32 }],
       timeout_ms: 120000,
     },
   },
 });
 ```
 
+Omit `prompt` for image-only uploads to `/v1/predictions/upload`. Set `prompt` for
+image-and-text chat requests to `/v1/chat/completions`; `model` defaults to
+`MinerU2.5-2509-1.2B` and can name any compatible served chat model.
+For MinerU, use `prompt: "\nFormula Recognition:"`. The example exposes both fields.
+
 Use an absolute HTTP(S) service root or `/v1` base without credentials, query,
-or fragment. Concurrency defaults to 8 (range 1–1024), shared by all calls through
+or fragment. HTTP worker_size defaults to 1 (range 1–1024), shared by all calls through
 the engine; it is independent of browser-local ONNX session limits.
 The per-crop parser deadline includes admission and network time, aborts Fetch
 on timeout, and releases request permits. The service must permit CORS from
 the page origin; HTTPS pages need a service compatible with the browser's
-mixed-content rules. For gpuhub, forward port 8000 over SSH and enter the local
+mixed-content rules. For gpuhub, forward port 6008 over SSH and enter the local
 forwarded URL when using the local example page.
 
-Turning off both formula switches skips unused MinerU service settings, even if
+Turning off both formula switches skips unused HTTP formula service settings, even if
 the address or concurrency input was cleared. No formula requests or local
 formula model downloads occur. Enabling either switch requires valid settings
 again.
@@ -537,7 +541,7 @@ again.
 Validate the production browser UI and external service with a formula PDF:
 
 ```sh
-rtk node crates/web/tests/mineru.mjs /absolute/path/to/formulas.pdf http://127.0.0.1:18000/v1
+rtk node crates/web/tests/formula_http.mjs /absolute/path/to/formulas.pdf http://127.0.0.1:18000/v1
 ```
 
 SDK callers can also select a preset without providing any formula paths:
@@ -550,10 +554,10 @@ const parser = await createParser({
     layout: { queue_size: 1 },
     tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" },
     ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } },
-    formula: { queue_size: 4, engine: { type: "texo" }, batch_size: 4, timeout_ms: 120000 },
+    formula: { queue_size: 4, engine: [{ type: "texo", batch_size: 4 }], timeout_ms: 120000 },
   },
 });
-// Select PP with engine: { type: "pp" } when creating the next parser.
+// Select PP with engine: [{ type: "pp" }] when creating the next parser.
 const document = await parser.parse(pdfBytes);
 const markdown = await parser.render(document, "markdown");
 ```
@@ -582,7 +586,7 @@ formulaArtifacts: { type: "texo", kind: "bytes", encoder, decoder, tokenizer }
 
 URLs resolve against the calling page. Byte arrays are copied before Worker
 transfer, so the caller retains its buffers. Omitting `type` in the legacy PP
-artifact shape remains supported. When an explicit `config.formula.engine.type`
+artifact shape remains supported. When an explicit `config.formula.engine[].type`
 is supplied, it must match the artifact type; mismatches fail with `InvalidConfig`.
 Without explicit selection, a custom artifact's type selects its model. With
 neither, Texo is the default. Filesystem path keys are rejected in Web config.
@@ -590,8 +594,8 @@ neither, Texo is the default. Filesystem path keys are rejected in Web config.
 Both local formula engines use a bounded ready-crop queue in the Worker. The
 parser submits crops independently under a shared admission budget and refills
 its window as each result completes. Local model batches use at most
-`formula.batch_size` crops and never wait to fill; MinerU continuously fills
-HTTP slots according to `concurrency` instead.
+`formula.engine[].batch_size` crops and never wait to fill; HTTP continuously fills
+HTTP slots according to `worker_size` instead.
 
 Only detected inline/display regions enter recognition; formula numbers remain
 source text. Each `document.pages[].formulas[]` entry reports the actual engine,
@@ -631,8 +635,8 @@ them to use the defaults.
 
 Use `session_size` (positive integer; no fixed upper limit) and `batch_size` (1–32) under `layout`, `tsr`,
 `tsr.cell_detection`, and each of `ocr.detection`, `ocr.recognition`, and
-`ocr.orientation`. Local formula engines use `formula.engine.session_size` and
-`formula.batch_size`. The former `sessions` and top-level `ocr.batch_size` names
+`ocr.orientation`. Local formula engines use `formula.engine[].worker_size` and
+`formula.engine[].batch_size`. The former `sessions` and top-level `ocr.batch_size` names
 are rejected. Each model shares one ready-input queue among its sessions. Short
 batches run immediately. OCR combines equal tensor dimensions without changing
 padding. ORT Web's global guard still serializes physical runs and readback;
@@ -644,7 +648,7 @@ Every model queue requires an explicit `queue_size` under `layout`, `tsr`,
 `formula`. `config` and these capacities are required even when a model is disabled;
 missing, zero, fractional, or out-of-range values fail before model downloads.
 Capacities range from 1 to 536869887, independently of sessions and batches.
-`formula.queue_size` also applies to MinerU. A queue may be smaller than one
+`formula.queue_size` also applies to HTTP. A queue may be smaller than one
 batch; producers wait for space while consumers execute available inputs.
 
 Render capacity uses completion acknowledgements: dequeuing a page does not free
@@ -668,3 +672,15 @@ GPU=1; native library defaults are CPU=1, GPU=0. Explicit `executionProvider:
 to CPU owners. Mixed WebGPU/WASM owners retain the existing browser inference
 and readback guard, so this does not promise simultaneous browser GPU/CPU calls.
 The old formula `session_size` field is rejected; other model counts are unchanged.
+
+### Mixed formula consumers and preloading
+
+`config.formula.engine` is an ordered list. For example, use
+`[{type: "texo", worker_size: 1, batch_size: 4}, {type: "http", server_url: "http://localhost:6008", worker_size: 16}]`.
+All consumers share `queue_size`, `inline_enabled`, `display_enabled`, and
+`timeout_ms`. HTTP does not accept `batch_size`; it sends one crop per worker.
+The Worker preloads every configured local model before becoming ready and skips
+local artifacts for HTTP entries. Omitted local artifacts use the matching presets.
+To override multiple models, pass `formulaArtifacts` as an array aligned with
+`formula.engine`, using `null` for HTTP or a default local preset. A single source
+remains accepted for a single local group. Each output records its actual consumer.

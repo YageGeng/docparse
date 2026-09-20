@@ -224,13 +224,13 @@ fn every_model_has_independent_inference_limits() {
         model.insert("batch_size".into(), json!(batch));
     }
     value
-        .pointer_mut("/formula/engine")
+        .pointer_mut("/formula/engine/0")
         .expect("engine")
         .as_object_mut()
         .expect("engine")
         .remove("sessions");
     *value
-        .pointer_mut("/formula/engine/session_size")
+        .pointer_mut("/formula/engine/0/worker_size")
         .expect("session size") = json!(2);
     let raw: RawConfig =
         serde_json::from_value(value.clone()).expect("new inference settings");
@@ -243,7 +243,7 @@ fn every_model_has_independent_inference_limits() {
         "/ocr/detection",
         "/ocr/recognition",
         "/ocr/orientation",
-        "/formula/engine",
+        "/formula/engine/0",
     ] {
         assert_eq!(round_trip.pointer(path), value.pointer(path));
     }
@@ -261,12 +261,17 @@ fn inference_limits_reject_invalid_counts_and_old_names() {
         "/ocr/detection",
         "/ocr/recognition",
         "/ocr/orientation",
-        "/formula/engine",
+        "/formula/engine/0",
     ] {
         for count in [0, 9] {
             let mut value = defaults.clone();
-            value.pointer_mut(path).expect("model")["session_size"] =
-                json!(count);
+            value.pointer_mut(path).expect("model")[if path
+                .starts_with("/formula")
+            {
+                "worker_size"
+            } else {
+                "session_size"
+            }] = json!(count);
             let raw: RawConfig = serde_json::from_value(value).expect("schema");
             // Nine consumers are valid now; zero must still fail before resource allocation.
             assert_eq!(
@@ -276,7 +281,7 @@ fn inference_limits_reject_invalid_counts_and_old_names() {
             );
         }
     }
-    for path in ["/layout", "/formula/engine"] {
+    for path in ["/layout", "/formula/engine/0"] {
         let mut value = defaults.clone();
         value.pointer_mut(path).expect("model")["sessions"] = json!(2);
         assert!(

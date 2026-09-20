@@ -1,7 +1,7 @@
 //! Exercise the actual HTTP adapter without downloading local inference models.
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Multipart, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
@@ -9,10 +9,10 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use docparse_common::timing::Timings;
 use docparse_config::{
-    FormulaEngineConfig, MineruFormulaConfig, RawConfig, ValidatedConfig,
+    FormulaEngineConfig, HttpFormulaConfig, RawConfig, ValidatedConfig,
 };
 use docparse_formula::FormulaEngine;
-use docparse_formula_mineru::MineruEngine;
+use docparse_formula_http::HttpEngine;
 use docparse_layout::{PageImage, PageImageInput, PixelFormat};
 use serde_json::{Value, json};
 use std::{
@@ -36,19 +36,19 @@ async fn completion(
     State(counts): State<Arc<Counts>>,
     Json(body): Json<Value>,
 ) -> Response {
-    assert_eq!(body.pointer("/model"), Some(&json!("MinerU2.5-2509-1.2B")));
+    assert_eq!(body.pointer("/model"), Some(&json!("custom-formula-model")));
     assert_eq!(
         body.pointer("/messages/0/content"),
         Some(&json!("You are a helpful assistant."))
     );
     assert_eq!(
         body.pointer("/messages/1/content/1/text"),
-        Some(&json!("\nFormula Recognition:"))
+        Some(&json!("Read the formula exactly."))
     );
     assert_eq!(body.pointer("/temperature"), Some(&json!(0.0)));
-    assert_eq!(
-        body.pointer("/vllm_xargs/no_repeat_ngram_size"),
-        Some(&json!(100))
+    assert!(
+        body.get("vllm_xargs").is_none(),
+        "generic chat must not require MinerU's custom logits processor"
     );
     let data_url = body
         .pointer("/messages/1/content/0/image_url/url")
@@ -100,11 +100,68 @@ async fn completion(
     }
 }
 
+/// Checks that image-only requests preserve crop pixels and carry no text prompt.
+async fn upload(
+    State(counts): State<Arc<Counts>>,
+    mut form: Multipart,
+) -> Response {
+    let mut id = None;
+    while let Some(field) = form.next_field().await.expect("multipart field") {
+        match field.name().expect("field name") {
+            "image" => {
+                assert_eq!(field.content_type(), Some("image/png"));
+                let bytes = field.bytes().await.expect("image bytes");
+                let image =
+                    image::load_from_memory(&bytes).expect("PNG").to_rgb8();
+                assert_eq!(
+                    image.dimensions(),
+                    (16, 16),
+                    "image-only crops are not resized by the client"
+                );
+                id = Some(image.get_pixel(0, 0).0[0]);
+            }
+            "task" => assert_eq!(field.text().await.expect("task"), "formula"),
+            other => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("unexpected field {other}"),
+                )
+                    .into_response();
+            }
+        }
+    }
+    let id = id.expect("image field");
+    let active = counts.active.fetch_add(1, Ordering::SeqCst) + 1;
+    counts.peak.fetch_max(active, Ordering::SeqCst);
+    counts.calls.fetch_add(1, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(
+        10 + u64::from(8 - id.min(8)) * 4,
+    ))
+    .await;
+    counts.active.fetch_sub(1, Ordering::SeqCst);
+    match id {
+        250 => (StatusCode::UNPROCESSABLE_ENTITY, "generation incomplete")
+            .into_response(),
+        251 => Json(json!({"text": "   "})).into_response(),
+        252 => (StatusCode::SERVICE_UNAVAILABLE, "private upstream details")
+            .into_response(),
+        253 => Json(json!({"wrong_field": "x"})).into_response(),
+        255 => {
+            Json(json!({"text": "x".repeat(1024 * 1024 + 1)})).into_response()
+        }
+        _ => {
+            Json(json!({"text": format!("$$x_{{{id}}}$$"), "output_tokens": 5}))
+                .into_response()
+        }
+    }
+}
+
 /// Binds a local OpenAI-compatible service with a reverse-proxy prefix.
 async fn service() -> (String, Arc<Counts>, tokio::task::JoinHandle<()>) {
     let counts = Arc::new(Counts::default());
     let router = Router::new()
         .route("/mineru/v1/chat/completions", post(completion))
+        .route("/mineru/v1/predictions/upload", post(upload))
         .with_state(Arc::clone(&counts));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -135,15 +192,124 @@ fn crop(id: u8) -> Arc<PageImage> {
 }
 
 /// Creates a native engine using exactly the application's validated configuration path.
-fn engine(url: String, concurrency: usize, timeout_ms: u64) -> MineruEngine {
+fn engine(url: String, worker_size: usize, timeout_ms: u64) -> HttpEngine {
     let mut raw = RawConfig::default();
-    raw.formula.engine = FormulaEngineConfig::Mineru(MineruFormulaConfig {
-        server_url: url,
-        concurrency,
-    });
+    raw.formula.engine = vec![FormulaEngineConfig::Http(
+        HttpFormulaConfig::builder()
+            .server_url(url)
+            .worker_size(worker_size)
+            .prompt(Some("Read the formula exactly.".into()))
+            .model("custom-formula-model".into())
+            .build(),
+    )];
     raw.formula.timeout_ms = timeout_ms;
-    MineruEngine::try_from(&ValidatedConfig::try_from(raw).expect("config"))
+    HttpEngine::try_from(&ValidatedConfig::try_from(raw).expect("config"))
         .expect("engine")
+}
+
+/// Two independently configured HTTP groups compete for one queue without multiplying either group's worker limit.
+#[tokio::test]
+async fn multiple_http_groups_share_one_formula_queue() {
+    let (first_url, first_counts, first_server) = service().await;
+    let (second_url, second_counts, second_server) = service().await;
+    let mut raw = RawConfig::default();
+    raw.formula.engine = vec![
+        FormulaEngineConfig::Http(
+            HttpFormulaConfig::builder()
+                .server_url(first_url)
+                .worker_size(1)
+                .build(),
+        ),
+        FormulaEngineConfig::Http(
+            HttpFormulaConfig::builder()
+                .server_url(second_url)
+                .worker_size(2)
+                .prompt(Some("Read the formula exactly.".into()))
+                .model("custom-formula-model".into())
+                .build(),
+        ),
+    ];
+    let config = ValidatedConfig::try_from(raw).expect("mixed configuration");
+    let mut pool =
+        docparse_formula::queue::FormulaPool::new(&config).expect("pool");
+    assert_eq!(
+        pool.admission().expect("admission").available_permits(),
+        config.formula().queue_size + 3
+    );
+    for index in 0..2 {
+        let engine = HttpEngine::on_queue(
+            &config.for_formula_engine(index).expect("group"),
+            Some(pool.consumer()),
+        )
+        .expect("consumer");
+        assert!(Arc::ptr_eq(
+            &pool.pressure().expect("pool pressure"),
+            &engine.pressure().expect("consumer pressure")
+        ));
+        pool.add(Arc::new(engine));
+    }
+    let output = pool
+        .recognize_named(
+            (0..24).map(|index| crop(index % 8)).collect(),
+            Timings::default(),
+        )
+        .await
+        .expect("mixed results");
+    for (index, result) in output.into_iter().enumerate() {
+        assert_eq!(result.latex, format!("x_{{{}}}", index % 8));
+        assert_eq!(result.engine, "formula-http");
+    }
+    assert!(first_counts.calls.load(Ordering::SeqCst) > 0);
+    assert!(second_counts.calls.load(Ordering::SeqCst) > 0);
+    assert!(first_counts.peak.load(Ordering::SeqCst) <= 1);
+    assert!(second_counts.peak.load(Ordering::SeqCst) <= 2);
+    first_server.abort();
+    second_server.abort();
+}
+
+/// Image-only consumers share the queue limit across callers, preserve order, and recover after upstream errors.
+#[tokio::test]
+async fn image_only_uploads_share_worker_size_and_recover() {
+    let (url, counts, server) = service().await;
+    let mut raw = RawConfig::default();
+    raw.formula.engine = vec![FormulaEngineConfig::Http(
+        HttpFormulaConfig::builder()
+            .server_url(url)
+            .worker_size(2)
+            .build(),
+    )];
+    let engine =
+        HttpEngine::try_from(&ValidatedConfig::try_from(raw).expect("config"))
+            .expect("engine");
+    let (first, second) = tokio::join!(
+        engine.recognize((0..4).map(crop).collect(), Timings::default()),
+        engine.recognize((4..8).map(crop).collect(), Timings::default()),
+    );
+    assert_eq!(
+        first.expect("first"),
+        (0..4).map(|id| format!("x_{{{id}}}")).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        second.expect("second"),
+        (4..8).map(|id| format!("x_{{{id}}}")).collect::<Vec<_>>()
+    );
+    assert_eq!(counts.peak.load(Ordering::SeqCst), 2);
+    assert_eq!(counts.calls.load(Ordering::SeqCst), 8);
+    for id in [250, 251, 252, 253, 255] {
+        let error = engine
+            .recognize(vec![crop(id)], Timings::default())
+            .await
+            .expect_err("invalid output");
+        assert!(!error.to_string().contains("private upstream details"));
+    }
+    assert_eq!(
+        engine
+            .recognize(vec![crop(6)], Timings::default())
+            .await
+            .expect("recovered"),
+        ["x_{6}"]
+    );
+    server.abort();
 }
 
 /// Engine-owned consumers must survive destruction of the runtime that constructed them.
@@ -170,9 +336,9 @@ fn engine_survives_construction_runtime() {
     );
 }
 
-/// Out-of-order HTTP completions preserve crop order and share one concurrency budget across pages.
+/// Out-of-order HTTP completions preserve crop order and share one worker_size budget across pages.
 #[tokio::test]
-async fn bounds_concurrency_across_batches_and_preserves_order() {
+async fn bounds_worker_size_across_batches_and_preserves_order() {
     let (url, counts, server) = service().await;
     let engine = engine(url, 2, 5000);
     let (first, second) = tokio::join!(

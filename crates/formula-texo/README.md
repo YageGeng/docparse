@@ -21,18 +21,18 @@ Configure the existing formula section:
 queue_size = 8
 inline_enabled = true
 display_enabled = true
-batch_size = 8
 timeout_ms = 120000
 
-[formula.engine]
+[[formula.engine]]
+batch_size = 8
 type = "texo"
-session_size = 2
+worker_size = 2
 encoder_path = "models/texo/encoder_model.onnx"
 decoder_path = "models/texo/decoder_model_merged.onnx"
 tokenizer_path = "models/texo/tokenizer.json"
 ```
 
-Core selects Texo only through `formula.engine.type = "texo"`. All three paths
+Core selects Texo only through `formula.engine[].type = "texo"`. All three paths
 are explicit and may use arbitrary filenames. Texo has no manifest-path field:
 its SHA-256 hashes and source revision are pinned in this crate. The `pp` variant
 owns `model_path`, `tokenizer_path`, and `model_manifest_path`. Flat paths are
@@ -56,7 +56,7 @@ The browser host initializes ORT Web and selects WASM CPU or WebGPU through
 tokenizer }` to `TexoEngine::from_artifacts` and inject the engine, or set
 `ParserArtifacts::texo_formula`. Do not supply both PP-FormulaNet and Texo artifacts.
 Native filesystem loading is unavailable in browsers. The JS SDK accepts
-`config.formula.engine.type` and loads preset resources automatically; callers may
+`config.formula.engine[].type` and loads preset resources automatically; callers may
 override them with `formulaArtifacts: { type: "texo", kind: "urls" | "bytes",
 encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
 `examples/browser/main.rs` also demonstrates direct Rust/WASM loading.
@@ -74,15 +74,14 @@ encoder, decoder, tokenizer }`. The example has a Texo/PP selector.
   synchronization. Hidden features, logits, and KV outputs return to host memory;
   ORT manages transfers to the selected accelerator on subsequent calls.
 - Native calls share a bounded crop queue across pages and documents. Each of
-  `formula.engine.session_size` independent owners holds its own encoder, decoder,
+  `formula.engine[].worker_size` independent owners holds its own encoder, decoder,
   tokenizer, and execution thread. An idle owner drains ready crops up to
-  `formula.batch_size`; it never waits to fill a batch. Queue capacity is
+  `formula.engine[].batch_size`; it never waits to fill a batch. Queue capacity is
   `formula.queue_size` crops, in addition to active batches. Parser crop admission is shared across pages
-  and bounded to `queue_size + session_size * batch_size`. Results return in each caller's original order.
-  Caller packets of at most `min(batch_size, queue_size)` enter atomically. Ready packets may be combined or split to fill
-  a model batch, regardless of their original caller boundaries. Canceled crops do not consume
+  and bounded to `queue_size + sum(worker_size * batch_size)`. Results return in each caller's original order.
+  Ready crops from different pages and documents may share a model batch. Canceled crops do not consume
   its batch slots, and unconsumed tails still count toward queue capacity.
-- Native defaults are one owner on the selected backend, with no fixed upper limit. Every extra
+- Native defaults are one owner per configured group on the selected backend, with no fixed upper limit. Every extra
   session duplicates model/runtime resources. Browser sessions share a bounded
   per-crop ready queue under the global inference guard.
 - Core submits crops independently with a shared pre-crop admission budget and
@@ -161,7 +160,7 @@ be checked on a CUDA host; CPU parity alone does not validate GPU performance.
 
 ## Formula consumers
 
-`formula.engine.session_size` selects the number of encoder/decoder owners
+`formula.engine[].worker_size` selects the number of encoder/decoder owners
 (default 1, positive, with no fixed upper limit). Every owner uses the compiled
 native accelerator or the browser-selected backend and drains the same bounded
 queue. Native standard runs return hidden states and KV caches to host memory.

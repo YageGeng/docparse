@@ -12,7 +12,7 @@ default-members = [
   "crates/core",
   "crates/layout",
   "crates/formula",
-  "crates/formula-mineru",
+  "crates/formula-http",
   "crates/formula-texo",
   "crates/ocr",
   "crates/server",
@@ -76,7 +76,7 @@ docparse-config = { version = "0.1.0", path = "crates/config" }
 docparse-core = { version = "0.1.0", path = "crates/core" }
 docparse-database = { version = "0.1.0", path = "crates/database" }
 docparse-formula = { version = "0.1.0", path = "crates/formula" }
-docparse-formula-mineru = { version = "0.1.0", path = "crates/formula-mineru" }
+docparse-formula-http = { version = "0.1.0", path = "crates/formula-http" }
 docparse-formula-texo = { version = "0.1.0", path = "crates/formula-texo" }
 docparse-layout = { version = "0.1.0", path = "crates/layout" }
 docparse-migration = { version = "0.1.0", path = "crates/migration" }

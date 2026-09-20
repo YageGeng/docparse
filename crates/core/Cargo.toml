@@ -15,14 +15,14 @@ cuda = ["docparse-formula/cuda", "docparse-formula-texo/cuda", "docparse-layout/
 metal = ["docparse-formula/metal", "docparse-formula-texo/metal", "docparse-layout/metal", "docparse-ocr/metal", "docparse-tsr/metal"]
 openvino = ["docparse-formula/openvino", "docparse-formula-texo/openvino", "docparse-layout/openvino", "docparse-ocr/openvino", "docparse-tsr/openvino"]
 pdfium-ipc = ["dep:ipc-channel", "dep:tracing-subscriber"]
-wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-formula-mineru/wasm", "docparse-formula-texo/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
+wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-formula-http/wasm", "docparse-formula-texo/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
 
 [dependencies]
 # workspace crates
 docparse-common.workspace = true
 docparse-config.workspace = true
 docparse-formula.workspace = true
-docparse-formula-mineru.workspace = true
+docparse-formula-http.workspace = true
 docparse-formula-texo.workspace = true
 docparse-layout.workspace = true
 docparse-ocr.workspace = true

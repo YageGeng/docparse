@@ -46,10 +46,10 @@ function configuration(overrides: WebParseConfig | undefined): unknown {
       const engine = (values as Record<string, unknown>).engine;
       const formulaEnabled = merged.inline_enabled !== false || merged.display_enabled !== false;
       const invalidEngine = formulaEngineError(engine, formulaEnabled);
-      if (engine === undefined || invalidEngine) throw Object.assign(new Error(invalidEngine ?? "formula.engine must be an object"), { code: "InvalidConfig" });
+      if (engine === undefined || invalidEngine) throw Object.assign(new Error(invalidEngine ?? "formula.engine must be a list"), { code: "InvalidConfig" });
       // Replace the tagged object; paths belonging to the other default variant must not leak across.
       // Omit inactive service settings, including NaN from a cleared input, before Rust deserialization.
-      merged.engine = !formulaEnabled && (engine as { type: string }).type === "mineru" ? { type: "mineru" } : engine;
+      merged.engine = formulaEnabled ? engine : (engine as { type: string }[]).map(entry => ({ type: entry.type }));
     }
     if (group === "tsr" && Object.hasOwn(values, "cell_detection")) {
       const cells = (values as Record<string, unknown>).cell_detection;
@@ -86,12 +86,12 @@ async function formulaBytes(source: FormulaSource, progress?: (value: ParserProg
     const encoder = source.kind === "urls" ? await artifact("formula_encoder", source.encoder, progress) : source.encoder;
     const decoder = source.kind === "urls" ? await artifact("formula_decoder", source.decoder, progress) : source.decoder;
     const tokenizer = source.kind === "urls" ? await artifact("formula_tokenizer", source.tokenizer, progress) : source.tokenizer;
-    return { texo_formula: { encoder, decoder, tokenizer } };
+    return { type: "texo", encoder, decoder, tokenizer };
   }
   const model = source.kind === "urls" ? await artifact("formula_model", source.model, progress) : source.model;
   const config = source.kind === "urls" ? await artifact("formula_tokenizer", source.tokenizer, progress) : source.tokenizer;
   const manifest = source.kind === "urls" ? await artifact("formula_manifest", source.manifest, progress) : source.manifest;
-  return { formula: { model, config, manifest } };
+  return { type: "pp", model, config, manifest };
 }
 
 /** Pending table promises are correlated separately from the enclosing parse operation. */
@@ -179,8 +179,8 @@ scope.addEventListener("message", async (event: MessageEvent<WorkerInbound>) => 
         recognition: await modelBytes(ocrSource.recognition, "ocr_recognition", progress),
         orientation: ocrSource.orientation ? await modelBytes(ocrSource.orientation, "ocr_orientation", progress) : undefined,
       } : undefined;
-      const formulaArtifacts = payload.formulaArtifacts ? await formulaBytes(payload.formulaArtifacts, progress) : {};
-      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts, ...formulaArtifacts };
+      const formulaArtifacts = payload.formulaArtifacts ? await Promise.all(payload.formulaArtifacts.map(source => source ? formulaBytes(source, progress) : null)) : [];
+      const auxiliaryArtifacts = { tsr: tableArtifacts, tsr_cell_detection: tableCellArtifacts, ocr: ocrArtifacts, formula_engines: formulaArtifacts };
       const base = payload.runtimeBaseUrl ?? new URL("./ort/", import.meta.url).href;
       progress?.({ stage: "initializing_model" });
       const modelStarted = performance.now();

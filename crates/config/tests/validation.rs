@@ -10,17 +10,17 @@ use docparse_config::{
 fn texo_sessions_are_positive_and_default_to_one() {
     let mut value = serde_json::to_value(RawConfig::default()).expect("config");
     assert_eq!(
-        value.pointer("/formula/engine/session_size"),
+        value.pointer("/formula/engine/0/worker_size"),
         Some(&1.into())
     );
     for count in [0, 9] {
         *value
-            .pointer_mut("/formula/engine/session_size")
+            .pointer_mut("/formula/engine/0/worker_size")
             .expect("sessions") = count.into();
         let raw = serde_json::from_value(value.clone()).expect("shape");
         // Preserve zero rejection while allowing counts beyond the former eight-session limit.
         if count == 0 {
-            assert_invalid_value(raw, "formula.engine.session_size");
+            assert_invalid_value(raw, "formula.engine.worker_size");
         } else {
             ValidatedConfig::try_from(raw).expect("positive consumer count");
         }
@@ -322,7 +322,7 @@ fn formula_configuration_accepts_bounded_batches() {
         .expect("default config");
     value.as_object_mut().expect("object").insert(
         "formula".into(),
-        serde_json::json!({"queue_size": 4, "batch_size": 4, "timeout_ms": 120000}),
+        serde_json::json!({"queue_size": 4, "engine":[{"type":"texo","batch_size":4}], "timeout_ms": 120000}),
     );
     let raw =
         serde_json::from_value::<docparse_config::RawConfig>(value.clone());
@@ -369,7 +369,7 @@ fn formula_configuration_accepts_bounded_batches() {
     );
     for invalid in [0, 33] {
         *value
-            .pointer_mut("/formula/batch_size")
+            .pointer_mut("/formula/engine/0/batch_size")
             .expect("batch_size") = invalid.into();
         let raw =
             serde_json::from_value::<docparse_config::RawConfig>(value.clone())

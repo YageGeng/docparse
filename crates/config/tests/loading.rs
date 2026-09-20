@@ -82,7 +82,7 @@ fn short_concurrency_names_load_and_override() {
     let path = write_config(
         directory.path(),
         "docparse.toml",
-        "[render]\nworkers = 5\nqueue_size = 4\n[layout]\nsession_size = 4\n[tsr]\nsession_size = 8\n[formula]\nbatch_size = 4\n",
+        "[render]\nworkers = 5\nqueue_size = 4\n[layout]\nsession_size = 4\n[tsr]\nsession_size = 8\n[[formula.engine]]\ntype = \"texo\"\nbatch_size = 4\n",
     );
     let raw = ConfigLoader::new(&path)
         .with_env_provider(environment_provider(json!({
@@ -98,7 +98,7 @@ fn short_concurrency_names_load_and_override() {
         ("/layout/session_size", 2),
         ("/render/queue_size", 4),
         ("/tsr/session_size", 6),
-        ("/formula/batch_size", 4),
+        ("/formula/engine/0/batch_size", 4),
     ] {
         assert_eq!(
             values.pointer(pointer),
@@ -139,7 +139,7 @@ fn formula_engine_paths_are_variant_specific() {
         directory.path(),
         "docparse.toml",
         r#"
-[formula.engine]
+[[formula.engine]]
 type = "texo"
 encoder_path = "texo/encoder.onnx"
 decoder_path = "texo/decoder.onnx"
@@ -148,7 +148,10 @@ tokenizer_path = "texo/tokenizer.json"
     );
     let raw = ConfigLoader::new(path).load_raw().expect("Texo config");
     let json = serde_json::to_value(raw.formula).expect("formula JSON");
-    let engine = json.get("engine").expect("engine");
+    let engine = json
+        .get("engine")
+        .and_then(|value| value.get(0))
+        .expect("engine");
     assert_eq!(engine.get("type"), Some(&json!("texo")));
     assert_eq!(
         engine.get("encoder_path"),
@@ -172,7 +175,7 @@ fn formula_engine_switches_across_profile_and_environment() {
         dir.path(),
         "docparse.toml",
         r#"
-[formula.engine]
+[[formula.engine]]
 type = "pp"
 model_path = "pp/custom.onnx"
 model_manifest_path = "pp/custom.json"
@@ -182,7 +185,7 @@ model_manifest_path = "pp/custom.json"
         dir.path(),
         "docparse.texo.toml",
         r#"
-[formula.engine]
+[[formula.engine]]
 type = "texo"
 encoder_path = "texo/renamed-encoder.onnx"
 decoder_path = "texo/renamed-decoder.onnx"
@@ -191,11 +194,11 @@ decoder_path = "texo/renamed-decoder.onnx"
     let raw = ConfigLoader::new(&path)
         .with_profile("texo")
         .with_env_provider(Figment::from(Serialized::defaults(
-            json!({"formula":{"engine":{"tokenizer_path":"texo/env.json"}}}),
+            json!({"formula":{"engine":[{"type":"texo", "encoder_path":"texo/renamed-encoder.onnx", "decoder_path":"texo/renamed-decoder.onnx", "tokenizer_path":"texo/env.json"}]}}),
         )))
         .load_raw()
         .expect("switched engine");
-    let paths = match raw.formula.engine {
+    let paths = match raw.formula.engine.into_iter().next().expect("engine") {
         docparse_config::FormulaEngineConfig::Texo(paths) => Some(paths),
         _ => None,
     }
@@ -205,9 +208,9 @@ decoder_path = "texo/renamed-decoder.onnx"
     assert_eq!(paths.decoder_path, base.join("texo/renamed-decoder.onnx"));
     assert_eq!(paths.tokenizer_path, base.join("texo/env.json"));
     let raw = ConfigLoader::new(&path).with_profile("texo")
-        .with_env_provider(Figment::from(Serialized::defaults(json!({"formula":{"engine":{"type":"pp","model_path":"new/model.onnx"}}}))))
+        .with_env_provider(Figment::from(Serialized::defaults(json!({"formula":{"engine":[{"type":"pp","model_path":"new/model.onnx"}]}}))))
         .load_raw().expect("switch back to PP");
-    let paths = match raw.formula.engine {
+    let paths = match raw.formula.engine.into_iter().next().expect("engine") {
         docparse_config::FormulaEngineConfig::Pp(paths) => Some(paths),
         _ => None,
     }
@@ -783,11 +786,11 @@ fn repository_default_config_matches_documented_defaults() {
         .expect("the repository default config must remain valid");
 
     assert!(matches!(
-        RawConfig::default().formula.engine,
+        RawConfig::default().formula.engine.first().expect("engine"),
         docparse_config::FormulaEngineConfig::Texo(_)
     ));
     assert!(matches!(
-        config.formula.engine,
+        config.formula.engine.first().expect("engine"),
         docparse_config::FormulaEngineConfig::Texo(_)
     ));
 
@@ -1018,7 +1021,7 @@ fn model_session_counts_have_no_policy_ceiling() {
         "/ocr/detection/session_size",
         "/ocr/recognition/session_size",
         "/ocr/orientation/session_size",
-        "/formula/engine/session_size",
+        "/formula/engine/0/worker_size",
     ];
     for engine in ["pp", "texo"] {
         for count in [16, 64] {
@@ -1026,7 +1029,7 @@ fn model_session_counts_have_no_policy_ceiling() {
                 serde_json::to_value(docparse_config::RawConfig::default())
                     .expect("defaults");
             *value.pointer_mut("/formula/engine").expect("engine") =
-                serde_json::json!({"type": engine, "session_size": count});
+                serde_json::json!([{ "type": engine, "worker_size": count }]);
             for path in paths {
                 *value.pointer_mut(path).expect("session field") = count.into();
             }
@@ -1055,7 +1058,7 @@ fn formula_session_configuration() {
                 serde_json::to_value(docparse_config::RawConfig::default())
                     .expect("defaults");
             *value.pointer_mut("/formula/engine").expect("engine") =
-                serde_json::json!({"type": engine, "session_size": count});
+                serde_json::json!([{ "type": engine, "worker_size": count }]);
             let raw: docparse_config::RawConfig =
                 serde_json::from_value(value).expect("single session count");
             assert_eq!(
@@ -1075,7 +1078,8 @@ fn formula_session_configuration() {
                 .as_object_mut()
                 .expect("engine settings")
                 .insert(field.into(), 1.into());
-            *value.pointer_mut("/formula/engine").expect("engine") = settings;
+            *value.pointer_mut("/formula/engine").expect("engine") =
+                serde_json::json!([settings]);
             serde_json::from_value::<docparse_config::RawConfig>(value)
                 .expect_err("removed CPU/GPU setting");
         }

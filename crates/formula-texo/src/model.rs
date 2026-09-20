@@ -67,6 +67,15 @@ impl TexoEngine {
         config: Arc<ValidatedConfig>,
         artifacts: TexoArtifacts,
     ) -> Result<Self, FormulaError> {
+        Self::from_artifacts_on_queue(config, artifacts, None).await
+    }
+
+    /// Attaches execution owners to an existing shared queue, or creates a standalone queue.
+    pub async fn from_artifacts_on_queue(
+        config: Arc<ValidatedConfig>,
+        artifacts: TexoArtifacts,
+        queue: Option<docparse_formula::queue::FormulaQueue>,
+    ) -> Result<Self, FormulaError> {
         let artifacts = docparse_common::run_cpu(move || {
             artifacts.verify()?;
             Ok::<_, FormulaError>(artifacts)
@@ -78,17 +87,21 @@ impl TexoEngine {
             "loading Texo ONNX encoder and cached decoder with provider {}",
             backend.execution_provider()
         );
-        let runner = SessionRunner::load(artifacts, backend, config.formula())
-            .await
-            .map_err(|error| {
-                tracing::error!("Texo initialization failed: {}", error);
-                error
-            })?;
-        docparse_formula::queue::configure_backpressure(
-            &runner.pressure(),
-            config.formula(),
-        )?;
-        let session_size = config.formula().engine.session_size();
+        let shared = queue.is_some();
+        let runner =
+            SessionRunner::load(artifacts, backend, config.formula(), queue)
+                .await
+                .map_err(|error| {
+                    tracing::error!("Texo initialization failed: {}", error);
+                    error
+                })?;
+        if !shared {
+            docparse_formula::queue::configure_backpressure(
+                &runner.pressure(),
+                config.formula(),
+            )?;
+        }
+        let session_size = config.formula().single_engine()?.worker_size();
         let provider = backend.execution_provider();
         tracing::info!(
             "loaded Texo with {} session pairs on {}",
@@ -99,7 +112,8 @@ impl TexoEngine {
             runner,
             admission: Arc::new(tokio::sync::Semaphore::new(
                 config.formula().queue_size
-                    + config.formula().batch_size * session_size,
+                    + config.formula().single_engine()?.batch_size()
+                        * session_size,
             )),
             name: format!("texo-transfer-onnx-{provider}"),
         })

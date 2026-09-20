@@ -25,6 +25,22 @@ pub struct ValidatedConfig {
 }
 
 impl ValidatedConfig {
+    /// Selects one already-validated group for an engine constructor without changing shared policy.
+    pub fn for_formula_engine(
+        &self,
+        index: usize,
+    ) -> Result<Self, ConfigError> {
+        let engine = self.formula.engine.get(index).ok_or(
+            ConfigError::InvalidValue {
+                field: "formula.engine",
+                reason: "consumer group index is out of range",
+            },
+        )?;
+        let mut selected = self.clone();
+        selected.formula.engine = vec![engine.clone()];
+        Ok(selected)
+    }
+
     /// Returns formula artifact paths and the validated batch/deadline limits.
     pub fn formula(&self) -> &FormulaConfig {
         &self.formula
@@ -333,11 +349,36 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             "fusion.estimated_font_size_tolerance_points",
         )?;
 
-        if let crate::FormulaEngineConfig::Mineru(mineru) =
-            &config.formula.engine
-            && (config.formula.inline_enabled || config.formula.display_enabled)
-        {
-            mineru.endpoint()?;
+        let enabled =
+            config.formula.inline_enabled || config.formula.display_enabled;
+        if enabled && config.formula.engine.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "formula.engine",
+                reason: "requires at least one consumer group when formula recognition is enabled",
+            });
+        }
+        let mut capacity = config.formula.queue_size;
+        for engine in &config.formula.engine {
+            if enabled {
+                if let crate::FormulaEngineConfig::Http(http) = engine {
+                    http.endpoint()?;
+                }
+                if engine.worker_size() == 0 {
+                    return Err(ConfigError::InvalidValue {
+                        field: "formula.engine.worker_size",
+                        reason: "must be positive",
+                    });
+                }
+                if !(1..=32).contains(&engine.batch_size()) {
+                    return Err(ConfigError::InvalidValue {
+                        field: "formula.engine.batch_size",
+                        reason: "must be between 1 and 32",
+                    });
+                }
+                capacity = engine.worker_size().checked_mul(engine.batch_size()).and_then(|active| capacity.checked_add(active))
+                    .filter(|capacity| *capacity <= (usize::MAX >> 3))
+                    .ok_or(ConfigError::InvalidValue { field: "formula.engine.worker_size", reason: "total active and pending capacity must fit semaphore permits" })?;
+            }
         }
         let pressure = &config.formula.backpressure;
         if !pressure.high_watermark.is_finite()
@@ -351,25 +392,6 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             return Err(ConfigError::InvalidValue {
                 field: "formula.backpressure",
                 reason: "requires 0 <= low_watermark < high_watermark <= 1 and positive pause/resume seconds",
-            });
-        }
-        let sessions = config.formula.engine.session_size();
-        // Check permit representability without imposing a hardware-dependent session ceiling.
-        let capacity = sessions
-            .checked_mul(config.formula.batch_size)
-            .and_then(|active| active.checked_add(config.formula.queue_size));
-        if sessions == 0
-            || capacity.is_none_or(|capacity| capacity > (usize::MAX >> 3))
-        {
-            return Err(ConfigError::InvalidValue {
-                field: "formula.engine.session_size",
-                reason: "must be positive and fit the admission capacity",
-            });
-        }
-        if !(1..=32).contains(&config.formula.batch_size) {
-            return Err(ConfigError::InvalidValue {
-                field: "formula.batch_size",
-                reason: "must be between 1 and 32",
             });
         }
         if !(1..=86_400_000).contains(&config.formula.timeout_ms) {

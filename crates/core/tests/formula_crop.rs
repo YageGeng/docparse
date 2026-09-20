@@ -65,13 +65,13 @@ async fn real_motion_descriptor_preserves_overbar() {
     raw.ocr.policy = OcrPolicy::Disabled;
     // These regression expectations belong to the PP model, independently of the application default.
     let pp = root.join("models/pp-formulanet-plus-s");
-    raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+    raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Pp(
         docparse_config::PpFormulaConfig::builder()
             .model_path(pp.join("inference.onnx"))
             .tokenizer_path(pp.join("tokenizer.json"))
             .model_manifest_path(pp.join("model-manifest.json"))
             .build(),
-    );
+    )];
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;
     let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
@@ -200,13 +200,13 @@ async fn real_softmax_crop_preserves_component_subscript() {
     raw.ocr.policy = OcrPolicy::Disabled;
     // These regression expectations belong to the PP model, independently of the application default.
     let pp = root.join("models/pp-formulanet-plus-s");
-    raw.formula.engine = docparse_config::FormulaEngineConfig::Pp(
+    raw.formula.engine = vec![docparse_config::FormulaEngineConfig::Pp(
         docparse_config::PpFormulaConfig::builder()
             .model_path(pp.join("inference.onnx"))
             .tokenizer_path(pp.join("tokenizer.json"))
             .model_manifest_path(pp.join("model-manifest.json"))
             .build(),
-    );
+    )];
     raw.formula.inline_enabled = true;
     raw.formula.display_enabled = true;
     let config =

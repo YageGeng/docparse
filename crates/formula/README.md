@@ -25,7 +25,7 @@ rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s --ve
 - Tokenizer SHA-256: `2811d82701ec97c192fa256aa2b4516929373870ae660326cc5b1dc879b95ff2`.
 - Reference/export provenance: OAR-OCR `7feb044d74be09e3e2078a89cec0f0f8688e942b`, release v0.3.0 model artifact.
 
-To select Plus-M, update the existing `[formula.engine]` selection in `docparse.toml`:
+To select Plus-M, update the existing `[[formula.engine]]` selection in `docparse.toml`:
 
 ```toml
 [formula]
@@ -33,7 +33,7 @@ queue_size = 8
 inline_enabled = true
 display_enabled = true
 
-[formula.engine]
+[[formula.engine]]
 type = "pp"
 model_path = "models/pp-formulanet-plus-m/inference.onnx"
 tokenizer_path = "models/pp-formulanet-plus-m/tokenizer.json"
@@ -118,11 +118,11 @@ Apache-2.0 license notices.
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
 Required `formula.queue_size` sets its capacity independently of sessions and batches.
-`formula.engine.session_size` creates consumers on the selected backend (default 1,
+`formula.engine[].worker_size` creates consumers on the selected backend (default 1,
 positive, with no fixed upper limit). PP retains its CPU compatibility executor for
 unsupported CoreML graphs on Apple. There is no separate CPU consumer group.
 Native queue executors belong to the engine and survive its construction runtime.
-Each idle owner drains only ready work up to `formula.batch_size`; short tails
+Each idle owner drains only ready work up to `formula.engine[].batch_size`; short tails
 run immediately. The parser reserves crop admission before raster allocation,
 keeps a bounded sliding window, and maps independently completed results back to
 original regions. Canceled requests do not use batch slots. Native PP execution
