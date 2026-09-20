@@ -76,9 +76,8 @@ pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
 
 /// A reusable bounded ONNX session shared by documents and page batches.
 pub struct PpFormulaNetEngine {
-    runner: Arc<SessionRunner>,
+    pool: crate::queue::FormulaPool,
     name: String,
-    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl PpFormulaNetEngine {
@@ -87,15 +86,22 @@ impl PpFormulaNetEngine {
         config: Arc<ValidatedConfig>,
         artifacts: FormulaArtifacts,
     ) -> Result<Self, FormulaError> {
-        Self::from_artifacts_on_queue(config, artifacts, None).await
+        // Standalone engines own the same producer pool used by mixed configurations.
+        let mut pool = crate::queue::FormulaPool::new(&config)?;
+        let workers =
+            Self::spawn_from_artifacts(config, artifacts, pool.receiver())
+                .await?;
+        let name = workers.name().to_owned();
+        pool.add(workers);
+        Ok(Self { pool, name })
     }
 
-    /// Attaches execution owners to an existing shared queue, or creates a standalone queue.
-    pub async fn from_artifacts_on_queue(
+    /// Initializes execution owners on the receiving side of an existing pool.
+    pub async fn spawn_from_artifacts(
         config: Arc<ValidatedConfig>,
         artifacts: FormulaArtifacts,
-        queue: Option<crate::queue::FormulaQueue>,
-    ) -> Result<Self, FormulaError> {
+        receiver: docparse_common::Queue<crate::queue::FormulaRequest>,
+    ) -> Result<crate::queue::FormulaWorkers, FormulaError> {
         let (artifacts, kind) = docparse_common::run_cpu(move || {
             let kind = artifacts.verify()?;
             Ok::<_, FormulaError>((artifacts, kind))
@@ -111,27 +117,20 @@ impl PpFormulaNetEngine {
         );
         let session_size = config.formula().single_engine()?.worker_size();
         // Each local model owns the configured number of consumers, independently of batching.
-        let shared = queue.is_some();
         let runner = SessionRunner::load(
             artifacts,
             backend,
             kind,
             config.formula().single_engine()?.batch_size(),
             session_size,
-            config.formula().queue_size,
-            queue,
+            receiver,
         )
         .await
         .map_err(|error| {
             tracing::error!("formula model initialization failed: {}", error);
             error
         })?;
-        if !shared {
-            crate::queue::configure_backpressure(
-                &runner.pressure(),
-                config.formula(),
-            )?;
-        }
+
         let provider = runner.provider;
         tracing::info!(
             "loaded {} with {} sessions on {} (requested {})",
@@ -140,21 +139,14 @@ impl PpFormulaNetEngine {
             provider,
             backend.execution_provider()
         );
-        Ok(Self {
-            runner,
-            name: format!("{}-onnx-{provider}", kind.as_str()),
-            admission: Arc::new(tokio::sync::Semaphore::new(
-                config.formula().single_engine()?.batch_size() * session_size
-                    + config.formula().queue_size,
-            )),
-        })
+        Ok(runner.workers)
     }
 }
 
 impl FormulaEngine for PpFormulaNetEngine {
     /// Exposes the shared queue rather than estimating load from active sessions.
     fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        Some(self.runner.pressure())
+        self.pool.pressure()
     }
 
     /// Reports the fixed supported model family.
@@ -164,7 +156,7 @@ impl FormulaEngine for PpFormulaNetEngine {
 
     /// Bounds executing and ready crop pixels across every page sharing this engine.
     fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
-        Some(Arc::clone(&self.admission))
+        self.pool.admission()
     }
 
     /// Shares individual crop requests across callers; the session forms actual model batches.
@@ -179,12 +171,10 @@ impl FormulaEngine for PpFormulaNetEngine {
                     "batch size must be 1..32".into(),
                 ));
             }
-            Arc::clone(&self.runner).run(images, timings).await.map_err(
-                |error| {
-                    tracing::warn!("formula batch failed: {}", error);
-                    error
-                },
-            )
+            self.pool.recognize(images, timings).await.map_err(|error| {
+                tracing::warn!("formula batch failed: {}", error);
+                error
+            })
         })
     }
 }

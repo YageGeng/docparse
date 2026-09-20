@@ -1,49 +1,33 @@
 //! Native Texo sessions consume the same ready-crop queue as other formula engines.
 use super::{Generation, MAX_LENGTH, ModelSessions, StepOutput};
 use crate::TexoArtifacts;
-use docparse_common::timing::{TimingStage, Timings};
+use docparse_common::timing::TimingStage;
 use docparse_formula::{
     FormulaError,
-    queue::{FormulaQueue, FormulaRequest as Request, FormulaWorkers},
+    queue::{FormulaRequest as Request, FormulaWorkers},
 };
-use docparse_layout::{
-    PageImage,
-    wasm_compat::{OnnxBackend, SessionWorker},
-};
+use docparse_layout::wasm_compat::{OnnxBackend, SessionWorker};
 use ort::{session::builder::SessionBuilder, value::Tensor};
 use std::sync::Arc;
 
 type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
 
 /// Queue ownership is separate from native session ownership so heterogeneous groups can compete directly.
-pub(crate) struct SessionManager {
-    queue: FormulaQueue,
-    _workers: FormulaWorkers,
-}
+pub(crate) struct SessionManager;
 
 impl SessionManager {
-    /// Exposes pressure from the same channel consumed by every configured engine.
-    pub(crate) fn pressure(
-        &self,
-    ) -> Arc<docparse_common::queue::QueuePressure> {
-        self.queue.pressure()
-    }
-
     /// Loads each pair on its dedicated native owner and attaches it to the selected queue.
     pub(crate) async fn load(
         artifacts: TexoArtifacts,
         backend: OnnxBackend,
         config: &docparse_config::FormulaConfig,
-        shared: Option<FormulaQueue>,
-    ) -> Result<Arc<Self>, FormulaError> {
+        receiver: docparse_common::Queue<Request>,
+    ) -> Result<FormulaWorkers, FormulaError> {
         let settings = config.single_engine()?;
-        let queue = shared.unwrap_or_else(|| {
-            FormulaQueue::new("formula_texo", config.queue_size).0
-        });
         Self::start(
             settings.worker_size(),
             settings.batch_size(),
-            queue,
+            receiver,
             format!("texo-transfer-onnx-{}", backend.execution_provider()),
             move |index| {
                 tracing::info!(
@@ -68,16 +52,15 @@ impl SessionManager {
     async fn start<F, W>(
         worker_size: usize,
         batch_size: usize,
-        queue: FormulaQueue,
+        receiver: docparse_common::Queue<Request>,
         name: String,
         initialize: F,
-    ) -> Result<Arc<Self>, FormulaError>
+    ) -> Result<FormulaWorkers, FormulaError>
     where
         F: Fn(usize) -> Result<W, FormulaError> + Send + Sync + 'static,
         W: FnMut(&mut Vec<Request>) -> BatchResult + 'static,
     {
-        let receiver = queue.receiver();
-        let mut workers = FormulaWorkers::default();
+        let mut workers = FormulaWorkers::new(name.clone());
         let initialize = Arc::new(initialize);
         let metrics = docparse_common::telemetry::ModelMetrics::new(
             "formula_texo",
@@ -117,19 +100,7 @@ impl SessionManager {
                 }
             }))?;
         }
-        Ok(Arc::new(Self {
-            queue,
-            _workers: workers,
-        }))
-    }
-
-    /// Keeps direct single-engine callers on the same ordered and cancelable queue protocol.
-    pub(crate) async fn run(
-        self: Arc<Self>,
-        images: Vec<Arc<PageImage>>,
-        timings: Timings,
-    ) -> Result<Vec<String>, FormulaError> {
-        self.queue.run(images, timings).await
+        Ok(workers)
     }
 }
 
@@ -249,11 +220,12 @@ mod tests {
         }
         let destroyed = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&destroyed);
-        let (queue, _) = FormulaQueue::new("test", 4);
+        let (_queue, receiver) =
+            docparse_formula::queue::FormulaQueue::new("test", 4);
         let result = SessionManager::start(
             2,
             2,
-            queue.consumer(),
+            receiver,
             "test".into(),
             move |index| {
                 if index == 1 {

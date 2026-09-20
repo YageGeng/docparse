@@ -20,6 +20,14 @@ dependencies = [
 [dependency-groups]
 dev = ["requests==2.34.2"]
 
+[tool.pyright]
+# Check deployment scripts and tests against the same locked environment as the service.
+include = ["*.py", "tests"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+
 [tool.uv]
 package = false
 # The deployed CUDA runtime targets NVIDIA GPUs on Linux x86_64.

@@ -4,9 +4,12 @@ mod wasm_compat;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use docparse_common::timing::{TimingStage, Timings};
-use docparse_common::{WasmBoxedFuture, run_cpu, timeout};
+use docparse_common::{WasmBoxedFuture, run_cpu};
 use docparse_config::{FormulaEngineConfig, ValidatedConfig};
-use docparse_formula::{FormulaEngine, FormulaError, queue::FormulaQueue};
+use docparse_formula::{
+    FormulaEngine, FormulaError,
+    queue::{FormulaPool, FormulaRequest, FormulaWorkers},
+};
 use docparse_layout::PageImage;
 use futures_util::{
     StreamExt,
@@ -33,10 +36,6 @@ pub enum HttpError {
     Task(#[from] docparse_common::TaskError),
     #[error("HTTP formula response does not match the expected schema")]
     Json(#[from] serde_json::Error),
-    #[error(
-        "HTTP formula batch timed out after {0} ms, including queue admission"
-    )]
-    Timeout(u128),
     #[error("invalid HTTP request or response: {0}")]
     Invalid(&'static str),
 }
@@ -49,13 +48,8 @@ impl From<HttpError> for FormulaError {
 }
 
 /// A bounded shared crop queue that continuously replenishes HTTP inference slots.
-#[derive(typed_builder::TypedBuilder)]
 pub struct HttpEngine {
-    queue: FormulaQueue,
-    timeout: Duration,
-    admission: Arc<Semaphore>,
-    // Sender is declared first so it closes before the native worker is joined.
-    _worker: docparse_formula::queue::FormulaWorkers,
+    pool: FormulaPool,
 }
 
 /// The actor owns transport resources independently of producer lifetimes.
@@ -73,16 +67,20 @@ impl TryFrom<&ValidatedConfig> for HttpEngine {
     type Error = HttpError;
     /// Creates a standalone HTTP consumer group using its configured worker limit.
     fn try_from(config: &ValidatedConfig) -> Result<Self, Self::Error> {
-        Self::on_queue(config, None)
+        // Standalone callers retain a real producer; shared initialization returns workers only.
+        let mut pool = FormulaPool::new(config)?;
+        let workers = Self::spawn(config, pool.receiver())?;
+        pool.add(workers);
+        Ok(Self { pool })
     }
 }
 
 impl HttpEngine {
     /// Registers HTTP workers directly on the shared formula queue without creating a second pending queue.
-    pub fn on_queue(
+    pub fn spawn(
         config: &ValidatedConfig,
-        shared: Option<FormulaQueue>,
-    ) -> Result<Self, HttpError> {
+        receiver: docparse_common::Queue<FormulaRequest>,
+    ) -> Result<FormulaWorkers, HttpError> {
         let result = (|| {
             let FormulaEngineConfig::Http(service) =
                 config.formula().single_engine()?
@@ -103,19 +101,7 @@ impl HttpEngine {
                     .permits(Arc::new(Semaphore::new(service.worker_size)))
                     .build(),
             );
-            let attached = shared.is_some();
-            let queue = shared.unwrap_or_else(|| {
-                FormulaQueue::new("formula_http", config.formula().queue_size).0
-            });
-            if !attached {
-                docparse_formula::queue::configure_backpressure(
-                    &queue.pressure(),
-                    config.formula(),
-                )?;
-            }
-            let receiver = queue.receiver();
-            let mut workers =
-                docparse_formula::queue::FormulaWorkers::default();
+            let mut workers = FormulaWorkers::new("formula-http".into());
             let metrics = docparse_common::telemetry::ModelMetrics::new(
                 "formula_http",
                 service.worker_size,
@@ -174,14 +160,7 @@ impl HttpEngine {
                 endpoint,
                 service.worker_size
             );
-            Ok(Self::builder()
-                .queue(queue)
-                .timeout(timeout)
-                .admission(Arc::new(Semaphore::new(
-                    service.worker_size + config.formula().queue_size,
-                )))
-                ._worker(workers)
-                .build())
+            Ok(workers)
         })();
         result.inspect_err(|error| {
             tracing::error!("HTTP formula initialization failed: {}", error)
@@ -324,7 +303,7 @@ impl HttpService {
 impl FormulaEngine for HttpEngine {
     /// Applies the same pending-queue policy to HTTP formula consumers.
     fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        Some(self.queue.pressure())
+        self.pool.pressure()
     }
 
     /// Identifies the external model independently of the local ONNX provider.
@@ -334,7 +313,7 @@ impl FormulaEngine for HttpEngine {
 
     /// Limits retained crop pixels globally before requests reach the HTTP queue.
     fn admission(&self) -> Option<Arc<Semaphore>> {
-        Some(Arc::clone(&self.admission))
+        self.pool.admission()
     }
 
     /// Runs bounded crop requests concurrently while preserving order and a single batch deadline.
@@ -352,11 +331,7 @@ impl FormulaEngine for HttpEngine {
                 );
             }
             tracing::debug!("queuing {} HTTP formula crops", count);
-            let result = timeout(self.timeout, self.queue.run(images, timings))
-                .await
-                .unwrap_or_else(|_elapsed| {
-                    Err(HttpError::Timeout(self.timeout.as_millis()).into())
-                });
+            let result = self.pool.recognize(images, timings).await;
             match result {
                 Ok(latex) => {
                     tracing::debug!(

@@ -25,15 +25,14 @@ fn crop(value: u8) -> Arc<PageImage> {
 /// Different consumers drain their own batch limits from one queue and may complete out of order.
 #[tokio::test]
 async fn consumers_share_pending_work_and_preserve_provenance() {
-    let (queue, _) = FormulaQueue::new("mixed-test", 12);
-    let first = queue.consumer();
-    let second = queue.consumer();
-    assert!(Arc::ptr_eq(&first.pressure(), &second.pressure()));
+    let (queue, first) = FormulaQueue::new("mixed-test", 12);
+    // Consumer handles expose only receiving, while both drain the same producer channel.
+    let second = first.clone();
     let work = queue.run_named((0..12).map(crop).collect(), Timings::default());
     tokio::pin!(work);
     assert!(futures_util::poll!(&mut work).is_pending());
-    let a = first.receiver();
-    let b = second.receiver();
+    let a = first;
+    let b = second;
     let mut batches = Vec::new();
     for (receiver, limit, name, expected) in [
         (&a, 2, "texo", 2),

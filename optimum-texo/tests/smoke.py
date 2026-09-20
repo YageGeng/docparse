@@ -1,7 +1,8 @@
 """Verify a running CUDA service against the repository's real Texo reference crops."""
+
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -11,14 +12,25 @@ def main():
     """Check reference parity, concurrent batching, invalid inputs, and recovery over real HTTP."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:6008")
-    parser.add_argument("--fixtures", type=Path, default=Path(__file__).resolve().parents[2] / "crates/formula-texo/tests/fixtures")
+    parser.add_argument(
+        "--fixtures",
+        type=Path,
+        default=Path(__file__).resolve().parents[2]
+        / "crates/formula-texo/tests/fixtures",
+    )
     args = parser.parse_args()
     base = args.url.rstrip("/")
     response = requests.get(base + "/v1/health", timeout=10)
     response.raise_for_status()
     health = response.json()
-    assert health["status"] == "ready" and health["providers"][0] == "CUDAExecutionProvider"
+    assert (
+        health["status"] == "ready"
+        and health["providers"][0] == "CUDAExecutionProvider"
+    )
     assert health["use_cache"] and health["use_io_binding"]
+    # Verify that the live service exposes the validated consumer and queue settings.
+    assert health["session_size"] >= 1 and health["queue_size"] >= 1
+    assert 1 <= health["batch_size"] == health["batch_limit"] <= 32
     cases = json.loads((args.fixtures / "reference.json").read_text())["cases"]
 
     def recognize(case, max_tokens=1024):
@@ -27,7 +39,8 @@ def main():
             return requests.post(
                 base + "/v1/predictions/upload",
                 files={"image": (case["image"], image, "image/png")},
-                data={"task": "formula", "max_tokens": str(max_tokens)}, timeout=120,
+                data={"task": "formula", "max_tokens": str(max_tokens)},
+                timeout=120,
             )
 
     for case in cases:
@@ -43,13 +56,31 @@ def main():
     batches = sorted({response.json()["batch_size"] for response in responses})
     if health["batch_limit"] > 1:
         assert max(batches) > 1, "concurrent requests did not form a model batch"
-    invalid = requests.post(base + "/v1/predictions/upload", files={"image": ("bad.png", b"not an image", "image/png")}, timeout=10)
+    invalid = requests.post(
+        base + "/v1/predictions/upload",
+        files={"image": ("bad.png", b"not an image", "image/png")},
+        timeout=10,
+    )
     assert invalid.status_code == 400, invalid.status_code
     assert recognize(cases[0], max_tokens=2).status_code == 422
     recovered = recognize(cases[0])
     recovered.raise_for_status()
     assert recovered.json()["text"] == cases[0]["latex"]
-    print(json.dumps({"reference_cases": len(cases), "concurrent_requests": len(work), "observed_batches": batches, "invalid_image": 400, "incomplete_generation": 422, "recovery": "passed"}))
+    print(
+        json.dumps(
+            {
+                "reference_cases": len(cases),
+                "concurrent_requests": len(work),
+                "observed_batches": batches,
+                "session_size": health["session_size"],
+                "queue_size": health["queue_size"],
+                "batch_size": health["batch_size"],
+                "invalid_image": 400,
+                "incomplete_generation": 422,
+                "recovery": "passed",
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

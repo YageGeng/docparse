@@ -3,7 +3,10 @@ use crate::{
     TexoArtifacts, TexoEngine,
     model::{Generation, MAX_LENGTH, ModelSessions, StepOutput},
 };
-use docparse_formula::{FormulaError, queue::FormulaQueue};
+use docparse_formula::{
+    FormulaError,
+    queue::{FormulaRequest, FormulaWorkers},
+};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,14 +23,23 @@ mod platform {
         pub async fn from_config(
             config: Arc<docparse_config::ValidatedConfig>,
         ) -> Result<Self, FormulaError> {
-            Self::from_config_on_queue(config, None).await
+            let artifacts = Self::load_artifacts(&config).await?;
+            Self::from_artifacts(config, artifacts).await
         }
 
         /// Loads this group's artifacts and attaches its sessions to the shared queue.
-        pub async fn from_config_on_queue(
+        pub async fn spawn_from_config(
             config: Arc<docparse_config::ValidatedConfig>,
-            queue: Option<FormulaQueue>,
-        ) -> Result<Self, FormulaError> {
+            receiver: docparse_common::Queue<FormulaRequest>,
+        ) -> Result<FormulaWorkers, FormulaError> {
+            let artifacts = Self::load_artifacts(&config).await?;
+            Self::spawn_from_artifacts(config, artifacts, receiver).await
+        }
+
+        /// Reads this group's configured bytes for standalone or shared execution.
+        async fn load_artifacts(
+            config: &docparse_config::ValidatedConfig,
+        ) -> Result<TexoArtifacts, FormulaError> {
             let docparse_config::FormulaEngineConfig::Texo(paths) =
                 config.formula().single_engine()?.clone()
             else {
@@ -42,7 +54,7 @@ mod platform {
                 TexoArtifacts::try_from(&paths)
             })
             .await??;
-            Self::from_artifacts_on_queue(config, artifacts, queue).await
+            Ok(artifacts)
         }
     }
     impl TryFrom<&docparse_config::TexoFormulaConfig> for TexoArtifacts {
@@ -78,33 +90,23 @@ mod platform {
 mod platform {
     use super::*;
     use crate::preprocess::FormulaInput;
-    use docparse_common::timing::{TimingStage, Timings};
-    use docparse_formula::queue::{BatchTimings, FormulaRequest};
-    use docparse_layout::{PageImage, wasm_compat::OnnxBackend};
+    use docparse_common::timing::TimingStage;
+    use docparse_formula::queue::BatchTimings;
+    use docparse_layout::wasm_compat::OnnxBackend;
     use ort::{session::builder::SessionBuilder, value::Tensor};
     use ort_web::{SyncDirection, ValueExt};
 
     /// One bounded crop queue is shared by all callers in the browser Worker.
-    pub(crate) struct SessionRunner {
-        queue: FormulaQueue,
-        _workers: docparse_formula::queue::FormulaWorkers,
-    }
+    pub(crate) struct SessionRunner;
 
     impl SessionRunner {
-        /// Shares the browser pending queue's pressure state with the engine.
-        pub(crate) fn pressure(
-            &self,
-        ) -> Arc<docparse_common::queue::QueuePressure> {
-            self.queue.pressure()
-        }
-
         /// Loads both graphs using the host-initialized ORT Web backend and starts their local owner.
         pub(crate) async fn load(
             artifacts: TexoArtifacts,
             backend: OnnxBackend,
             config: &docparse_config::FormulaConfig,
-            shared: Option<FormulaQueue>,
-        ) -> Result<Arc<Self>, FormulaError> {
+            receiver: docparse_common::Queue<FormulaRequest>,
+        ) -> Result<FormulaWorkers, FormulaError> {
             let docparse_config::FormulaEngineConfig::Texo(texo) =
                 config.single_engine()?
             else {
@@ -113,12 +115,11 @@ mod platform {
                 ));
             };
             let batch_size = texo.batch_size;
-            let queue = shared.unwrap_or_else(|| {
-                FormulaQueue::new("formula_texo", config.queue_size).0
-            });
-            let receiver = queue.receiver();
-            let mut workers =
-                docparse_formula::queue::FormulaWorkers::default();
+            // Shared consumers own execution only, never a producer handle.
+            let mut workers = FormulaWorkers::new(format!(
+                "texo-transfer-onnx-{}",
+                backend.execution_provider()
+            ));
             for _ in 0..texo.worker_size {
                 // Apply the shared runtime settings to both graphs, including their memory policy.
                 let mut encoder_builder = SessionBuilder::try_from(backend)?;
@@ -214,19 +215,7 @@ mod platform {
                     },
                 ))?;
             }
-            Ok(Arc::new(Self {
-                queue,
-                _workers: workers,
-            }))
-        }
-
-        /// Publishes crops independently while preserving the caller's original output order.
-        pub(crate) async fn run(
-            self: Arc<Self>,
-            images: Vec<Arc<PageImage>>,
-            timings: Timings,
-        ) -> Result<Vec<String>, FormulaError> {
-            self.queue.run(images, timings).await
+            Ok(workers)
         }
     }
 
@@ -241,11 +230,11 @@ mod platform {
             Err(FormulaError::ArtifactsRequired)
         }
         /// Browser consumers require explicit bytes rather than filesystem access.
-        pub async fn from_config_on_queue(
-            config: Arc<docparse_config::ValidatedConfig>,
-            _queue: Option<FormulaQueue>,
-        ) -> Result<Self, FormulaError> {
-            Self::from_config(config).await
+        pub async fn spawn_from_config(
+            _config: Arc<docparse_config::ValidatedConfig>,
+            _receiver: docparse_common::Queue<FormulaRequest>,
+        ) -> Result<FormulaWorkers, FormulaError> {
+            Err(FormulaError::ArtifactsRequired)
         }
     }
 }

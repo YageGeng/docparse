@@ -103,11 +103,9 @@ mod platform {
             {
                 render.remove("workers");
             }
-            let mut figment = Self::merge_source(
-                Figment::from(Serialized::defaults(defaults)),
-                Toml::file(&config_path),
-            )
-            .map_err(&load_error)?;
+            // Consumer arrays replace previous lists through Figment directly; merging cannot fail here.
+            let mut figment = Figment::from(Serialized::defaults(defaults))
+                .merge(Toml::file(&config_path));
 
             if let Some(profile) = selected_profile {
                 Self::validate_profile_name(&profile)?;
@@ -120,21 +118,12 @@ mod platform {
                     });
                 }
 
-                figment = Self::merge_source(figment, Toml::file(profile_path))
-                    .map_err(&load_error)?;
+                figment = figment.merge(Toml::file(profile_path));
             }
 
-            figment = Self::merge_source(
-                figment,
-                Serialized::defaults(environment_values),
-            )
-            .map_err(&load_error)?;
+            figment = figment.merge(Serialized::defaults(environment_values));
             if let Some(overrides) = explicit_overrides {
-                figment = Self::merge_source(
-                    figment,
-                    Serialized::defaults(overrides),
-                )
-                .map_err(&load_error)?;
+                figment = figment.merge(Serialized::defaults(overrides));
             }
 
             let mut config: RawConfig =
@@ -154,15 +143,6 @@ mod platform {
                     Self::remove_queue_defaults(nested);
                 }
             }
-        }
-
-        /// Replaces model-specific defaults when a higher-priority layer switches the tagged engine.
-        fn merge_source(
-            base: Figment,
-            source: impl figment::Provider,
-        ) -> Result<Figment, Box<figment::Error>> {
-            // Arrays replace the previous consumer list atomically; individual tagged entries must not be merged by index.
-            Ok(base.merge(source))
         }
 
         /// Reads configuration values and a profile from either the injected or process environment.

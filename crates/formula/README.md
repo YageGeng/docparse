@@ -117,6 +117,11 @@ Apache-2.0 license notices.
 ## Shared queue
 
 Native and browser sessions use one bounded per-crop queue shared by all callers.
+In Rust, `FormulaPool` owns submission and admission. Shared groups receive
+`pool.receiver()` and return `FormulaWorkers` through `spawn_from_artifacts`,
+`spawn_from_config`, or `HttpEngine::spawn`; retain these owners with `pool.add`.
+Workers expose no recognition API. Standalone engine constructors keep their
+own pool and continue to implement `FormulaEngine`.
 Required `formula.queue_size` sets its capacity independently of sessions and batches.
 `formula.engine[].worker_size` creates consumers on the selected backend (default 1,
 positive, with no fixed upper limit). PP retains its CPU compatibility executor for

@@ -56,9 +56,8 @@ impl TryFrom<SessionOutputs<'_>> for StepOutput {
 
 /// Reusable Texo sessions with bounded ownership and one result per input crop.
 pub struct TexoEngine {
-    runner: Arc<SessionRunner>,
+    pool: docparse_formula::queue::FormulaPool,
     name: String,
-    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl TexoEngine {
@@ -67,15 +66,24 @@ impl TexoEngine {
         config: Arc<ValidatedConfig>,
         artifacts: TexoArtifacts,
     ) -> Result<Self, FormulaError> {
-        Self::from_artifacts_on_queue(config, artifacts, None).await
+        // Standalone engines own the same producer pool used by mixed configurations.
+        let mut pool = docparse_formula::queue::FormulaPool::new(&config)?;
+        let workers =
+            Self::spawn_from_artifacts(config, artifacts, pool.receiver())
+                .await?;
+        let name = workers.name().to_owned();
+        pool.add(workers);
+        Ok(Self { pool, name })
     }
 
-    /// Attaches execution owners to an existing shared queue, or creates a standalone queue.
-    pub async fn from_artifacts_on_queue(
+    /// Initializes execution owners on the receiving side of an existing pool.
+    pub async fn spawn_from_artifacts(
         config: Arc<ValidatedConfig>,
         artifacts: TexoArtifacts,
-        queue: Option<docparse_formula::queue::FormulaQueue>,
-    ) -> Result<Self, FormulaError> {
+        receiver: docparse_common::Queue<
+            docparse_formula::queue::FormulaRequest,
+        >,
+    ) -> Result<docparse_formula::queue::FormulaWorkers, FormulaError> {
         let artifacts = docparse_common::run_cpu(move || {
             artifacts.verify()?;
             Ok::<_, FormulaError>(artifacts)
@@ -87,20 +95,14 @@ impl TexoEngine {
             "loading Texo ONNX encoder and cached decoder with provider {}",
             backend.execution_provider()
         );
-        let shared = queue.is_some();
         let runner =
-            SessionRunner::load(artifacts, backend, config.formula(), queue)
+            SessionRunner::load(artifacts, backend, config.formula(), receiver)
                 .await
                 .map_err(|error| {
                     tracing::error!("Texo initialization failed: {}", error);
                     error
                 })?;
-        if !shared {
-            docparse_formula::queue::configure_backpressure(
-                &runner.pressure(),
-                config.formula(),
-            )?;
-        }
+
         let session_size = config.formula().single_engine()?.worker_size();
         let provider = backend.execution_provider();
         tracing::info!(
@@ -108,22 +110,14 @@ impl TexoEngine {
             session_size,
             provider
         );
-        Ok(Self {
-            runner,
-            admission: Arc::new(tokio::sync::Semaphore::new(
-                config.formula().queue_size
-                    + config.formula().single_engine()?.batch_size()
-                        * session_size,
-            )),
-            name: format!("texo-transfer-onnx-{provider}"),
-        })
+        Ok(runner)
     }
 }
 
 impl FormulaEngine for TexoEngine {
     /// Shares adaptive admission across all documents using this engine.
     fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        Some(self.runner.pressure())
+        self.pool.pressure()
     }
 
     /// Reports the selected model and registered execution provider.
@@ -133,7 +127,7 @@ impl FormulaEngine for TexoEngine {
 
     /// Bounds pre-crop admission globally instead of allocating one ready window per page.
     fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
-        Some(Arc::clone(&self.admission))
+        self.pool.admission()
     }
 
     /// Preserves input order, propagates cancellation, and refuses truncated output.
@@ -149,12 +143,10 @@ impl FormulaEngine for TexoEngine {
                     "Texo batch size must be 1..32".into(),
                 ));
             }
-            Arc::clone(&self.runner).run(images, timings).await.map_err(
-                |error| {
-                    tracing::warn!("Texo formula batch failed: {}", error);
-                    error
-                },
-            )
+            self.pool.recognize(images, timings).await.map_err(|error| {
+                tracing::warn!("Texo formula batch failed: {}", error);
+                error
+            })
         })
     }
 }

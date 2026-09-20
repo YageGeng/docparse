@@ -237,16 +237,13 @@ async fn multiple_http_groups_share_one_formula_queue() {
         config.formula().queue_size + 3
     );
     for index in 0..2 {
-        let engine = HttpEngine::on_queue(
+        let engine = HttpEngine::spawn(
             &config.for_formula_engine(index).expect("group"),
-            Some(pool.consumer()),
+            pool.receiver(),
         )
         .expect("consumer");
-        assert!(Arc::ptr_eq(
-            &pool.pressure().expect("pool pressure"),
-            &engine.pressure().expect("consumer pressure")
-        ));
-        pool.add(Arc::new(engine));
+        assert_eq!(engine.name(), "formula-http");
+        pool.add(engine);
     }
     let output = pool
         .recognize_named(

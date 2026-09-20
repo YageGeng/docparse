@@ -12,9 +12,7 @@ use typed_builder::TypedBuilder;
 /// One sender represents the same queue across every page and document using an engine.
 #[derive(Clone)]
 pub struct FormulaQueue {
-    sender: Option<docparse_common::queue::QueueSender<FormulaRequest>>,
-    receiver: Queue<FormulaRequest>,
-    pressure: Arc<docparse_common::queue::QueuePressure>,
+    sender: docparse_common::queue::QueueSender<FormulaRequest>,
 }
 
 /// Connects the formula policy to the actual queue before producer access begins.
@@ -37,7 +35,7 @@ pub fn configure_backpressure(
 impl FormulaQueue {
     /// Shares pressure tracking across every caller of this engine.
     pub fn pressure(&self) -> Arc<docparse_common::queue::QueuePressure> {
-        Arc::clone(&self.pressure)
+        self.sender.pressure()
     }
 
     /// Creates a bounded crop queue; capacity must be positive, as with Tokio channels.
@@ -46,29 +44,7 @@ impl FormulaQueue {
         capacity: usize,
     ) -> (Self, Queue<FormulaRequest>) {
         let (sender, receiver) = Queue::new(name, capacity);
-        let pressure = sender.pressure();
-        (
-            Self {
-                sender: Some(sender),
-                receiver: receiver.clone(),
-                pressure,
-            },
-            receiver,
-        )
-    }
-
-    /// Shares only the receiving side so engine owners cannot keep their own queue alive during shutdown.
-    pub fn consumer(&self) -> Self {
-        Self {
-            sender: None,
-            receiver: self.receiver.clone(),
-            pressure: Arc::clone(&self.pressure),
-        }
-    }
-
-    /// Returns another consumer of the same pending-crop channel.
-    pub fn receiver(&self) -> Queue<FormulaRequest> {
-        self.receiver.clone()
+        (Self { sender }, receiver)
     }
 
     /// Discards consumer identity only for the legacy text-only engine interface.
@@ -91,9 +67,8 @@ impl FormulaQueue {
         images: Vec<Arc<PageImage>>,
         timings: Timings,
     ) -> Result<Vec<FormulaOutput>, FormulaError> {
-        let sender = self.sender.as_ref().ok_or_else(|| {
-            FormulaError::Invalid("consumer cannot submit formula work".into())
-        })?;
+        // Only producer handles expose submission; consumers use Queue<FormulaRequest> directly.
+        let sender = &self.sender;
         if images
             .iter()
             .any(|image| image.width() == 0 || image.height() == 0)
@@ -239,11 +214,26 @@ pub struct FormulaOutput {
 /// Aborts receiver loops before joining native owners, including partial initialization failures.
 #[derive(Default)]
 pub struct FormulaWorkers {
+    name: String,
     aborts: Vec<futures_util::future::AbortHandle>,
     owners: Vec<docparse_common::ThreadManager>,
 }
 
 impl FormulaWorkers {
+    /// Names an execution group without exposing a request-submission interface.
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            aborts: Vec::new(),
+            owners: Vec::new(),
+        }
+    }
+
+    /// Reports the initialized consumer family for lifecycle logs.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Starts one independently owned consumer that can be stopped without closing peer groups.
     pub fn spawn(
         &mut self,
@@ -278,7 +268,8 @@ impl Drop for FormulaWorkers {
 pub struct FormulaPool {
     queue: FormulaQueue,
     admission: Arc<tokio::sync::Semaphore>,
-    engines: Vec<Arc<dyn crate::FormulaEngine>>,
+    receiver: Queue<FormulaRequest>,
+    workers: Vec<FormulaWorkers>,
     timeout: std::time::Duration,
 }
 
@@ -288,26 +279,27 @@ impl FormulaPool {
         config: &docparse_config::ValidatedConfig,
     ) -> Result<Self, FormulaError> {
         let config = config.formula();
-        let (queue, _) = FormulaQueue::new("formula", config.queue_size);
+        let (queue, receiver) = FormulaQueue::new("formula", config.queue_size);
         configure_backpressure(&queue.pressure(), config)?;
         Ok(Self::builder()
             .queue(queue)
             .admission(Arc::new(tokio::sync::Semaphore::new(
                 config.active_capacity() + config.queue_size,
             )))
-            .engines(Vec::new())
+            .receiver(receiver)
+            .workers(Vec::new())
             .timeout(std::time::Duration::from_millis(config.timeout_ms))
             .build())
     }
 
-    /// Gives initialized engines receiving access without another producer queue.
-    pub fn consumer(&self) -> FormulaQueue {
-        self.queue.consumer()
+    /// Gives execution groups receiving access without granting request submission.
+    pub fn receiver(&self) -> Queue<FormulaRequest> {
+        self.receiver.clone()
     }
 
     /// Retains execution owners until the shared pool is shut down.
-    pub fn add(&mut self, engine: Arc<dyn crate::FormulaEngine>) {
-        self.engines.push(engine);
+    pub fn add(&mut self, workers: FormulaWorkers) {
+        self.workers.push(workers);
     }
 }
 

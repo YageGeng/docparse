@@ -1,0 +1,6 @@
+# Each owner loads its own encoder, first-step decoder, and cached decoder.
+session_size = 1
+# Pending requests, excluding the batches already held by session owners.
+queue_size = 128
+# Maximum ready crops per owner; short batches run after a 3 ms collection window.
+batch_size = 16

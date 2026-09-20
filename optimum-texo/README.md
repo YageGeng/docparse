@@ -20,15 +20,39 @@ uv run --locked python prepare_model.py
 
 The startup script works from any directory and defaults to `0.0.0.0:6008`.
 Override `HOST`, `PORT`, or `CUDA_VISIBLE_DEVICES` when needed. Keep one Uvicorn
-worker: each process loads its own CUDA model. `TEXO_BATCH_SIZE` controls the
-server's maximum tensor batch size (default 16, range 1–32).
+worker: `SessionManager` creates the independent model owners inside that process.
+Edit `config.toml` to control concurrency and memory use:
 
-```sh
-CUDA_VISIBLE_DEVICES=0 PORT=6008 TEXO_BATCH_SIZE=16 ./start.sh
+```toml
+session_size = 2
+queue_size = 128
+batch_size = 16
 ```
 
-The server gathers ready uploads for 3 ms, groups equal generation limits, and
-processes them through one model owner. Its pending queue holds 128 images.
+The shipped default is one owner. Each owner loads a complete model with three
+ONNX sessions (encoder, first-step decoder, cached decoder) on a dedicated thread.
+Increasing `session_size` duplicates model and cache memory; throughput depends
+on available GPU resources. `queue_size` counts pending images, excluding up to
+`session_size * batch_size` images already held by consumers. All values must be
+positive integers, and `batch_size` is limited to 32. Unknown keys fail startup.
+These settings replace the former `TEXO_BATCH_SIZE` environment variable.
+
+```sh
+CUDA_VISIBLE_DEVICES=0 PORT=6008 ./start.sh
+# Select another configuration file with an absolute path.
+TEXO_CONFIG=/path/to/config.toml ./start.sh
+```
+
+All owners consume the same bounded request queue. Each drains ready uploads up
+to its batch limit; sparse uploads get a 3 ms collection window, while full ready
+batches start immediately. Equal generation limits are grouped together. Canceled
+queued requests are skipped, and one failed batch does not stop other owners.
+HTTP disconnects cancel the corresponding queued reply; completed batch images
+are released before a consumer waits for new work. Already-running native
+inference retains its inputs until it completes.
+The service becomes ready only after every model has loaded. Partial startup
+failure releases earlier owners; shutdown rejects queued callers and waits for
+running native inference to finish without blocking the API event loop.
 ORT graph optimization is `all`; intra-op thread settings remain at ORT defaults.
 Model files and virtual environments are ignored by Git.
 
@@ -60,6 +84,9 @@ The decoder uses separate first-step and cached graphs (`use_merged=False`).
 - `POST /v1/predictions/upload`: multipart PNG/image input and JSON text output.
 - `/docs`: interactive API documentation.
 
+Health responses also include `session_size`, `queue_size`, `batch_size`,
+`active_sessions`, and the total `active_images` across consumers.
+
 ```sh
 curl --fail http://127.0.0.1:6008/v1/predictions/upload \
   -F 'image=@formula.png' -F 'task=formula' -F 'max_tokens=1024'
@@ -74,6 +101,9 @@ concurrent uploads internally.
 generations return 422 rather than truncated LaTeX. Invalid images return 400,
 empty/oversized uploads 413, full queues or failed inference 503, and requests
 exceeding 120 seconds 504. Uploads are limited to 16 MiB and 16 megapixels.
+After margin cropping, preprocessing also limits the intermediate resized image
+to 16,777,216 pixels. Crops exceeding this limit return 422 without failing
+other images in the same batch.
 Responses contain `text`, `output_tokens`, `batch_size`, `queue_ms`, and
 `inference_time_ms`; the latter is shared batch wall time. CORS and authentication
 are not configured by this service; browser deployments can provide them at a proxy.
@@ -88,10 +118,28 @@ worker_size = 32
 ```
 
 Omit `prompt` and `batch_size` for this HTTP consumer. DocParse's `worker_size`
-controls concurrent uploads; `TEXO_BATCH_SIZE` independently controls GPU batches
-inside this Python service.
+controls concurrent uploads; `config.toml` independently controls the session
+count, pending queue capacity, and GPU batch limit inside this Python service.
 
 ## Verification
+
+From this directory, install the locked dependencies and check all Python scripts
+and tests. Pyright uses the project's Python 3.12 `.venv` via `pyproject.toml`:
+
+```sh
+uv sync --locked
+uvx pyright --project .
+uvx ruff check .
+uvx ruff format --check .
+```
+
+The CPU-only regression checks cover intermediate allocation limits, isolation
+of invalid crops in a batch, unchanged reference preprocessing pixels, TOML
+validation, concurrent owners, queue saturation, cancellation, and teardown:
+
+```sh
+uv run --locked python -m unittest discover -s tests -p 'test_*.py'
+```
 
 With the service running, the check uses the repository's three real reference
 images, compares exact LaTeX, sends 18 requests at concurrency 16, and verifies
@@ -103,3 +151,18 @@ uv run --locked python tests/smoke.py --url http://127.0.0.1:6008
 
 When copying this folder without the rest of the repository, supply
 `--fixtures /path/to/formula-texo/tests/fixtures` explicitly.
+
+### Local throughput check
+
+On an RTX 4060 Laptop GPU (8 GiB), the three reference crops repeated over
+96 requests at HTTP concurrency 32 gave the following median throughput across
+three warmed runs, with `queue_size = 128` and `batch_size = 16`:
+
+| Session owners | Images/second |
+| --- | --- |
+| 1 | 21.38 |
+| 2 | 24.69 |
+
+Every response matched the reference LaTeX. The roughly 15% gain is specific to
+this small workload and device; it is not a general PDF benchmark. The default
+remains one owner so deployments can choose additional model memory explicitly.

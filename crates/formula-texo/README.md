@@ -54,7 +54,10 @@ does not prove that every operator was accelerated.
 The browser host initializes ORT Web and selects WASM CPU or WebGPU through
 `ValidatedConfig::with_webgpu`. Supply `TexoArtifacts { encoder, decoder,
 tokenizer }` to `TexoEngine::from_artifacts` and inject the engine, or set
-`ParserArtifacts::texo_formula`. Do not supply both PP-FormulaNet and Texo artifacts.
+`ParserArtifacts::texo_formula`. For mixed groups, use the ordered
+`ParserArtifacts::formula_engines` list with `None` for HTTP entries. Legacy
+single-family fields are normalized at the parser boundary when that list is
+empty; an explicit list takes precedence and every slot must match its group.
 Native filesystem loading is unavailable in browsers. The JS SDK accepts
 `config.formula.engine[].type` and loads preset resources automatically; callers may
 override them with `formulaArtifacts: { type: "texo", kind: "urls" | "bytes",
