@@ -27,7 +27,13 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(mode=mode):
                 await self._check_upload(mode)
 
-    async def _check_upload(self, mode: str) -> None:
+    async def test_full_queue_waits_for_capacity(self):
+        """Saturated uploads wait for space and still honor transport cancellation and deadlines."""
+        for mode in ["success", "disconnect", "timeout", "cancel"]:
+            with self.subTest(mode=mode):
+                await self._check_upload(mode, saturated=True)
+
+    async def _check_upload(self, mode: str, saturated: bool = False) -> None:
         """Give each transport scenario its own callback scope and independently owned queue."""
         loop = asyncio.get_running_loop()
         entered, queued, disconnected = (
@@ -48,7 +54,7 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("test release timed out")
             return [{"text": "x", "output_tokens": 1} for _ in images]
 
-        manager = SessionManager(Settings(1, 4, 1))
+        manager = SessionManager(Settings(1, 1, 1))
         with (
             patch(
                 "session_manager.load_model",
@@ -63,16 +69,20 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
             patch.object(app.state, "manager", manager, create=True),
         ):
             await manager.start()
-            blocker = manager.submit(Image.new("RGB", (1, 1)), 32)
+            blocker = asyncio.create_task(manager.submit(Image.new("RGB", (1, 1)), 32))
             await asyncio.wait_for(entered.wait(), 2)
+            fillers = (
+                [asyncio.create_task(manager.submit(Image.new("RGB", (1, 1)), 32))]
+                if saturated
+                else []
+            )
             submit = manager.submit
 
-            def observe(image, limit):
-                """Capture the production future without altering queue behavior."""
-                future = submit(image, limit)
-                replies.append(future)
+            async def observe(image, limit):
+                """Capture the request task without altering queue admission or inference."""
+                replies.append(asyncio.current_task())
                 queued.set()
-                return future
+                return await submit(image, limit)
 
             data = io.BytesIO()
             Image.new("RGB", (1, 1)).save(data, format="PNG")
@@ -142,7 +152,13 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
                 request = asyncio.create_task(app(scope, receive, send))
                 try:
                     await asyncio.wait_for(queued.wait(), 2)
+                    self.assertEqual(
+                        statuses, [], "queue saturation must not return 503"
+                    )
                     await asyncio.wait_for(listener_started.wait(), 2)
+                    if saturated:
+                        self.assertEqual(manager.health()["queued"], 1)
+                        self.assertFalse(replies[0].done())
                     if mode == "disconnect":
                         disconnected.set()
                     elif mode == "success":
@@ -165,12 +181,14 @@ class UploadTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     release.set()
                     await asyncio.wait_for(
-                        asyncio.gather(request, blocker, return_exceptions=True),
+                        asyncio.gather(
+                            request, blocker, *fillers, return_exceptions=True
+                        ),
                         3,
                     )
                     await manager.queue.join()
                     await manager.close()
-            self.assertEqual(len(calls), 2 if mode == "success" else 1)
+            self.assertEqual(len(calls), (2 if mode == "success" else 1) + len(fillers))
             self.assertEqual(
                 statuses,
                 {

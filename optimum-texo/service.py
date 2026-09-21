@@ -109,10 +109,10 @@ async def recognize(
             pass
 
     try:
-        future = manager.submit(crop, max_tokens)
+        future = asyncio.create_task(manager.submit(crop, max_tokens))
         disconnected = asyncio.create_task(wait_for_disconnect())
         try:
-            # Client departure must cancel queue ownership, not just discard the eventual HTTP response.
+            # Admission and inference share one deadline and the same disconnect cancellation.
             done, _ = await asyncio.wait(
                 (future, disconnected), timeout=120, return_when=asyncio.FIRST_COMPLETED
             )
@@ -127,14 +127,12 @@ async def recognize(
             # Cover success, timeout, disconnect, and cancellation of the enclosing request task.
             future.cancel()
             disconnected.cancel()
-            await asyncio.gather(disconnected, return_exceptions=True)
-    except asyncio.QueueFull as error:
-        LOG.warning("Texo request queue is full")
-        raise HTTPException(503, "Texo request queue is full") from error
+            await asyncio.gather(future, disconnected, return_exceptions=True)
     except TimeoutError as error:
         LOG.warning("Texo request timed out")
         raise HTTPException(504, "Texo request exceeded 120 seconds") from error
     except RuntimeError as error:
+        LOG.warning("Texo request failed: %s", error)
         raise HTTPException(503, str(error)) from error
     if "error" in result:
         LOG.warning("Texo rejected formula: %s", result["error"])

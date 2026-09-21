@@ -32,9 +32,10 @@ batch_size = 16
 The shipped default is one owner. Each owner loads a complete model with three
 ONNX sessions (encoder, first-step decoder, cached decoder) on a dedicated thread.
 Increasing `session_size` duplicates model and cache memory; throughput depends
-on available GPU resources. `queue_size` counts pending images, excluding up to
-`session_size * batch_size` images already held by consumers. All values must be
-positive integers, and `batch_size` is limited to 32. Unknown keys fail startup.
+on available GPU resources. `queue_size` counts admitted pending images, excluding
+uploads waiting for admission and up to `session_size * batch_size` images already
+held by consumers. All values must be positive integers, and `batch_size` is
+limited to 32. Unknown keys fail startup.
 These settings replace the former `TEXO_BATCH_SIZE` environment variable.
 
 ```sh
@@ -43,16 +44,20 @@ CUDA_VISIBLE_DEVICES=0 PORT=6008 ./start.sh
 TEXO_CONFIG=/path/to/config.toml ./start.sh
 ```
 
-All owners consume the same bounded request queue. Each drains ready uploads up
-to its batch limit; sparse uploads get a 3 ms collection window, while full ready
+All owners consume the same bounded request queue. When it is full, HTTP requests
+await a free slot without blocking the event loop or returning a queue-full 503.
+Waiting uploads retain their decoded images until admission or cancellation.
+Each owner drains ready uploads up to its batch limit; sparse uploads get a
+3 ms collection window, while full ready
 batches start immediately. Equal generation limits are grouped together. Canceled
 queued requests are skipped, and one failed batch does not stop other owners.
-HTTP disconnects cancel the corresponding queued reply; completed batch images
-are released before a consumer waits for new work. Already-running native
-inference retains its inputs until it completes.
+HTTP disconnects cancel admission waits and the corresponding queued reply;
+completed batch images are released before a consumer waits for new work.
+Already-running native inference retains its inputs until it completes.
 The service becomes ready only after every model has loaded. Partial startup
-failure releases earlier owners; shutdown rejects queued callers and waits for
-running native inference to finish without blocking the API event loop.
+failure releases earlier owners; shutdown rejects admission waiters and queued
+callers and waits for running native inference to finish without blocking the API
+event loop.
 ORT graph optimization is `all`; intra-op thread settings remain at ORT defaults.
 Model files and virtual environments are ignored by Git.
 
@@ -99,14 +104,16 @@ concurrent uploads internally.
 
 `max_tokens` limits total sequence length including BOS (2–1024). Unfinished
 generations return 422 rather than truncated LaTeX. Invalid images return 400,
-empty/oversized uploads 413, full queues or failed inference 503, and requests
-exceeding 120 seconds 504. Uploads are limited to 16 MiB and 16 megapixels.
+empty/oversized uploads 413, unavailable sessions or failed inference 503, and
+requests exceeding 120 seconds 504. The deadline covers queue admission, queued
+waiting, and inference. Uploads are limited to 16 MiB and 16 megapixels.
 After margin cropping, preprocessing also limits the intermediate resized image
 to 16,777,216 pixels. Crops exceeding this limit return 422 without failing
 other images in the same batch.
 Responses contain `text`, `output_tokens`, `batch_size`, `queue_ms`, and
-`inference_time_ms`; the latter is shared batch wall time. CORS and authentication
-are not configured by this service; browser deployments can provide them at a proxy.
+`inference_time_ms`. `queue_ms` includes waiting for admission;
+`inference_time_ms` is shared batch wall time. CORS and authentication are not
+configured by this service; browser deployments can provide them at a proxy.
 
 ## DocParse configuration
 

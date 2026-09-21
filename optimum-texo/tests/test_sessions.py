@@ -70,9 +70,12 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                 images = [Image.new("RGB", (1, 1)) for _ in range(3)]
                 references = [weakref.ref(image) for image in images]
                 replies = [
-                    manager.submit(image, budget)
+                    asyncio.create_task(manager.submit(image, budget))
                     for image, budget in zip(images, [32, 2, 16])
                 ]
+                # Start submissions and their queue puts before canceling an admitted crop.
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
                 replies[2].cancel()
                 del images
                 with self.assertLogs("texo.sessions", level="ERROR"):
@@ -118,7 +121,9 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             pending = []
             try:
                 pending = [
-                    manager.submit(Image.new("L", (1, 1), index), 32)
+                    asyncio.create_task(
+                        manager.submit(Image.new("L", (1, 1), index), 32)
+                    )
                     for index in range(4)
                 ]
                 first = await asyncio.wait_for(entered.get(), 3)
@@ -127,16 +132,22 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sorted([first[1], second[1]]), [2, 2])
                 self.assertEqual(manager.health()["active_images"], 4)
                 pending.extend(
-                    manager.submit(Image.new("L", (1, 1), index), 32)
-                    for index in range(4, 8)
+                    asyncio.create_task(
+                        manager.submit(Image.new("L", (1, 1), index), 32)
+                    )
+                    for index in range(4, 24)
                 )
-                with self.assertRaises(asyncio.QueueFull):
-                    manager.submit(Image.new("L", (1, 1)), 32)
+                # Let all submissions run while both native owners still hold their first batch.
+                done, _ = await asyncio.wait(pending, timeout=0.03)
+                self.assertFalse(
+                    done, "full queues must suspend admission instead of rejecting it"
+                )
+                self.assertEqual(manager.health()["queued"], 4)
                 release.set()
                 results = await asyncio.wait_for(asyncio.gather(*pending), 3)
                 self.assertEqual(
                     [result["text"] for result in results],
-                    [str(index) for index in range(8)],
+                    [str(index) for index in range(24)],
                 )
                 for result in results:
                     size = result["batch_size"]
@@ -175,10 +186,13 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             await manager.start()
             try:
                 image = Image.new("L", (1, 1))
-                canceled = manager.submit(image, 99)
+                canceled = asyncio.create_task(manager.submit(image, 99))
+                # Reach queue ownership before cancellation so the consumer must skip this crop.
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
                 canceled.cancel()
-                failed = manager.submit(image, 2)
-                valid = manager.submit(image, 16)
+                failed = asyncio.create_task(manager.submit(image, 2))
+                valid = asyncio.create_task(manager.submit(image, 16))
                 with self.assertLogs("texo.sessions", level="ERROR"):
                     outcomes = await asyncio.gather(
                         failed, valid, return_exceptions=True
@@ -193,7 +207,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await manager.close()
             with self.assertRaises(RuntimeError):
-                manager.submit(image, 32)
+                await manager.submit(image, 32)
 
     async def test_failed_startup_releases_earlier_sessions(self):
         """A later model load failure cannot leave the first owner's thread alive."""
@@ -244,17 +258,26 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             patch("session_manager.generate", generate),
         ):
             await manager.start()
-            active = manager.submit(Image.new("L", (1, 1)), 32)
+            active = asyncio.create_task(manager.submit(Image.new("L", (1, 1)), 32))
             await asyncio.wait_for(entered.wait(), 3)
-            pending = manager.submit(Image.new("L", (1, 1)), 32)
+            pending = [
+                asyncio.create_task(manager.submit(Image.new("L", (1, 1)), 32))
+                for _ in range(6)
+            ]
+            done, _ = await asyncio.wait(pending, timeout=0.03)
+            self.assertFalse(done)
+            self.assertEqual(manager.health()["queued"], 2)
             closing = asyncio.create_task(manager.close())
             try:
                 with self.assertRaises(TimeoutError):
                     await asyncio.wait_for(asyncio.shield(closing), 0.03)
+                self.assertTrue(all(reply.done() for reply in [active, *pending]))
             finally:
                 release.set()
                 await asyncio.wait_for(closing, 3)
-                outcomes = await asyncio.gather(active, pending, return_exceptions=True)
+                outcomes = await asyncio.wait_for(
+                    asyncio.gather(active, *pending, return_exceptions=True), 1
+                )
             self.assertTrue(
                 all(isinstance(outcome, RuntimeError) for outcome in outcomes)
             )

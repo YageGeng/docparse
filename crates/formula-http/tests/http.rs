@@ -355,6 +355,96 @@ async fn bounds_worker_size_across_batches_and_preserves_order() {
     server.abort();
 }
 
+/// A pending upstream response holds its worker and blocks admission once the shared formula queue fills.
+#[tokio::test]
+async fn upstream_wait_backpressures_formula_queue() {
+    let (entered, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let upstream_release = Arc::clone(&release);
+    let router = Router::new().route(
+        "/v1/predictions/upload",
+        post(move || {
+            let entered = entered.clone();
+            let release = Arc::clone(&upstream_release);
+            async move {
+                // Hold the response until the test explicitly frees remote inference capacity.
+                entered.send(()).expect("request observer");
+                release.acquire().await.expect("response gate").forget();
+                Json(json!({"text": "x"}))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener");
+    let mut raw = RawConfig::default();
+    raw.formula.queue_size = 1;
+    raw.formula.engine = vec![FormulaEngineConfig::Http(
+        HttpFormulaConfig::builder()
+            .server_url(format!(
+                "http://{}",
+                listener.local_addr().expect("address")
+            ))
+            .worker_size(1)
+            .build(),
+    )];
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.expect("server");
+    });
+    let config = ValidatedConfig::try_from(raw).expect("config");
+    // FormulaQueue::run_named uses this exact sender; observe admission separately from the reply.
+    let (sender, receiver) = docparse_common::Queue::new("formula-test", 1);
+    let _workers = HttpEngine::spawn(&config, receiver).expect("workers");
+    let mut replies = Vec::new();
+    for index in 0..3 {
+        let (response, reply) = tokio::sync::oneshot::channel();
+        replies.push(reply);
+        let request = docparse_formula::queue::FormulaRequest::builder()
+            .image(crop(index))
+            .response(response)
+            .context(docparse_common::timing::TimingContext::new(
+                Timings::default(),
+            ))
+            .build();
+        let admission = sender.send(request);
+        tokio::pin!(admission);
+        if index == 2 {
+            tokio::time::timeout(Duration::from_millis(30), &mut admission)
+                .await
+                .expect_err("full formula queue must block its producer");
+            assert!(matches!(
+                received.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+            assert!(replies.iter_mut().all(|reply| matches!(
+                reply.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            )));
+            release.add_permits(1);
+        }
+        tokio::time::timeout(Duration::from_secs(3), &mut admission)
+            .await
+            .expect("queue capacity released")
+            .expect("admitted");
+        if index == 0 {
+            tokio::time::timeout(Duration::from_secs(3), received.recv())
+                .await
+                .expect("first HTTP request")
+                .expect("request observer");
+        }
+    }
+    release.add_permits(2);
+    for reply in replies {
+        let output = tokio::time::timeout(Duration::from_secs(3), reply)
+            .await
+            .expect("response deadline")
+            .expect("reply")
+            .expect("inference");
+        assert_eq!(output.latex, "x");
+    }
+    server.abort();
+}
+
 /// An available HTTP slot takes another caller's crop while an earlier slow crop is still running.
 #[tokio::test]
 async fn shared_http_queue_refills_before_slow_caller_finishes() {

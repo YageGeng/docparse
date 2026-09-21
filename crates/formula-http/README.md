@@ -69,6 +69,16 @@ pre-crop admission budget is `formula.queue_size + sum(active crops across all g
 Local entries accept `batch_size`; HTTP entries reject it. Remote services decide
 how concurrent uploads form GPU batches.
 
+Backpressure propagates through pending HTTP responses: when the remote Texo queue
+is full, the upload waits for a free slot while retaining its HTTP worker. Once
+all workers are occupied, the shared formula queue fills and its bounded sender
+awaits capacity. The parser's pre-crop permits remain held until recognition ends,
+so further crops wait before allocating pixels. This uses asynchronous suspension;
+no retry loop or extra client-side request queue is needed. Existing request
+deadlines and cancellation still terminate waiting work. The optional
+`formula.backpressure` policy separately controls inline-formula shedding and is
+disabled by default; bounded queue waiting works independently of that policy.
+
 Results preserve caller order. Deadlines include queue admission, PNG encoding,
 and the HTTP round trip. Cancellation releases HTTP slots; an already-running
 PNG encoder retains its permit until it finishes. The adapter does not retry or

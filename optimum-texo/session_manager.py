@@ -34,6 +34,7 @@ class SessionManager:
         self.queue: asyncio.Queue[Job] = asyncio.Queue(maxsize=settings.queue_size)
         self._executors: list[ThreadPoolExecutor] = []
         self._tasks: list[asyncio.Task[None]] = []
+        self._admissions: set[asyncio.Task[None]] = set()
         self._active = [0] * settings.session_size
         self._providers: list[str] = []
         self._io_binding = False
@@ -69,13 +70,47 @@ class SessionManager:
             await self.close()
             raise
 
-    def submit(self, image: Image.Image, max_length: int) -> asyncio.Future[Response]:
-        """Admit without another waiting queue; callers own timeout and cancellation of replies."""
+    async def submit(self, image: Image.Image, max_length: int) -> Response:
+        """Wait for bounded queue capacity and inference, canceling abandoned work at either stage."""
         if not self._accepting:
+            LOG.warning(
+                "Rejected Texo request because sessions are not accepting requests"
+            )
             raise RuntimeError("Texo sessions are not accepting requests")
         future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
-        self.queue.put_nowait(Job(image, max_length, future, time.perf_counter()))
-        return future
+        submitted = time.perf_counter()
+        waiting = self.queue.full()
+        if waiting:
+            LOG.debug(
+                "Texo queue capacity %d reached; waiting for space",
+                self.settings.queue_size,
+            )
+        # Track puts separately so shutdown can wake producers before draining a Python 3.12 queue.
+        admission = asyncio.create_task(
+            self.queue.put(Job(image, max_length, future, submitted))
+        )
+        # Failed reply tracebacks retain this frame, so keep crop ownership only in the queued job.
+        del image
+        self._admissions.add(admission)
+        try:
+            try:
+                await admission
+            except asyncio.CancelledError:
+                if not self._accepting:
+                    raise RuntimeError("Texo service stopped") from None
+                raise
+            finally:
+                self._admissions.discard(admission)
+                del admission
+            if waiting:
+                LOG.debug(
+                    "Texo request admitted after %.1f ms",
+                    (time.perf_counter() - submitted) * 1000,
+                )
+            return await future
+        finally:
+            # Cancel both queued replies and replies whose native inference is already running.
+            future.cancel()
 
     async def _consume(
         self, index: int, executor: ThreadPoolExecutor, model, tokenizer
@@ -168,6 +203,12 @@ class SessionManager:
     async def close(self) -> None:
         """Stop admission, release pending callers, and join native work without blocking the event loop."""
         self._accepting = False
+        LOG.info(
+            "Stopping Texo sessions with %d pending admissions", len(self._admissions)
+        )
+        for admission in self._admissions:
+            admission.cancel()
+        await asyncio.gather(*self._admissions, return_exceptions=True)
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
