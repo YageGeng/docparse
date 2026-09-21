@@ -22,9 +22,9 @@ sqlx_slow_statements_threshold_ms = 1000
 
 [runtime]
 # Shared by every ONNX session: level1, level2, level3, or all.
-optimization_level = "level1"
+optimization_level = "all"
 # Applied to every model; disable cached memory plans for variable shapes.
-memory_pattern = false
+memory_pattern = true
 continue_on_error = true
 
 [render]
@@ -43,7 +43,7 @@ batch_size = 1
 queue_size = 8
 
 [tsr]
-mode = "tsr_only"
+mode = "fallback"
 session_size = 2
 batch_size = 1
 queue_size = 16
