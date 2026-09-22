@@ -18,6 +18,9 @@ wasm = ["pdfium-sys/wasm"]
 # workspace crates
 pdfium-sys.workspace = true
 
+# builder
+typed-builder.workspace = true
+
 [dev-dependencies]
 # testing
 blake3.workspace = true

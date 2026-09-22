@@ -378,3 +378,24 @@ fn formula_configuration_accepts_bounded_batches() {
             .expect_err("invalid formula batch must fail");
     }
 }
+
+/// Figure delivery is inline unless a directory is named for file output.
+#[test]
+fn figure_file_delivery_requires_a_directory() {
+    let mut inline = RawConfig::default();
+    assert_eq!(
+        inline.figures.delivery,
+        docparse_config::FigureDelivery::Inline
+    );
+    ValidatedConfig::try_from(inline.clone()).expect("inline figures");
+    inline.figures.delivery = docparse_config::FigureDelivery::File;
+    assert!(matches!(
+        ValidatedConfig::try_from(inline.clone()),
+        Err(ConfigError::InvalidValue {
+            field: "figures.directory",
+            ..
+        })
+    ));
+    inline.figures.directory = Some(std::path::PathBuf::from("figures"));
+    ValidatedConfig::try_from(inline).expect("file figures");
+}

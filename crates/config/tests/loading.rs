@@ -800,7 +800,8 @@ fn repository_default_config_matches_documented_defaults() {
     assert!(config.render.queue_size > 0);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
-    assert_eq!(config.tsr.mode, docparse_config::TableMode::TsrOnly);
+    // The checked-in configuration now follows the same fallback policy as library defaults.
+    assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
     assert_eq!(
         RawConfig::default().tsr.mode,
         docparse_config::TableMode::Fallback

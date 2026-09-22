@@ -1,7 +1,7 @@
 use crate::{
-    ConfigError, DatabaseConfig, FormulaConfig, FusionConfig, LayoutConfig,
-    OcrConfig, OutputConfig, RawConfig, RenderConfig, RuntimeConfig,
-    ServerConfig, TsrConfig,
+    ConfigError, DatabaseConfig, FigureConfig, FigureDelivery, FormulaConfig,
+    FusionConfig, LayoutConfig, OcrConfig, OutputConfig, RawConfig,
+    RenderConfig, RuntimeConfig, ServerConfig, TsrConfig,
 };
 use typed_builder::TypedBuilder;
 
@@ -22,6 +22,7 @@ pub struct ValidatedConfig {
     fusion: FusionConfig,
     ocr: OcrConfig,
     output: OutputConfig,
+    figures: FigureConfig,
 }
 
 impl ValidatedConfig {
@@ -78,6 +79,11 @@ impl ValidatedConfig {
     /// Returns validated output rendering options.
     pub fn output(&self) -> &OutputConfig {
         &self.output
+    }
+
+    /// Returns how figure images are embedded or written.
+    pub fn figures(&self) -> &FigureConfig {
+        &self.figures
     }
 
     /// Validates a finite inclusive unit-interval value.
@@ -286,6 +292,18 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             });
         }
         config.render.validate()?;
+        if config.figures.delivery == FigureDelivery::File
+            && config
+                .figures
+                .directory
+                .as_ref()
+                .is_none_or(|path| path.as_os_str().is_empty())
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "figures.directory",
+                reason: "must be a non-empty directory when figures.delivery is file",
+            });
+        }
 
         Self::validate_unit_interval(
             config.fusion.minimum_line_coverage,
@@ -409,6 +427,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             fusion,
             ocr,
             output,
+            figures,
             // Keep native connection settings and credentials out of parser instances and browser validation.
             ..
         } = config;
@@ -421,6 +440,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
             .fusion(fusion)
             .ocr(ocr)
             .output(output)
+            .figures(figures)
             .build())
     }
 }

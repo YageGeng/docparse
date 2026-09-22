@@ -320,8 +320,9 @@ impl<'a> SemanticAssembler<'a> {
         let polygon = Self::content_polygon(&lines);
         let text = Block::derive_text(&seed.label, &lines);
         let content_bbox = Self::content_bbox(&lines)?.unwrap_or(seed.bbox);
-        // Table whitespace carries empty cells and separators; retain it before containment normalization.
-        let bbox = if seed.label == LayoutLabel::Table {
+        // Label-owned policy keeps visual extents without coupling composition to asset delivery.
+        let bbox = if seed.label == LayoutLabel::Table || seed.label.is_figure()
+        {
             Bbox::try_from([
                 seed.bbox.left.min(content_bbox.left),
                 seed.bbox.top.min(content_bbox.top),
@@ -331,7 +332,7 @@ impl<'a> SemanticAssembler<'a> {
         } else {
             content_bbox
         };
-        let evidence = seed
+        let evidence: Vec<Evidence> = seed
             .assignment_evidence
             .iter()
             .map(|assignment| {
@@ -376,6 +377,8 @@ impl<'a> SemanticAssembler<'a> {
             .evidence(evidence)
             .semantic_hints(BTreeMap::new())
             .lines(lines)
+            .embedded_image_index(seed.embedded_image_index)
+            .figure_bounds(seed.figure_bounds)
             .build())
     }
 

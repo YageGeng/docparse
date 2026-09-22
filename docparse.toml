@@ -133,6 +133,11 @@ formula_placeholder = "[formula]"
 include_evidence = false
 include_diagnostics = true
 
+# inline stores base64 in JSON. file writes the original bytes and stores an absolute path.
+[figures]
+delivery = "inline"
+# directory = "output/figures"
+
 [monitoring]
 # Optional history upstream; live metrics and /metrics do not require Prometheus.
 # prometheus_url = "http://127.0.0.1:19090"

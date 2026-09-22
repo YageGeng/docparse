@@ -20,26 +20,11 @@ impl TryFrom<&mut FormulaCrop<'_>> for PageImage {
     fn try_from(crop: &mut FormulaCrop<'_>) -> Result<Self, Self::Error> {
         let image = &crop.rendered.image;
         let transform = &crop.rendered.transform;
-        if transform.render_size() != (image.width(), image.height()) {
-            return Err(FormulaError::Invalid(
-                "formula image/transform mismatch".into(),
-            ));
-        }
-        let start = transform
-            .viewport_to_rendered(Point::new(crop.bbox.left, crop.bbox.top));
-        let end = transform.viewport_to_rendered(Point::new(
-            crop.bbox.right,
-            crop.bbox.bottom,
-        ));
-        let mut left = start.x.floor().clamp(0.0, image.width() as f64) as u32;
-        let mut top = start.y.floor().clamp(0.0, image.height() as f64) as u32;
-        let mut right = end.x.ceil().clamp(0.0, image.width() as f64) as u32;
-        let mut bottom = end.y.ceil().clamp(0.0, image.height() as f64) as u32;
-        if left >= right || top >= bottom {
-            return Err(FormulaError::Invalid(
-                "formula crop is outside the page".into(),
-            ));
-        }
+        // Share viewport rounding and clipping with figure crops before formula-only expansion.
+        let [mut left, mut top, mut right, mut bottom] = crop
+            .rendered
+            .crop_bounds(crop.bbox)
+            .map_err(FormulaError::Invalid)?;
         if let Some(limit) = crop.expansion {
             // Search locally: crossing a full formula height without a separator is ambiguous, not permission to take another row.
             let margin = (bottom - top).max(2);
@@ -168,28 +153,17 @@ impl TryFrom<&mut FormulaCrop<'_>> for PageImage {
             ])
             .map_err(|error| FormulaError::Invalid(error.to_string()))?;
         }
-        let row_bytes = (right - left) as usize * 3;
-        let mut pixels =
-            Vec::with_capacity(row_bytes * (bottom - top) as usize);
-        for y in top..bottom {
-            let offset =
-                (y as usize * image.width() as usize + left as usize) * 3;
-            pixels.extend_from_slice(
-                image.data().get(offset..offset + row_bytes).ok_or_else(
-                    || {
-                        FormulaError::Invalid(
-                            "formula crop exceeds raster".into(),
-                        )
-                    },
-                )?,
-            );
-        }
+        // Expansion chooses pixel bounds; the same checked copy path serves every raster consumer.
+        let pixels = crop
+            .rendered
+            .crop_pixels([left, top, right, bottom])
+            .map_err(FormulaError::Invalid)?;
         PageImage::try_from(
             PageImageInput::builder()
-                .width(right - left)
-                .height(bottom - top)
+                .width(pixels.width())
+                .height(pixels.height())
                 .pixel_format(image.pixel_format())
-                .data(Arc::from(pixels))
+                .data(Arc::from(pixels.into_raw()))
                 .build(),
         )
         .map_err(|error| FormulaError::Invalid(error.to_string()))
@@ -245,9 +219,10 @@ mod tests {
                     }
                 }
             }
-            let rendered = RenderedPage {
-                page_number: 1,
-                image: Arc::new(
+            // Build with empty figure metadata for this formula-only raster.
+            let rendered = RenderedPage::builder()
+                .page_number(1)
+                .image(Arc::new(
                     PageImage::try_from(
                         PageImageInput::builder()
                             .width(50)
@@ -257,21 +232,23 @@ mod tests {
                             .build(),
                     )
                     .expect("image"),
-                ),
-                transform: PageTransform::try_from(
-                    PageTransformInput::builder()
-                        .page_to_viewport(AffineTransform::identity())
-                        .viewport_width(50.0)
-                        .viewport_height(50.0)
-                        .render_width(50)
-                        .render_height(50)
-                        .model_width(50)
-                        .model_height(50)
-                        .rotation(PageRotation::Degrees0)
-                        .build(),
+                ))
+                .transform(
+                    PageTransform::try_from(
+                        PageTransformInput::builder()
+                            .page_to_viewport(AffineTransform::identity())
+                            .viewport_width(50.0)
+                            .viewport_height(50.0)
+                            .render_width(50)
+                            .render_height(50)
+                            .model_width(50)
+                            .model_height(50)
+                            .rotation(PageRotation::Degrees0)
+                            .build(),
+                    )
+                    .expect("transform"),
                 )
-                .expect("transform"),
-            };
+                .build();
             let original = Bbox::try_from(seed).expect("seed");
             let mut crop = FormulaCrop {
                 bbox: original,

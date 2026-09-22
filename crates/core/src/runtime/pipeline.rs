@@ -53,6 +53,7 @@ struct ScannedDocument {
     context: Arc<DocumentContext>,
     extracted_pages: BTreeMap<u32, ExtractedPage>,
     pre_scan_warnings: BTreeMap<u32, PageWarning>,
+    figure_assets: Arc<crate::FigureAssets>,
     page_errors: Vec<PageError>,
 }
 
@@ -149,6 +150,17 @@ impl ParseRuntime {
         input: impl Into<DocumentSource> + crate::WasmCompatSend,
         options: crate::ParseOptions<'_>,
     ) -> Result<DocumentResult, ParseRuntimeError> {
+        let owned_assets = options.figure_assets.is_none();
+        let figure_assets = options
+            .figure_assets
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| {
+                Arc::new(crate::FigureAssets::new(
+                    self.config.figures().clone(),
+                    "figures-".into(),
+                ))
+            });
         let observer = options.observer;
         let tables =
             options.table_runtime(&self.config, self.table_engine.as_ref())?;
@@ -179,6 +191,7 @@ impl ParseRuntime {
         let mut scanned = match self
             .scan_document(
                 executor.as_ref(),
+                Arc::clone(&figure_assets),
                 &timings,
                 &mut timing_receiver,
                 observer,
@@ -202,6 +215,10 @@ impl ParseRuntime {
             )
             .await?;
         let result = scanned.finish(pages, &timings, observer)?;
+        // Failed or cancelled parses drop all owners and remove their uncommitted directory.
+        if owned_assets {
+            figure_assets.keep(true);
+        }
         drop(total_timer);
         while let Ok(timing) = timing_receiver.try_recv() {
             if let Some(observer) = observer {
@@ -227,6 +244,7 @@ impl ParseRuntime {
     async fn scan_document(
         &self,
         executor: &dyn PdfiumSession,
+        figure_assets: Arc<crate::FigureAssets>,
         timings: &Timings,
         timing_receiver: &mut mpsc::UnboundedReceiver<crate::Timing>,
         observer: Option<&dyn crate::ParseObserver>,
@@ -352,6 +370,7 @@ impl ParseRuntime {
             .context(context)
             .extracted_pages(extracted_pages)
             .pre_scan_warnings(pre_scan_warnings)
+            .figure_assets(figure_assets)
             .page_errors(page_errors)
             .build())
     }
@@ -442,6 +461,7 @@ impl ParseRuntime {
                     let ocr_engine = self.ocr_engine.as_ref().map(Arc::clone);
                     let formula_engine = self.formula_engine.as_ref().map(Arc::clone);
                     let tables = Arc::clone(&tables);
+                    let figure_assets = Arc::clone(&scanned.figure_assets);
                     let context = Arc::clone(&scanned.context);
                     let rendered = rendered.map(|mut rendered| {
                         Arc::make_mut(&mut rendered.image).retain_page(lease.clone());
@@ -453,7 +473,7 @@ impl ParseRuntime {
                             match rendered {
                                 Ok(rendered) => super::analyze_rendered_page(PageAnalysisInput::builder()
                                     .config(config).layout_engine(layout_engine).ocr_engine(ocr_engine).formula_engine(formula_engine)
-                                    .context(context).extracted(extracted).rendered(rendered).timings(timings).tables(tables).build()).await,
+                                    .context(context).extracted(extracted).rendered(rendered).timings(timings).tables(tables).figure_assets(figure_assets).build()).await,
                                 Err(error) if config.runtime().continue_on_error && !error.is_fatal() => {
                                     tracing::warn!("render failed for page {}, using native fallback: {}", page_number, error);
                                     docparse_common::run_cpu(move || analyze_without_render(config, context, extracted, error, timings))

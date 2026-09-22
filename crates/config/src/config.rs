@@ -19,6 +19,10 @@ pub struct RawConfig {
     pub fusion: FusionConfig,
     pub ocr: OcrConfig,
     pub output: OutputConfig,
+    /// Figure bytes are inlined or written beside the parse result.
+    #[builder(default)]
+    #[serde(default)]
+    pub figures: FigureConfig,
     /// Server logging is configured before connections and model initialization.
     #[builder(default)]
     #[serde(default)]
@@ -154,6 +158,7 @@ impl Default for RawConfig {
             .fusion(FusionConfig::default())
             .ocr(OcrConfig::default())
             .output(OutputConfig::default())
+            .figures(FigureConfig::default())
             .build()
     }
 }
@@ -707,6 +712,37 @@ impl Default for OutputConfig {
             .include_evidence(true)
             .include_diagnostics(false)
             .build()
+    }
+}
+
+/// Where figure image bytes are delivered. Exactly one variant is active.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FigureDelivery {
+    /// Embed standard Base64 in the JSON result. This is the default.
+    #[default]
+    Inline,
+    /// Write each image into `directory` and store its absolute path.
+    File,
+}
+
+/// Delivery policy for image, chart, header, footer, and seal layouts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
+#[serde(default, deny_unknown_fields)]
+pub struct FigureConfig {
+    #[builder(default)]
+    pub delivery: FigureDelivery,
+    /// Required when `delivery` is `file`. Relative paths are resolved at write time.
+    #[builder(default)]
+    pub directory: Option<PathBuf>,
+}
+
+impl Default for FigureConfig {
+    /// Inlines figure bytes so a parse does not write a directory unless asked.
+    fn default() -> Self {
+        Self::builder().build()
     }
 }
 

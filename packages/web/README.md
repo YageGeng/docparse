@@ -129,6 +129,15 @@ snapshots and release the PDF/result readers, including after deletion in anothe
 - Text, canonical merged-cell tables and per-page/per-block JSON are rendered
   without interpreting document text as HTML. Complete JSON downloads stream
   directly from the persisted server result.
+- Figure images appear alongside their region text, preserving PDF selection.
+  Inline delivery supports lazy previews and original-byte downloads, with image
+  dimensions and embedded/raster provenance. Failed browser previews retain the
+  download action. File delivery currently returns a server filesystem path, not
+  an HTTP asset URL; the inspector explains that these images cannot be previewed
+  online. Existing results without image fields remain readable; reparse to add images.
+  The JSON inspector replaces Base64 bodies with their character counts to keep
+  large images out of the rendered text. Explicit JSON copying and downloads
+  retain the complete original data.
 
 ## API types
 

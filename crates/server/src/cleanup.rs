@@ -1,6 +1,6 @@
 use crate::{
     code::ApiCode,
-    error::{ApiResult, DatabaseSnafu, RequestSnafu},
+    error::{ApiResult, DatabaseSnafu, RequestSnafu, StorageSnafu},
     state::AppState,
     storage::SharedStorage,
 };
@@ -73,7 +73,7 @@ impl DeletedResults {
                     code: ApiCode::from(&*source),
                 })?;
             if jobs.is_empty() {
-                return Ok(());
+                break;
             }
             for job in jobs {
                 cursor = Some(job.id);
@@ -90,6 +90,90 @@ impl DeletedResults {
                 }
             }
         }
+        self.recover_figures().await
+    }
+
+    /// Reconciles only pending attempt directories; committed assets require no database lookup.
+    async fn recover_figures(&self) -> ApiResult<()> {
+        let mut entries = tokio::fs::read_dir(self.storage.root())
+            .await
+            .context(StorageSnafu {
+                stage: "cleanup-list-figures",
+                code: ApiCode::service_unavailable(5031003),
+            })?;
+        while let Some(entry) =
+            entries.next_entry().await.context(StorageSnafu {
+                stage: "cleanup-read-figure",
+                code: ApiCode::service_unavailable(5031003),
+            })?
+        {
+            let name = entry.file_name();
+            let Some((stem, _)) = name
+                .to_str()
+                .and_then(|name| name.split_once(".json.figures-"))
+            else {
+                continue;
+            };
+            let (Some(id), Some(token)) = (
+                stem.get(..36).and_then(|id| uuid::Uuid::parse_str(id).ok()),
+                stem.get(37..)
+                    .and_then(|token| uuid::Uuid::parse_str(token).ok()),
+            ) else {
+                continue;
+            };
+            if stem.as_bytes().get(36) != Some(&b'-')
+                || !entry
+                    .file_type()
+                    .await
+                    .context(StorageSnafu {
+                        stage: "cleanup-stat-figures",
+                        code: ApiCode::service_unavailable(5031003),
+                    })?
+                    .is_dir()
+            {
+                continue;
+            }
+            let marker = entry.path().join(".pending");
+            if !tokio::fs::try_exists(&marker).await.context(StorageSnafu {
+                stage: "cleanup-check-figures",
+                code: ApiCode::service_unavailable(5031003),
+            })? {
+                continue;
+            }
+            let job = Jobs::find_by_id(&self.db, id).await.with_context(
+                |source| DatabaseSnafu {
+                    stage: "cleanup-find-figure-job",
+                    code: ApiCode::from(&*source),
+                },
+            )?;
+            let result_name = format!("{stem}.json");
+            let committed = job.as_ref().is_some_and(|job| {
+                job.result_path.as_deref() == Some(result_name.as_str())
+            });
+            if !committed
+                && job.as_ref().is_some_and(|job| {
+                    job.status == docparse_database::JobStatus::Running
+                        && job.lease_token == Some(token)
+                })
+            {
+                continue;
+            }
+            // A successful but unacknowledged commit keeps its files; abandoned attempts lose theirs.
+            let cleanup = if committed {
+                tokio::fs::remove_file(marker).await
+            } else {
+                tokio::fs::remove_dir_all(entry.path()).await
+            };
+            if let Err(error) = cleanup
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(error).context(StorageSnafu {
+                    stage: "cleanup-recover-figures",
+                    code: ApiCode::service_unavailable(5031003),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Retries cleanup at startup and every thirty seconds in every server role, stopping promptly on shutdown.

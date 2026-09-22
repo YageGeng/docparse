@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Derived from LiteParse revision b2e76ec5b0c1cb4eb11d67296e916792f4fb5858 and modified for docparse.
 use std::marker::PhantomData;
+use typed_builder::TypedBuilder;
 
 use crate::bitmap::Bitmap;
 use crate::document::{Document, FormEnvironment};
@@ -19,9 +20,11 @@ pub struct ImageBounds {
     pub height: f32,
 }
 
+/// Reads an image stream once after checking its reported length against the caller budget.
 fn image_object_data(
     obj: pdfium_sys::FPDF_PAGEOBJECT,
     decoded: bool,
+    limit: std::os::raw::c_ulong,
 ) -> Option<Vec<u8>> {
     let size = unsafe {
         if decoded {
@@ -34,7 +37,7 @@ fn image_object_data(
             ffi!(FPDFImageObj_GetImageDataRaw(obj, std::ptr::null_mut(), 0))
         }
     };
-    if size == 0 || size > usize::MAX as std::os::raw::c_ulong {
+    if size == 0 || size > limit || size > usize::MAX as std::os::raw::c_ulong {
         return None;
     }
     let mut bytes = vec![0u8; size as usize];
@@ -101,6 +104,71 @@ fn image_filters(obj: pdfium_sys::FPDF_PAGEOBJECT) -> Vec<String> {
 
 fn is_jpeg(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xff, 0xd8, 0xff]) && bytes.ends_with(&[0xff, 0xd9])
+}
+
+/// Image file carried unchanged from a PDF image stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodedImageKind {
+    Jpeg,
+    Png,
+    Jp2,
+    Jpx,
+}
+
+/// Original image-file bytes. Raw pixel samples are not represented here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodedImage {
+    pub kind: EncodedImageKind,
+    pub bytes: Vec<u8>,
+}
+
+/// One axis-aligned embedded image in viewport space.
+#[derive(Debug, Clone, TypedBuilder)]
+pub struct EmbeddedImage {
+    pub bounds: RectF,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    /// Present only when the decoded stream is still a complete image file.
+    #[builder(default)]
+    pub encoded: Option<EncodedImage>,
+}
+
+/// Recognizes complete encoded image streams without transcoding their bytes.
+fn classify_image_file(bytes: &[u8]) -> Option<EncodedImageKind> {
+    if is_jpeg(bytes) {
+        return Some(EncodedImageKind::Jpeg);
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(EncodedImageKind::Png);
+    }
+    // JP2 signature box: length, 'jP  '.
+    if bytes.len() >= 8 && &bytes[4..8] == b"jP  " {
+        return Some(EncodedImageKind::Jp2);
+    }
+    if bytes.starts_with(&[0xff, 0x4f, 0xff, 0x51]) {
+        return Some(EncodedImageKind::Jpx);
+    }
+    None
+}
+
+/// Reads a bounded encoded image using the shared stream length check.
+fn encoded_image_file(
+    obj: pdfium_sys::FPDF_PAGEOBJECT,
+) -> Option<EncodedImage> {
+    let filters = image_filters(obj);
+    let preserves_file = filters
+        .iter()
+        .any(|filter| filter == "DCTDecode" || filter == "JPXDecode");
+    let limit: std::os::raw::c_ulong = if preserves_file {
+        64 * 1024 * 1024
+    } else {
+        // Flate and uncompressed streams are usually raw samples. Only small
+        // buffers are inspected, in case the file itself survived the filter.
+        8 * 1024 * 1024
+    };
+    // Share length validation with the reader instead of querying decoded size twice.
+    let bytes = image_object_data(obj, true, limit)?;
+    classify_image_file(&bytes).map(|kind| EncodedImage { kind, bytes })
 }
 
 /// Metadata for an embedded image page object retained by the extraction
@@ -655,14 +723,17 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             };
 
             let raw_bytes = include_data
-                .then(|| image_object_data(obj, false))
+                .then(|| {
+                    image_object_data(obj, false, std::os::raw::c_ulong::MAX)
+                })
                 .flatten();
             let jpeg_bytes = if include_data
                 && image_filters(obj)
                     .iter()
                     .any(|filter| filter == "DCTDecode")
             {
-                image_object_data(obj, true).filter(|bytes| is_jpeg(bytes))
+                image_object_data(obj, true, std::os::raw::c_ulong::MAX)
+                    .filter(|bytes| is_jpeg(bytes))
             } else {
                 None
             };
@@ -689,6 +760,31 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             images: results,
             error_count,
         }
+    }
+
+    /// Enumerates axis-aligned embedded images, including images inside Form XObjects.
+    ///
+    /// Bounds are viewport rectangles. `encoded` is set only when PDFium's decoded
+    /// stream is still a JPEG, PNG, or JPEG 2000 file; the bytes are not transcoded.
+    pub fn embedded_images(&self, view_box: &RectF) -> Vec<EmbeddedImage> {
+        let viewport = self.viewport_transform(view_box);
+        let count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
+        let mut images = Vec::new();
+        for index in 0..count {
+            let object =
+                unsafe { ffi!(FPDFPage_GetObject(self.handle, index)) };
+            if object.is_null() {
+                continue;
+            }
+            collect_embedded_images(
+                object,
+                &FS_IDENTITY,
+                &viewport,
+                0,
+                &mut images,
+            );
+        }
+        images
     }
 
     /// Extract bounding boxes of filled vector path objects on this page,
@@ -1642,6 +1738,117 @@ fn compose_matrix(
     }
 }
 
+const EMBEDDED_IMAGE_FORM_DEPTH: usize = 6;
+
+/// Rejects rotated or sheared edges that cannot use a rectangular placement.
+fn corners_are_axis_aligned(corners: [(f32, f32); 4]) -> bool {
+    const EDGE_EPSILON: f32 = 0.2;
+    [(0, 1), (1, 2), (2, 3), (3, 0)]
+        .into_iter()
+        .all(|(start, end)| {
+            let dx = (corners[end].0 - corners[start].0).abs();
+            let dy = (corners[end].1 - corners[start].1).abs();
+            dx <= EDGE_EPSILON || dy <= EDGE_EPSILON
+        })
+}
+
+/// Collects placed images recursively while applying ancestor form transforms.
+fn collect_embedded_images(
+    obj: pdfium_sys::FPDF_PAGEOBJECT,
+    parent: &pdfium_sys::FS_MATRIX,
+    viewport: &ViewportTransform,
+    depth: usize,
+    out: &mut Vec<EmbeddedImage>,
+) {
+    let obj_type = unsafe { ffi!(FPDFPageObj_GetType(obj)) };
+    if obj_type == pdfium_sys::FPDF_PAGEOBJ_FORM as i32 {
+        if depth >= EMBEDDED_IMAGE_FORM_DEPTH {
+            return;
+        }
+        let mut form_matrix = FS_IDENTITY;
+        unsafe { ffi!(FPDFPageObj_GetMatrix(obj, &mut form_matrix)) };
+        let combined = compose_matrix(parent, &form_matrix);
+        let count = unsafe { ffi!(FPDFFormObj_CountObjects(obj)) };
+        for index in 0..count {
+            let child = unsafe {
+                ffi!(FPDFFormObj_GetObject(obj, index as std::os::raw::c_ulong))
+            };
+            if child.is_null() {
+                continue;
+            }
+            collect_embedded_images(child, &combined, viewport, depth + 1, out);
+        }
+        return;
+    }
+    if obj_type != pdfium_sys::FPDF_PAGEOBJ_IMAGE as i32 {
+        return;
+    }
+
+    let mut matrix = FS_IDENTITY;
+    unsafe { ffi!(FPDFPageObj_GetMatrix(obj, &mut matrix)) };
+    let matrix = compose_matrix(parent, &matrix);
+    // PDF images are painted on the unit square. Ancestor form matrices are
+    // included in `matrix`; GetBounds would omit them.
+    let local = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+    let mut viewport_corners = [(0.0_f32, 0.0_f32); 4];
+    for (index, (x, y)) in local.into_iter().enumerate() {
+        let page_x = matrix.a * x + matrix.c * y + matrix.e;
+        let page_y = matrix.b * x + matrix.d * y + matrix.f;
+        viewport_corners[index] = viewport.transform_point(page_x, page_y);
+    }
+    if !corners_are_axis_aligned(viewport_corners) {
+        return;
+    }
+    let left = viewport_corners
+        .iter()
+        .map(|corner| corner.0)
+        .fold(f32::INFINITY, f32::min);
+    let right = viewport_corners
+        .iter()
+        .map(|corner| corner.0)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let top = viewport_corners
+        .iter()
+        .map(|corner| corner.1)
+        .fold(f32::INFINITY, f32::min);
+    let bottom = viewport_corners
+        .iter()
+        .map(|corner| corner.1)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if !(right - left > 0.5 && bottom - top > 0.5) {
+        return;
+    }
+
+    let mut pixel_width = 0_u32;
+    let mut pixel_height = 0_u32;
+    let pixel_ok = unsafe {
+        ffi!(FPDFImageObj_GetImagePixelSize(
+            obj,
+            &mut pixel_width,
+            &mut pixel_height
+        ))
+    };
+    if pixel_ok == 0 {
+        pixel_width = 0;
+        pixel_height = 0;
+    }
+    let encoded =
+        encoded_image_file(obj).filter(|_| pixel_width > 0 && pixel_height > 0);
+    out.push(
+        EmbeddedImage::builder()
+            .bounds(RectF {
+                left,
+                top,
+                right,
+                bottom,
+            })
+            .pixel_width(pixel_width)
+            .pixel_height(pixel_height)
+            .encoded(encoded)
+            .build(),
+    );
+}
+
 /// Recursively collect path objects, descending into Form XObjects. `parent`
 /// is the accumulated form matrix mapping this object's content space into
 /// page space (identity at the top level).
@@ -1819,22 +2026,6 @@ where
 /// Recursion limit for nested form XObjects in `filled_path_bounds`.
 const MAX_FORM_DEPTH: u32 = 4;
 
-/// Compose two FS_MATRIX transforms: the result applies `inner` first,
-/// then `outer` (i.e. `outer ∘ inner`).
-fn compose_matrices(
-    outer: &pdfium_sys::FS_MATRIX,
-    inner: &pdfium_sys::FS_MATRIX,
-) -> pdfium_sys::FS_MATRIX {
-    pdfium_sys::FS_MATRIX {
-        a: outer.a * inner.a + outer.c * inner.b,
-        b: outer.b * inner.a + outer.d * inner.b,
-        c: outer.a * inner.c + outer.c * inner.d,
-        d: outer.b * inner.c + outer.d * inner.d,
-        e: outer.a * inner.e + outer.c * inner.f + outer.e,
-        f: outer.b * inner.e + outer.d * inner.f + outer.f,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn collect_filled_paths(
     obj: pdfium_sys::FPDF_PAGEOBJECT,
@@ -1865,7 +2056,8 @@ fn collect_filled_paths(
         };
         let has_m = unsafe { ffi!(FPDFPageObj_GetMatrix(obj, &mut m)) } != 0;
         let combined = match (transform, has_m) {
-            (Some(outer), true) => Some(compose_matrices(outer, &m)),
+            // Share the same composition as image and stroked-path traversal.
+            (Some(outer), true) => Some(compose_matrix(outer, &m)),
             (Some(outer), false) => Some(*outer),
             (None, true) => Some(m),
             (None, false) => None,
@@ -2073,6 +2265,29 @@ mod tests {
             assert!(!is_jpeg(&[0xff, 0xd8, 0xff, 0xe0]));
             assert!(!is_jpeg(&[0x89, b'P', b'N', b'G', 0xff, 0xd9]));
         }
+
+        /// Recognizes the image files PDFium can return without transcoding.
+        #[test]
+        fn classifies_jpeg_png_and_jpeg2000_files() {
+            use crate::EncodedImageKind;
+            use crate::page::classify_image_file;
+            assert_eq!(
+                classify_image_file(&[0xff, 0xd8, 0xff, 0xe0, 1, 0xff, 0xd9]),
+                Some(EncodedImageKind::Jpeg)
+            );
+            assert_eq!(
+                classify_image_file(b"\x89PNG\r\n\x1a\nrest"),
+                Some(EncodedImageKind::Png)
+            );
+            let mut jp2 = vec![0, 0, 0, 12];
+            jp2.extend(b"jP  ");
+            assert_eq!(classify_image_file(&jp2), Some(EncodedImageKind::Jp2));
+            assert_eq!(
+                classify_image_file(&[0xff, 0x4f, 0xff, 0x51, 0, 1]),
+                Some(EncodedImageKind::Jpx)
+            );
+            assert_eq!(classify_image_file(&[1, 2, 3, 4, 5, 6, 7, 8]), None);
+        }
     }
 
     use super::*;
@@ -2186,5 +2401,166 @@ mod tests {
         assert_eq!(link.subtype, "link");
         assert_eq!(link.uri.as_deref(), Some("https://example.com"));
         assert_eq!(link.rect.as_ref().unwrap().top, 130.0);
+    }
+
+    /// Writes binary fixture objects with exact cross-reference offsets.
+    fn binary_document(objects: &[Vec<u8>]) -> Vec<u8> {
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::with_capacity(objects.len());
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            pdf.extend_from_slice(object);
+            pdf.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1)
+                .as_bytes(),
+        );
+        for offset in offsets {
+            pdf.extend_from_slice(
+                format!("{offset:010} 00000 n \n").as_bytes(),
+            );
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    /// Wraps binary fixture payloads with their exact PDF stream lengths.
+    fn stream_object(header: &str, data: &[u8]) -> Vec<u8> {
+        let mut object =
+            format!("{header} /Length {} >>\nstream\n", data.len())
+                .into_bytes();
+        object.extend_from_slice(data);
+        object.extend_from_slice(b"\nendstream");
+        object
+    }
+
+    /// 2×2 red JPEG produced by ImageMagick; bytes must round-trip unchanged.
+    fn tiny_jpeg() -> Vec<u8> {
+        vec![
+            255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1,
+            0, 0, 255, 219, 0, 67, 0, 3, 2, 2, 2, 2, 2, 3, 2, 2, 2, 3, 3, 3, 3,
+            4, 6, 4, 4, 4, 4, 4, 8, 6, 6, 5, 6, 9, 8, 10, 10, 9, 8, 9, 9, 10,
+            12, 15, 12, 10, 11, 14, 11, 9, 9, 13, 17, 13, 14, 15, 16, 16, 17,
+            16, 10, 12, 18, 19, 18, 16, 19, 15, 16, 16, 16, 255, 219, 0, 67, 1,
+            3, 3, 3, 4, 3, 4, 8, 4, 4, 8, 16, 11, 9, 11, 16, 16, 16, 16, 16,
+            16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
+            16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
+            16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 255,
+            192, 0, 17, 8, 0, 2, 0, 2, 3, 1, 17, 0, 2, 17, 1, 3, 17, 1, 255,
+            196, 0, 20, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8,
+            255, 196, 0, 20, 16, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 255, 196, 0, 21, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 7, 9, 255, 196, 0, 20, 17, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 255, 218, 0, 12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0,
+            58, 3, 21, 77, 255, 217,
+        ]
+    }
+
+    /// 1×1 red PNG. The PDF stores this file, not decoded pixels.
+    fn tiny_png() -> Vec<u8> {
+        vec![
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0,
+            0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12,
+            73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 0, 3, 1, 1, 0, 201,
+            254, 146, 239, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ]
+    }
+
+    /// Keeps original JPEG and PNG bytes, including a JPEG placed inside a form.
+    #[test]
+    fn embedded_images_keep_original_files_and_form_placement() {
+        let jpeg = tiny_jpeg();
+        let png = tiny_png();
+        let form_stream = b"q\n100 0 0 80 0 0 cm\n/Im1 Do\nQ\n";
+        let contents = b"\
+q\n100 0 0 80 40 90 cm\n/Im1 Do\nQ\n\
+q\n30 0 0 30 20 20 cm\n/Im2 Do\nQ\n\
+q\n1 0 0 1 10 200 cm\n/Fm Do\nQ\n";
+        let bytes = binary_document(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] \
+/Resources << /XObject << /Im1 4 0 R /Im2 5 0 R /Fm 7 0 R >> >> \
+/Contents 6 0 R >>"
+                .to_vec(),
+            stream_object(
+                "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 \
+/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode",
+                &jpeg,
+            ),
+            stream_object(
+                "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 \
+/ColorSpace /DeviceRGB /BitsPerComponent 8",
+                &png,
+            ),
+            stream_object("<<", contents),
+            stream_object(
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 100 80] \
+/Resources << /XObject << /Im1 4 0 R >> >>",
+                form_stream,
+            ),
+        ]);
+        let library = Library::init();
+        let document = library.load_document_from_bytes(&bytes, None).unwrap();
+        let page = document.page(0).unwrap();
+        let view_box = page.view_box().unwrap();
+        let images = page.embedded_images(&view_box);
+        assert_eq!(images.len(), 3, "page image, png, and form image");
+
+        let mut jpeg_hits = 0;
+        let mut png_hits = 0;
+        for image in &images {
+            let encoded = image.encoded.as_ref().expect("original file");
+            match encoded.kind {
+                EncodedImageKind::Jpeg => {
+                    assert_eq!(encoded.bytes, jpeg);
+                    assert_eq!((image.pixel_width, image.pixel_height), (2, 2));
+                    jpeg_hits += 1;
+                }
+                EncodedImageKind::Png => {
+                    assert_eq!(encoded.bytes, png);
+                    assert_eq!((image.pixel_width, image.pixel_height), (1, 1));
+                    png_hits += 1;
+                }
+                EncodedImageKind::Jp2 | EncodedImageKind::Jpx => {
+                    panic!("fixture has no JPEG 2000 image");
+                }
+            }
+        }
+        assert_eq!(jpeg_hits, 2);
+        assert_eq!(png_hits, 1);
+
+        let direct = images
+            .iter()
+            .find(|image| {
+                image.encoded.as_ref().is_some_and(|encoded| {
+                    encoded.kind == EncodedImageKind::Jpeg
+                }) && (image.bounds.left - 40.0).abs() < 1.0
+            })
+            .expect("directly painted jpeg");
+        assert!((direct.bounds.top - 230.0).abs() < 1.0);
+        assert!((direct.bounds.right - 140.0).abs() < 1.0);
+        assert!((direct.bounds.bottom - 310.0).abs() < 1.0);
+
+        let nested = images
+            .iter()
+            .find(|image| {
+                image.encoded.as_ref().is_some_and(|encoded| {
+                    encoded.kind == EncodedImageKind::Jpeg
+                }) && (image.bounds.left - 10.0).abs() < 1.0
+            })
+            .expect("form jpeg");
+        assert!((nested.bounds.top - 120.0).abs() < 1.0);
+        assert!((nested.bounds.right - 110.0).abs() < 1.0);
+        assert!((nested.bounds.bottom - 200.0).abs() < 1.0);
     }
 }

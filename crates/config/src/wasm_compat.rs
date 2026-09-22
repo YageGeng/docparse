@@ -327,6 +327,12 @@ mod platform {
                     value: config.render.workers,
                 });
             }
+            if config.figures.delivery == crate::FigureDelivery::File {
+                return Err(crate::ConfigError::InvalidValue {
+                    field: "figures.delivery",
+                    reason: "file output is not available in the browser",
+                });
+            }
             Ok(())
         }
     }

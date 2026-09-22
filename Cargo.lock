@@ -1196,6 +1196,7 @@ dependencies = [
 name = "docparse-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "blake3",
  "docparse-common",
  "docparse-config",
@@ -1381,6 +1382,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "docparse-pdfium-sys",
+ "typed-builder",
 ]
 
 [[package]]

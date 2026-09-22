@@ -273,8 +273,11 @@ impl PageAnalyzer {
             .build()
             .merge(&mut text_items, &mut warnings, ocr);
 
+        let figure_matches =
+            crate::figure::FigureCatalog::new(&extracted.embedded_images)
+                .match_detections(&detections, page_bbox);
         let AssignmentResult {
-            model_seeds,
+            mut model_seeds,
             reference_seeds,
             residual,
             inline_formulas,
@@ -285,6 +288,14 @@ impl PageAnalyzer {
             self.config.fusion().clone(),
         )
         .assign(text_items, detections)?;
+        for seed in &mut model_seeds {
+            if let Some(matched) =
+                figure_matches.get(&seed.source_detection_index)
+            {
+                seed.embedded_image_index = Some(matched.image_index);
+                seed.figure_bounds = Some(matched.bounds);
+            }
+        }
         let references: Vec<_> = reference_seeds
             .into_iter()
             .map(|seed| assembler.reference_block(seed))
@@ -311,7 +322,9 @@ impl PageAnalyzer {
         let fallback = assembler.fallback_blocks(residual, &fallback_tree)?;
         blocks.extend(fallback.blocks);
         warnings.extend(fallback.warnings);
-        let blocks = assembler.normalize_blocks(blocks)?;
+        let mut blocks = assembler.normalize_blocks(blocks)?;
+        // Expand after merging so a larger image rectangle cannot swallow a neighbor.
+        crate::figure::FigureCatalog::place(&mut blocks);
         Ok(PageTableDraft::builder()
             .blocks(blocks)
             .warnings(warnings)

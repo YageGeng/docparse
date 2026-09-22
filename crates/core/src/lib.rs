@@ -6,6 +6,7 @@ pub use wasm_compat::*;
 mod context;
 mod error;
 mod extract;
+mod figure;
 mod fusion;
 mod glyph_resolver;
 mod label_policy;

@@ -919,9 +919,10 @@ mod tests {
         .expect("raster")
         .into_rgb8();
         let (width, height) = raster.dimensions();
-        let rendered = RenderedPage {
-            page_number: page.page_number,
-            image: Arc::new(
+        // Build with empty figure metadata for this formula-only raster.
+        let rendered = RenderedPage::builder()
+            .page_number(page.page_number)
+            .image(Arc::new(
                 PageImage::try_from(
                     PageImageInput::builder()
                         .width(width)
@@ -931,21 +932,23 @@ mod tests {
                         .build(),
                 )
                 .expect("image"),
-            ),
-            transform: PageTransform::try_from(
-                PageTransformInput::builder()
-                    .page_to_viewport(AffineTransform::identity())
-                    .viewport_width(page.width)
-                    .viewport_height(page.height)
-                    .render_width(width)
-                    .render_height(height)
-                    .model_width(width)
-                    .model_height(height)
-                    .rotation(PageRotation::Degrees0)
-                    .build(),
+            ))
+            .transform(
+                PageTransform::try_from(
+                    PageTransformInput::builder()
+                        .page_to_viewport(AffineTransform::identity())
+                        .viewport_width(page.width)
+                        .viewport_height(page.height)
+                        .render_width(width)
+                        .render_height(height)
+                        .model_width(width)
+                        .model_height(height)
+                        .rotation(PageRotation::Degrees0)
+                        .build(),
+                )
+                .expect("transform"),
             )
-            .expect("transform"),
-        };
+            .build();
         let formulas: Vec<_> = page
             .formulas
             .iter()
@@ -1084,9 +1087,10 @@ mod tests {
                 let expected =
                     image::imageops::crop_imm(&raster, 16, 14, 18, 22)
                         .to_image();
-                let rendered = RenderedPage {
-                    page_number: 1,
-                    image: Arc::new(
+                // Build with empty figure metadata for this formula-only raster.
+                let rendered = RenderedPage::builder()
+                    .page_number(1)
+                    .image(Arc::new(
                         PageImage::try_from(
                             PageImageInput::builder()
                                 .width(50)
@@ -1096,21 +1100,23 @@ mod tests {
                                 .build(),
                         )
                         .expect("image"),
-                    ),
-                    transform: PageTransform::try_from(
-                        PageTransformInput::builder()
-                            .page_to_viewport(AffineTransform::identity())
-                            .viewport_width(50.0 / scale)
-                            .viewport_height(50.0 / scale)
-                            .render_width(50)
-                            .render_height(50)
-                            .model_width(50)
-                            .model_height(50)
-                            .rotation(rotation)
-                            .build(),
+                    ))
+                    .transform(
+                        PageTransform::try_from(
+                            PageTransformInput::builder()
+                                .page_to_viewport(AffineTransform::identity())
+                                .viewport_width(50.0 / scale)
+                                .viewport_height(50.0 / scale)
+                                .render_width(50)
+                                .render_height(50)
+                                .model_width(50)
+                                .model_height(50)
+                                .rotation(rotation)
+                                .build(),
+                        )
+                        .expect("transform"),
                     )
-                    .expect("transform"),
-                };
+                    .build();
                 for (label, neighbors) in [
                     (LayoutLabel::InlineFormula, false),
                     (LayoutLabel::DisplayFormula, false),

@@ -660,6 +660,84 @@ pub struct Block {
     #[builder(default)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table: Option<crate::Table>,
+    /// Original embedded file or page-raster crop for a figure layout.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<FigureImage>,
+    /// Page embedded-image index used while the asset is still being attached.
+    #[builder(default)]
+    #[serde(skip)]
+    pub(crate) embedded_image_index: Option<u32>,
+    /// Placed image bounds applied only when they do not nest with another block.
+    #[builder(default)]
+    #[serde(skip)]
+    pub(crate) figure_bounds: Option<Bbox>,
+}
+
+/// Whether figure bytes came from a PDF image file or from the page raster.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FigureSource {
+    Embedded,
+    Raster,
+}
+
+/// Image file types PDFium can return without transcoding, plus raster PNG crops.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
+pub enum FigureMediaType {
+    #[serde(rename = "image/jpeg")]
+    Jpeg,
+    #[serde(rename = "image/png")]
+    Png,
+    #[serde(rename = "image/jp2")]
+    Jp2,
+    #[serde(rename = "image/jpx")]
+    Jpx,
+}
+
+impl FigureMediaType {
+    /// Returns the canonical media type written into JSON.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Jp2 => "image/jp2",
+            Self::Jpx => "image/jpx",
+        }
+    }
+}
+
+/// Exactly one place the figure bytes are delivered.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FigureDelivery {
+    File { path: String },
+    Inline { data_base64: String },
+}
+
+/// Pixel size and bytes for one image, chart, header, footer, or seal block.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
+pub struct FigureImage {
+    pub source: FigureSource,
+    pub media_type: FigureMediaType,
+    pub width: u32,
+    pub height: u32,
+    pub delivery: FigureDelivery,
 }
 
 /// Canonical text projection applied between two non-empty physical Lines.

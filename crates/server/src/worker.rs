@@ -158,10 +158,14 @@ impl Worker {
             let output = self.output.clone();
             let input_hash = lease.job.input_hash.clone();
             let token = lease.token;
+            let name = format!("{id}-{token}.json");
+            // The attempt prefix ties assets to deletion/recovery without trusting paths from stored JSON.
+            let figure_assets = parser.figure_assets(storage.root().to_path_buf(), format!("{name}.figures-"));
+            let assets = Arc::clone(&figure_assets);
             let mut operation = JoinSet::new();
             operation.spawn(async move {
                 let input = storage.path(&format!("{input_hash}.pdf"))?;
-                let options = ParseOptions::builder().observer(Some(&observer)).build();
+                let options = ParseOptions::builder().observer(Some(&observer)).figure_assets(Some(Arc::clone(&assets))).build();
                 let parsing = docparse_common::telemetry::Timer::new("docparse_job_parse_seconds", "scope", "local");
                 let result = if let Some(reservation) = reservation {
                     observer.on_progress(ParseProgress::Opening);
@@ -176,10 +180,13 @@ impl Worker {
                 metrics::counter!("docparse_pages_parsed_total").increment(result.pages.len() as u64);
                 let mut temporary = storage.temporary().await?;
                 let publishing = docparse_common::telemetry::Timer::new("docparse_job_publish_seconds", "scope", "local");
+                let writer_assets = Arc::clone(&assets);
                 let writer_span = tracing::Span::current();
                 let writer_dispatcher = tracing::dispatcher::get_default(Clone::clone);
                 let (temporary, publishing) =
                     tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&writer_dispatcher, || writer_span.in_scope(|| -> ApiResult<_> {
+                        // Cancelled waiters cannot remove files while their real writer is still publishing.
+                        let _assets = writer_assets;
                         // Move timing ownership into the real writer; cancelling its async waiter cannot stop it.
                         let publishing = publishing;
                         // Stream the standard API envelope around the configured canonical view, avoiding a second document-sized buffer.
@@ -211,7 +218,6 @@ impl Worker {
                         code: ApiCode::COMMON_INTERNAL_ERROR,
                     })??;
                 // Each attempt gets a different object: a stale blocking writer cannot replace its successor's result.
-                let name = format!("{id}-{token}.json");
                 storage.publish((temporary, publishing), &name).await?;
                 Ok::<_, crate::error::ApiError>(name)
             }.in_current_span().with_current_subscriber());
@@ -295,15 +301,21 @@ impl Worker {
                 })?;
             // Capture one monotonic measurement for both persistence and logs, before the atomic completion update.
             let duration = started.elapsed();
-            let accepted = Jobs::finish(
+            // Cancellation while awaiting the database can hide a successful commit; recovery owns that uncertainty.
+            if outcome.is_ok() { figure_assets.keep(false); }
+            let completion = Jobs::finish(
                 &self.db,
                 &lease,
                 outcome.as_deref().map_err(String::as_str),
                 final_progress,
                 duration,
             )
-            .await
-            .with_context(|source| DatabaseSnafu {
+            .await;
+            // Preserve ambiguous acknowledgements for recovery; never remove possibly committed assets.
+            if outcome.is_ok() && matches!(&completion, Ok(true)) {
+                figure_assets.keep(true);
+            }
+            let accepted = completion.with_context(|source| DatabaseSnafu {
                 stage: "task-finish-attempt",
                 code: ApiCode::from(&*source),
             })?;
@@ -332,14 +344,15 @@ mod tests {
     use docparse_common::timing::TimingStage;
     use docparse_core::Timing;
 
-    /// HTTP workers expose slow model queues at INFO without logging every short stage.
+    /// Slow model queues remain observable at TRACE without recording short stages.
     #[test]
     fn progress_observer_logs_slow_stages() {
         let log = tempfile::NamedTempFile::new().expect("log");
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
             .without_time()
-            .with_max_level(tracing::Level::INFO)
+            // Match the production observer's TRACE policy instead of expecting INFO output.
+            .with_max_level(tracing::Level::TRACE)
             .with_writer(log.reopen().expect("writer"))
             .finish();
         let (sender, _) = watch::channel(None);

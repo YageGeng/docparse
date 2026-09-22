@@ -355,6 +355,7 @@ export interface components {
             /** Format: int32 */
             final_order: number;
             id: components["schemas"]["BlockId"];
+            image?: null | components["schemas"]["FigureImage"];
             label: components["schemas"]["LayoutLabel"];
             label_source: components["schemas"]["LabelSource"];
             lines: components["schemas"]["Line"][];
@@ -435,6 +436,36 @@ export interface components {
         };
         /** @description Stable identity for one residual XY-cut region. */
         FallbackRegionId: string;
+        /** @description Exactly one place the figure bytes are delivered. */
+        FigureDelivery: {
+            path: string;
+            /** @enum {string} */
+            type: "file";
+        } | {
+            data_base64: string;
+            /** @enum {string} */
+            type: "inline";
+        };
+        /** @description Pixel size and bytes for one image, chart, header, footer, or seal block. */
+        FigureImage: {
+            delivery: components["schemas"]["FigureDelivery"];
+            /** Format: int32 */
+            height: number;
+            media_type: components["schemas"]["FigureMediaType"];
+            source: components["schemas"]["FigureSource"];
+            /** Format: int32 */
+            width: number;
+        };
+        /**
+         * @description Image file types PDFium can return without transcoding, plus raster PNG crops.
+         * @enum {string}
+         */
+        FigureMediaType: "image/jpeg" | "image/png" | "image/jp2" | "image/jpx";
+        /**
+         * @description Whether figure bytes came from a PDF image file or from the page raster.
+         * @enum {string}
+         */
+        FigureSource: "embedded" | "raster";
         /** @description Recognized mathematics with non-owning references to its original layout and text. */
         FormulaResult: {
             /** @description Original formula extent in viewport points. */

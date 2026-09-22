@@ -200,7 +200,8 @@ impl Serialize for ConfiguredBlock<'_> {
             "Block",
             15 + usize::from(!self.block.source_regions.is_empty())
                 + usize::from(self.block.markdown.is_some())
-                + usize::from(self.block.table.is_some()),
+                + usize::from(self.block.table.is_some())
+                + usize::from(self.block.image.is_some()),
         )?;
         state.serialize_field("id", &self.block.id)?;
         state.serialize_field("label", &self.block.label)?;
@@ -234,6 +235,9 @@ impl Serialize for ConfiguredBlock<'_> {
         state.serialize_field("lines", &self.block.lines)?;
         if let Some(table) = &self.block.table {
             state.serialize_field("table", table)?;
+        }
+        if let Some(image) = &self.block.image {
+            state.serialize_field("image", image)?;
         }
         state.end()
     }

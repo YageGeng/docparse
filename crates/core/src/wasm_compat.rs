@@ -17,7 +17,9 @@ compile_error!("docparse supports wasm32-unknown-unknown browser builds only");
 mod native;
 
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
-pub use native::{write_pdf_overlays, write_pdf_overlays_for_pages};
+pub use native::{
+    FigureAssets, write_pdf_overlays, write_pdf_overlays_for_pages,
+};
 
 // The outline database is a native adapter; browser callers can inject an in-memory resolver.
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
@@ -43,3 +45,33 @@ pub(crate) fn default_glyph_resolver()
 
 #[cfg(all(feature = "pdfium-ipc", not(target_arch = "wasm32")))]
 pub use crate::pdfium::ipc as pdfium_ipc;
+
+/// Browser image delivery is inline and owns no filesystem resources.
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub struct FigureAssets {
+    pub(crate) config: docparse_config::FigureConfig,
+}
+
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+impl FigureAssets {
+    /// Preserves delivery validation without consulting a browser filesystem.
+    pub(crate) fn new(
+        config: docparse_config::FigureConfig,
+        _prefix: String,
+    ) -> Self {
+        Self { config }
+    }
+
+    /// Inline results have no pending directory to publish or clean.
+    pub fn keep(&self, _committed: bool) {}
+
+    /// Reports unsupported file delivery without manufacturing browser-local paths.
+    pub(crate) fn write(
+        &self,
+        _block_id: &str,
+        _media_type: crate::FigureMediaType,
+        _bytes: &[u8],
+    ) -> Result<String, String> {
+        Err("file figure delivery is unavailable in the browser".to_owned())
+    }
+}

@@ -1,10 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, Check, Copy, FileText, ScanText, Table2 } from "lucide-react";
-import type { PageResult, Table } from "@/api/client";
+import type { Block, PageResult, Table } from "@/api/client";
 import { blockLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormulaView, MathPreview } from "./FormulaView";
+
+/** Previews delivered image bytes without treating server filesystem paths as browser URLs. */
+function FigureView({ image, name }: { image: NonNullable<Block["image"]>; name: string }) {
+  const [failed, setFailed] = useState(false);
+  // Restrict data URLs to the image formats in the API, keeping the original download bytes intact.
+  const extension = { "image/jpeg": "jpg", "image/png": "png", "image/jp2": "jp2", "image/jpx": "jpx" }[image.media_type];
+  const src = useMemo(
+    () => extension && image.delivery.type === "inline" && image.delivery.data_base64
+      ? `data:${image.media_type};base64,${image.delivery.data_base64}`
+      : undefined,
+    [image, extension],
+  );
+  useEffect(() => setFailed(false), [image]);
+
+  return (
+    <figure className="my-3 min-w-0 space-y-2">
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={name}
+          width={image.width}
+          height={image.height}
+          loading="lazy"
+          decoding="async"
+          className="max-h-96 max-w-full rounded border border-border object-contain"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground" role="status">
+          {image.delivery.type === "file"
+            ? "图片保存在服务器，暂不支持在线预览。"
+            : src
+              ? "图片无法预览，可下载原图查看。"
+              : "图片数据不可用，请查看原 PDF。"}
+        </p>
+      )}
+      <figcaption className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{image.source === "embedded" ? "内嵌原图" : "页面截图"} · {image.width} × {image.height}</span>
+        {src && (
+          <Button asChild size="sm" variant="outline">
+            <a href={src} download={`${name}.${extension}`}>下载原图</a>
+          </Button>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
 
 /** Presents canonical table cells with their original row/column spans and escaped text content. */
 function TableView({ table }: { table: Table }) {
@@ -54,12 +101,17 @@ export function ResultInspector({
   const [copyError, setCopyError] = useState(false);
   const selectedBlock = page?.blocks.find((block) => block.id === selected);
   const tables = page?.blocks.filter((block) => block.table) ?? [];
+  // Keep the canonical copy source separate from the bounded on-screen image projection.
+  const jsonValue = useMemo(
+    () => selectedBlock ? { ...selectedBlock, formulas: page?.formulas?.filter(formula => formula.block_id === selectedBlock.id) ?? [] } : page,
+    [page, selectedBlock],
+  );
   const json = useMemo(
     () =>
       tab === "json" && page
-        ? JSON.stringify(selectedBlock ? { ...selectedBlock, formulas: page.formulas?.filter(formula => formula.block_id === selectedBlock.id) ?? [] } : page, null, 2)
+        ? JSON.stringify(jsonValue, (key, value) => key === "data_base64" && typeof value === "string" ? `[图片数据已省略：${value.length} 个 Base64 字符]` : value, 2)
         : "",
-    [tab, page, selectedBlock],
+    [tab, page, jsonValue],
   );
   useEffect(() => {
     if (selected)
@@ -77,7 +129,7 @@ export function ResultInspector({
   async function copy() {
     const text =
       tab === "json"
-        ? json
+        ? JSON.stringify(jsonValue, null, 2) ?? ""
         : (selectedBlock?.markdown ?? selectedBlock?.text ??
           page?.blocks.map((block) => block.markdown ?? block.text).join("\n\n") ??
           "");
@@ -171,10 +223,12 @@ export function ResultInspector({
                     </span>
                     {blockLabel(block.label)}
                   </button>
+                  {/* Figure bytes accompany, rather than replace, extracted text and PDF selection. */}
+                  {block.image && <FigureView image={block.image} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block.label)}`} />}
                   {block.table ? (
                     <TableView table={block.table} />
                   ) : (["inline_formula", "display_formula"].includes(typeof block.label === "string" ? block.label : "") && page.formulas?.some(formula => formula.block_id === block.id && formula.latex)) ? null : (
-                    block.markdown ? <div className="inline-prose"><MathPreview source={block.markdown} format="markdown" preserveProse /></div> :
+                    block.markdown ? <div className="inline-prose"><MathPreview source={block.markdown} format="markdown" preserveProse /></div> : block.image && !block.text ? null :
                     <p
                       className={
                         block.label === "doc_title" ||
@@ -224,7 +278,7 @@ export function ResultInspector({
         <TabsContent value="json" className="inspector-content">
           <div className="json-caption">
             {selectedBlock ? "当前选中区域" : "当前页面"} ·
-            完整文档可通过顶部按钮下载
+            图片 Base64 已折叠；复制保留完整数据，完整文档可通过顶部按钮下载
           </div>
           <pre className="json-view">{json || "结果尚未生成"}</pre>
         </TabsContent>

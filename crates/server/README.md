@@ -103,7 +103,7 @@ its active operation, releases the document and input mapping, acknowledges shut
 and exits normally. If acknowledgement or process exit takes more than five seconds,
 the supervisor kills and reaps the child before replacement. Broken transports and
 crashed workers bypass the graceful request. Install both binaries together: IPC
-protocol version 2 requires this shutdown behavior. Synchronous custom glyph
+protocol version 4 carries image assets with bounded render deliveries and requires this shutdown behavior. Synchronous custom glyph
 resolvers must return; an indefinitely blocked callback cannot be safely terminated as a Rust
 thread and makes pool cleanup report failure.
 
@@ -297,6 +297,16 @@ pending. Every server role retries pending cleanup at startup and every thirty
 seconds, independently of parser concurrency. Cleanup syncs the storage directory
 before clearing the result path, so a restart can safely retry an interrupted unlink
 or acknowledgement. No database transaction is held while accessing storage.
+
+With `figures.delivery = "file"`, HTTP workers place image assets under shared
+storage in `<job>-<attempt>.json.figures-*` directories, overriding the library's
+`figures.directory` location. Directories are created only on the first image
+write and shared by every page in the attempt. Failed or cancelled attempts
+release their files after the last active writer exits; deleting a completed
+result also removes its image directory. Pending markers allow the cleanup sweep
+to reconcile interrupted attempts with durable job ownership, retaining active
+attempts and successful commits whose acknowledgement was lost. Committed
+directories require no database lookup during recovery scans.
 
 The event name is `job`, its `id` is the durable database version, and `data` is
 the same `ApiResponse<JobSnapshot>` returned by the status endpoint. Every new

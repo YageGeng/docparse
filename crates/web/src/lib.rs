@@ -387,16 +387,15 @@ impl WebParser {
         engine: Option<Arc<dyn docparse_core::TableStructureEngine>>,
         observer: BrowserObserver,
     ) -> Result<JsValue, JsValue> {
+        // Browser parses keep default inline assets; preserve the optional table override.
+        let mut parse_options = docparse_core::ParseOptions::builder()
+            .table_engine(engine)
+            .observer(Some(&observer))
+            .build();
+        parse_options.table = options;
         let document = self
             .parser
-            .parse_bytes_with_options(
-                Arc::from(bytes),
-                docparse_core::ParseOptions {
-                    table: options,
-                    table_engine: engine,
-                    observer: Some(&observer),
-                },
-            )
+            .parse_bytes_with_options(Arc::from(bytes), parse_options)
             .await
             .map_err(|error| {
                 let code = match &error {

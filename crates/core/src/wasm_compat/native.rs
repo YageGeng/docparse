@@ -6,6 +6,7 @@ use crate::{OverlayRenderer, RenderError};
 use docparse_config::ValidatedConfig;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::{io::Write, sync::Mutex};
 
 impl DocParser {
     /// Parses one filesystem PDF while retaining path context on failure.
@@ -131,4 +132,122 @@ pub async fn write_pdf_overlays_for_pages(
     let outputs = operation?;
     close_result?;
     Ok(outputs)
+}
+
+/// Lazily owns one parse's image directory until the caller commits its result.
+/// Clones of its Arc retain files through cancelled, still-running CPU writes.
+pub struct FigureAssets {
+    pub(crate) config: docparse_config::FigureConfig,
+    prefix: String,
+    directory: Mutex<Option<tempfile::TempDir>>,
+}
+
+impl FigureAssets {
+    /// Creates a lazy owner without touching disk, including for file-free documents.
+    pub(crate) fn new(
+        config: docparse_config::FigureConfig,
+        prefix: String,
+    ) -> Self {
+        Self {
+            config,
+            prefix,
+            directory: Mutex::new(None),
+        }
+    }
+
+    /// Retains files after successful publication; otherwise the last owner removes them.
+    /// Pass false when durable publication is uncertain so recovery can reconcile the pending marker.
+    /// Call only after all parse and publication work using this owner has completed.
+    pub fn keep(&self, committed: bool) {
+        if let Some(directory) = self
+            .directory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+        {
+            // A pending marker permits server recovery after a crash or an ambiguous database acknowledgement.
+            if committed
+                && let Err(error) =
+                    std::fs::remove_file(directory.path().join(".pending"))
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(
+                    "failed to clear figure publication marker: {}",
+                    error
+                );
+            }
+            // Retain the path so an uncertain publication can later clear its marker idempotently.
+            directory.disable_cleanup(true);
+        }
+    }
+
+    /// Atomically writes an image and automatically removes incomplete temporary files on failure.
+    pub(crate) fn write(
+        &self,
+        block_id: &str,
+        media_type: crate::FigureMediaType,
+        bytes: &[u8],
+    ) -> Result<String, String> {
+        let mut directory = self.directory.lock().map_err(|error| {
+            format!("figure directory lock is poisoned: {error}")
+        })?;
+        if directory.is_none() {
+            let root = self.config.directory.as_deref().ok_or_else(|| {
+                "figures.directory is required for file delivery".to_owned()
+            })?;
+            if self.prefix.contains(['/', '\\']) {
+                return Err(
+                    "figure directory prefix must not contain path separators"
+                        .to_owned(),
+                );
+            }
+            std::fs::create_dir_all(root).map_err(|error| {
+                format!("failed to create figure root: {error}")
+            })?;
+            let root = std::fs::canonicalize(root).map_err(|error| {
+                format!("failed to resolve figure root: {error}")
+            })?;
+            let created = tempfile::Builder::new()
+                .prefix(&self.prefix)
+                .tempdir_in(root)
+                .map_err(|error| {
+                    format!("failed to create figure directory: {error}")
+                })?;
+            std::fs::write(created.path().join(".pending"), []).map_err(
+                |error| format!("failed to mark figure publication: {error}"),
+            )?;
+            *directory = Some(created);
+        }
+        let directory =
+            directory.as_ref().expect("initialized image directory");
+        let stem: String = block_id
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+            .collect();
+        let path = directory
+            .path()
+            .join(format!("{stem}.{}", media_type.extension()));
+        let mut temporary =
+            tempfile::NamedTempFile::new_in(directory.path())
+                .map_err(|error| format!("failed to create figure: {error}"))?;
+        temporary
+            .write_all(bytes)
+            .map_err(|error| format!("failed to write figure: {error}"))?;
+        temporary
+            .persist(&path)
+            .map_err(|error| format!("failed to publish figure: {error}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    }
+}
+
+impl crate::FigureMediaType {
+    /// Returns the file extension used for directory delivery.
+    pub(crate) const fn extension(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpg",
+            Self::Png => "png",
+            Self::Jp2 => "jp2",
+            Self::Jpx => "jpx",
+        }
+    }
 }

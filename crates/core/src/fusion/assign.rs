@@ -95,6 +95,12 @@ pub(crate) struct BlockSeed {
     pub(crate) fragments: Vec<LineFragment>,
     #[builder(default)]
     pub(crate) assignment_evidence: Vec<AssignEvidence>,
+    /// Embedded image selected for this detection, when the match is unique.
+    #[builder(default)]
+    pub(crate) embedded_image_index: Option<u32>,
+    /// Image placement recorded for a later, containment-safe bbox update.
+    #[builder(default)]
+    pub(crate) figure_bounds: Option<docparse_layout::Bbox>,
 }
 
 impl TryFrom<ModelSeedInput> for BlockSeed {

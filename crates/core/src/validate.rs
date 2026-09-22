@@ -299,6 +299,36 @@ impl ResultValidator {
                 return Err(Self::invalid(&block_path, "duplicate BlockId"));
             }
             Self::validate_bbox(block.bbox, &format!("{block_path}.bbox"))?;
+            if let Some(image) = &block.image {
+                let image_path = format!("{block_path}.image");
+                if image.width == 0 || image.height == 0 {
+                    return Err(Self::invalid(
+                        &image_path,
+                        "width and height must be positive",
+                    ));
+                }
+                match &image.delivery {
+                    crate::FigureDelivery::File { path }
+                        if path.is_empty()
+                            || !std::path::Path::new(path).is_absolute() =>
+                    {
+                        return Err(Self::invalid(
+                            format!("{image_path}.delivery.path"),
+                            "must be a non-empty absolute path",
+                        ));
+                    }
+                    crate::FigureDelivery::Inline { data_base64 }
+                        if data_base64.is_empty() =>
+                    {
+                        return Err(Self::invalid(
+                            format!("{image_path}.delivery.data_base64"),
+                            "must be non-empty",
+                        ));
+                    }
+                    crate::FigureDelivery::File { .. }
+                    | crate::FigureDelivery::Inline { .. } => {}
+                }
+            }
             if block.label == docparse_layout::LayoutLabel::Reference
                 && (!block.text.is_empty()
                     || !block.lines.is_empty()

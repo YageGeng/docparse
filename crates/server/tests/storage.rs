@@ -1,6 +1,117 @@
 use docparse_server::storage::SharedStorage;
 use std::io::Write;
 
+/// Deleting a result also removes its attempt-owned image directories without touching another result.
+#[tokio::test]
+async fn deletion_removes_only_owned_figure_directories() {
+    let directory = tempfile::tempdir().expect("directory");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    for name in ["result.json.figures-one", "other.json.figures-two"] {
+        let path = directory.path().join(name);
+        std::fs::create_dir(&path).expect("directory");
+        std::fs::write(path.join("image.png"), b"image").expect("image");
+    }
+    storage.remove("result.json").await.expect("delete");
+    assert!(!directory.path().join("result.json.figures-one").exists());
+    assert!(
+        directory
+            .path()
+            .join("other.json.figures-two/image.png")
+            .exists()
+    );
+}
+
+/// Real database fences distinguish active writers, failed attempts, ambiguous commits, and deleted results.
+#[tokio::test]
+#[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+async fn pending_figure_recovery_follows_durable_attempt_ownership() {
+    use docparse_database::{
+        connection, query::parse_job::ParseJobQuery as Jobs,
+    };
+    use docparse_server::{
+        cleanup::DeletedResults,
+        state::{AppState, HttpOptions},
+    };
+    use tokio_util::sync::CancellationToken;
+    use uuid::Uuid;
+    let db = connection::connect(
+        &docparse_config::DatabaseConfig::builder()
+            .url(
+                std::env::var("DOCPARSE_TEST_DATABASE_URL")
+                    .expect("test database"),
+            )
+            .build(),
+    )
+    .await
+    .expect("database");
+    let directory = tempfile::tempdir().expect("storage");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let state = AppState::new(
+        db.clone(),
+        storage,
+        HttpOptions::builder().build(),
+        CancellationToken::new(),
+    )
+    .expect("state");
+    let cleanup = DeletedResults::from(&state);
+    let id = Uuid::new_v4();
+    Jobs::submit(&db, id, &"a".repeat(64), None, None)
+        .await
+        .expect("submit");
+    let lease = Jobs::claim(&db, 60, 3).await.expect("claim").expect("job");
+    assert_eq!(lease.job.id, id);
+    let active = directory
+        .path()
+        .join(format!("{id}-{}.json.figures-active", lease.token));
+    let stale = directory
+        .path()
+        .join(format!("{id}-{}.json.figures-stale", Uuid::new_v4()));
+    for path in [&active, &stale] {
+        std::fs::create_dir(path).expect("directory");
+        std::fs::write(path.join(".pending"), []).expect("marker");
+        std::fs::write(path.join("image.png"), b"image").expect("image");
+    }
+    cleanup.sweep().await.expect("recover stale");
+    assert!(active.join("image.png").exists());
+    assert!(!stale.exists());
+    assert!(
+        Jobs::finish(
+            &db,
+            &lease,
+            Err("retry"),
+            None,
+            std::time::Duration::ZERO
+        )
+        .await
+        .expect("fail")
+    );
+    cleanup.sweep().await.expect("recover failed");
+    assert!(!active.exists());
+    let lease = Jobs::claim(&db, 60, 3)
+        .await
+        .expect("claim")
+        .expect("retry");
+    let name = format!("{id}-{}.json", lease.token);
+    let committed = directory.path().join(format!("{name}.figures-committed"));
+    std::fs::create_dir(&committed).expect("directory");
+    std::fs::write(committed.join(".pending"), []).expect("marker");
+    std::fs::write(committed.join("image.png"), b"image").expect("image");
+    assert!(
+        Jobs::finish(&db, &lease, Ok(&name), None, std::time::Duration::ZERO)
+            .await
+            .expect("commit")
+    );
+    cleanup.sweep().await.expect("recover ambiguous success");
+    assert!(committed.join("image.png").exists());
+    assert!(!committed.join(".pending").exists());
+    Jobs::mark_deleted(&db, id)
+        .await
+        .expect("delete")
+        .expect("job");
+    cleanup.sweep().await.expect("cleanup deleted job");
+    assert!(!committed.exists());
+}
+
 /// Cache generation and deletion must not acquire locks on immutable payload files.
 #[tokio::test]
 async fn result_maintenance_does_not_lock_the_payload() {

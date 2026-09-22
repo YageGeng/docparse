@@ -147,6 +147,18 @@ pub enum LayoutLabel {
 }
 
 impl LayoutLabel {
+    /// Identifies visual assets independently of extraction, composition, and delivery.
+    pub const fn is_figure(&self) -> bool {
+        matches!(
+            self,
+            Self::Chart
+                | Self::FooterImage
+                | Self::HeaderImage
+                | Self::Image
+                | Self::Seal
+        )
+    }
+
     /// Known labels in the exact numeric class order exported by PP-DocLayoutV3.
     pub const ALL: [Self; 25] = [
         Self::Abstract,

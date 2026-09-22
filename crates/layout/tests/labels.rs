@@ -1,5 +1,19 @@
 use docparse_layout::LayoutLabel;
 
+/// Figure policy excludes atomic-but-nonfigure labels such as watermarks and tables.
+#[test]
+fn visual_asset_labels_preserve_their_semantic_boundary() {
+    for label in LayoutLabel::ALL {
+        assert_eq!(
+            label.is_figure(),
+            ["chart", "footer_image", "header_image", "image", "seal"]
+                .contains(&label.to_str())
+        );
+    }
+    assert!(!LayoutLabel::Watermark.is_figure());
+    assert!(!LayoutLabel::Unknown("image".into()).is_figure());
+}
+
 /// Parser-derived watermarks must serialize canonically without extending the model's class IDs.
 #[test]
 fn watermark_is_a_semantic_label_without_a_model_index() {

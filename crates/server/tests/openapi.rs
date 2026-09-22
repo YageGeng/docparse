@@ -38,7 +38,8 @@ async fn documentation_covers_routes_and_wire_schemas() {
         .await
         .expect("spec body");
     let spec: Value = serde_json::from_slice(&bytes).expect("OpenAPI JSON");
-    for (path, method) in [
+    // Include monitoring in both operation coverage and the expected path count.
+    let routes = [
         ("/api/jobs", "post"),
         ("/api/jobs/status", "get"),
         ("/api/jobs/events", "get"),
@@ -50,7 +51,10 @@ async fn documentation_covers_routes_and_wire_schemas() {
         ("/api/ready", "get"),
         ("/api/openapi.json", "get"),
         ("/api/docs", "get"),
-    ] {
+        ("/api/monitoring/snapshot", "get"),
+        ("/api/monitoring/history", "get"),
+    ];
+    for (path, method) in routes {
         assert!(
             spec.get("paths")
                 .and_then(|paths| paths.get(path))
@@ -140,7 +144,7 @@ async fn documentation_covers_routes_and_wire_schemas() {
             .and_then(Value::as_object)
             .expect("paths")
             .len(),
-        11
+        routes.len()
     );
     let schemas = spec.pointer("/components/schemas").expect("schemas");
     assert!(

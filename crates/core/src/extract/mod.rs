@@ -31,4 +31,8 @@ pub struct ExtractedPage {
     #[builder(default)]
     pub watermark_evidence:
         std::collections::BTreeMap<crate::TextItemId, crate::Evidence>,
+    /// Render-stage images moved into fusion, excluded from document-wide scan snapshots.
+    #[builder(default, setter(skip))]
+    #[serde(skip)]
+    pub(crate) embedded_images: Vec<crate::figure::EmbeddedImage>,
 }

@@ -39,6 +39,11 @@ pub struct SharedStorage {
 }
 
 impl SharedStorage {
+    /// Exposes the canonical storage root for attempt-owned assets and recovery scans.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     // Filesystem failures use inline status constructors; blocking-task failures retain the common internal fallback.
     /// Resolves the shared directory once without deriving paths from uploaded filenames.
     pub async fn new(root: impl AsRef<Path>) -> ApiResult<Self> {
@@ -150,7 +155,18 @@ impl SharedStorage {
                     let entry = entry?;
                     if entry.file_name().to_string_lossy().starts_with(&prefix)
                     {
-                        match std::fs::remove_file(entry.path()) {
+                        // Only attempt-owned figure directories are recursive; never follow directory symlinks.
+                        let removal = if entry.file_type()?.is_dir()
+                            && entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with(&format!("{name}.figures-"))
+                        {
+                            std::fs::remove_dir_all(entry.path())
+                        } else {
+                            std::fs::remove_file(entry.path())
+                        };
+                        match removal {
                             Ok(()) => {}
                             Err(error)
                                 if error.kind()

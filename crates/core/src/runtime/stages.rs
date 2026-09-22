@@ -26,6 +26,7 @@ pub(crate) struct PageAnalysisInput {
     rendered: RenderedPage,
     timings: Timings,
     tables: Arc<TableRuntime>,
+    figure_assets: Arc<crate::FigureAssets>,
 }
 
 /// Runs layout, OCR, table resolution, and final page validation over owned page inputs.
@@ -41,10 +42,11 @@ impl PageAnalysisInput {
             ocr_engine,
             formula_engine,
             context,
-            extracted,
-            rendered,
+            mut extracted,
+            mut rendered,
             timings,
             tables,
+            figure_assets,
         } = self;
         let page_number = extracted.page_number;
         if rendered.page_number != page_number {
@@ -53,6 +55,9 @@ impl PageAnalysisInput {
                 actual: rendered.page_number,
             });
         }
+        // Move image files into fusion only after render admission; later raster clones stay cheap.
+        extracted.embedded_images =
+            std::mem::take(&mut rendered.embedded_images);
         tracing::debug!("starting layout detection for page {}", page_number);
         let (detections, layout_warning) = match layout_engine
             .detect(
@@ -106,6 +111,7 @@ impl PageAnalysisInput {
             .rendered(rendered)
             .timings(timings)
             .tables(tables)
+            .figure_assets(figure_assets)
             .layout_warning(layout_warning)
             .draft(draft)
             .build())
@@ -124,6 +130,7 @@ pub(crate) struct PageStage<D> {
     rendered: RenderedPage,
     timings: Timings,
     tables: Arc<TableRuntime>,
+    figure_assets: Arc<crate::FigureAssets>,
     #[builder(default)]
     layout_warning: Option<PageWarning>,
     draft: D,
@@ -142,6 +149,7 @@ impl PageStage<crate::page::PageAnalysisDraft> {
             rendered,
             timings,
             tables,
+            figure_assets,
             layout_warning,
             draft,
         } = self;
@@ -201,6 +209,7 @@ impl PageStage<crate::page::PageAnalysisDraft> {
             .rendered(rendered)
             .timings(timings)
             .tables(tables)
+            .figure_assets(figure_assets)
             .layout_warning(layout_warning)
             .draft(draft)
             .build())
@@ -217,6 +226,7 @@ impl PageStage<crate::page::PageTableDraft> {
             rendered,
             timings,
             tables,
+            figure_assets,
             layout_warning,
             mut draft,
             formula_engine,
@@ -234,13 +244,25 @@ impl PageStage<crate::page::PageTableDraft> {
             .await;
         // Table assembly has finished; retain its measured source words for exact formula byte ranges.
         let words = std::mem::take(&mut draft.extracted.table_evidence.words);
+        let embedded_images =
+            std::mem::take(&mut draft.extracted.embedded_images);
         let cpu_config = Arc::clone(&config);
         let cpu_timings = timings.clone();
+        let rendered_for_figures = rendered.clone();
+        let assets = Arc::clone(&figure_assets);
         let page = docparse_common::run_cpu(move || {
             let _timer = cpu_timings.start(TimingStage::TextFinish);
-            PageAnalyzer::new(cpu_config)
+            let mut page = PageAnalyzer::new(cpu_config)
                 .with_timings(cpu_timings)
-                .complete(draft)
+                .complete(draft)?;
+            // Reuse this CPU hop and release encoded image buffers before formula inference.
+            crate::figure::FigureCatalog::new(&embedded_images).attach(
+                &mut page.blocks,
+                &rendered_for_figures,
+                &assets,
+                &mut page.warnings,
+            );
+            Ok::<_, crate::PageAnalysisError>(page)
         })
         .await
         .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
@@ -256,6 +278,7 @@ impl PageStage<crate::page::PageTableDraft> {
             .rendered(rendered)
             .timings(timings)
             .tables(tables)
+            .figure_assets(figure_assets)
             .layout_warning(layout_warning)
             .draft(PageFormulaDraft { page, words })
             .build())
@@ -294,13 +317,13 @@ impl PageStage<PageFormulaDraft> {
         }
         if let Some(warning) = layout_warning {
             page.warnings.push(warning);
-            page.warnings.sort_by(|left, right| {
-                left.stage
-                    .cmp(&right.stage)
-                    .then_with(|| left.code.cmp(&right.code))
-                    .then_with(|| left.message.cmp(&right.message))
-            });
         }
+        page.warnings.sort_by(|left, right| {
+            left.stage
+                .cmp(&right.stage)
+                .then_with(|| left.code.cmp(&right.code))
+                .then_with(|| left.message.cmp(&right.message))
+        });
         Ok(page)
     }
 }

@@ -111,6 +111,9 @@ pub struct ParseOptions<'a> {
     pub table_engine: Option<Arc<dyn crate::TableStructureEngine>>,
     #[builder(default)]
     pub observer: Option<&'a dyn crate::ParseObserver>,
+    /// An external publication owner keeps assets only after its durable result is accepted.
+    #[builder(default)]
+    pub figure_assets: Option<Arc<crate::FigureAssets>>,
 }
 
 impl ParseOptions<'_> {
@@ -543,6 +546,17 @@ impl DocParserBuilder {
 }
 
 impl DocParser {
+    /// Names file assets for an external publication while preserving this parser's delivery mode.
+    pub fn figure_assets(
+        &self,
+        directory: PathBuf,
+        prefix: String,
+    ) -> Arc<crate::FigureAssets> {
+        let mut config = self.config.figures().clone();
+        config.directory = Some(directory);
+        Arc::new(crate::FigureAssets::new(config, prefix))
+    }
+
     /// Creates an empty dependency-injection builder.
     pub fn builder() -> DocParserBuilder {
         DocParserBuilder::default()
@@ -635,6 +649,17 @@ impl DocParser {
             ))
         })?;
         Arc::make_mut(&mut input.image).retain_page(lease.clone());
+        let owned_assets = options.figure_assets.is_none();
+        let figure_assets = options
+            .figure_assets
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| {
+                Arc::new(crate::FigureAssets::new(
+                    self.config.figures().clone(),
+                    "figures-".into(),
+                ))
+            });
         let observer = options.observer;
         let (collector, mut timing_receiver) =
             docparse_common::timing::Timings::channel();
@@ -709,6 +734,7 @@ impl DocParser {
                     .rendered(rendered)
                     .timings(timings)
                     .tables(tables)
+                    .figure_assets(Arc::clone(&figure_assets))
                     .build(),
             ))
             .await
@@ -727,6 +753,10 @@ impl DocParser {
                 observer
                     .on_progress(crate::ParseProgress::Complete { total: 1 });
             }
+        }
+        // Library calls publish on successful completion; external owners decide after their own commit.
+        if result.is_ok() && owned_assets {
+            figure_assets.keep(true);
         }
         result
     }

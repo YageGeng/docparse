@@ -15,7 +15,7 @@ use std::{
 };
 use typed_builder::TypedBuilder;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 4;
 pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const WORKER_BINARY: &str = "docparse-pdfium-worker";
 
@@ -109,20 +109,37 @@ pub struct Request {
 }
 
 /// Validated transforms and an immutable shared pixel segment.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TypedBuilder)]
 pub struct Raster {
     pub page_number: u32,
     pub transform: PageTransform,
     pub pixels: IpcSharedMemory,
+    /// Metadata stays in the render message while encoded files use shared memory.
+    #[builder(default, setter(skip))]
+    pub(crate) images:
+        Vec<(crate::figure::EmbeddedImage, Option<IpcSharedMemory>)>,
 }
 impl From<RenderedPage> for Raster {
     /// Publishes pixels without serializing their byte array into the IPC message.
     fn from(page: RenderedPage) -> Self {
-        Self {
-            page_number: page.page_number,
-            transform: page.transform,
-            pixels: IpcSharedMemory::from_bytes(page.image.data()),
-        }
+        let mut raster = Self::builder()
+            .page_number(page.page_number)
+            .transform(page.transform)
+            .pixels(IpcSharedMemory::from_bytes(page.image.data()))
+            .build();
+        // Pair each file with its own metadata instead of maintaining parallel scan arrays.
+        raster.images = page
+            .embedded_images
+            .into_iter()
+            .map(|mut image| {
+                let bytes = image
+                    .bytes
+                    .take()
+                    .map(|bytes| IpcSharedMemory::from_bytes(&bytes));
+                (image, bytes)
+            })
+            .collect();
+        raster
     }
 }
 impl TryFrom<Raster> for RenderedPage {
@@ -160,11 +177,21 @@ impl TryFrom<Raster> for RenderedPage {
             value.pixels.len(),
             copying.elapsed().as_secs_f64() * 1000.0
         );
-        Ok(Self::builder()
+        let mut rendered = Self::builder()
             .page_number(value.page_number)
             .transform(value.transform)
             .image(Arc::new(image))
-            .build())
+            .build();
+        // Restore files only for this admitted page; pre-scan carries no image buffers.
+        rendered.embedded_images = value
+            .images
+            .into_iter()
+            .map(|(mut image, bytes)| {
+                image.bytes = bytes.map(|memory| memory.to_vec());
+                image
+            })
+            .collect();
+        Ok(rendered)
     }
 }
 
@@ -198,7 +225,7 @@ impl TryFrom<PreScannedPage> for Outcome {
 
 impl TryFrom<Outcome> for PreScannedPage {
     type Error = PdfiumRuntimeError;
-    /// Restores owned facts and warning text without manufacturing successful pages.
+    /// Restores lightweight facts; original image files arrive only with render responses.
     fn try_from(outcome: Outcome) -> Result<Self, Self::Error> {
         match outcome {
             Outcome::Scanned {
@@ -538,4 +565,65 @@ pub fn run_worker() -> Result<(), PdfiumRuntimeError> {
     }
     tracing::info!("PDFium worker {} stopped", std::process::id());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use docparse_layout::{
+        AffineTransform, Bbox, PageRotation, PageTransformInput,
+    };
+
+    /// Render IPC preserves optional image files without relying on JSON field omission.
+    #[test]
+    fn image_files_round_trip_with_render_ipc() {
+        let transform = PageTransform::try_from(
+            PageTransformInput::builder()
+                .page_to_viewport(AffineTransform::identity())
+                .viewport_width(4.0)
+                .viewport_height(4.0)
+                .render_width(4)
+                .render_height(4)
+                .model_width(4)
+                .model_height(4)
+                .rotation(PageRotation::Degrees0)
+                .build(),
+        )
+        .expect("transform");
+        let image = PageImage::try_from(
+            PageImageInput::builder()
+                .width(4)
+                .height(4)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(vec![255_u8; 48]))
+                .build(),
+        )
+        .expect("raster");
+        let mut rendered = RenderedPage::builder()
+            .page_number(1)
+            .image(Arc::new(image))
+            .transform(transform)
+            .build();
+        rendered.embedded_images = [true, false]
+            .into_iter()
+            .map(|file| {
+                crate::figure::EmbeddedImage::builder()
+                    .bounds(
+                        Bbox::try_from([1.0, 2.0, 3.0, 4.0]).expect("bounds"),
+                    )
+                    .pixel_width(20)
+                    .pixel_height(10)
+                    .media_type(file.then_some(crate::FigureMediaType::Jpeg))
+                    .bytes(file.then(|| vec![0xff, 0xd8, 0xff, 0xd9]))
+                    .build()
+            })
+            .collect();
+        let expected = rendered.embedded_images.clone();
+        let (sender, receiver) = ipc_channel::ipc::channel().expect("channel");
+        sender.send(Raster::from(rendered)).expect("send");
+        let restored =
+            RenderedPage::try_from(receiver.recv().expect("receive"))
+                .expect("restore");
+        assert_eq!(restored.embedded_images, expected);
+    }
 }

@@ -8,8 +8,16 @@ export interface Bbox { left: number; top: number; right: number; bottom: number
 export interface Point { x: number; y: number }
 /** Original region geometry retained when several candidates become one content layout. */
 export interface SourceRegionEvidence { label?: string; model_region_id: string | null; fallback_region_id: string | null; bbox: Bbox; polygon: Point[] | null; geometry_source: string; confidence: number | null; model_order: number | null }
+/** Pixel size and bytes for an image, chart, header image, footer image, or seal. */
+export interface FigureImage {
+  source: "embedded" | "raster";
+  media_type: "image/jpeg" | "image/png" | "image/jp2" | "image/jpx";
+  width: number;
+  height: number;
+  delivery: { type: "file"; path: string } | { type: "inline"; data_base64: string };
+}
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; image?: FigureImage; [key: string]: unknown }
 /** A non-owning source slice. Byte offsets address UTF-8, not JavaScript UTF-16 strings. */
 export interface TableTextSpan { text_item_id: string; byte_range: { start: number; end: number }; bbox: Bbox }
 /** Cell-local physical line with the original source references. */

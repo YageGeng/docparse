@@ -19,6 +19,94 @@ pub struct RenderedPage {
     pub page_number: u32,
     pub image: Arc<PageImage>,
     pub transform: PageTransform,
+    /// Image files travel with the bounded render delivery, never the document-wide pre-scan.
+    #[builder(default, setter(skip))]
+    pub(crate) embedded_images: Vec<crate::figure::EmbeddedImage>,
+}
+
+impl RenderedPage {
+    /// Converts viewport bounds to outward-rounded, clipped pixels for both figures and formulas.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    pub(crate) fn crop_bounds(&self, bbox: Bbox) -> Result<[u32; 4], String> {
+        if self.transform.render_size()
+            != (self.image.width(), self.image.height())
+        {
+            return Err("page raster does not match its transform".to_owned());
+        }
+        let start =
+            self.transform
+                .viewport_to_rendered(docparse_layout::Point::new(
+                    bbox.left, bbox.top,
+                ));
+        let end =
+            self.transform
+                .viewport_to_rendered(docparse_layout::Point::new(
+                    bbox.right,
+                    bbox.bottom,
+                ));
+        if ![start.x, start.y, end.x, end.y]
+            .into_iter()
+            .all(f64::is_finite)
+        {
+            return Err("crop coordinates must be finite".to_owned());
+        }
+        let bounds = [
+            start.x.floor().clamp(0.0, f64::from(self.image.width())) as u32,
+            start.y.floor().clamp(0.0, f64::from(self.image.height())) as u32,
+            end.x.ceil().clamp(0.0, f64::from(self.image.width())) as u32,
+            end.y.ceil().clamp(0.0, f64::from(self.image.height())) as u32,
+        ];
+        if bounds[0] >= bounds[2] || bounds[1] >= bounds[3] {
+            return Err("crop is outside the page".to_owned());
+        }
+        Ok(bounds)
+    }
+
+    /// Copies checked pixel rows once; callers retain their own expansion and encoding policies.
+    pub(crate) fn crop_pixels(
+        &self,
+        [left, top, right, bottom]: [u32; 4],
+    ) -> Result<image::RgbImage, String> {
+        let image = &self.image;
+        if left >= right
+            || top >= bottom
+            || right > image.width()
+            || bottom > image.height()
+        {
+            return Err("crop is outside the page".to_owned());
+        }
+        // Validated PageImage dimensions bound every offset and allocation below.
+        let width = right - left;
+        let height = bottom - top;
+        let row_bytes = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(3))
+            .ok_or_else(|| "crop is too large".to_owned())?;
+        let capacity = usize::try_from(height)
+            .ok()
+            .and_then(|height| row_bytes.checked_mul(height))
+            .ok_or_else(|| "crop is too large".to_owned())?;
+        let mut pixels = Vec::with_capacity(capacity);
+        for y in top..bottom {
+            let offset = (y as usize)
+                .checked_mul(image.width() as usize)
+                .and_then(|offset| offset.checked_add(left as usize))
+                .and_then(|offset| offset.checked_mul(3))
+                .ok_or_else(|| "crop is too large".to_owned())?;
+            let end = offset
+                .checked_add(row_bytes)
+                .ok_or_else(|| "crop is too large".to_owned())?;
+            pixels.extend_from_slice(
+                image
+                    .data()
+                    .get(offset..end)
+                    .ok_or_else(|| "crop exceeds the page raster".to_owned())?,
+            );
+        }
+        // ImageBuffer takes ownership of the Vec; PNG encoding needs no extra Arc allocation/copy.
+        image::RgbImage::from_raw(width, height, pixels)
+            .ok_or_else(|| "crop buffer has an invalid length".to_owned())
+    }
 }
 
 /// Page shell and any recoverable native-text extraction failure.
@@ -376,32 +464,34 @@ pub(crate) fn pre_scan_document_page(
             }),
         ),
     };
+    let extracted = ExtractedPage::builder()
+        .page_number(page_number)
+        .width(f64::from(width))
+        .height(f64::from(height))
+        .rotation(normalized_rotation(page.rotation()))
+        .watermark_annotations(
+            page.annotations(&view_box)
+                .into_iter()
+                .filter(|annotation| annotation.subtype == "watermark")
+                .filter_map(|annotation| annotation.rect)
+                .filter_map(|rect| {
+                    Bbox::try_from([
+                        f64::from(rect.left),
+                        f64::from(rect.top),
+                        f64::from(rect.right),
+                        f64::from(rect.bottom),
+                    ])
+                    .ok()
+                })
+                .collect(),
+        )
+        .content_bounds(content_bounds)
+        .text_items(text_items)
+        .table_evidence(table_evidence)
+        .build();
+    // Keep document-wide scan facts lightweight; image payloads belong to render admission.
     Ok(PreScannedPage {
-        extracted: ExtractedPage::builder()
-            .page_number(page_number)
-            .width(f64::from(width))
-            .height(f64::from(height))
-            .rotation(normalized_rotation(page.rotation()))
-            .watermark_annotations(
-                page.annotations(&view_box)
-                    .into_iter()
-                    .filter(|annotation| annotation.subtype == "watermark")
-                    .filter_map(|annotation| annotation.rect)
-                    .filter_map(|rect| {
-                        Bbox::try_from([
-                            f64::from(rect.left),
-                            f64::from(rect.top),
-                            f64::from(rect.right),
-                            f64::from(rect.bottom),
-                        ])
-                        .ok()
-                    })
-                    .collect(),
-            )
-            .content_bounds(content_bounds)
-            .text_items(text_items)
-            .table_evidence(table_evidence)
-            .build(),
+        extracted,
         extraction_error,
     })
 }
@@ -512,11 +602,18 @@ pub(crate) fn render_document_page(
         page_number,
         source,
     })?;
-    Ok(RenderedPage::builder()
+    let mut rendered = RenderedPage::builder()
         .page_number(page_number)
         .image(image)
         .transform(transform)
-        .build())
+        .build();
+    // Rendering already holds a completion-counted page lease, bounding retained image files.
+    rendered.embedded_images = page
+        .embedded_images(&view_box)
+        .into_iter()
+        .filter_map(|image| crate::figure::EmbeddedImage::try_from(image).ok())
+        .collect();
+    Ok(rendered)
 }
 
 /// Converts PDFium quarter-turn values into public clockwise degrees.
@@ -542,6 +639,47 @@ mod tests {
     use docparse_config::{RenderConfig, RuntimeConfig};
 
     use super::{PdfInput, PdfiumExecutor};
+
+    include!("../../tests/common/pdf.rs");
+
+    /// Pre-scan must not retain image payloads; bounded rendering must still deliver them.
+    #[tokio::test]
+    async fn embedded_images_are_loaded_only_during_render() {
+        let content = "q 40 0 0 40 10 10 cm /Im1 Do Q";
+        let bytes = document(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>".into(),
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] /Length 15 >>\nstream\nFFD8FFE000FFD9>\nendstream".into(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        ]);
+        let executor = PdfiumExecutor::open(
+            PdfInput::Bytes(Arc::from(bytes)),
+            &RuntimeConfig::default(),
+        )
+        .await
+        .expect("open");
+        let scanned = executor.pre_scan_page(1, None).await.expect("scan");
+        assert!(
+            scanned.extracted.embedded_images.is_empty(),
+            "pre-scan must not accumulate images across the document"
+        );
+        let rendered = executor
+            .render_page(1, &RenderConfig::default())
+            .await
+            .expect("render");
+        assert_eq!(rendered.embedded_images.len(), 1);
+        assert_eq!(
+            rendered
+                .embedded_images
+                .first()
+                .expect("embedded image")
+                .bytes
+                .as_deref(),
+            Some(&[0xff, 0xd8, 0xff, 0xe0, 0x00, 0xff, 0xd9][..])
+        );
+        executor.close().await.expect("close");
+    }
 
     /// Resolves the deterministic PDF extraction fixture from the core crate.
     fn fixture_path() -> PathBuf {

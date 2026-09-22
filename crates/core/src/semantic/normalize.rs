@@ -76,30 +76,36 @@ impl SemanticAssembler<'_> {
         blocks.sort_by(|left, right| left.id.cmp(&right.id));
         let mut groups: Vec<_> =
             blocks.into_iter().map(LayoutGroup::from).collect();
-        loop {
-            let pair = groups.iter().enumerate().find_map(|(left, group)| {
-                groups
-                    .iter()
-                    .enumerate()
-                    .skip(left + 1)
-                    .find(|(_, other)| group.joins(other))
-                    .map(|(right, _)| (left, right))
-            });
-            let Some((left, right)) = pair else {
-                break;
-            };
-            let mut other = groups.remove(right);
-            if let Some(group) = groups.get_mut(left) {
-                group.bbox = Bbox::try_from([
-                    group.bbox.left.min(other.bbox.left),
-                    group.bbox.top.min(other.bbox.top),
-                    group.bbox.right.max(other.bbox.right),
-                    group.bbox.bottom.max(other.bbox.bottom),
-                ])?;
+        let mut left = 0;
+        while left < groups.len() {
+            let mut right = left + 1;
+            while right < groups.len() {
+                if !groups
+                    .get(left)
+                    .expect("left index is below group count")
+                    .joins(
+                        groups
+                            .get(right)
+                            .expect("right index is below group count"),
+                    )
+                {
+                    right += 1;
+                    continue;
+                }
+                let mut other = groups.remove(right);
+                let group = groups
+                    .get_mut(left)
+                    .expect("removing a later group retains the left index");
+                // Full containment makes the union one existing box. Unchanged bounds
+                // need no rescan; growth only revisits this owner's skipped candidates.
+                // Earlier owners already rejected both boxes and therefore their union.
+                if !group.bbox.contains_bbox(other.bbox) {
+                    group.bbox = other.bbox;
+                    right = left + 1;
+                }
                 group.blocks.append(&mut other.blocks);
             }
-            // Recheck containment against the current union after each merge.
-            // Partial intersection alone cannot pull another neighbor into the group.
+            left += 1;
         }
         let mut result = Vec::with_capacity(groups.len());
         for group in groups {
@@ -339,6 +345,70 @@ mod tests {
             assert_eq!(
                 item_ids,
                 vec![TextItemId::native(1, 0), TextItemId::native(1, 1)]
+            );
+        }
+    }
+
+    /// Expanding a group revisits earlier candidates without changing partial-overlap ownership.
+    #[test]
+    fn expansion_rechecks_skipped_boxes_without_merging_partial_neighbors() {
+        let assembler = SemanticAssembler::new(
+            1,
+            Bbox::try_from([0.0, 0.0, 100.0, 100.0]).expect("page"),
+            docparse_config::FusionConfig::default(),
+        );
+        // The later enclosing box must absorb the skipped sibling, but not the protruding neighbor.
+        let blocks = [
+            group(0, [2.0, 2.0, 3.0, 3.0]),
+            group(1, [6.0, 6.0, 7.0, 7.0]),
+            group(2, [0.0, 0.0, 10.0, 10.0]),
+            group(3, [9.0, 0.0, 12.0, 10.0]),
+        ]
+        .into_iter()
+        .flat_map(|group| group.blocks)
+        .collect();
+        let result = assembler.normalize_blocks(blocks).expect("normalize");
+        assert_eq!(result.len(), 2);
+        let counts: Vec<_> = result
+            .iter()
+            .map(|block| {
+                block.lines.iter().flat_map(|line| &line.text_items).count()
+            })
+            .collect();
+        assert_eq!(counts, [3, 1]);
+    }
+
+    /// Measures a duplicate-heavy tail after unrelated blocks without a machine-specific timing assertion.
+    #[test]
+    #[ignore = "manual normalization performance measurement"]
+    fn duplicate_tail_benchmark() {
+        for count in [256_u32, 512, 1024] {
+            let assembler = SemanticAssembler::new(
+                1,
+                Bbox::try_from([0.0, 0.0, 10000.0, 100.0]).expect("page"),
+                docparse_config::FusionConfig::default(),
+            );
+            let blocks = (0..count)
+                .flat_map(|index| {
+                    let x = if index < count / 2 {
+                        f64::from(index) * 3.0
+                    } else {
+                        5000.0
+                    };
+                    group(index + 10000, [x, 0.0, x + 1.0, 1.0]).blocks
+                })
+                .collect();
+            let started = std::time::Instant::now();
+            let result = assembler.normalize_blocks(blocks).expect("normalize");
+            eprintln!("normalize {count} blocks: {:?}", started.elapsed());
+            assert_eq!(result.len(), count as usize / 2 + 1);
+            assert_eq!(
+                result
+                    .iter()
+                    .flat_map(|block| &block.lines)
+                    .flat_map(|line| &line.text_items)
+                    .count(),
+                count as usize
             );
         }
     }
