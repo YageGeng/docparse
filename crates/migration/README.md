@@ -6,12 +6,15 @@ SeaQuery builders.
 
 ```bash
 rtk proxy sea-orm-cli migrate generate change_name -d crates/migration
-rtk proxy sea-orm-cli migrate status -d crates/migration
-rtk proxy sea-orm-cli migrate up -d crates/migration
+rtk proxy cargo run -p docparse-migration --features cli -- status
+rtk proxy cargo run -p docparse-migration --features cli -- up
 ```
 
 Provide `DATABASE_URL` through deployment secrets or your shell environment.
-Run `up` once before API/worker rollout. Runtime database connections do not apply
-migrations. The initial migration creates only `parse_jobs`, its queue/lease
+The `cli` feature keeps standalone command dependencies out of server builds.
+Use the Cargo commands above for execution because `sea-orm-cli migrate` does not
+forward Cargo features. Continue using `sea-orm-cli` to generate migration files.
+Runtime database connections also apply pending migrations under a transaction
+advisory lock. The initial migration creates only `parse_jobs`, its queue/lease
 indexes, and SeaORM's own migration history. Do not use `fresh`, `refresh`, or
 `reset` against a database whose task history must be retained.

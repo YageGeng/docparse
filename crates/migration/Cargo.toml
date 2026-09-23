@@ -6,9 +6,18 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Keep CLI dependencies out of the server's runtime migration path.
+cli = ["dep:tokio", "sea-orm-migration/cli"]
+
+[[bin]]
+name = "docparse-migration"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 # async
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread"], optional = true }
 
 # storage
 sea-orm-migration.workspace = true

@@ -107,13 +107,14 @@ tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "
 url = "2"
 
 # api documentation
-utoipa = { version = "5", features = ["uuid"] }
-utoipa-axum = "0.2"
-utoipa-scalar = "0.3"
+utoipa = { version = "6", features = ["uuid"] }
+utoipa-axum = "0.3"
+utoipa-scalar = "0.4"
 
 # storage
 sea-orm = { version = "2", default-features = false, features = ["macros", "sqlx-postgres", "runtime-tokio-rustls", "with-chrono", "with-json", "with-uuid"] }
-sea-orm-migration = { version = "2", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres"] }
+# The standalone migrator opts into CLI support; server builds only need the migration library.
+sea-orm-migration = { version = "2", default-features = false, features = ["runtime-tokio-rustls", "sqlx-postgres"] }
 tempfile = "3"
 
 # identity
