@@ -4,6 +4,7 @@ pub(crate) mod bidi;
 mod formula;
 mod inline;
 pub(crate) mod metrics;
+mod projection;
 mod scripts;
 
 pub(crate) use assemble::{

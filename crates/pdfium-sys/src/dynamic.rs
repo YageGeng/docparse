@@ -245,6 +245,9 @@ pub struct PdfiumBindings {
     ) -> FPDF_BOOL,
     pub FPDFPageObj_GetMatrix:
         unsafe extern "C" fn(FPDF_PAGEOBJECT, *mut FS_MATRIX) -> FPDF_BOOL,
+    // Preserve image masks at native resolution and restore placement before releasing the PDFium lock.
+    pub FPDFPageObj_SetMatrix:
+        unsafe extern "C" fn(FPDF_PAGEOBJECT, *const FS_MATRIX) -> FPDF_BOOL,
     pub FPDFPageObj_GetStrokeColor: unsafe extern "C" fn(
         FPDF_PAGEOBJECT,
         *mut std::os::raw::c_uint,
@@ -419,6 +422,9 @@ pub struct PdfiumBindings {
         std::os::raw::c_int,
     ) -> FPDF_BITMAP,
     pub FPDFBitmap_Destroy: unsafe extern "C" fn(FPDF_BITMAP),
+    // Embedded image bitmaps may be grayscale or BGR rather than page-rendering BGRA.
+    pub FPDFBitmap_GetFormat:
+        unsafe extern "C" fn(FPDF_BITMAP) -> std::os::raw::c_int,
     pub FPDFBitmap_GetWidth:
         unsafe extern "C" fn(FPDF_BITMAP) -> std::os::raw::c_int,
     pub FPDFBitmap_GetHeight:
@@ -880,6 +886,7 @@ impl PdfiumBindings {
                 "FPDFImageObj_GetImagePixelSize"
             ),
             FPDFPageObj_GetMatrix: load_fn!(lib, "FPDFPageObj_GetMatrix"),
+            FPDFPageObj_SetMatrix: load_fn!(lib, "FPDFPageObj_SetMatrix"),
             FPDFPageObj_GetStrokeColor: load_fn!(
                 lib,
                 "FPDFPageObj_GetStrokeColor"
@@ -932,6 +939,7 @@ impl PdfiumBindings {
             ),
             FPDFBitmap_CreateEx: load_fn!(lib, "FPDFBitmap_CreateEx"),
             FPDFBitmap_Destroy: load_fn!(lib, "FPDFBitmap_Destroy"),
+            FPDFBitmap_GetFormat: load_fn!(lib, "FPDFBitmap_GetFormat"),
             FPDFBitmap_GetWidth: load_fn!(lib, "FPDFBitmap_GetWidth"),
             FPDFBitmap_GetHeight: load_fn!(lib, "FPDFBitmap_GetHeight"),
             FPDFBitmap_GetStride: load_fn!(lib, "FPDFBitmap_GetStride"),

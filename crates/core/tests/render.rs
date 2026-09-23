@@ -13,6 +13,102 @@ use docparse_layout::{
     Bbox, LayoutLabel, PageImage, PageImageInput, PixelFormat,
 };
 
+/// Structured text and Markdown preserve physical indentation while leaving source text and formula ranges intact.
+#[test]
+fn structured_renderers_keep_geometry_based_whitespace() {
+    for label in [
+        LayoutLabel::Algorithm,
+        LayoutLabel::Content,
+        LayoutLabel::Chart,
+    ] {
+        let algorithm = label == LayoutLabel::Algorithm;
+        let mut document = document();
+        let block = document
+            .pages
+            .first_mut()
+            .expect("page")
+            .blocks
+            .first_mut()
+            .expect("block");
+        block.label = label;
+        let template = block.lines.first().expect("line").clone();
+        block.lines = [
+            ("begin", 10.0, 10.0),
+            ("nested", 30.0, 25.0),
+            ("2:", 10.0, 40.0),
+            ("return", 30.0, 40.0),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (text, left, top))| {
+            let mut line = template.clone();
+            line.id = LineId::new(&block.id, index as u32);
+            line.inline_spans.clear();
+            line.text = text.to_owned();
+            line.bbox = Bbox::try_from([
+                left,
+                top,
+                left + text.chars().count() as f64 * 5.0,
+                top + 10.0,
+            ])
+            .expect("bbox");
+            let item = line.text_items.first_mut().expect("item");
+            item.raw_text = text.to_owned();
+            item.bbox = line.bbox;
+            line
+        })
+        .collect();
+        let before = serde_json::to_value(&document).expect("snapshot");
+        assert_eq!(
+            TextRenderer::new(RenderView::Semantic, "[formula]")
+                .render(&document),
+            "begin\n    nested\n2:  return"
+        );
+        assert_eq!(
+            MarkdownRenderer::new(RenderView::Semantic, "[formula]")
+                .render(&document),
+            if algorithm {
+                "```\nbegin\n    nested\n2:  return\n```"
+            } else {
+                "begin  \n&nbsp;&nbsp;&nbsp;&nbsp;nested  \n2:&nbsp;&nbsp;return"
+            }
+        );
+        assert_eq!(serde_json::to_value(&document).expect("snapshot"), before);
+    }
+}
+
+/// Algorithm fences contain literal Markdown syntax and grow when the source itself contains backtick fences.
+#[test]
+fn algorithm_fences_preserve_literal_content() {
+    for (source, fence) in [
+        ("return x_y < z & w", "```"),
+        ("```", "````"),
+        ("`````", "``````"),
+    ] {
+        let mut document = document();
+        let block = document
+            .pages
+            .first_mut()
+            .expect("page")
+            .blocks
+            .first_mut()
+            .expect("block");
+        block.label = LayoutLabel::Algorithm;
+        let line = block.lines.first_mut().expect("line");
+        line.inline_spans.clear();
+        line.text = source.to_owned();
+        line.text_items.first_mut().expect("item").raw_text = source.to_owned();
+        let before = document.clone();
+        let expected = format!("{fence}\n{source}\n{fence}");
+        for view in [RenderView::Semantic, RenderView::Raw] {
+            let markdown =
+                MarkdownRenderer::new(view, "[formula]").render(&document);
+            assert!(markdown.ends_with(&expected), "{markdown:?}");
+            assert_eq!(document, before);
+        }
+    }
+}
+
 /// Builds one small canonical result with a missing inline formula.
 fn document() -> DocumentResult {
     let bbox = Bbox::try_from([10.0, 10.0, 90.0, 20.0]).expect("valid bbox");
@@ -302,6 +398,7 @@ fn character_cleanup_is_a_read_only_presentation() {
         .first_mut()
         .expect("block")
         .label = LayoutLabel::Algorithm;
+    // Algorithm code fences preserve literal whitespace without prose dehyphenation.
     assert!(
         MarkdownRenderer::new(RenderView::Semantic, "[formula]")
             .render(&document)

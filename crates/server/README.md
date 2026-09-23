@@ -103,7 +103,9 @@ its active operation, releases the document and input mapping, acknowledges shut
 and exits normally. If acknowledgement or process exit takes more than five seconds,
 the supervisor kills and reaps the child before replacement. Broken transports and
 crashed workers bypass the graceful request. Install both binaries together: IPC
-protocol version 4 carries image assets with bounded render deliveries and requires this shutdown behavior. Synchronous custom glyph
+protocol version 5 carries original image files or deferred RGBA pixels with bounded
+render deliveries and requires this shutdown behavior. Rebuild the server and
+`docparse-pdfium-worker` together when updating the protocol. Synchronous custom glyph
 resolvers must return; an indefinitely blocked callback cannot be safely terminated as a Rust
 thread and makes pool cleanup report failure.
 

@@ -764,6 +764,18 @@ impl crate::Block {
             })
             .collect();
         if !inline.is_empty() {
+            // Formula replacement must not collapse algorithm/TOC indentation in the browser projection.
+            if crate::label_policy::LabelPolicy::from(&self.label)
+                .preserves_line_breaks()
+            {
+                // Keep block Markdown consistent with complete-document algorithm fences.
+                self.markdown = Some(self.render_markdown_text(
+                    placeholder,
+                    false,
+                    &inline,
+                ));
+                return;
+            }
             // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
             self.markdown = Some(
                 self.lines

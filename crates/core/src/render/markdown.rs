@@ -130,13 +130,38 @@ impl MarkdownRenderer {
 }
 
 impl Block {
-    /// Joins prose with LiteParse's whitespace and lowercase continuation rule while retaining list boundaries.
-    fn render_markdown_text(
+    /// Fences algorithms with literal spacing and otherwise applies the shared prose/spatial presentation rules.
+    pub(crate) fn render_markdown_text(
         &self,
         placeholder: &str,
         prose: bool,
         formulas: &[&crate::FormulaResult],
     ) -> String {
+        if self.label == LayoutLabel::Algorithm {
+            // Code fences preserve real spaces and newlines; prose escapes and HTML entities would become visible code.
+            let text = Self::layout_text(&self.lines, false, |line| {
+                line.render_markdown_formulas(placeholder, formulas, false)
+            });
+            if text.is_empty() {
+                return text;
+            }
+            // A fence longer than every source backtick run cannot be closed by extracted algorithm content.
+            let fence = "`".repeat(
+                text.split(|ch| ch != '`')
+                    .map(str::len)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1)
+                    .max(3),
+            );
+            return format!("{fence}\n{text}\n{fence}");
+        }
+        // Use one whitespace policy for JSON summaries, Markdown and formula-enriched previews.
+        if LabelPolicy::from(&self.label).preserves_line_breaks() {
+            return Self::layout_text(&self.lines, true, |line| {
+                line.render_markdown_formulas(placeholder, formulas, true)
+            });
+        }
         let mut text = String::new();
         for line in &self.lines {
             let rendered =

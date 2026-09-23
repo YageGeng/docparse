@@ -757,7 +757,8 @@ mod tests {
         .expect("semantic assembly must succeed");
         let block = output.blocks.first().expect("model block must exist");
 
-        assert_eq!(block.text, "high- quality");
+        // Visual regions preserve physical rows without applying prose dehyphenation.
+        assert_eq!(block.text, "high-\nquality");
     }
 
     /// Verifies a vertically overlapping formula fragment cannot consume a prose hyphen.

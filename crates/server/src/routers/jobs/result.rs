@@ -123,7 +123,9 @@ pub async fn result(
     };
     // Weak validators identify the semantic representation across gzip and identity content codings.
     let identity = format!(
-        "v1:{name}:{page:?}:{markdown}:{}",
+        "{}:{name}:{page:?}:{markdown}:{}",
+        // Match the algorithm-fence cache revision so clients cannot revalidate an obsolete presentation.
+        if markdown { "v3" } else { "v1" },
         if markdown {
             state.options.output.formula_placeholder.as_str()
         } else {

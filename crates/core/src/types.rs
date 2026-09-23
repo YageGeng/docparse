@@ -740,6 +740,14 @@ pub struct FigureImage {
     pub delivery: FigureDelivery,
 }
 
+/// An embedded PDF image not already delivered by a layout block, including small and page-sized images.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PageImageAsset {
+    pub id: String,
+    pub bbox: Bbox,
+    pub image: FigureImage,
+}
+
 /// Canonical text projection applied between two non-empty physical Lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockTextBoundary {
@@ -799,6 +807,24 @@ impl Block {
     /// Derives label-aware summary text while retaining every physical source line.
     pub(crate) fn derive_text(label: &LayoutLabel, lines: &[Line]) -> String {
         let policy = LabelPolicy::from(label);
+        // Structured regions require geometric spacing; source items remain unchanged for exact formula mappings.
+        if policy.preserves_line_breaks() {
+            let mut text = String::with_capacity(
+                lines.iter().map(|line| line.text.len()).sum(),
+            );
+            Line::project_layout(
+                lines,
+                |line| line.text.as_str(),
+                |new_row, spaces, body| {
+                    if new_row {
+                        text.push('\n');
+                    }
+                    text.extend(std::iter::repeat_n(' ', spaces));
+                    text.push_str(body);
+                },
+            );
+            return text;
+        }
         let capacity = lines
             .iter()
             .map(|line| policy.line_text(&line.text).len())
@@ -831,22 +857,53 @@ impl Block {
             return self.label == LayoutLabel::Table
                 && self.text == table.to_text();
         }
-        // Schema-2 results produced before cell reconstruction joined table fragments
-        // with spaces. Keep those stored documents valid while new unresolved tables
-        // retain line breaks and structured tables use their explicit cell projection.
-        if self.label == LayoutLabel::Table
-            && self.text
+        if LabelPolicy::from(&self.label).preserves_line_breaks() {
+            // Compare new output as borrowed segments instead of building and discarding the whole summary again.
+            let mut remaining = Some(self.text.as_str());
+            Line::project_layout(
+                &self.lines,
+                |line| line.text.as_str(),
+                |new_row, spaces, body| {
+                    remaining = remaining.and_then(|tail| {
+                        let tail = if new_row {
+                            tail.strip_prefix('\n')?
+                        } else {
+                            tail
+                        };
+                        let (padding, tail) = tail.split_at_checked(spaces)?;
+                        if !padding.bytes().all(|byte| byte == b' ') {
+                            return None;
+                        }
+                        tail.strip_prefix(body)
+                    });
+                },
+            );
+            if remaining == Some("") {
+                return true;
+            }
+            // Continue accepting stored schema-2 output whose structured text predates geometric whitespace.
+            return self.text
                 == self
                     .lines
                     .iter()
-                    .map(|line| line.text.trim())
+                    .map(|line| line.text.trim_end())
                     .filter(|text| !text.is_empty())
                     .collect::<Vec<_>>()
-                    .join(" ")
-        {
-            return true;
+                    .join("\n")
+                || (matches!(
+                    self.label,
+                    LayoutLabel::Content | LayoutLabel::Table
+                ) || LabelPolicy::from(&self.label)
+                    == LabelPolicy::Atomic)
+                    && self.text
+                        == self
+                            .lines
+                            .iter()
+                            .map(|line| line.text.trim())
+                            .filter(|text| !text.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ");
         }
-
         let policy = LabelPolicy::from(&self.label);
         let mut offset = 0_usize;
         let mut non_empty = self
@@ -988,6 +1045,10 @@ pub struct PageResult {
     pub height: f64,
     pub rotation: i32,
     pub blocks: Vec<Block>,
+    /// Images are retained even when no layout owns them; each source placement is delivered only once.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<PageImageAsset>,
     /// Formula recognition outputs retain both LaTeX and Markdown under every JSON visibility policy.
     #[builder(default)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1136,6 +1197,55 @@ mod tests {
     use docparse_layout::{Bbox, LayoutLabel};
 
     use super::{Block, BlockId, Line, LineId, WritingDirection};
+
+    /// Structured labels restore geometric indentation and join fragments on the same physical row.
+    #[test]
+    fn structured_text_restores_horizontal_spacing() {
+        let lines: Vec<_> = [
+            ("begin", 10.0, 10.0),
+            ("nested", 30.0, 25.0),
+            ("2:", 10.0, 40.0),
+            ("return", 30.0, 40.0),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (text, left, top))| {
+            let mut line = line(index as u32, text);
+            line.bbox = Bbox::try_from([
+                left,
+                top,
+                left + text.chars().count() as f64 * 5.0,
+                top + 10.0,
+            ])
+            .expect("bbox");
+            line.text_items = vec![
+                crate::TextItem::builder()
+                    .id(crate::TextItemId::native(1, index as u32))
+                    .raw_text(text.to_owned())
+                    .bbox(line.bbox)
+                    .source(crate::TextSource::Native)
+                    .build(),
+            ];
+            line
+        })
+        .collect();
+        for label in [
+            LayoutLabel::Algorithm,
+            LayoutLabel::Chart,
+            LayoutLabel::Content,
+            LayoutLabel::Table,
+        ] {
+            assert_eq!(
+                Block::derive_text(&label, &lines),
+                "begin\n    nested\n2:  return",
+                "{label:?}"
+            );
+        }
+        assert_eq!(
+            Block::derive_text(&LayoutLabel::Text, &lines),
+            "begin nested 2: return"
+        );
+    }
 
     /// Builds one source line for Block text derivation tests.
     fn line(index: u32, text: &str) -> Line {

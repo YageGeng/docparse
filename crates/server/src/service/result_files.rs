@@ -99,7 +99,9 @@ impl SharedStorage {
             ),
             None => "index.json".to_owned(),
         };
-        let cache = self.path(&format!("{name}.v1.{suffix}"))?;
+        // Algorithm fences change Markdown bytes; regenerate earlier cached presentations.
+        let version = if markdown.is_some() { "v3" } else { "v1" };
+        let cache = self.path(&format!("{name}.{version}.{suffix}"))?;
         let placeholder = markdown.map(str::to_owned);
         let storage = self.clone();
         let name = name.to_owned();

@@ -256,12 +256,14 @@ impl PageStage<crate::page::PageTableDraft> {
                 .with_timings(cpu_timings)
                 .complete(draft)?;
             // Reuse this CPU hop and release encoded image buffers before formula inference.
-            crate::figure::FigureCatalog::new(&embedded_images).attach(
-                &mut page.blocks,
-                &rendered_for_figures,
-                &assets,
-                &mut page.warnings,
-            );
+            // Preserve images that have no layout owner instead of dropping them after matching.
+            page.images = crate::figure::FigureCatalog::new(&embedded_images)
+                .attach(
+                    &mut page.blocks,
+                    &rendered_for_figures,
+                    &assets,
+                    &mut page.warnings,
+                );
             Ok::<_, crate::PageAnalysisError>(page)
         })
         .await

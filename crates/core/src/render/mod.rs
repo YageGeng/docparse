@@ -38,6 +38,31 @@ pub enum RenderError {
     PageMismatch(String),
 }
 
+impl crate::Block {
+    /// Encodes a geometry-only line projection as plain text or Markdown without allocating per-line padding strings.
+    pub(crate) fn layout_text<'a, T: AsRef<str>>(
+        lines: &'a [crate::Line],
+        markdown: bool,
+        render: impl Fn(&'a crate::Line) -> T,
+    ) -> String {
+        let mut text = String::new();
+        crate::Line::project_layout(lines, render, |new_row, spaces, body| {
+            if new_row {
+                text.push_str(if markdown { "  \n" } else { "\n" });
+            }
+            if markdown {
+                for _ in 0..spaces {
+                    text.push_str("&nbsp;");
+                }
+            } else {
+                text.extend(std::iter::repeat_n(' ', spaces));
+            }
+            text.push_str(body);
+        });
+        text
+    }
+}
+
 /// Collects block IDs hidden only in the semantic rendering projection.
 pub(crate) fn hidden_repeated_chrome(
     document: &crate::DocumentResult,

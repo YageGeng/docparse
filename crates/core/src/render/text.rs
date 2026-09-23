@@ -38,6 +38,17 @@ impl TextRenderer {
                     lines.push(table.to_text());
                     continue;
                 }
+                // Spatial labels share the same median-width projection as canonical JSON and Markdown.
+                if crate::label_policy::LabelPolicy::from(&block.label)
+                    .preserves_line_breaks()
+                {
+                    lines.push(crate::Block::layout_text(
+                        &block.lines,
+                        false,
+                        |line| render_line(line, &self.formula_placeholder),
+                    ));
+                    continue;
+                }
                 if block.label == docparse_layout::LayoutLabel::Watermark
                     && !lines.is_empty()
                 {

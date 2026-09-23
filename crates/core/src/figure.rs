@@ -1,5 +1,5 @@
-//! Embedded-image matching and figure assets for visual layout blocks.
-use std::collections::BTreeMap;
+//! Label-independent embedded-image delivery with visual-layout raster fallbacks.
+use std::{borrow::Cow, collections::BTreeMap};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use docparse_layout::{Bbox, LayoutDetection};
@@ -19,6 +19,15 @@ const MIN_SIDE_POINTS: f64 = 8.0;
 const MAX_PAGE_COVERAGE: f64 = 0.90;
 const BOUNDS_EPSILON: f64 = 0.5;
 
+/// Internal payload format; raw pixels are encoded only after leaving PDFium's critical section.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+pub(crate) enum EmbeddedImageFormat {
+    Encoded(FigureMediaType),
+    Rgba,
+}
+
 /// One embedded image carried from PDFium into page fusion.
 ///
 /// `bytes` stay off the JSON snapshot. IPC sends them in a shared-memory side channel.
@@ -30,8 +39,8 @@ pub(crate) struct EmbeddedImage {
     pub(crate) pixel_width: u32,
     pub(crate) pixel_height: u32,
     #[builder(default)]
-    // Binary IPC requires a fixed field layout even when no original file is available.
-    pub(crate) media_type: Option<FigureMediaType>,
+    // Binary IPC requires a fixed field layout even when image extraction failed.
+    pub(crate) format: Option<EmbeddedImageFormat>,
     #[builder(default)]
     #[serde(skip)]
     pub(crate) bytes: Option<Vec<u8>>,
@@ -40,7 +49,7 @@ pub(crate) struct EmbeddedImage {
 impl TryFrom<::pdfium::EmbeddedImage> for EmbeddedImage {
     type Error = docparse_layout::GeometryError;
 
-    /// Converts one PDFium image, keeping file bytes only for a complete image file.
+    /// Moves an original file or deferred pixel buffer across the PDFium boundary without encoding or cloning it.
     fn try_from(image: ::pdfium::EmbeddedImage) -> Result<Self, Self::Error> {
         let bounds = Bbox::try_from([
             f64::from(image.bounds.left),
@@ -48,25 +57,29 @@ impl TryFrom<::pdfium::EmbeddedImage> for EmbeddedImage {
             f64::from(image.bounds.right),
             f64::from(image.bounds.bottom),
         ])?;
-        let (media_type, bytes) = match image.encoded {
-            Some(encoded)
-                if image.pixel_width > 0 && image.pixel_height > 0 =>
-            {
+        let (format, bytes) = match image.data {
+            Some(::pdfium::EmbeddedImageData::Encoded(encoded)) => {
                 let media_type = match encoded.kind {
                     ::pdfium::EncodedImageKind::Jpeg => FigureMediaType::Jpeg,
                     ::pdfium::EncodedImageKind::Png => FigureMediaType::Png,
                     ::pdfium::EncodedImageKind::Jp2 => FigureMediaType::Jp2,
                     ::pdfium::EncodedImageKind::Jpx => FigureMediaType::Jpx,
                 };
-                (Some(media_type), Some(encoded.bytes))
+                (
+                    Some(EmbeddedImageFormat::Encoded(media_type)),
+                    Some(encoded.bytes),
+                )
             }
-            _ => (None, None),
+            Some(::pdfium::EmbeddedImageData::Rgba(pixels)) => {
+                (Some(EmbeddedImageFormat::Rgba), Some(pixels))
+            }
+            None => (None, None),
         };
         Ok(Self::builder()
             .bounds(bounds)
             .pixel_width(image.pixel_width)
             .pixel_height(image.pixel_height)
-            .media_type(media_type)
+            .format(format)
             .bytes(bytes)
             .build())
     }
@@ -94,12 +107,57 @@ impl EmbeddedImage {
         Some(bounds)
     }
 
-    /// Returns the original file when PDFium kept a complete image.
-    fn original(&self) -> Option<(FigureMediaType, &[u8], u32, u32)> {
-        let media_type = self.media_type?;
-        let bytes = self.bytes.as_deref()?;
-        (self.pixel_width > 0 && self.pixel_height > 0 && !bytes.is_empty())
-            .then_some((media_type, bytes, self.pixel_width, self.pixel_height))
+    /// Borrows original files or encodes mask-aware pixels on the CPU stage, sharing the same fallback for every owner.
+    fn prepare(
+        &self,
+        rendered: &RenderedPage,
+    ) -> Result<PreparedFigure<'_>, String> {
+        let Some((format, bytes)) = self
+            .format
+            .zip(self.bytes.as_deref())
+            .filter(|(_, bytes)| !bytes.is_empty())
+        else {
+            return rendered.cropped_figure(self.bounds);
+        };
+        let (media_type, bytes) = match format {
+            EmbeddedImageFormat::Encoded(media) => {
+                (media, Cow::Borrowed(bytes))
+            }
+            EmbeddedImageFormat::Rgba => {
+                let expected = usize::try_from(self.pixel_width)
+                    .ok()
+                    .zip(usize::try_from(self.pixel_height).ok())
+                    .and_then(|(width, height)| width.checked_mul(height))
+                    .and_then(|pixels| pixels.checked_mul(4));
+                if expected != Some(bytes.len())
+                    || self.pixel_width == 0
+                    || self.pixel_height == 0
+                {
+                    return Err(
+                        "invalid embedded RGBA dimensions or length".into()
+                    );
+                }
+                let mut png = Vec::new();
+                PngEncoder::new(&mut png)
+                    .write_image(
+                        bytes,
+                        self.pixel_width,
+                        self.pixel_height,
+                        image::ExtendedColorType::Rgba8,
+                    )
+                    .map_err(|error| {
+                        format!("failed to encode embedded PNG: {error}")
+                    })?;
+                (FigureMediaType::Png, Cow::Owned(png))
+            }
+        };
+        Ok(PreparedFigure::builder()
+            .media_type(media_type)
+            .bytes(bytes)
+            .width(self.pixel_width)
+            .height(self.pixel_height)
+            .source(FigureSource::Embedded)
+            .build())
     }
 }
 
@@ -121,7 +179,7 @@ impl<'a> FigureCatalog<'a> {
         Self { images }
     }
 
-    /// Records a unique image for each figure detection without moving its box.
+    /// Records geometric image matches independently of the model's semantic label.
     pub(crate) fn match_detections(
         &self,
         detections: &[LayoutDetection],
@@ -129,9 +187,7 @@ impl<'a> FigureCatalog<'a> {
     ) -> BTreeMap<u32, FigureMatch> {
         let mut matches = BTreeMap::new();
         for detection in detections {
-            if !detection.label.is_figure() {
-                continue;
-            }
+            // Algorithms, text, tables and any future label may be backed by an embedded image.
             let Some(matched) = self.container(detection.bbox, page) else {
                 continue;
             };
@@ -179,52 +235,70 @@ impl<'a> FigureCatalog<'a> {
         }
     }
 
-    /// Attaches one asset to every figure block. A missing file falls back to a PNG crop.
+    /// Delivers embedded images once, returning unclaimed placements independently of layout labels.
     pub(crate) fn attach(
         &self,
         blocks: &mut [Block],
         rendered: &RenderedPage,
         assets: &FigureAssets,
         warnings: &mut Vec<PageWarning>,
-    ) {
-        // Text-only pages never create a directory or perform any filesystem work.
-        for block in blocks.iter_mut().filter(|block| block.label.is_figure()) {
-            let embedded = block.embedded_image_index.and_then(|index| {
-                usize::try_from(index)
-                    .ok()
-                    .and_then(|index| self.images.get(index))
-                    .and_then(EmbeddedImage::original)
-            });
-            let asset = if let Some((media, bytes, width, height)) = embedded {
-                PreparedFigure::builder()
-                    .block(block)
-                    .media_type(media)
-                    .bytes(bytes)
-                    .width(width)
-                    .height(height)
-                    .source(FigureSource::Embedded)
-                    .build()
-                    .deliver(assets)
-            } else {
-                match rendered.crop_png(block.bbox) {
-                    Ok((bytes, width, height)) => PreparedFigure::builder()
-                        .block(block)
-                        .media_type(FigureMediaType::Png)
-                        .bytes(&bytes)
-                        .width(width)
-                        .height(height)
-                        .source(FigureSource::Raster)
-                        .build()
-                        .deliver(assets),
-                    Err(message) => Err(message),
-                }
-            };
-            match asset {
-                Ok(image) => block.image = Some(image),
-                Err(message) => warnings.push(missing(block, &message)),
+    ) -> Vec<crate::PageImageAsset> {
+        let mut delivered = vec![false; self.images.len()];
+        // Raster fallbacks remain limited to visual regions; embedded-image matches accept every label.
+        for block in blocks.iter_mut().filter(|block| {
+            block.label.is_figure() || block.embedded_image_index.is_some()
+        }) {
+            let index = block
+                .embedded_image_index
+                .take()
+                .and_then(|index| usize::try_from(index).ok());
+            if index.is_some_and(|index| {
+                delivered.get(index).copied().unwrap_or(false)
+            }) {
+                continue;
             }
-            block.embedded_image_index = None;
+            let prepared = match index.and_then(|index| self.images.get(index))
+            {
+                Some(image) => image.prepare(rendered),
+                None => rendered.cropped_figure(block.bbox),
+            };
+            let asset = prepared
+                .and_then(|image| image.deliver(block.id.as_str(), assets));
+            match asset {
+                Ok(image) => {
+                    block.image = Some(image);
+                    if let Some(slot) =
+                        index.and_then(|index| delivered.get_mut(index))
+                    {
+                        *slot = true;
+                    }
+                }
+                Err(message) => {
+                    warnings.push(missing(block.id.as_str(), &message))
+                }
+            }
         }
+        // Matching thresholds only protect layout geometry. They must never discard actual PDF images.
+        let mut remaining = Vec::new();
+        for (index, image) in
+            self.images.iter().enumerate().filter(|(index, _)| {
+                !delivered.get(*index).copied().unwrap_or(false)
+            })
+        {
+            let id = format!("p{}:image{index}", rendered.page_number);
+            match image
+                .prepare(rendered)
+                .and_then(|image| image.deliver(&id, assets))
+            {
+                Ok(asset) => remaining.push(crate::PageImageAsset {
+                    id,
+                    bbox: image.bounds,
+                    image: asset,
+                }),
+                Err(message) => warnings.push(missing(&id, &message)),
+            }
+        }
+        remaining
     }
 
     /// Picks the smallest image that contains nearly all of the layout box.
@@ -276,9 +350,8 @@ impl<'a> FigureCatalog<'a> {
 /// One figure image ready to inline or write.
 #[derive(TypedBuilder)]
 struct PreparedFigure<'a> {
-    block: &'a Block,
     media_type: FigureMediaType,
-    bytes: &'a [u8],
+    bytes: Cow<'a, [u8]>,
     width: u32,
     height: u32,
     source: FigureSource,
@@ -286,20 +359,20 @@ struct PreparedFigure<'a> {
 
 impl PreparedFigure<'_> {
     /// Encodes this image inline or writes it into the parse's private directory.
-    fn deliver(&self, assets: &FigureAssets) -> Result<FigureImage, String> {
+    fn deliver(
+        &self,
+        id: &str,
+        assets: &FigureAssets,
+    ) -> Result<FigureImage, String> {
         if self.width == 0 || self.height == 0 || self.bytes.is_empty() {
             return Err("image file is empty".to_owned());
         }
         let delivery = match assets.config.delivery {
             docparse_config::FigureDelivery::Inline => FigureDelivery::Inline {
-                data_base64: STANDARD.encode(self.bytes),
+                data_base64: STANDARD.encode(self.bytes.as_ref()),
             },
             docparse_config::FigureDelivery::File => FigureDelivery::File {
-                path: assets.write(
-                    self.block.id.as_str(),
-                    self.media_type,
-                    self.bytes,
-                )?,
+                path: assets.write(id, self.media_type, self.bytes.as_ref())?,
             },
         };
         Ok(FigureImage::builder()
@@ -313,14 +386,11 @@ impl PreparedFigure<'_> {
 }
 
 /// Builds one block-scoped warning without discarding other page results.
-fn missing(block: &Block, message: &str) -> PageWarning {
+fn missing(id: &str, message: &str) -> PageWarning {
     PageWarning {
         code: "VisualAssetUnavailable".to_owned(),
         stage: "figure".to_owned(),
-        message: format!(
-            "figure {} has no image: {message}",
-            block.id.as_str()
-        ),
+        message: format!("figure {id} has no image: {message}"),
     }
 }
 
@@ -345,7 +415,10 @@ fn union_bbox(left: Bbox, right: Bbox) -> Option<Bbox> {
 
 impl RenderedPage {
     /// Encodes shared raster cropping as PNG without duplicating formula pixel extraction.
-    fn crop_png(&self, bbox: Bbox) -> Result<(Vec<u8>, u32, u32), String> {
+    fn cropped_figure(
+        &self,
+        bbox: Bbox,
+    ) -> Result<PreparedFigure<'static>, String> {
         let image = self.crop_pixels(self.crop_bounds(bbox)?)?;
         let mut png = Vec::new();
         PngEncoder::new(&mut png)
@@ -356,7 +429,13 @@ impl RenderedPage {
                 image::ExtendedColorType::Rgb8,
             )
             .map_err(|error| format!("failed to encode figure PNG: {error}"))?;
-        Ok((png, image.width(), image.height()))
+        Ok(PreparedFigure::builder()
+            .media_type(FigureMediaType::Png)
+            .bytes(Cow::Owned(png))
+            .width(image.width())
+            .height(image.height())
+            .source(FigureSource::Raster)
+            .build())
     }
 }
 
@@ -372,7 +451,7 @@ mod tests {
         PageTransformInput, PixelFormat,
     };
 
-    use super::{EmbeddedImage, FigureCatalog};
+    use super::{EmbeddedImage, EmbeddedImageFormat, FigureCatalog};
     use crate::pdfium::RenderedPage;
     use crate::{
         Block, BlockId, ExtractedPage, FigureDelivery, FigureMediaType,
@@ -382,6 +461,127 @@ mod tests {
     /// Supplies deterministic viewport bounds for matching tests.
     fn page() -> Bbox {
         Bbox::try_from([0.0, 0.0, 400.0, 600.0]).expect("page")
+    }
+
+    /// An embedded image is associated geometrically even when the model calls it algorithm or text.
+    #[test]
+    fn image_matching_does_not_depend_on_layout_label() {
+        let images = vec![image([20.0, 20.0, 90.0, 90.0], true)];
+        for label in [
+            LayoutLabel::Algorithm,
+            LayoutLabel::Content,
+            LayoutLabel::Text,
+            LayoutLabel::Chart,
+        ] {
+            let detections =
+                vec![detection(0, label.clone(), [25.0, 25.0, 85.0, 85.0])];
+            assert_eq!(
+                FigureCatalog::new(&images)
+                    .match_detections(&detections, page())
+                    .len(),
+                1,
+                "{label:?}"
+            );
+        }
+    }
+
+    /// Tiny, full-page and extra images survive independently, without duplicating an image matched twice.
+    #[test]
+    fn every_embedded_placement_is_delivered_once() {
+        let images = vec![
+            image([0.0, 0.0, 2.0, 2.0], true),
+            image([0.0, 0.0, 4.0, 4.0], true),
+            image([3.0, 3.0, 3.1, 3.1], true),
+        ];
+        let mut blocks = vec![
+            figure_block(
+                0,
+                LayoutLabel::Algorithm,
+                [0.0, 0.0, 2.0, 2.0],
+                Some(0),
+                None,
+            ),
+            figure_block(
+                1,
+                LayoutLabel::Text,
+                [0.0, 0.0, 2.0, 2.0],
+                Some(0),
+                None,
+            ),
+        ];
+        let mut warnings = Vec::new();
+        let remaining = FigureCatalog::new(&images).attach(
+            &mut blocks,
+            &rendered_page(),
+            &super::FigureAssets::new(
+                FigureConfig::default(),
+                "all-images-".into(),
+            ),
+            &mut warnings,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            blocks.iter().filter(|block| block.image.is_some()).count(),
+            1
+        );
+        assert_eq!(remaining.len(), 2);
+        assert!(
+            remaining
+                .iter()
+                .all(|asset| asset.image.source == FigureSource::Embedded)
+        );
+        let page = crate::PageResult::builder()
+            .page_number(1)
+            .width(4.0)
+            .height(4.0)
+            .rotation(0)
+            .blocks(Vec::new())
+            .images(remaining)
+            .build();
+        crate::ResultValidator::validate_page(&page)
+            .expect("image content validates");
+        let document = crate::DocumentResult::builder()
+            .schema_version(crate::SchemaVersion::V2_0)
+            .context(crate::DocumentContext::builder().page_count(1).build())
+            .pages(vec![page])
+            .build();
+        let config = docparse_config::OutputConfig::builder()
+            .formula_placeholder("[formula]".into())
+            .include_evidence(false)
+            .include_diagnostics(false)
+            .build();
+        let json = crate::JsonRenderer::render_with_config(&document, &config)
+            .expect("JSON");
+        let restored: crate::DocumentResult =
+            serde_json::from_str(&json).expect("roundtrip");
+        assert_eq!(restored.pages.first().expect("page").images.len(), 2);
+    }
+
+    /// Deferred RGBA keeps alpha during CPU-side PNG encoding and rejects malformed IPC pixel lengths.
+    #[test]
+    fn deferred_pixels_encode_without_losing_transparency() {
+        let pixels = vec![255, 0, 0, 0, 0, 255, 0, 128];
+        let mut embedded = EmbeddedImage::builder()
+            .bounds(Bbox::try_from([0.0, 0.0, 2.0, 1.0]).expect("bounds"))
+            .pixel_width(2)
+            .pixel_height(1)
+            .format(Some(EmbeddedImageFormat::Rgba))
+            .bytes(Some(pixels.clone()))
+            .build();
+        let rendered = rendered_page();
+        let prepared = embedded.prepare(&rendered).expect("prepare");
+        assert_eq!(prepared.media_type, FigureMediaType::Png);
+        assert_eq!(prepared.source, FigureSource::Embedded);
+        assert_eq!(
+            image::load_from_memory(prepared.bytes.as_ref())
+                .expect("PNG")
+                .to_rgba8()
+                .into_raw(),
+            pixels
+        );
+        drop(prepared);
+        embedded.bytes.as_mut().expect("pixels").pop();
+        assert!(embedded.prepare(&rendered).is_err());
     }
 
     /// Builds one model detection with a stable source identity.
@@ -412,7 +612,11 @@ mod tests {
             .bounds(Bbox::try_from(bounds).expect("image"))
             .pixel_width(20)
             .pixel_height(10)
-            .media_type(file.then_some(FigureMediaType::Jpeg))
+            .format(
+                file.then_some(EmbeddedImageFormat::Encoded(
+                    FigureMediaType::Jpeg,
+                )),
+            )
             .bytes(file.then(|| vec![0xff, 0xd8, 0xff, 0xd9]))
             .build()
     }
@@ -497,7 +701,8 @@ mod tests {
             images.first().expect("embedded").bounds
         );
         assert_eq!(matches.get(&1).expect("seal match").image_index, 1);
-        assert!(!matches.contains_key(&2));
+        // Semantic text labels no longer suppress a geometric embedded-image match.
+        assert_eq!(matches.get(&2).expect("text image").image_index, 0);
         assert!(!matches.contains_key(&3));
     }
 
@@ -633,7 +838,9 @@ mod tests {
                 .bounds(Bbox::try_from([0.0, 0.0, 4.0, 2.0]).expect("bounds"))
                 .pixel_width(8)
                 .pixel_height(4)
-                .media_type(Some(FigureMediaType::Jpeg))
+                .format(Some(EmbeddedImageFormat::Encoded(
+                    FigureMediaType::Jpeg,
+                )))
                 .bytes(Some(jpeg.clone()))
                 .build(),
         ];
@@ -772,7 +979,9 @@ mod tests {
                 .bounds(Bbox::try_from([0.0, 0.0, 2.0, 2.0]).expect("bounds"))
                 .pixel_width(3)
                 .pixel_height(5)
-                .media_type(Some(FigureMediaType::Png))
+                .format(Some(EmbeddedImageFormat::Encoded(
+                    FigureMediaType::Png,
+                )))
                 .bytes(Some(png.clone()))
                 .build(),
         ];
@@ -781,7 +990,9 @@ mod tests {
                 .bounds(Bbox::try_from([0.0, 0.0, 2.0, 2.0]).expect("bounds"))
                 .pixel_width(2)
                 .pixel_height(2)
-                .media_type(Some(FigureMediaType::Jpeg))
+                .format(Some(EmbeddedImageFormat::Encoded(
+                    FigureMediaType::Jpeg,
+                )))
                 .bytes(Some(jpeg.clone()))
                 .build(),
         ];

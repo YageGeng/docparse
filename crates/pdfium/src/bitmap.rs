@@ -109,10 +109,30 @@ impl<'lib> Bitmap<'lib> {
         Ok(unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) })
     }
 
-    /// Convert the BGRA buffer to RGBA in a new Vec.
+    /// Converts page or image-object bitmaps to RGBA, honoring grayscale/BGR/BGRx/BGRA storage.
     pub fn to_rgba(&self) -> Result<Vec<u8>, PdfiumError> {
-        let (width, height, stride, _) = self.layout()?;
-        let src = self.buffer()?;
+        // Image objects need not use the BGRA format used for page rendering.
+        // SAFETY: this bitmap owns a live PDFium handle under the Library lock.
+        let format = unsafe { ffi!(FPDFBitmap_GetFormat(self.handle)) } as u32;
+        let channels = match format {
+            pdfium_sys::FPDFBitmap_Gray => 1,
+            pdfium_sys::FPDFBitmap_BGR => 3,
+            pdfium_sys::FPDFBitmap_BGRx | pdfium_sys::FPDFBitmap_BGRA => 4,
+            _ => return Err(PdfiumError::OperationFailed),
+        };
+        let (width, height, stride, len) = checked_bitmap_layout(
+            self.width(),
+            self.height(),
+            self.stride(),
+            channels,
+        )
+        .ok_or(PdfiumError::OperationFailed)?;
+        // SAFETY: the validated layout bounds the allocation owned by this live bitmap.
+        let ptr = unsafe { ffi!(FPDFBitmap_GetBuffer(self.handle)) };
+        let ptr = NonNull::new(ptr.cast::<u8>())
+            .ok_or(PdfiumError::OperationFailed)?;
+        // SAFETY: the buffer is non-null and remains valid for this immutable bitmap borrow.
+        let src = unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) };
         let capacity = width
             .checked_mul(height)
             .and_then(|pixels| pixels.checked_mul(4))
@@ -124,18 +144,33 @@ impl<'lib> Bitmap<'lib> {
                 y.checked_mul(stride).ok_or(PdfiumError::OperationFailed)?;
             let end = start
                 .checked_add(
-                    width.checked_mul(4).ok_or(PdfiumError::OperationFailed)?,
+                    width
+                        .checked_mul(channels)
+                        .ok_or(PdfiumError::OperationFailed)?,
                 )
                 .ok_or(PdfiumError::OperationFailed)?;
             let row =
                 src.get(start..end).ok_or(PdfiumError::OperationFailed)?;
-            // Fixed array chunks preserve exact BGRA pixels and satisfy current Clippy guidance.
-            for pixel in row.as_chunks::<4>().0 {
-                // BGRA -> RGBA
-                rgba.push(pixel[2]); // R
-                rgba.push(pixel[1]); // G
-                rgba.push(pixel[0]); // B
-                rgba.push(pixel[3]); // A
+            for pixel in row.chunks_exact(channels) {
+                match pixel {
+                    [gray] => {
+                        rgba.extend_from_slice(&[*gray, *gray, *gray, 255])
+                    }
+                    [blue, green, red] => {
+                        rgba.extend_from_slice(&[*red, *green, *blue, 255])
+                    }
+                    [blue, green, red, alpha] => rgba.extend_from_slice(&[
+                        *red,
+                        *green,
+                        *blue,
+                        if format == pdfium_sys::FPDFBitmap_BGRA {
+                            *alpha
+                        } else {
+                            255
+                        },
+                    ]),
+                    _ => return Err(PdfiumError::OperationFailed),
+                }
             }
         }
 
@@ -208,7 +243,7 @@ impl<'lib> Bitmap<'lib> {
 
     /// Validates all PDFium-reported dimensions before pixel memory access.
     fn layout(&self) -> Result<(usize, usize, usize, usize), PdfiumError> {
-        checked_bitmap_layout(self.width(), self.height(), self.stride())
+        checked_bitmap_layout(self.width(), self.height(), self.stride(), 4)
             .ok_or(PdfiumError::OperationFailed)
     }
 }
@@ -218,11 +253,12 @@ fn checked_bitmap_layout(
     width: i32,
     height: i32,
     stride: i32,
+    channels: usize,
 ) -> Option<(usize, usize, usize, usize)> {
     let width = usize::try_from(width).ok().filter(|width| *width > 0)?;
     let height = usize::try_from(height).ok().filter(|height| *height > 0)?;
     let stride = usize::try_from(stride).ok()?;
-    let row_bytes = width.checked_mul(4)?;
+    let row_bytes = width.checked_mul(channels)?;
     if stride < row_bytes {
         return None;
     }
@@ -253,10 +289,12 @@ mod tests {
     /// Verifies bitmap dimensions and stride are checked before slice construction.
     #[test]
     fn bitmap_layout_rejects_invalid_stride_and_dimensions() {
-        assert_eq!(checked_bitmap_layout(10, 2, 40), Some((10, 2, 40, 80)));
-        assert_eq!(checked_bitmap_layout(10, 2, 39), None);
-        assert_eq!(checked_bitmap_layout(-1, 2, 40), None);
-        assert_eq!(checked_bitmap_layout(10, 0, 40), None);
+        assert_eq!(checked_bitmap_layout(10, 2, 40, 4), Some((10, 2, 40, 80)));
+        assert_eq!(checked_bitmap_layout(10, 2, 39, 4), None);
+        assert_eq!(checked_bitmap_layout(-1, 2, 40, 4), None);
+        assert_eq!(checked_bitmap_layout(10, 0, 40, 4), None);
+        assert_eq!(checked_bitmap_layout(10, 2, 32, 3), Some((10, 2, 32, 64)));
+        assert_eq!(checked_bitmap_layout(10, 2, 12, 1), Some((10, 2, 12, 24)));
     }
 
     /// Verifies the safe color boundary rejects values outside 32-bit ARGB.

@@ -86,6 +86,36 @@ Renderers do not mutate canonical text or table source ranges. List detection
 recognizes circle/square bullets and the private-use Word bullet across source
 item boundaries.
 
+Algorithms, charts, contents lists, visual labels and unresolved tables retain
+physical rows and horizontal spacing. Like LiteParse's projection, spacing uses
+the median of source-box width divided by Unicode character count; gaps become
+proportional spaces relative to the block's left (or right-to-left) origin.
+Same-row fragments such as an algorithm line number and its statement are joined
+without turning them into separate rows. JSON summaries and plain text share this
+projection; Markdown uses hard breaks and non-breaking spaces so HTML rendering
+retains indentation. Algorithms instead use fenced code blocks with literal spaces
+and newlines; the backtick fence grows when the source contains backticks that could
+otherwise close it. Recognized formula source remains literal inside the algorithm
+code block. Source text items and exact formula byte ranges stay unchanged.
+
+Embedded PDF images are extracted independently of layout labels. A matched image
+can belong to an algorithm, chart, text, table or any other block. Images without
+a unique owner are delivered in optional `pages[].images[]` records containing
+`id`, `bbox`, and `image`; an embedded placement is not duplicated across owners.
+Small decorations, rotated placements and full-page scans remain eligible. Original
+Opaque JPEG/PNG/JPEG-2000 files keep their bytes; masked images carry their native
+RGBA pixels so transparency survives. The PDFium layer copies pixels under its
+lock but does not encode PNG. The existing CPU image-delivery stage performs that
+encoding after native handles have been released. Image payloads have no fixed
+8/64 MB budget; dimensions, allocation lengths and arithmetic remain validated.
+Visual regions without an embedded image retain their existing raster-crop fallback.
+Older JSON remains readable; reparse PDFs to obtain newly retained images and JSON
+spacing. Markdown caches are versioned and regenerated from existing stored lines.
+
+Geometry projection emits borrowed text segments and spacing to format-specific
+writers. Median character width uses linear selection rather than sorting, and
+canonical validation compares those segments without rebuilding a summary string.
+
 ## Table composition
 
 Model-owned table regions retain their whitespace and pass through shared table reconstruction after containment normalization. `src/table/evidence.rs` captures transient measured words, vector rules, and PDF structure tags. `grid/` separates tagged ownership, ruled topology, text alignment, and merged-cell recovery. `assemble.rs` reuses cell-local line assembly while preserving canonical text ownership; `render.rs` and `validate.rs` handle projections and invariants.

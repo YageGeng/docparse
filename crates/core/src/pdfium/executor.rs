@@ -650,7 +650,8 @@ mod tests {
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>".into(),
-            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] /Length 15 >>\nstream\nFFD8FFE000FFD9>\nendstream".into(),
+            // Use valid image samples now that extraction evaluates transparency rather than only sniffing JPEG markers.
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >>\nstream\nFF0000>\nendstream".into(),
             format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         ]);
         let executor = PdfiumExecutor::open(
@@ -676,7 +677,7 @@ mod tests {
                 .expect("embedded image")
                 .bytes
                 .as_deref(),
-            Some(&[0xff, 0xd8, 0xff, 0xe0, 0x00, 0xff, 0xd9][..])
+            Some(&[255, 0, 0, 255][..])
         );
         executor.close().await.expect("close");
     }

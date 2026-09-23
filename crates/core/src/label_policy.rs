@@ -18,7 +18,8 @@ pub(crate) enum LabelPolicy {
 impl LabelPolicy {
     /// Returns whether canonical Block text should retain physical line breaks.
     pub(crate) const fn preserves_line_breaks(self) -> bool {
-        matches!(self, Self::Algorithm | Self::Structured)
+        // Visual labels and contents pages carry spatial structure rather than flowing prose.
+        matches!(self, Self::Algorithm | Self::Structured | Self::Atomic)
     }
 
     /// Returns whether canonical Block text may join an encoded line-end hyphen.
@@ -42,7 +43,6 @@ impl From<&LayoutLabel> for LabelPolicy {
         match label {
             LayoutLabel::Abstract
             | LayoutLabel::AsideText
-            | LayoutLabel::Content
             | LayoutLabel::Footnote
             | LayoutLabel::ReferenceContent
             | LayoutLabel::Text
@@ -65,7 +65,7 @@ impl From<&LayoutLabel> for LabelPolicy {
                 Self::Chrome
             }
             LayoutLabel::Reference => Self::VisualOnly,
-            LayoutLabel::Table => Self::Structured,
+            LayoutLabel::Table | LayoutLabel::Content => Self::Structured,
             LayoutLabel::Unknown(_) => Self::Unknown,
         }
     }
@@ -85,7 +85,7 @@ mod tests {
             (LayoutLabel::Algorithm, LabelPolicy::Algorithm),
             (LayoutLabel::AsideText, LabelPolicy::FlowText),
             (LayoutLabel::Chart, LabelPolicy::Atomic),
-            (LayoutLabel::Content, LabelPolicy::FlowText),
+            (LayoutLabel::Content, LabelPolicy::Structured),
             (LayoutLabel::DisplayFormula, LabelPolicy::Formula),
             (LayoutLabel::DocTitle, LabelPolicy::Title),
             (LayoutLabel::FigureTitle, LabelPolicy::Title),

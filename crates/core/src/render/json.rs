@@ -124,12 +124,17 @@ impl Serialize for ConfiguredPage<'_> {
         let mut state = serializer.serialize_struct(
             "PageResult",
             7 + usize::from(!self.page.replaced_native_text.is_empty())
-                + usize::from(!self.page.formulas.is_empty()),
+                + usize::from(!self.page.formulas.is_empty())
+                + usize::from(!self.page.images.is_empty()),
         )?;
         state.serialize_field("page_number", &self.page.page_number)?;
         state.serialize_field("width", &self.page.width)?;
         state.serialize_field("height", &self.page.height)?;
         state.serialize_field("rotation", &self.page.rotation)?;
+        // Unmatched embedded images are content, not diagnostics or optional evidence.
+        if !self.page.images.is_empty() {
+            state.serialize_field("images", &self.page.images)?;
+        }
         if !self.page.formulas.is_empty() {
             state.serialize_field("formulas", &self.page.formulas)?;
         }

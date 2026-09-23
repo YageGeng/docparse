@@ -538,10 +538,45 @@ button:disabled {
 }
 .workbench {
   min-height: 0;
+  min-width: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: 116px minmax(0, 1fr) minmax(330px, 36%);
+  /* Explicit tracks prevent long results from expanding the row or squeezing its fixed controls. */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 100px minmax(320px, var(--pdf-pane-size, 58fr)) 12px minmax(340px, var(--result-pane-size, 42fr));
+  overflow: hidden;
 }
+.pane-divider {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  background: #f5f7fb;
+  border-inline: 1px solid var(--border);
+}
+.pane-divider::before {
+  content: "";
+  width: 3px;
+  height: 36px;
+  border-radius: 999px;
+  background: #b7c4d6;
+}
+/* Extend the pointer target without taking more space from the document panes. */
+.pane-divider::after { content: ""; position: absolute; inset: 0 -6px; }
+.pane-divider:hover,
+.pane-divider:focus-visible,
+.workbench[data-resizing="true"] .pane-divider { background: #e5edff; }
+.pane-divider:hover::before,
+.pane-divider:focus-visible::before,
+.workbench[data-resizing="true"] .pane-divider::before { background: var(--primary); }
+.pane-divider:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.workbench[data-resizing="true"],
+.workbench[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
+/* Scale the existing PDF bitmap with the pane while the expensive PDF.js render waits for release. */
+.workbench[data-resizing="true"] .pdf-pane .pdf-sheet { width: calc(min(100%, 1000px) * var(--pdf-display-zoom, 1)) !important; }
 .page-rail {
   overflow-y: auto;
   overflow-x: hidden;
@@ -595,6 +630,8 @@ button:disabled {
   background: #fff;
 }
 .pdf-pane {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
   padding: 24px;
   background: #edf1f7;
@@ -655,58 +692,81 @@ button:disabled {
   fill: #3b82f61f;
 }
 .inspector {
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
   background: #fff;
   overflow: hidden;
 }
 .inspector-heading {
-  padding: 20px 20px 13px;
+  flex: 0 0 auto;
+  min-height: 76px;
+  padding: 18px 22px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 .inspector-heading h2 {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 .inspector-heading p {
-  font-size: 11px;
+  font-size: 12px;
   color: #607087;
   margin-top: 5px;
 }
+.inspector-tabs-root {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  overflow: hidden;
+}
 .inspector-tabs {
-  padding: 0 12px !important;
+  /* These controls never shrink or scroll vertically when the selected document is long. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  justify-content: flex-start !important;
+  padding: 0 16px !important;
   width: 100% !important;
   border-bottom: 1px solid var(--border);
-  height: 39px !important;
+  height: 48px !important;
   border-radius: 0 !important;
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 .inspector-tabs [data-slot="tabs-trigger"] {
-  font-size: 12px;
-  padding-bottom: 10px;
+  flex: 1 0 auto;
+  height: 47px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  font-size: 13px;
+  gap: 8px;
+  color: var(--muted-foreground);
 }
+.inspector-tabs [data-slot="tabs-trigger"]:focus-visible { outline-offset: -4px; }
+/* Inactive Radix underlines also occupy scroll space even at zero opacity. */
+.inspector-tabs [data-slot="tabs-trigger"]::after { bottom: 0 !important; inset-inline: 10px; }
 .inspector-tabs [data-state="active"] {
   color: #2563eb !important;
 }
 .inspector-tabs [data-state="active"]::after {
   background: #2563eb !important;
-  bottom: -1px !important;
-}
-.tab-count {
-  font-size: 9px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: #edf2f9;
 }
 .inspector-content {
+  flex: 1 1 0%;
   overflow: auto;
+  min-width: 0;
   min-height: 0;
   margin-top: 0;
+  overscroll-behavior: contain;
 }
+.inspector-markdown { overflow: hidden; }
 .inspector-empty {
   display: flex;
   flex-direction: column;
@@ -763,6 +823,12 @@ button:disabled {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Spatial text uses reconstructed spaces and physical rows rather than paragraph reflow. */
+.content-block.is-spatial > p,
+.content-block.is-spatial .inline-prose { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.content-block.is-spatial > p { white-space: pre; overflow-x: auto; }
+.content-block.is-spatial .inline-prose .formula-preview { overflow-x: auto; }
+.content-block.is-spatial .inline-prose .formula-preview p { white-space: nowrap; }
 .table-scroll {
   max-width: 100%;
   /* Keep both scrollbars reachable while inspecting wide, multi-page-sized tables. */
@@ -802,6 +868,31 @@ button:disabled {
 }
 
 .formula-result { margin: 12px 0; border-top: 1px solid var(--border); padding-top: 12px; }
+/* Full-document Markdown needs readable prose, scrollable tables, and preserved code whitespace. */
+.markdown-result { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
+.markdown-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 22px; border-bottom: 1px solid var(--border); background: #fbfcfe; font-size: 12px; color: var(--muted-foreground); }
+.markdown-view-switch { display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: #edf1f7; }
+.markdown-view-switch button { height: 28px; padding: 0 12px; font-size: 12px; }
+.markdown-view-switch button[aria-pressed="true"] { background: #fff; color: var(--foreground); box-shadow: 0 1px 3px #17233a14; }
+.markdown-scroll { flex: 1 1 0%; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.markdown-source { margin: 0; padding: 24px; font-family: monospace; font-size: 12px; line-height: 1.8; white-space: pre; }
+.markdown-document { width: 100%; max-width: 80ch; margin-inline: auto; padding: 24px; font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.markdown-document :is(p, ul, ol, blockquote, pre, table) { margin-block: 0 1em; }
+.markdown-document :is(h1, h2, h3, h4, h5, h6) { margin-block: 1.4em .6em; font-weight: 600; line-height: 1.4; }
+.markdown-document > :first-child { margin-top: 0; }
+.markdown-document h1 { font-size: 1.6em; }
+.markdown-document h2 { font-size: 1.35em; }
+.markdown-document h3 { font-size: 1.15em; }
+.markdown-document ul { list-style: disc; padding-left: 1.5em; }
+.markdown-document ol { list-style: decimal; padding-left: 1.5em; }
+.markdown-document blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
+.markdown-document pre { overflow-x: auto; padding: 12px; background: var(--muted); border-radius: 6px; white-space: pre; }
+.markdown-document code { font-family: monospace; font-size: .9em; }
+.markdown-document a { color: var(--primary); text-decoration: underline; }
+.markdown-document table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 12px; }
+.markdown-document :is(td, th) { border: 1px solid var(--border); padding: 7px 9px; min-width: 65px; vertical-align: top; }
+.markdown-document th { background: var(--muted); font-weight: 600; }
+.markdown-document .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: 4px; }
 .formula-result h3 { font-size: 12px; font-weight: 600; }
 .formula-representation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted-foreground); }
 .formula-preview { min-width: 0; overflow-x: auto; padding: 6px 0; white-space: normal; }
@@ -855,7 +946,8 @@ button:disabled {
   .workbench {
     display: block;
   }
-  .page-rail {
+  .page-rail,
+  .pane-divider {
     display: none;
   }
   .pdf-pane,

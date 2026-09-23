@@ -161,7 +161,7 @@ explicit environment variable takes precedence.
 - `src/api`: generated contract, shared response handling and streamed upload.
 - `src/features/jobs`: upload recovery, persisted history and SSE synchronization.
 - `src/features/viewer`: URL-based inspection, lazy PDF rendering, result worker
-  and text/table/JSON presentation.
+  and text/table/JSON/Markdown presentation.
 - `src/components/ui`: the selected shadcn/Radix components.
 - `scripts`: API generation and self-hosted PDF.js asset preparation.
 
@@ -177,6 +177,33 @@ rtk proxy node crates/server/tests/directory_upload.mjs http://127.0.0.1:5173
 
 ## Formula previews
 
+The inspector has Content, Markdown, and JSON tabs. Content includes merged-cell
+tables, images from every semantic label, and unmatched page images; separate
+table/image tabs are not needed. Images retain preview and download actions.
+On desktop, drag the divider between the PDF and results to resize either pane.
+The focused divider supports arrow keys, Home/End, and Enter to reset; double-click
+also restores the default ratio. Header and tab controls remain fixed while result
+content scrolls independently. Narrow screens retain the original/result switch.
+Dragging scales the current PDF bitmap; a new PDF.js raster is requested on release.
+Algorithm, contents-list and chart text uses a monospace font to display the
+backend's geometric indentation. Existing results remain readable, but PDFs must
+be parsed again to add images that older versions discarded.
+
+Completed documents offer both JSON and Markdown downloads. The Markdown tab
+loads the complete document from `GET /jobs/result?id=<uuid>&format=markdown`
+only when opened; it does not change with PDF page navigation. Preview and source
+views share the exact server output, and the copy action preserves that source.
+The current document's opened Markdown and rendered DOM survive tab/source toggles;
+changing documents or leaving the workbench releases them.
+The existing server renderer caches Markdown from the stored parse result without
+running inference again. JSON retains its complete schema and contents.
+
+The full-document preview supports headings, lists, code, formulas, pipe tables,
+and merged-cell HTML tables. DOMPurify restricts raw HTML to table structure and
+line breaks, allowing only row/column span attributes. Other raw markup and
+automatic image requests are disabled. Table-cell formulas use the same bounded,
+untrusted KaTeX renderer as paragraph formulas.
+
 The content inspector renders recognized inline/display formulas in both LaTeX
 and Markdown views using KaTeX. Copy buttons copy the exact corresponding JSON
 source, including Markdown delimiters. Formula-only regions show the recognized
@@ -188,7 +215,8 @@ results without this optional projection retain the previous view until reparsed
 its embedded formulas, and formulas without a block anchor remain visible.
 Selected-region JSON includes its associated formula records.
 
-Markdown raw HTML and automatic image loading are disabled. LaTeX trusted
+Inline previews disable raw HTML; the document preview uses the restricted table
+policy above. Automatic image loading and LaTeX trusted
 commands are disabled, with bounded macro expansion and layout size. Unsupported
 LaTeX shows an explicit preview error while retaining the source copy buttons.
 Fonts and rendering libraries are served locally.
@@ -197,4 +225,19 @@ Verify against the production server and built workbench:
 
 ```sh
 rtk proxy node crates/server/tests/formula_web.mjs /absolute/path/to/formulas.pdf
+```
+
+Verify Markdown preview, source, copying, downloading, and rendering safety against
+the production server and the Vite development workbench, using a completed real
+job that contains formulas and tables:
+
+```sh
+rtk proxy node crates/server/tests/markdown_web.mjs http://127.0.0.1:5173 <job-uuid>
+```
+
+Verify pane resizing, keyboard controls, fixed headers, and mobile layout with a
+completed real document containing at least nine pages:
+
+```sh
+rtk proxy node crates/server/tests/workbench_web.mjs http://127.0.0.1:5173 <job-uuid>
 ```

@@ -15,7 +15,8 @@ use std::{
 };
 use typed_builder::TypedBuilder;
 
-pub const PROTOCOL_VERSION: u32 = 4;
+// Image metadata now distinguishes encoded files from deferred RGBA pixels.
+pub const PROTOCOL_VERSION: u32 = 5;
 pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const WORKER_BINARY: &str = "docparse-pdfium-worker";
 
@@ -114,7 +115,7 @@ pub struct Raster {
     pub page_number: u32,
     pub transform: PageTransform,
     pub pixels: IpcSharedMemory,
-    /// Metadata stays in the render message while encoded files use shared memory.
+    /// Metadata stays in the render message while original files and deferred pixels use shared memory.
     #[builder(default, setter(skip))]
     pub(crate) images:
         Vec<(crate::figure::EmbeddedImage, Option<IpcSharedMemory>)>,
@@ -127,7 +128,7 @@ impl From<RenderedPage> for Raster {
             .transform(page.transform)
             .pixels(IpcSharedMemory::from_bytes(page.image.data()))
             .build();
-        // Pair each file with its own metadata instead of maintaining parallel scan arrays.
+        // Pair each payload with its metadata instead of maintaining parallel scan arrays.
         raster.images = page
             .embedded_images
             .into_iter()
@@ -182,7 +183,7 @@ impl TryFrom<Raster> for RenderedPage {
             .transform(value.transform)
             .image(Arc::new(image))
             .build();
-        // Restore files only for this admitted page; pre-scan carries no image buffers.
+        // Restore payloads only for this admitted page; pre-scan carries no image buffers.
         rendered.embedded_images = value
             .images
             .into_iter()
@@ -574,7 +575,7 @@ mod tests {
         AffineTransform, Bbox, PageRotation, PageTransformInput,
     };
 
-    /// Render IPC preserves optional image files without relying on JSON field omission.
+    /// Render IPC preserves original files and RGBA pixels without relying on JSON field omission.
     #[test]
     fn image_files_round_trip_with_render_ipc() {
         let transform = PageTransform::try_from(
@@ -604,20 +605,31 @@ mod tests {
             .image(Arc::new(image))
             .transform(transform)
             .build();
-        rendered.embedded_images = [true, false]
-            .into_iter()
-            .map(|file| {
-                crate::figure::EmbeddedImage::builder()
-                    .bounds(
-                        Bbox::try_from([1.0, 2.0, 3.0, 4.0]).expect("bounds"),
-                    )
-                    .pixel_width(20)
-                    .pixel_height(10)
-                    .media_type(file.then_some(crate::FigureMediaType::Jpeg))
-                    .bytes(file.then(|| vec![0xff, 0xd8, 0xff, 0xd9]))
-                    .build()
-            })
-            .collect();
+        rendered.embedded_images = [
+            Some(crate::figure::EmbeddedImageFormat::Encoded(
+                crate::FigureMediaType::Jpeg,
+            )),
+            Some(crate::figure::EmbeddedImageFormat::Rgba),
+            None,
+        ]
+        .into_iter()
+        .map(|format| {
+            crate::figure::EmbeddedImage::builder()
+                .bounds(Bbox::try_from([1.0, 2.0, 3.0, 4.0]).expect("bounds"))
+                .pixel_width(2)
+                .pixel_height(1)
+                .format(format)
+                .bytes(format.map(|format| match format {
+                    crate::figure::EmbeddedImageFormat::Rgba => {
+                        vec![255, 0, 0, 0, 0, 255, 0, 255]
+                    }
+                    crate::figure::EmbeddedImageFormat::Encoded(_) => {
+                        vec![0xff, 0xd8, 0xff, 0xd9]
+                    }
+                }))
+                .build()
+        })
+        .collect();
         let expected = rendered.embedded_images.clone();
         let (sender, receiver) = ipc_channel::ipc::channel().expect("channel");
         sender.send(Raster::from(rendered)).expect("send");

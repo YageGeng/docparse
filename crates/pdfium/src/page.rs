@@ -20,11 +20,10 @@ pub struct ImageBounds {
     pub height: f32,
 }
 
-/// Reads an image stream once after checking its reported length against the caller budget.
+/// Reads an image stream without a policy size cap, retaining platform allocation and length checks.
 fn image_object_data(
     obj: pdfium_sys::FPDF_PAGEOBJECT,
     decoded: bool,
-    limit: std::os::raw::c_ulong,
 ) -> Option<Vec<u8>> {
     let size = unsafe {
         if decoded {
@@ -37,10 +36,13 @@ fn image_object_data(
             ffi!(FPDFImageObj_GetImageDataRaw(obj, std::ptr::null_mut(), 0))
         }
     };
-    if size == 0 || size > limit || size > usize::MAX as std::os::raw::c_ulong {
+    let length = usize::try_from(size).ok()?;
+    if length == 0 || length > isize::MAX as usize {
         return None;
     }
-    let mut bytes = vec![0u8; size as usize];
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(length).ok()?;
+    bytes.resize(length, 0);
     let written = unsafe {
         if decoded {
             ffi!(FPDFImageObj_GetImageDataDecoded(
@@ -115,22 +117,29 @@ pub enum EncodedImageKind {
     Jpx,
 }
 
-/// Original image-file bytes. Raw pixel samples are not represented here.
+/// Original standalone image-file bytes retained without transcoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodedImage {
     pub kind: EncodedImageKind,
     pub bytes: Vec<u8>,
 }
 
-/// One axis-aligned embedded image in viewport space.
+/// Owned pixels or original file bytes that can leave the PDFium critical section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmbeddedImageData {
+    Encoded(EncodedImage),
+    Rgba(Vec<u8>),
+}
+
+/// One embedded image with its enclosing viewport rectangle.
 #[derive(Debug, Clone, TypedBuilder)]
 pub struct EmbeddedImage {
     pub bounds: RectF,
     pub pixel_width: u32,
     pub pixel_height: u32,
-    /// Present only when the decoded stream is still a complete image file.
+    /// Original file or mask-aware RGBA pixels; PNG encoding belongs outside PDFium's lock.
     #[builder(default)]
-    pub encoded: Option<EncodedImage>,
+    pub data: Option<EmbeddedImageData>,
 }
 
 /// Recognizes complete encoded image streams without transcoding their bytes.
@@ -151,24 +160,84 @@ fn classify_image_file(bytes: &[u8]) -> Option<EncodedImageKind> {
     None
 }
 
-/// Reads a bounded encoded image using the shared stream length check.
-fn encoded_image_file(
-    obj: pdfium_sys::FPDF_PAGEOBJECT,
-) -> Option<EncodedImage> {
-    let filters = image_filters(obj);
-    let preserves_file = filters
-        .iter()
-        .any(|filter| filter == "DCTDecode" || filter == "JPXDecode");
-    let limit: std::os::raw::c_ulong = if preserves_file {
-        64 * 1024 * 1024
-    } else {
-        // Flate and uncompressed streams are usually raw samples. Only small
-        // buffers are inspected, in case the file itself survived the filter.
-        8 * 1024 * 1024
-    };
-    // Share length validation with the reader instead of querying decoded size twice.
-    let bytes = image_object_data(obj, true, limit)?;
-    classify_image_file(&bytes).map(|kind| EncodedImage { kind, bytes })
+impl Page<'_, '_> {
+    /// Extracts original files or mask-aware native-resolution pixels without compressing inside the Library lock.
+    fn image_data(
+        &self,
+        obj: pdfium_sys::FPDF_PAGEOBJECT,
+        width: u32,
+        height: u32,
+    ) -> Option<EmbeddedImageData> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        // PageObj_HasTransparency omits image-dictionary SMask entries, so mask-aware rasterization is required.
+        let handle = {
+            let mut original = FS_IDENTITY;
+            // SAFETY: the live image object and writable matrix storage remain valid under self's lock.
+            if unsafe { ffi!(FPDFPageObj_GetMatrix(obj, &mut original)) } == 0 {
+                return None;
+            }
+            // PDFium bitmaps use signed dimensions. This is an API validity check, not a configurable size budget.
+            let width = i32::try_from(width).ok()?;
+            let height = i32::try_from(height).ok()?;
+            let native = pdfium_sys::FS_MATRIX {
+                a: width as f32,
+                d: height as f32,
+                ..FS_IDENTITY
+            };
+            // SAFETY: both transforms are finite; the original is restored immediately, including when rendering fails.
+            if unsafe { ffi!(FPDFPageObj_SetMatrix(obj, &native)) } == 0 {
+                return None;
+            }
+            // SAFETY: the image, its page and document are alive; PDFium transfers ownership of the returned bitmap.
+            let handle = unsafe {
+                ffi!(FPDFImageObj_GetRenderedBitmap(
+                    self.doc_handle,
+                    self.handle,
+                    obj
+                ))
+            };
+            // SAFETY: restore the same live object before fallible pixel conversion or returning to the caller.
+            let restored =
+                unsafe { ffi!(FPDFPageObj_SetMatrix(obj, &original)) } != 0;
+            if !restored {
+                if !handle.is_null() {
+                    // SAFETY: this function still owns the bitmap returned above.
+                    unsafe { ffi!(FPDFBitmap_Destroy(handle)) };
+                }
+                return None;
+            }
+            handle
+        };
+        if handle.is_null() {
+            return None;
+        }
+        // SAFETY: ownership of this non-null bitmap was transferred by PDFium; it drops before the Library lock.
+        let bitmap = unsafe { Bitmap::from_handle(handle) };
+        let filters = image_filters(obj);
+        // Only possible standalone files need an opacity scan; filtered sample streams go straight to pixel delivery.
+        if (filters.is_empty()
+            || filters
+                .iter()
+                .any(|filter| filter == "DCTDecode" || filter == "JPXDecode"))
+            && bitmap
+                .buffer()
+                .ok()?
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| matches!(pixel, [_, _, _, 255]))
+            && let Some(bytes) = image_object_data(obj, true)
+            && let Some(kind) = classify_image_file(&bytes)
+        {
+            return Some(EmbeddedImageData::Encoded(EncodedImage {
+                kind,
+                bytes,
+            }));
+        }
+        bitmap.to_rgba().ok().map(EmbeddedImageData::Rgba)
+    }
 }
 
 /// Metadata for an embedded image page object retained by the extraction
@@ -723,17 +792,14 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
             };
 
             let raw_bytes = include_data
-                .then(|| {
-                    image_object_data(obj, false, std::os::raw::c_ulong::MAX)
-                })
+                .then(|| image_object_data(obj, false))
                 .flatten();
             let jpeg_bytes = if include_data
                 && image_filters(obj)
                     .iter()
                     .any(|filter| filter == "DCTDecode")
             {
-                image_object_data(obj, true, std::os::raw::c_ulong::MAX)
-                    .filter(|bytes| is_jpeg(bytes))
+                image_object_data(obj, true).filter(|bytes| is_jpeg(bytes))
             } else {
                 None
             };
@@ -762,10 +828,10 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
         }
     }
 
-    /// Enumerates axis-aligned embedded images, including images inside Form XObjects.
+    /// Enumerates placed embedded images, including rotated images inside Form XObjects.
     ///
-    /// Bounds are viewport rectangles. `encoded` is set only when PDFium's decoded
-    /// stream is still a JPEG, PNG, or JPEG 2000 file; the bytes are not transcoded.
+    /// Bounds enclose the viewport placement. Original file bytes are retained when
+    /// available; otherwise mask-aware RGBA pixels leave the lock for deferred PNG encoding.
     pub fn embedded_images(&self, view_box: &RectF) -> Vec<EmbeddedImage> {
         let viewport = self.viewport_transform(view_box);
         let count = unsafe { ffi!(FPDFPage_CountObjects(self.handle)) };
@@ -777,6 +843,7 @@ impl<'doc, 'lib: 'doc> Page<'doc, 'lib> {
                 continue;
             }
             collect_embedded_images(
+                self,
                 object,
                 &FS_IDENTITY,
                 &viewport,
@@ -1740,20 +1807,9 @@ fn compose_matrix(
 
 const EMBEDDED_IMAGE_FORM_DEPTH: usize = 6;
 
-/// Rejects rotated or sheared edges that cannot use a rectangular placement.
-fn corners_are_axis_aligned(corners: [(f32, f32); 4]) -> bool {
-    const EDGE_EPSILON: f32 = 0.2;
-    [(0, 1), (1, 2), (2, 3), (3, 0)]
-        .into_iter()
-        .all(|(start, end)| {
-            let dx = (corners[end].0 - corners[start].0).abs();
-            let dy = (corners[end].1 - corners[start].1).abs();
-            dx <= EDGE_EPSILON || dy <= EDGE_EPSILON
-        })
-}
-
 /// Collects placed images recursively while applying ancestor form transforms.
 fn collect_embedded_images(
+    page: &Page<'_, '_>,
     obj: pdfium_sys::FPDF_PAGEOBJECT,
     parent: &pdfium_sys::FS_MATRIX,
     viewport: &ViewportTransform,
@@ -1776,7 +1832,14 @@ fn collect_embedded_images(
             if child.is_null() {
                 continue;
             }
-            collect_embedded_images(child, &combined, viewport, depth + 1, out);
+            collect_embedded_images(
+                page,
+                child,
+                &combined,
+                viewport,
+                depth + 1,
+                out,
+            );
         }
         return;
     }
@@ -1796,9 +1859,7 @@ fn collect_embedded_images(
         let page_y = matrix.b * x + matrix.d * y + matrix.f;
         viewport_corners[index] = viewport.transform_point(page_x, page_y);
     }
-    if !corners_are_axis_aligned(viewport_corners) {
-        return;
-    }
+    // An enclosing rectangle can describe rotated/sheared placements without discarding their image bytes.
     let left = viewport_corners
         .iter()
         .map(|corner| corner.0)
@@ -1815,7 +1876,14 @@ fn collect_embedded_images(
         .iter()
         .map(|corner| corner.1)
         .fold(f32::NEG_INFINITY, f32::max);
-    if !(right - left > 0.5 && bottom - top > 0.5) {
+    // Tiny decorations and full-page scans are still images; only invalid geometry is rejected.
+    if !(left.is_finite()
+        && right.is_finite()
+        && top.is_finite()
+        && bottom.is_finite()
+        && right > left
+        && bottom > top)
+    {
         return;
     }
 
@@ -1832,8 +1900,7 @@ fn collect_embedded_images(
         pixel_width = 0;
         pixel_height = 0;
     }
-    let encoded =
-        encoded_image_file(obj).filter(|_| pixel_width > 0 && pixel_height > 0);
+    let data = page.image_data(obj, pixel_width, pixel_height);
     out.push(
         EmbeddedImage::builder()
             .bounds(RectF {
@@ -1844,7 +1911,7 @@ fn collect_embedded_images(
             })
             .pixel_width(pixel_width)
             .pixel_height(pixel_height)
-            .encoded(encoded)
+            .data(data)
             .build(),
     );
 }
@@ -2519,7 +2586,10 @@ q\n1 0 0 1 10 200 cm\n/Fm Do\nQ\n";
         let mut jpeg_hits = 0;
         let mut png_hits = 0;
         for image in &images {
-            let encoded = image.encoded.as_ref().expect("original file");
+            let Some(EmbeddedImageData::Encoded(encoded)) = image.data.as_ref()
+            else {
+                panic!("expected original file");
+            };
             match encoded.kind {
                 EncodedImageKind::Jpeg => {
                     assert_eq!(encoded.bytes, jpeg);
@@ -2542,9 +2612,7 @@ q\n1 0 0 1 10 200 cm\n/Fm Do\nQ\n";
         let direct = images
             .iter()
             .find(|image| {
-                image.encoded.as_ref().is_some_and(|encoded| {
-                    encoded.kind == EncodedImageKind::Jpeg
-                }) && (image.bounds.left - 40.0).abs() < 1.0
+                matches!(image.data.as_ref(), Some(EmbeddedImageData::Encoded(encoded)) if encoded.kind == EncodedImageKind::Jpeg) && (image.bounds.left - 40.0).abs() < 1.0
             })
             .expect("directly painted jpeg");
         assert!((direct.bounds.top - 230.0).abs() < 1.0);
@@ -2554,13 +2622,82 @@ q\n1 0 0 1 10 200 cm\n/Fm Do\nQ\n";
         let nested = images
             .iter()
             .find(|image| {
-                image.encoded.as_ref().is_some_and(|encoded| {
-                    encoded.kind == EncodedImageKind::Jpeg
-                }) && (image.bounds.left - 10.0).abs() < 1.0
+                matches!(image.data.as_ref(), Some(EmbeddedImageData::Encoded(encoded)) if encoded.kind == EncodedImageKind::Jpeg) && (image.bounds.left - 10.0).abs() < 1.0
             })
             .expect("form jpeg");
         assert!((nested.bounds.top - 120.0).abs() < 1.0);
         assert!((nested.bounds.right - 110.0).abs() < 1.0);
         assert!((nested.bounds.bottom - 200.0).abs() < 1.0);
+    }
+
+    /// Rotated, tiny and full-page raw image placements survive enumeration as deferred pixels.
+    #[test]
+    fn embedded_images_include_rotated_tiny_and_raw_pixels() {
+        let samples = [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255];
+        let bytes = binary_document(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /XObject << /Im 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+            stream_object("<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8", &samples),
+            stream_object("<<", b"q 20 10 -10 20 50 50 cm /Im Do Q\nq 0.1 0 0 0.1 1 1 cm /Im Do Q\nq 300 0 0 400 0 0 cm /Im Do Q"),
+        ]);
+        let library = Library::init();
+        let document = library
+            .load_document_from_bytes(&bytes, None)
+            .expect("document");
+        let page = document.page(0).expect("page");
+        let images = page.embedded_images(&page.view_box().expect("view"));
+        assert_eq!(images.len(), 3);
+        for image in images {
+            let Some(EmbeddedImageData::Rgba(pixels)) = image.data else {
+                panic!("expected deferred RGBA pixels");
+            };
+            let rgb: Vec<_> = pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|pixel| pixel.iter().take(3).copied())
+                .collect();
+            assert_eq!(rgb, samples);
+        }
+    }
+
+    /// Soft masks survive extraction at native resolution and temporary transforms never alter the page.
+    #[test]
+    fn embedded_images_apply_masks_without_mutating_the_page() {
+        let bytes = binary_document(&[
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Resources << /XObject << /Im 4 0 R >> >> /Contents 6 0 R >>".to_vec(),
+            stream_object("<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 5 0 R", &[255, 0, 0, 0, 255, 0]),
+            stream_object("<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[0, 128]),
+            stream_object("<<", b"q 8 0 0 4 4 8 cm /Im Do Q"),
+        ]);
+        let library = Library::init();
+        let document = library
+            .load_document_from_bytes(&bytes, None)
+            .expect("document");
+        let page = document.page(0).expect("page");
+        let before = page
+            .render(72.0)
+            .expect("render")
+            .to_rgba()
+            .expect("pixels");
+        let images = page.embedded_images(&page.view_box().expect("view"));
+        let image = images.first().expect("image");
+        assert_eq!((image.pixel_width, image.pixel_height), (2, 1));
+        let Some(EmbeddedImageData::Rgba(pixels)) = image.data.as_ref() else {
+            panic!("expected mask-aware RGBA");
+        };
+        assert_eq!(pixels.len(), 8);
+        assert_eq!(pixels.get(3), Some(&0));
+        assert_eq!(pixels.get(7), Some(&128));
+        assert_eq!(
+            page.render(72.0)
+                .expect("render")
+                .to_rgba()
+                .expect("pixels"),
+            before
+        );
     }
 }

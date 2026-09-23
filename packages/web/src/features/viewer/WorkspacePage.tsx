@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
   ArrowLeft,
@@ -59,15 +59,35 @@ export function WorkspacePage() {
   const [overlays, setOverlays] = useState(true);
   const [mode, setMode] = useState("pdf");
   const [width, setWidth] = useState(620);
+  const [split, setSplit] = useState(58);
+  const [panelSpace, setPanelSpace] = useState(0);
+  const [resizing, setResizing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<unknown>();
   const viewer = useRef<HTMLDivElement>(null);
+  const workbench = useRef<HTMLDivElement>(null);
+  const divider = useRef<HTMLDivElement>(null);
+  const dragOffset = useRef(0);
+  const dragging = useRef(false);
+  const pendingWidth = useRef(width);
+  // Keep both panes usable at every desktop size; CSS uses the same minimum widths.
+  const minSplit = panelSpace > 0 ? Math.min(50, 320 / panelSpace * 100) : 25;
+  const maxSplit = panelSpace > 0 ? Math.max(50, 100 - 340 / panelSpace * 100) : 75;
+  const visibleSplit = Math.max(minSplit, Math.min(maxSplit, split));
   useEffect(() => {
     const node = viewer.current;
     if (!node) return;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry && entry.contentRect.width > 0)
-        setWidth(Math.max(220, entry.contentRect.width - 48));
+      if (entry && entry.contentRect.width > 0) {
+        // ResizeObserver already excludes padding, so the PDF fits the actual space after each divider move.
+        pendingWidth.current = Math.max(220, entry.contentRect.width);
+        // Reuse the current bitmap while dragging; commit its rasterization width only on release.
+        if (!dragging.current) setWidth(pendingWidth.current);
+        const bounds = workbench.current?.getBoundingClientRect();
+        const handleWidth = divider.current?.offsetWidth ?? 0;
+        if (bounds && handleWidth)
+          setPanelSpace(bounds.right - node.getBoundingClientRect().left - handleWidth);
+      }
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -77,6 +97,46 @@ export function WorkspacePage() {
     const timer = setTimeout(() => setCopied(false), 2000);
     return () => clearTimeout(timer);
   }, [copied]);
+
+  /** Captures the pointer so dragging stays reliable across the PDF canvas and outside the divider. */
+  function beginResize(event: PointerEvent<HTMLDivElement>) {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    dragOffset.current = event.clientX - event.currentTarget.getBoundingClientRect().left;
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragging.current = true;
+    setResizing(true);
+  }
+
+  /** Commits one PDF redraw after a completed or cancelled drag instead of rebuilding every frame. */
+  function finishResize() {
+    dragging.current = false;
+    setWidth(pendingWidth.current);
+    setResizing(false);
+  }
+
+  /** Converts pointer position into a bounded ratio shared by the two flexible grid columns. */
+  function resizePanels(event: PointerEvent<HTMLDivElement>) {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId) || !viewer.current || !panelSpace) return;
+    const position = event.clientX - dragOffset.current - viewer.current.getBoundingClientRect().left;
+    setSplit(Math.max(minSplit, Math.min(maxSplit, position / panelSpace * 100)));
+  }
+
+  /** Gives keyboard users the same resize limits and a reset action without requiring a drag. */
+  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    const values: Record<string, number> = {
+      ArrowLeft: visibleSplit - 2,
+      ArrowRight: visibleSplit + 2,
+      Home: minSplit,
+      End: maxSplit,
+      Enter: 58,
+    };
+    const value = values[event.key];
+    if (value === undefined) return;
+    event.preventDefault();
+    setSplit(Math.max(minSplit, Math.min(maxSplit, value)));
+  }
 
   /** Persists page selection while removing any region from the previous page. */
   function selectPage(value: number) {
@@ -182,6 +242,15 @@ export function WorkspacePage() {
               {copied ? "已复制" : "复制链接"}
             </span>
           </Button>
+          {/* Both downloads use the same completed parse; Markdown is generated and cached by the server. */}
+          {job.data.status === "succeeded" && (
+            <Button asChild variant="outline" size="sm">
+              <a href={apiUrl("jobs/result", { id, format: "markdown" })} download={`${name.replace(/\.pdf$/i, "")}.md`} aria-label="下载 Markdown">
+                <Download size={15} />
+                <span className="hidden sm:inline">Markdown</span>
+              </a>
+            </Button>
+          )}
           {job.data.status === "succeeded" ? (
             <Button asChild size="sm">
               <a
@@ -349,7 +418,13 @@ export function WorkspacePage() {
           </Button>
         </div>
       </div>
-      <div className="workbench" data-mobile-mode={mode}>
+      <div
+        ref={workbench}
+        className="workbench"
+        data-mobile-mode={mode}
+        data-resizing={resizing}
+        style={{ "--pdf-pane-size": `${visibleSplit}fr`, "--result-pane-size": `${100 - visibleSplit}fr`, "--pdf-display-zoom": zoom } as CSSProperties}
+      >
         <aside className="page-rail" aria-label="页面导航">
           <p>页面</p>
           {pdf &&
@@ -363,7 +438,7 @@ export function WorkspacePage() {
               />
             ))}
         </aside>
-        <div className="pdf-pane" ref={viewer}>
+        <div id="pdf-pane" className="pdf-pane" ref={viewer}>
           {pdf ? (
             <PdfPage
               key={number}
@@ -394,7 +469,28 @@ export function WorkspacePage() {
             </div>
           )}
         </div>
+        <div
+          ref={divider}
+          className="pane-divider"
+          role="separator"
+          tabIndex={0}
+          aria-label="调整原文与结果宽度"
+          aria-orientation="vertical"
+          aria-controls="pdf-pane result-pane"
+          aria-valuemin={Math.round(minSplit)}
+          aria-valuemax={Math.round(maxSplit)}
+          aria-valuenow={Math.round(visibleSplit)}
+          aria-valuetext={`原文 ${Math.round(visibleSplit)}%，结果 ${Math.round(100 - visibleSplit)}%`}
+          title="拖动调整宽度，方向键微调，双击恢复默认"
+          onPointerDown={beginResize}
+          onPointerMove={resizePanels}
+          onLostPointerCapture={finishResize}
+          onDoubleClick={() => setSplit(58)}
+          onKeyDown={resizeWithKeyboard}
+        />
         <ResultInspector
+          documentId={id}
+          ready={job.data.status === "succeeded"}
           page={page}
           selected={selected}
           onSelect={selectBlock}

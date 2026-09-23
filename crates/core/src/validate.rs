@@ -107,6 +107,62 @@ impl ResultValidator {
             ));
         }
 
+        // Validate unmatched page images with the same content rules as block-owned images.
+        let mut image_ids = BTreeSet::new();
+        for (index, asset) in page.images.iter().enumerate() {
+            let image_path = format!("{path}.images[{index}]");
+            if asset.id.is_empty() || !image_ids.insert(&asset.id) {
+                return Err(Self::invalid(
+                    &image_path,
+                    "image IDs must be non-empty and unique",
+                ));
+            }
+            Self::validate_bbox(asset.bbox, &format!("{image_path}.bbox"))?;
+        }
+        for (image, image_path) in page
+            .images
+            .iter()
+            .enumerate()
+            .map(|(index, asset)| {
+                (&asset.image, format!("{path}.images[{index}].image"))
+            })
+            .chain(page.blocks.iter().enumerate().filter_map(
+                |(index, block)| {
+                    block.image.as_ref().map(|image| {
+                        (image, format!("{path}.blocks[{index}].image"))
+                    })
+                },
+            ))
+        {
+            if image.width == 0 || image.height == 0 {
+                return Err(Self::invalid(
+                    &image_path,
+                    "width and height must be positive",
+                ));
+            }
+            match &image.delivery {
+                crate::FigureDelivery::File { path }
+                    if path.is_empty()
+                        || !std::path::Path::new(path).is_absolute() =>
+                {
+                    return Err(Self::invalid(
+                        format!("{image_path}.delivery.path"),
+                        "must be a non-empty absolute path",
+                    ));
+                }
+                crate::FigureDelivery::Inline { data_base64 }
+                    if data_base64.is_empty() =>
+                {
+                    return Err(Self::invalid(
+                        format!("{image_path}.delivery.data_base64"),
+                        "must be non-empty",
+                    ));
+                }
+                crate::FigureDelivery::File { .. }
+                | crate::FigureDelivery::Inline { .. } => {}
+            }
+        }
+
         let mut formula_ids = BTreeSet::new();
         for (index, formula) in page.formulas.iter().enumerate() {
             let location = format!("{path}.formulas[{index}]");
@@ -299,36 +355,6 @@ impl ResultValidator {
                 return Err(Self::invalid(&block_path, "duplicate BlockId"));
             }
             Self::validate_bbox(block.bbox, &format!("{block_path}.bbox"))?;
-            if let Some(image) = &block.image {
-                let image_path = format!("{block_path}.image");
-                if image.width == 0 || image.height == 0 {
-                    return Err(Self::invalid(
-                        &image_path,
-                        "width and height must be positive",
-                    ));
-                }
-                match &image.delivery {
-                    crate::FigureDelivery::File { path }
-                        if path.is_empty()
-                            || !std::path::Path::new(path).is_absolute() =>
-                    {
-                        return Err(Self::invalid(
-                            format!("{image_path}.delivery.path"),
-                            "must be a non-empty absolute path",
-                        ));
-                    }
-                    crate::FigureDelivery::Inline { data_base64 }
-                        if data_base64.is_empty() =>
-                    {
-                        return Err(Self::invalid(
-                            format!("{image_path}.delivery.data_base64"),
-                            "must be non-empty",
-                        ));
-                    }
-                    crate::FigureDelivery::File { .. }
-                    | crate::FigureDelivery::Inline { .. } => {}
-                }
-            }
             if block.label == docparse_layout::LayoutLabel::Reference
                 && (!block.text.is_empty()
                     || !block.lines.is_empty()

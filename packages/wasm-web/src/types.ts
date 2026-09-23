@@ -27,7 +27,9 @@ export interface TableCell { row: number; column: number; row_span: number; colu
 /** A recovered table view; source distinguishes local tagged/rule/alignment recovery from external_tsr input. Original TextItems remain owned by the parent block's lines. */
 export interface Table { row_count: number; column_count: number; cells: TableCell[]; source: "tagged_pdf" | "ruled" | "text_alignment" | "external_tsr" }
 /** A canonical page with viewport coordinates and recoverable warnings. */
-export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; formulas?: FormulaResult[]; replaced_native_text?: TextItem[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
+/** Embedded placements not already delivered through a block image. */
+export interface PageImageAsset { id: string; bbox: Bbox; image: FigureImage }
+export interface PageResult { page_number: number; width: number; height: number; rotation: number; blocks: Block[]; images?: PageImageAsset[]; formulas?: FormulaResult[]; replaced_native_text?: TextItem[]; warnings: PageWarning[]; diagnostics: Record<string, string> }
 /** Formula output includes both representations; failures retain geometry and an explicit error. */
 export interface FormulaResult { engine: string; id: string; label: "inline_formula" | "display_formula"; bbox: Bbox; crop_bbox?: Bbox; block_id: string | null; line_id: string | null; text_item_range: { start: number; end: number } | null; text_spans?: TableTextSpan[]; table_cell: [number, number] | null; latex: string | null; markdown: string | null; error: string | null }
 /** A recoverable stage failure or quality warning emitted by the actual parser. */

@@ -290,7 +290,7 @@ export interface components {
                 finished_at?: string | null;
                 /** Format: uuid */
                 id: string;
-                progress?: null | components["schemas"]["ParseProgress"];
+                progress?: components["schemas"]["ParseProgress"] | null;
                 /** Format: int64 */
                 size_bytes?: number | null;
                 /** @description First successful claim; NULL for never-started or legacy tasks. */
@@ -355,7 +355,7 @@ export interface components {
             /** Format: int32 */
             final_order: number;
             id: components["schemas"]["BlockId"];
-            image?: null | components["schemas"]["FigureImage"];
+            image?: components["schemas"]["FigureImage"] | null;
             label: components["schemas"]["LayoutLabel"];
             label_source: components["schemas"]["LabelSource"];
             lines: components["schemas"]["Line"][];
@@ -363,16 +363,16 @@ export interface components {
             markdown?: string | null;
             /** Format: int64 */
             model_order?: number | null;
-            model_region_id?: null | components["schemas"]["ModelRegionId"];
-            polygon?: null | components["schemas"]["Polygon"];
+            model_region_id?: components["schemas"]["ModelRegionId"] | null;
+            polygon?: components["schemas"]["Polygon"] | null;
             raw_label?: string | null;
             semantic_hints: {
                 [key: string]: string;
             };
-            source_region?: null | components["schemas"]["SourceRegionEvidence"];
+            source_region?: components["schemas"]["SourceRegionEvidence"] | null;
             /** @description All contributing regions for a merged layout; empty for legacy or unmerged blocks. */
             source_regions?: components["schemas"]["SourceRegionEvidence"][];
-            table?: null | components["schemas"]["Table"];
+            table?: components["schemas"]["Table"] | null;
             text: string;
         };
         /** @description Stable identity for one final block. */
@@ -470,8 +470,8 @@ export interface components {
         FormulaResult: {
             /** @description Original formula extent in viewport points. */
             bbox: components["schemas"]["Bbox"];
-            block_id?: null | components["schemas"]["BlockId"];
-            crop_bbox?: null | components["schemas"]["Bbox"];
+            block_id?: components["schemas"]["BlockId"] | null;
+            crop_bbox?: components["schemas"]["Bbox"] | null;
             /** @description Actual model/backend identity, including any documented compatibility executor. */
             engine?: string;
             /** @description Explicit recognition failure; original text remains available independently. */
@@ -482,7 +482,7 @@ export interface components {
             label: components["schemas"]["LayoutLabel"];
             /** @description Decoded LaTeX without outer Markdown math delimiters; null on failure. */
             latex?: string | null;
-            line_id?: null | components["schemas"]["LineId"];
+            line_id?: components["schemas"]["LineId"] | null;
             /** @description LaTeX wrapped with the original inline or display math delimiters. */
             markdown?: string | null;
             /** @description Zero-based row and column for formulas inside a recovered table. */
@@ -490,7 +490,7 @@ export interface components {
                 number,
                 number
             ] | null;
-            text_item_range?: null | components["schemas"]["TextItemRange"];
+            text_item_range?: components["schemas"]["TextItemRange"] | null;
             /** @description Exact UTF-8 source slices; boundary prose in the same TextItem remains outside the replacement. */
             text_spans?: components["schemas"]["TableTextSpan"][];
         };
@@ -512,7 +512,7 @@ export interface components {
             content_status: components["schemas"]["InlineContentStatus"];
             extracted_text?: string | null;
             label: components["schemas"]["LayoutLabel"];
-            polygon?: null | components["schemas"]["Polygon"];
+            polygon?: components["schemas"]["Polygon"] | null;
             text_item_range: components["schemas"]["TextItemRange"];
         };
         /** @description JSON result shape depends on whether the page query parameter is present. */
@@ -542,7 +542,7 @@ export interface components {
             finished_at?: string | null;
             /** Format: uuid */
             id: string;
-            progress?: null | components["schemas"]["ParseProgress"];
+            progress?: components["schemas"]["ParseProgress"] | null;
             /** Format: int64 */
             size_bytes?: number | null;
             /** @description First successful claim; NULL for never-started or legacy tasks. */
@@ -570,7 +570,7 @@ export interface components {
         };
         /** @description One final line that exclusively owns its text items. */
         Line: {
-            baseline?: null | components["schemas"]["Baseline"];
+            baseline?: components["schemas"]["Baseline"] | null;
             bbox: components["schemas"]["Bbox"];
             direction: components["schemas"]["WritingDirection"];
             id: components["schemas"]["LineId"];
@@ -589,7 +589,7 @@ export interface components {
         /** @description Non-owning reference used by document-level relations. */
         NodeRef: {
             block_id: components["schemas"]["BlockId"];
-            line_id?: null | components["schemas"]["LineId"];
+            line_id?: components["schemas"]["LineId"] | null;
             /** Format: int32 */
             page_number: number;
         };
@@ -601,6 +601,12 @@ export interface components {
             page_number: number;
             stage: string;
         };
+        /** @description An embedded PDF image not already delivered by a layout block, including small and page-sized images. */
+        PageImageAsset: {
+            bbox: components["schemas"]["Bbox"];
+            id: string;
+            image: components["schemas"]["FigureImage"];
+        };
         /** @description One page's canonical nested result. */
         PageResult: {
             blocks: components["schemas"]["Block"][];
@@ -611,6 +617,8 @@ export interface components {
             formulas?: components["schemas"]["FormulaResult"][];
             /** Format: double */
             height: number;
+            /** @description Images are retained even when no layout owns them; each source placement is delivered only once. */
+            images?: components["schemas"]["PageImageAsset"][];
             /** Format: int32 */
             page_number: number;
             /** @description Original unusable PDF facts replaced by confident OCR; excluded from reading order, retained for audit. */
@@ -641,6 +649,8 @@ export interface components {
                 formulas?: components["schemas"]["FormulaResult"][];
                 /** Format: double */
                 height: number;
+                /** @description Images are retained even when no layout owns them; each source placement is delivered only once. */
+                images?: components["schemas"]["PageImageAsset"][];
                 /** Format: int32 */
                 page_number: number;
                 /** @description Original unusable PDF facts replaced by confident OCR; excluded from reading order, retained for audit. */
@@ -756,13 +766,13 @@ export interface components {
             bbox: components["schemas"]["Bbox"];
             /** Format: double */
             confidence?: number | null;
-            fallback_region_id?: null | components["schemas"]["FallbackRegionId"];
+            fallback_region_id?: components["schemas"]["FallbackRegionId"] | null;
             geometry_source: components["schemas"]["GeometrySource"];
-            label?: null | components["schemas"]["LayoutLabel"];
+            label?: components["schemas"]["LayoutLabel"] | null;
             /** Format: int64 */
             model_order?: number | null;
-            model_region_id?: null | components["schemas"]["ModelRegionId"];
-            polygon?: null | components["schemas"]["Polygon"];
+            model_region_id?: components["schemas"]["ModelRegionId"] | null;
+            polygon?: components["schemas"]["Polygon"] | null;
         };
         /** @description Structured view of one table block; canonical source text stays in Block.lines. */
         Table: {
@@ -774,7 +784,7 @@ export interface components {
         };
         /** @description One logical cell; covered rowspan/colspan positions never become duplicate cells. */
         TableCell: {
-            bbox?: null | components["schemas"]["Bbox"];
+            bbox?: components["schemas"]["Bbox"] | null;
             column: number;
             column_span: number;
             is_header: boolean;
@@ -807,7 +817,7 @@ export interface components {
         };
         /** @description One continuous native or OCR text fact. */
         TextItem: {
-            baseline?: null | components["schemas"]["Baseline"];
+            baseline?: components["schemas"]["Baseline"] | null;
             bbox: components["schemas"]["Bbox"];
             /** Format: double */
             confidence?: number | null;
@@ -816,16 +826,16 @@ export interface components {
             /** Format: int32 */
             final_order: number;
             id: components["schemas"]["TextItemId"];
-            polygon?: null | components["schemas"]["Polygon"];
-            provenance?: null | components["schemas"]["PdfProvenance"];
-            raw_bbox?: null | components["schemas"]["Bbox"];
+            polygon?: components["schemas"]["Polygon"] | null;
+            provenance?: components["schemas"]["PdfProvenance"] | null;
+            raw_bbox?: components["schemas"]["Bbox"] | null;
             raw_text: string;
             repair_actions: components["schemas"]["RepairAction"][];
             /** Format: double */
             rotation: number;
             source: components["schemas"]["TextSource"];
-            style?: null | components["schemas"]["TextStyle"];
-            watermark?: null | components["schemas"]["WatermarkSource"];
+            style?: components["schemas"]["TextStyle"] | null;
+            watermark?: components["schemas"]["WatermarkSource"] | null;
         };
         /** @description Stable identity for one native or OCR text fact. */
         TextItemId: string;
