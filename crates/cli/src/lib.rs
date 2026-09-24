@@ -8,6 +8,7 @@ use anyhow::{Context, bail};
 use args::{
     Cli, Command, InspectModelArgs, OutputFormat, OutputView, ParseArgs,
 };
+use base64::{engine::general_purpose::STANDARD, write::EncoderWriter};
 use docparse_config::{ConfigLoader, ValidatedConfig};
 use docparse_core::{
     DocParser, DocumentResult, JsonRenderer, MarkdownRenderer, RenderView,
@@ -116,8 +117,7 @@ async fn parse_command(
         OutputView::Semantic => RenderView::Semantic,
     };
     if let Some(output) = arguments.output {
-        // JSON is streamed directly into the temporary file so large documents never require a
-        // second complete output buffer; text formats retain their existing in-memory renderers.
+        // JSON and Markdown write directly into the atomic file; plain text retains its existing renderer.
         atomic_write(&output, arguments.force, |file| {
             match arguments.format {
                 OutputFormat::Json => JsonRenderer::write_with_config(
@@ -133,13 +133,12 @@ async fn parse_command(
                             .as_bytes(),
                     )
                     .context("failed to stream text output"),
-                OutputFormat::Markdown => file
-                    .write_all(
-                        MarkdownRenderer::new(view, formula_placeholder)
-                            .render(&document)
-                            .as_bytes(),
-                    )
-                    .context("failed to stream Markdown output"),
+                OutputFormat::Markdown => write_portable_markdown(
+                    &document,
+                    view,
+                    &formula_placeholder,
+                    file,
+                ),
             }
         })?;
         return Ok(None);
@@ -152,10 +151,37 @@ async fn parse_command(
             TextRenderer::new(view, formula_placeholder).render(&document)
         }
         OutputFormat::Markdown => {
-            MarkdownRenderer::new(view, formula_placeholder).render(&document)
+            // The public stdout API returns a String, so only explicit file output is memory bounded.
+            let mut bytes = Vec::new();
+            write_portable_markdown(
+                &document,
+                view,
+                &formula_placeholder,
+                &mut bytes,
+            )?;
+            String::from_utf8(bytes).context("Markdown output is not UTF-8")?
         }
     };
     Ok(Some(rendered))
+}
+
+/// Writes portable Markdown by encoding each local figure file as it reaches the output writer.
+fn write_portable_markdown<W: Write>(
+    document: &DocumentResult,
+    view: RenderView,
+    placeholder: &str,
+    writer: &mut W,
+) -> anyhow::Result<()> {
+    MarkdownRenderer::new(view, placeholder)
+        .write_with_images(document, writer, |image, path, writer| {
+            let mut file = File::open(path)?;
+            write!(writer, "data:{};base64,", image.media_type.as_str())?;
+            let mut encoded = EncoderWriter::new(writer, &STANDARD);
+            let _ = std::io::copy(&mut file, &mut encoded)?;
+            let _ = encoded.finish()?;
+            Ok(())
+        })
+        .context("failed to write portable Markdown")
 }
 
 /// Validates configured artifacts and prints their stable manifest and tensor schema.

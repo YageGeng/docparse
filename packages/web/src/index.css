@@ -895,6 +895,8 @@ button:disabled {
 .markdown-document blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
 .markdown-document pre { overflow-x: auto; padding: 12px; background: var(--muted); border-radius: 6px; white-space: pre; }
 .markdown-document code { font-family: monospace; font-size: .9em; }
+.markdown-document hr { border: 0; border-top: 1px solid var(--border); margin-block: 1.75em; }
+.markdown-document img { display: block; max-width: 100%; height: auto; margin-block: 1em; object-fit: contain; }
 .markdown-document a { color: var(--primary); text-decoration: underline; }
 .markdown-document table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 12px; }
 .markdown-document :is(td, th) { border: 1px solid var(--border); padding: 7px 9px; min-width: 65px; vertical-align: top; }

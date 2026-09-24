@@ -8,7 +8,7 @@ use crate::{
         error::ApiErrorResponse,
         job::{JobJsonResult, JobResultQuery, ResultFormat},
     },
-    service::result_files::ResultIndex,
+    service::result_files::{MARKDOWN_CACHE_REVISION, ResultIndex},
     state::AppState,
 };
 use axum::{
@@ -124,8 +124,12 @@ pub async fn result(
     // Weak validators identify the semantic representation across gzip and identity content codings.
     let identity = format!(
         "{}:{name}:{page:?}:{markdown}:{}",
-        // Match the algorithm-fence cache revision so clients cannot revalidate an obsolete presentation.
-        if markdown { "v3" } else { "v1" },
+        // Match the Markdown cache revision so clients cannot revalidate an obsolete presentation.
+        if markdown {
+            MARKDOWN_CACHE_REVISION
+        } else {
+            "v1"
+        },
         if markdown {
             state.options.output.formula_placeholder.as_str()
         } else {

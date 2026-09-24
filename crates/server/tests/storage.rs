@@ -1,6 +1,110 @@
 use docparse_server::storage::SharedStorage;
 use std::io::Write;
 
+/// Only files inside the selected result's figure directory may become browser assets.
+#[tokio::test]
+async fn figure_paths_stay_inside_their_result() {
+    let directory = tempfile::tempdir().expect("directory");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let owned = directory.path().join("result.json.figures-owned");
+    let other = directory.path().join("other.json.figures-owned");
+    std::fs::create_dir(&owned).expect("owned directory");
+    std::fs::create_dir(&other).expect("other directory");
+    let image = owned.join("image.png");
+    std::fs::write(&image, b"image").expect("image");
+    let other_image = other.join("image.png");
+    std::fs::write(&other_image, b"other image").expect("other image");
+    let outside = directory.path().join("outside.png");
+    std::fs::write(&outside, b"outside").expect("outside image");
+    assert_eq!(
+        storage
+            .figure_path("result.json", image.to_str().expect("path"))
+            .await
+            .expect("owned figure"),
+        image.canonicalize().expect("canonical image")
+    );
+    for path in [&other_image, &outside] {
+        storage
+            .figure_path("result.json", path.to_str().expect("path"))
+            .await
+            .expect_err("unowned figure must be rejected");
+    }
+}
+
+/// A changed Markdown projection must rebuild old output with portable, inlined file figures.
+#[tokio::test]
+async fn markdown_cache_rebuilds_and_inlines_file_figures() {
+    use docparse_core::{
+        DocumentContext, DocumentResult, FigureDelivery, FigureImage,
+        FigureMediaType, FigureSource, PageImageAsset, PageResult,
+        SchemaVersion,
+    };
+    let directory = tempfile::tempdir().expect("directory");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let figures = storage.root().join("result.json.figures-owned");
+    std::fs::create_dir(&figures).expect("figures");
+    let image = figures.join("image.png");
+    std::fs::write(&image, [137, 80, 78, 71]).expect("image bytes");
+    let document = DocumentResult::builder()
+        .schema_version(SchemaVersion::V2_0)
+        .context(DocumentContext::builder().page_count(1).build())
+        .pages(vec![
+            PageResult::builder()
+                .page_number(1)
+                .width(100.0)
+                .height(100.0)
+                .rotation(0)
+                .blocks(Vec::new())
+                .images(vec![PageImageAsset {
+                    id: "image-1".into(),
+                    bbox: docparse_layout::Bbox::try_from([
+                        10.0, 10.0, 20.0, 20.0,
+                    ])
+                    .expect("bbox"),
+                    image: FigureImage::builder()
+                        .source(FigureSource::Embedded)
+                        .media_type(FigureMediaType::Png)
+                        .width(1)
+                        .height(1)
+                        .delivery(FigureDelivery::File {
+                            path: image.to_string_lossy().into_owned(),
+                        })
+                        .build(),
+                }])
+                .build(),
+        ])
+        .build();
+    let mut source = storage.temporary().await.expect("temporary");
+    serde_json::to_writer(
+        source.as_file_mut(),
+        &serde_json::json!({ "data": document }),
+    )
+    .expect("source JSON");
+    storage
+        .publish(source, "result.json")
+        .await
+        .expect("publish");
+    let placeholder = "[formula]";
+    let hash: String = blake3::hash(placeholder.as_bytes())
+        .to_hex()
+        .chars()
+        .take(32)
+        .collect();
+    let old_cache = directory.path().join(format!("result.json.v6.{hash}.md"));
+    std::fs::write(&old_cache, "stale line breaks").expect("old Markdown");
+
+    let cache = storage
+        .result_artifact("result.json", Some(placeholder))
+        .await
+        .expect("current Markdown");
+    assert_ne!(cache, old_cache);
+    assert!(cache.to_string_lossy().contains(".v7."));
+    assert_eq!(
+        std::fs::read_to_string(cache).expect("Markdown"),
+        "![image](data:image/png;base64,iVBORw==)"
+    );
+}
+
 /// Deleting a result also removes its attempt-owned image directories without touching another result.
 #[tokio::test]
 async fn deletion_removes_only_owned_figure_directories() {

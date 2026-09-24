@@ -776,6 +776,14 @@ impl crate::Block {
                 ));
                 return;
             }
+
+            if self.joins_prose_lines() {
+                // Keep browser Markdown and complete-document export on the same prose policy.
+                self.markdown =
+                    Some(self.render_markdown_text(placeholder, true, &inline));
+                return;
+            }
+
             // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
             self.markdown = Some(
                 self.lines
@@ -1668,7 +1676,7 @@ mod tests {
         let block = page.blocks.first().expect("block");
         assert_eq!(
             block.markdown.as_deref(),
-            Some("Before $T_{extract}$\n next")
+            Some("Before $T_{extract}$ next")
         );
         assert_eq!(block.text, "Before T\nextract next");
         let mut formula = page.formulas.remove(0);

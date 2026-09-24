@@ -1,5 +1,8 @@
 //! Label-independent embedded-image delivery with visual-layout raster fallbacks.
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use docparse_layout::{Bbox, LayoutDetection};
@@ -14,6 +17,7 @@ use crate::{
 };
 
 const CONTAINMENT: f64 = 0.85;
+const COMPONENT_COVERAGE: f64 = 0.5;
 const AMBIGUOUS_AREA_RATIO: f64 = 1.15;
 const MIN_SIDE_POINTS: f64 = 8.0;
 const MAX_PAGE_COVERAGE: f64 = 0.90;
@@ -185,12 +189,39 @@ impl<'a> FigureCatalog<'a> {
         detections: &[LayoutDetection],
         page: Bbox,
     ) -> BTreeMap<u32, FigureMatch> {
+        let mut composite_detections = BTreeSet::new();
+        let mut composite_images = vec![false; self.images.len()];
+        for detection in detections.iter().filter(|detection| {
+            detection.label == docparse_layout::LayoutLabel::Image
+        }) {
+            let parts: Vec<_> = self.parts(detection.bbox, page).collect();
+            if parts.len() > 1 {
+                composite_detections.insert(detection.source_detection_index);
+                for index in parts {
+                    if let Some(owned) = composite_images.get_mut(index) {
+                        *owned = true;
+                    }
+                }
+            }
+        }
         let mut matches = BTreeMap::new();
         for detection in detections {
+            // A composite's components belong to its raster crop, not to competing layout boxes.
+            if composite_detections.contains(&detection.source_detection_index)
+            {
+                continue;
+            }
             // Algorithms, text, tables and any future label may be backed by an embedded image.
             let Some(matched) = self.container(detection.bbox, page) else {
                 continue;
             };
+            if composite_images
+                .get(matched.image_index as usize)
+                .copied()
+                .unwrap_or(false)
+            {
+                continue;
+            }
             matches.insert(detection.source_detection_index, matched);
         }
         matches
@@ -244,30 +275,56 @@ impl<'a> FigureCatalog<'a> {
         warnings: &mut Vec<PageWarning>,
     ) -> Vec<crate::PageImageAsset> {
         let mut delivered = vec![false; self.images.len()];
+        let (width, height) = rendered.transform.viewport_size();
+        let page = Bbox::try_from([0.0, 0.0, width, height])
+            .expect("validated rendered viewport");
         // Raster fallbacks remain limited to visual regions; embedded-image matches accept every label.
         for block in blocks.iter_mut().filter(|block| {
             block.label.is_figure() || block.embedded_image_index.is_some()
         }) {
+            let parts: Vec<_> =
+                if block.label == docparse_layout::LayoutLabel::Image {
+                    self.parts(block.bbox, page).collect()
+                } else {
+                    Vec::new()
+                };
+            let composite = parts.len() > 1;
             let index = block
                 .embedded_image_index
                 .take()
                 .and_then(|index| usize::try_from(index).ok());
-            if index.is_some_and(|index| {
-                delivered.get(index).copied().unwrap_or(false)
-            }) {
+            if !composite
+                && index.is_some_and(|index| {
+                    delivered.get(index).copied().unwrap_or(false)
+                })
+            {
                 continue;
             }
-            let prepared = match index.and_then(|index| self.images.get(index))
-            {
-                Some(image) => image.prepare(rendered),
-                None => rendered.cropped_figure(block.bbox),
+            let prepared = if composite {
+                tracing::debug!(
+                    "using page raster for composite image block {} with {} embedded parts",
+                    block.id.as_str(),
+                    parts.len()
+                );
+                rendered.cropped_figure(block.bbox)
+            } else {
+                match index.and_then(|index| self.images.get(index)) {
+                    Some(image) => image.prepare(rendered),
+                    None => rendered.cropped_figure(block.bbox),
+                }
             };
             let asset = prepared
                 .and_then(|image| image.deliver(block.id.as_str(), assets));
             match asset {
                 Ok(image) => {
                     block.image = Some(image);
-                    if let Some(slot) =
+                    if composite {
+                        for index in parts {
+                            if let Some(slot) = delivered.get_mut(index) {
+                                *slot = true;
+                            }
+                        }
+                    } else if let Some(slot) =
                         index.and_then(|index| delivered.get_mut(index))
                     {
                         *slot = true;
@@ -299,6 +356,36 @@ impl<'a> FigureCatalog<'a> {
             }
         }
         remaining
+    }
+
+    /// Finds embedded images mostly inside an image layout or covering most of it.
+    fn parts(
+        &self,
+        layout: Bbox,
+        page: Bbox,
+    ) -> impl Iterator<Item = usize> + '_ {
+        let layout_fills_page = layout.width()
+            >= page.width() * MAX_PAGE_COVERAGE
+            && layout.height() >= page.height() * MAX_PAGE_COVERAGE;
+        self.images
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, image)| {
+                let bounds = image.bounds;
+                // Full-page layers belong to a full-page image layout but not to a small figure.
+                if !layout_fills_page
+                    && bounds.width() > page.width() * MAX_PAGE_COVERAGE
+                    && bounds.height() > page.height() * MAX_PAGE_COVERAGE
+                {
+                    return None;
+                }
+                let overlap = layout.intersection_area(bounds);
+                // A component may extend beyond a detector box; majority overlap still belongs to the layout.
+                (overlap / layout.area().max(f64::EPSILON) >= CONTAINMENT
+                    || overlap / bounds.area().max(f64::EPSILON)
+                        >= COMPONENT_COVERAGE)
+                    .then_some(index)
+            })
     }
 
     /// Picks the smallest image that contains nearly all of the layout box.
@@ -704,6 +791,95 @@ mod tests {
         // Semantic text labels no longer suppress a geometric embedded-image match.
         assert_eq!(matches.get(&2).expect("text image").image_index, 0);
         assert!(!matches.contains_key(&3));
+    }
+
+    /// A composite image region uses one raster crop and does not publish its pieces separately.
+    #[test]
+    fn composite_image_layout_uses_raster_and_consumes_parts() {
+        let images = vec![
+            image([10.0, 10.0, 130.0, 130.0], true),
+            image([100.0, 30.0, 130.0, 60.0], true),
+        ];
+        assert!(
+            FigureCatalog::new(&images)
+                .match_detections(
+                    &[
+                        detection(
+                            0,
+                            LayoutLabel::Image,
+                            [20.0, 20.0, 120.0, 120.0]
+                        ),
+                        detection(
+                            1,
+                            LayoutLabel::Text,
+                            [20.0, 20.0, 120.0, 120.0]
+                        ),
+                    ],
+                    page(),
+                )
+                .is_empty()
+        );
+
+        let images = vec![
+            image([0.0, 0.0, 2.0, 4.0], true),
+            image([2.0, 0.0, 4.0, 4.0], true),
+        ];
+        let mut blocks = vec![figure_block(
+            0,
+            LayoutLabel::Image,
+            [0.0, 0.0, 4.0, 4.0],
+            Some(0),
+            None,
+        )];
+        let mut warnings = Vec::new();
+        let remaining = FigureCatalog::new(&images).attach(
+            &mut blocks,
+            &rendered_page(),
+            &super::FigureAssets::new(
+                FigureConfig::default(),
+                "composite-".into(),
+            ),
+            &mut warnings,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            blocks
+                .first()
+                .and_then(|block| block.image.as_ref())
+                .map(|image| image.source),
+            Some(FigureSource::Raster)
+        );
+        assert!(remaining.is_empty());
+
+        // A page-sized image layout may itself be composed of multiple page-sized PDF layers.
+        let images = vec![
+            image([0.0, 0.0, 4.0, 4.0], true),
+            image([0.0, 0.0, 4.0, 4.0], true),
+        ];
+        let mut blocks = vec![figure_block(
+            1,
+            LayoutLabel::Image,
+            [0.0, 0.0, 4.0, 4.0],
+            None,
+            None,
+        )];
+        let remaining = FigureCatalog::new(&images).attach(
+            &mut blocks,
+            &rendered_page(),
+            &super::FigureAssets::new(
+                FigureConfig::default(),
+                "page-layers-".into(),
+            ),
+            &mut warnings,
+        );
+        assert_eq!(
+            blocks
+                .first()
+                .and_then(|block| block.image.as_ref())
+                .map(|image| image.source),
+            Some(FigureSource::Raster)
+        );
+        assert!(remaining.is_empty());
     }
 
     /// Expansion that would contain another block is refused; an isolated figure still expands.

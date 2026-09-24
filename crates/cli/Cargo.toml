@@ -33,6 +33,7 @@ async-trait.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # config and serialization
+base64.workspace = true
 serde_json.workspace = true
 
 # builder

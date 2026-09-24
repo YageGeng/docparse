@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::stages::PageAnalysisInput;
 use crate::wasm_compat::{TaskError, TaskSet};
 use docparse_common::timing::{TimingStage, Timings};
-use docparse_config::ValidatedConfig;
+use docparse_config::{OcrPolicy, ValidatedConfig};
 use docparse_layout::LayoutEngine;
 use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
@@ -261,10 +261,17 @@ impl ParseRuntime {
         let mut page_errors = Vec::new();
         let mut context_builder = DocumentContextBuilder::builder()
             .page_count(page_count)
-            .metadata(BTreeMap::from([(
-                "layout_engine".to_owned(),
-                self.layout_engine.name().to_owned(),
-            )]))
+            .metadata(BTreeMap::from([
+                (
+                    "layout_engine".to_owned(),
+                    self.layout_engine.name().to_owned(),
+                ),
+                (
+                    "ocr_enabled".to_owned(),
+                    (self.config.ocr().policy != OcrPolicy::Disabled)
+                        .to_string(),
+                ),
+            ]))
             .model_revision(Some(
                 self.layout_engine.model_revision().to_owned(),
             ))

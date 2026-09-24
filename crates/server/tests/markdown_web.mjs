@@ -32,13 +32,13 @@ try {
   await preview.waitFor({ timeout: 60000 });
   assert(await preview.locator(".katex").count() > 0, "Real formulas must render");
   assert(await preview.locator("table").count() > 0, "Real tables must render");
-  assert.equal(await preview.locator("script, iframe, img").count(), 0);
+  assert.equal(await preview.locator("script, iframe").count(), 0);
   await page.getByRole("button", { name: "源码", exact: true }).click();
   assert.equal(await page.locator(".markdown-source").textContent(), source);
   await page.getByRole("button", { name: "复制 Markdown", exact: true }).click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), source);
   const downloadEvent = page.waitForEvent("download");
-  await page.getByRole("link", { name: "下载 Markdown", exact: true }).click();
+  await page.locator(".markdown-toolbar").getByRole("link", { name: "下载当前 Markdown" }).click();
   const download = await downloadEvent;
   assert(download.suggestedFilename().endsWith(".md"));
   assert.equal(await readFile(await download.path(), "utf8"), source);

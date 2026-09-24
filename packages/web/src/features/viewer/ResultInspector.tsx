@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, Check, Copy, FileText, ScanText, BookOpen } from "lucide-react";
-import type { Block, PageResult, Table } from "@/api/client";
+import { apiUrl, type Block, type PageResult, type Table } from "@/api/client";
 import { blockLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -8,15 +8,15 @@ import { FormulaView, MathPreview } from "./FormulaView";
 import { MarkdownResult } from "./MarkdownResult";
 
 /** Previews delivered image bytes without treating server filesystem paths as browser URLs. */
-function FigureView({ image, name }: { image: NonNullable<Block["image"]>; name: string }) {
+function FigureView({ image, name, documentId }: { image: NonNullable<Block["image"]>; name: string; documentId: string }) {
   const [failed, setFailed] = useState(false);
   // Restrict data URLs to the image formats in the API, keeping the original download bytes intact.
   const extension = { "image/jpeg": "jpg", "image/png": "png", "image/jp2": "jp2", "image/jpx": "jpx" }[image.media_type];
   const src = useMemo(
-    () => extension && image.delivery.type === "inline" && image.delivery.data_base64
+    () => extension && (image.delivery.type === "inline" && image.delivery.data_base64
       ? `data:${image.media_type};base64,${image.delivery.data_base64}`
-      : undefined,
-    [image, extension],
+      : image.delivery.type === "file" ? apiUrl("jobs/figure", { id: documentId, path: image.delivery.path }) : undefined),
+    [documentId, image, extension],
   );
   useEffect(() => setFailed(false), [image]);
 
@@ -35,11 +35,7 @@ function FigureView({ image, name }: { image: NonNullable<Block["image"]>; name:
         />
       ) : (
         <p className="text-xs text-muted-foreground" role="status">
-          {image.delivery.type === "file"
-            ? "图片保存在服务器，暂不支持在线预览。"
-            : src
-              ? "图片无法预览，可下载原图查看。"
-              : "图片数据不可用，请查看原 PDF。"}
+          {src ? "图片无法预览，可下载原图查看。" : "图片数据不可用，请查看原 PDF。"}
         </p>
       )}
       <figcaption className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -88,6 +84,7 @@ function TableView({ table }: { table: Table }) {
 /** Shows only the current page's content and keeps region selection synchronized with the PDF overlay. */
 export function ResultInspector({
   documentId,
+  filename,
   ready,
   page,
   selected,
@@ -95,6 +92,7 @@ export function ResultInspector({
   pending,
 }: {
   documentId: string;
+  filename: string;
   ready: boolean;
   page?: PageResult;
   selected?: string;
@@ -226,7 +224,7 @@ export function ResultInspector({
                     {blockLabel(block)}
                   </button>
                   {/* Figure bytes accompany, rather than replace, extracted text and PDF selection. */}
-                  {block.image && <FigureView image={block.image} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block)}`} />}
+                  {block.image && <FigureView image={block.image} documentId={documentId} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block)}`} />}
                   {block.table ? (
                     <TableView table={block.table} />
                   ) : (["inline_formula", "display_formula"].includes(typeof block.label === "string" ? block.label : "") && page.formulas?.some(formula => formula.block_id === block.id && formula.latex)) ? null : (
@@ -248,7 +246,7 @@ export function ResultInspector({
               {/* Unmatched images remain visible in Content after removing the separate image tab. */}
               {page.images?.map(asset => <article key={asset.id} className="content-block">
                 <h3 className="mb-2 text-xs font-medium text-muted-foreground">页面图片</h3>
-                <FigureView image={asset.image} name={`第 ${page.page_number} 页 · ${asset.id}`} />
+                <FigureView image={asset.image} documentId={documentId} name={`第 ${page.page_number} 页 · ${asset.id}`} />
               </article>)}
               <FormulaView formulas={page.formulas?.filter(formula => !formula.block_id) ?? []} />
               {!page.blocks.length && (
@@ -269,7 +267,7 @@ export function ResultInspector({
         {/* Fetch the complete document only when requested; page navigation keeps this representation intact. */}
         {/* Retain only this document's opened preview across tab switches; changing documents releases it. */}
         <TabsContent value="markdown" forceMount={openedMarkdown === documentId ? true : undefined} hidden={tab !== "markdown"} className="inspector-content inspector-markdown">
-          <MarkdownResult key={documentId} id={documentId} ready={ready} />
+          <MarkdownResult key={documentId} id={documentId} filename={filename} ready={ready} />
         </TabsContent>
       </Tabs>
       <div className="inspector-footer">

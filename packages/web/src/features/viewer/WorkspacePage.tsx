@@ -490,6 +490,7 @@ export function WorkspacePage() {
         />
         <ResultInspector
           documentId={id}
+          filename={`${name.replace(/\.pdf$/i, "")}.md`}
           ready={job.data.status === "succeeded"}
           page={page}
           selected={selected}

@@ -1,14 +1,24 @@
+use std::io::{self, Write};
+
 use docparse_layout::LayoutLabel;
 
 use crate::label_policy::LabelPolicy;
 use crate::render::{hidden_repeated_chrome, render_line};
-use crate::{Block, DocumentResult, RenderView};
+use crate::{
+    Block, DocumentResult, FigureDelivery, FigureImage, RenderView, TextSource,
+};
 
 /// Minimal semantic Markdown renderer that preserves canonical traversal order.
 #[derive(Debug, Clone)]
 pub struct MarkdownRenderer {
     view: RenderView,
     formula_placeholder: String,
+}
+
+/// Keeps image payloads borrowed while one page's text boundaries are resolved.
+enum MarkdownPart<'a> {
+    Text(String),
+    Image(&'a FigureImage),
 }
 
 impl MarkdownRenderer {
@@ -25,19 +35,53 @@ impl MarkdownRenderer {
 
     /// Projects final blocks into Markdown without editing canonical labels or relations.
     pub fn render(&self, document: &DocumentResult) -> String {
+        let mut output = Vec::new();
+        self.write_with_images(document, &mut output, |_, path, writer| {
+            // Angle destinations allow spaces while preserving the stored file path.
+            let path = path
+                .replace('\\', "\\\\")
+                .replace('<', "\\<")
+                .replace('>', "\\>");
+            write!(writer, "<{path}>")
+        })
+        .expect("writing Markdown into memory cannot fail");
+        String::from_utf8(output).expect("Markdown output is UTF-8")
+    }
+
+    /// Streams page text and image destinations without holding encoded file figures in memory.
+    pub fn write_with_images<W: Write>(
+        &self,
+        document: &DocumentResult,
+        writer: &mut W,
+        mut file_image: impl FnMut(&FigureImage, &str, &mut W) -> io::Result<()>,
+    ) -> io::Result<()> {
         let hidden = if self.view == RenderView::Semantic {
             hidden_repeated_chrome(document)
         } else {
             std::collections::BTreeSet::new()
         };
-        let mut output: Vec<String> = Vec::new();
+        let mut wrote_page = false;
         for page in &document.pages {
+            let mut parts = Vec::new();
             let mut previous_prose = false;
             if self.view == RenderView::Raw {
-                output.push(format!("<!-- page {} -->", page.page_number));
+                parts.push(MarkdownPart::Text(format!(
+                    "<!-- page {} -->",
+                    page.page_number
+                )));
             }
             for block in &page.blocks {
-                if hidden.contains(block.id.as_str()) {
+                if block.label == LayoutLabel::Watermark {
+                    previous_prose = false;
+                    continue;
+                }
+                // Page headers and numbers remain visible inside page boundaries even when repeated.
+                if hidden.contains(block.id.as_str())
+                    && !matches!(
+                        block.label,
+                        LayoutLabel::Header | LayoutLabel::Number
+                    )
+                {
                     continue;
                 }
                 let formulas: Vec<_> = page
@@ -63,27 +107,44 @@ impl MarkdownRenderer {
                             | LayoutLabel::InlineFormula
                     )
                 {
-                    output.push(display.join("\n\n"));
+                    parts.push(MarkdownPart::Text(display.join("\n\n")));
                     previous_prose = false;
                     continue;
                 }
                 if let Some(table) = &block.table {
-                    output.push(table.to_markdown());
+                    parts.push(MarkdownPart::Text(table.to_markdown()));
                     previous_prose = false;
                     continue;
                 }
+                if let Some(image) = &block.image {
+                    parts.push(MarkdownPart::Image(image));
+                    previous_prose = false;
+                }
+                if self.view == RenderView::Semantic
+                    && block.label == LayoutLabel::Image
+                {
+                    // Persisted OCR policy governs new results; legacy results retain the source-based fallback.
+                    let show_text = match document
+                        .context
+                        .metadata
+                        .get("ocr_enabled")
+                        .map(String::as_str)
+                    {
+                        Some("true") => true,
+                        Some("false") => false,
+                        _ => block.lines.iter().any(|line| {
+                            line.text_items
+                                .iter()
+                                .any(|item| item.source == TextSource::Ocr)
+                        }),
+                    };
+                    if !show_text {
+                        continue;
+                    }
+                }
                 // Prose cleanup is a presentation projection; source lines and table ranges stay unchanged.
                 let prose = self.view == RenderView::Semantic
-                    && formulas.is_empty()
-                    && matches!(
-                        LabelPolicy::from(&block.label),
-                        LabelPolicy::FlowText | LabelPolicy::Title
-                    )
-                    && block.lines.iter().all(|line| {
-                        line.inline_spans.is_empty()
-                            && line.direction
-                                != crate::WritingDirection::Vertical
-                    });
+                    && block.joins_prose_lines();
                 let text = block.render_markdown_text(
                     &self.formula_placeholder,
                     prose,
@@ -107,37 +168,79 @@ impl MarkdownRenderer {
                 // Heal adjacent body blocks using the same boundary rule as physical lines.
                 if body
                     && previous_prose
-                    && let Some(previous) = output.last_mut()
+                    && let Some(MarkdownPart::Text(previous)) = parts.last_mut()
                     && is_soft_hyphen_break(previous, &rendered)
                 {
                     let _ = previous.pop();
                     previous.push_str(&rendered);
                 } else {
-                    output.push(rendered);
+                    parts.push(MarkdownPart::Text(rendered));
                 }
                 previous_prose = body;
             }
             // Unmatched model regions remain visible even when they own no native text.
-            output.extend(
+            parts.extend(
                 page.formulas
                     .iter()
                     .filter(|formula| formula.block_id.is_none())
-                    .filter_map(|formula| formula.markdown.clone()),
+                    .filter_map(|formula| {
+                        formula.markdown.clone().map(MarkdownPart::Text)
+                    }),
             );
+            parts.extend(
+                page.images
+                    .iter()
+                    .map(|asset| MarkdownPart::Image(&asset.image)),
+            );
+            if parts.is_empty() {
+                continue;
+            }
+            if wrote_page {
+                writer.write_all(if self.view == RenderView::Semantic {
+                    b"\n\n---\n\n"
+                } else {
+                    b"\n\n"
+                })?;
+            }
+            for (index, part) in parts.into_iter().enumerate() {
+                if index > 0 {
+                    writer.write_all(b"\n\n")?;
+                }
+                match part {
+                    MarkdownPart::Text(text) => {
+                        writer.write_all(text.as_bytes())?
+                    }
+                    MarkdownPart::Image(image) => {
+                        image.write_markdown(writer, &mut file_image)?
+                    }
+                }
+            }
+            wrote_page = true;
         }
-        output.join("\n\n")
+        Ok(())
     }
 }
 
 impl Block {
-    /// Fences algorithms with literal spacing and otherwise applies the shared prose/spatial presentation rules.
+    /// Joins physical wraps only for horizontal flow text and titles.
+    pub(crate) fn joins_prose_lines(&self) -> bool {
+        matches!(
+            LabelPolicy::from(&self.label),
+            LabelPolicy::FlowText | LabelPolicy::Title
+        ) && self
+            .lines
+            .iter()
+            .all(|line| line.direction != crate::WritingDirection::Vertical)
+    }
+
+    /// Fences algorithms and charts with literal spacing and otherwise applies shared presentation rules.
     pub(crate) fn render_markdown_text(
         &self,
         placeholder: &str,
         prose: bool,
         formulas: &[&crate::FormulaResult],
     ) -> String {
-        if self.label == LayoutLabel::Algorithm {
+        if matches!(self.label, LayoutLabel::Algorithm | LayoutLabel::Chart) {
             // Code fences preserve real spaces and newlines; prose escapes and HTML entities would become visible code.
             let text = Self::layout_text(&self.lines, false, |line| {
                 line.render_markdown_formulas(placeholder, formulas, false)
@@ -164,8 +267,14 @@ impl Block {
         }
         let mut text = String::new();
         for line in &self.lines {
-            let rendered =
-                line.render_markdown_formulas(placeholder, formulas, false);
+            // Detect list structure in source text so formula escaping can preserve only its marker.
+            let list_marker =
+                prose && crate::text_rules::is_list_marker(line.text.chars());
+            let rendered = line.render_markdown_formulas(
+                placeholder,
+                formulas,
+                prose && !formulas.is_empty(),
+            );
             if rendered.is_empty() {
                 continue;
             }
@@ -176,13 +285,16 @@ impl Block {
                 text.push_str(&rendered);
                 continue;
             }
-            let next =
+            let mut next =
                 rendered.split_whitespace().collect::<Vec<_>>().join(" ");
             if next.is_empty() {
                 continue;
             }
+            if list_marker && next.starts_with("\\* ") {
+                next.remove(0);
+            }
             if !text.is_empty() {
-                if crate::text_rules::is_list_marker(next.chars()) {
+                if list_marker {
                     text.push('\n');
                 } else if is_soft_hyphen_break(&text, &next) {
                     let _ = text.pop();
@@ -193,6 +305,25 @@ impl Block {
             text.push_str(&next);
         }
         text
+    }
+}
+
+impl FigureImage {
+    /// Writes inline bytes directly and lets the caller resolve file destinations.
+    fn write_markdown<W: Write>(
+        &self,
+        writer: &mut W,
+        file_image: &mut impl FnMut(&FigureImage, &str, &mut W) -> io::Result<()>,
+    ) -> io::Result<()> {
+        writer.write_all(b"![image](")?;
+        match &self.delivery {
+            FigureDelivery::Inline { data_base64 } => {
+                write!(writer, "data:{};base64,", self.media_type.as_str())?;
+                writer.write_all(data_base64.as_bytes())?;
+            }
+            FigureDelivery::File { path } => file_image(self, path, writer)?,
+        }
+        writer.write_all(b")")
     }
 }
 

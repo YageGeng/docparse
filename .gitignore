@@ -36,6 +36,8 @@ docparse.*.toml
 
 # Misc
 output.json
+output.md
+result.md
 
 # Browser build artifacts
 /packages/wasm-web/node_modules/

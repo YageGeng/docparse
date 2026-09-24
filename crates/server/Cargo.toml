@@ -51,6 +51,7 @@ tempfile.workspace = true
 uuid.workspace = true
 
 # config and serialization
+base64.workspace = true
 chrono.workspace = true
 figment.workspace = true
 serde.workspace = true

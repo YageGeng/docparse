@@ -235,6 +235,67 @@ impl SharedStorage {
         Ok(self.root.join(name))
     }
 
+    /// Resolves only image files inside the selected result's owned figure directory.
+    pub async fn figure_path(
+        &self,
+        name: &str,
+        requested: &str,
+    ) -> ApiResult<PathBuf> {
+        let storage = self.clone();
+        let name = name.to_owned();
+        let requested = requested.to_owned();
+        tokio::task::spawn_blocking(move || {
+            storage.figure_path_blocking(&name, &requested)
+        })
+        .await
+        .context(TaskSnafu {
+            stage: "figure-path-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?
+    }
+
+    /// Applies the same ownership check while a Markdown cache is built on a blocking worker.
+    pub(crate) fn figure_path_blocking(
+        &self,
+        name: &str,
+        requested: &str,
+    ) -> ApiResult<PathBuf> {
+        self.path(name)?;
+        if !Path::new(requested).is_absolute() {
+            return RequestSnafu {
+                stage: "figure-check-path",
+                code: ApiCode::bad_request(4001002),
+            }
+            .fail();
+        }
+        let path = std::fs::canonicalize(requested).context(StorageSnafu {
+            stage: "figure-resolve-path",
+            code: ApiCode::service_unavailable(5031003),
+        })?;
+        let valid_directory = path.parent().is_some_and(|parent| {
+            parent.parent() == Some(self.root.as_path())
+                && parent.file_name().is_some_and(|directory| {
+                    directory
+                        .to_string_lossy()
+                        .starts_with(&format!("{name}.figures-"))
+                })
+        });
+        let valid_extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                matches!(extension, "jpg" | "png" | "jp2" | "jpx")
+            });
+        if !valid_directory || !valid_extension {
+            return RequestSnafu {
+                stage: "figure-check-path",
+                code: ApiCode::bad_request(4001002),
+            }
+            .fail();
+        }
+        Ok(path)
+    }
+
     /// Checks storage writability without retaining a health-check artifact.
     pub async fn ready(&self) -> ApiResult<()> {
         drop(self.temporary().await?);

@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, LoaderCircle } from "lucide-react";
+import { Check, Copy, Download, LoaderCircle } from "lucide-react";
 import { apiUrl, decodeResponse } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { renderMarkdownDocument } from "@/lib/math";
 
 /** Reads the complete server-rendered Markdown on demand and offers its preview and exact source. */
-export function MarkdownResult({ id, ready }: { id: string; ready: boolean }) {
+export function MarkdownResult({ id, filename, ready }: { id: string; filename: string; ready: boolean }) {
   const [source, setSource] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<unknown>();
@@ -33,9 +33,16 @@ export function MarkdownResult({ id, ready }: { id: string; ready: boolean }) {
   const preview = useMemo(() => {
     // View toggles do not change immutable Markdown, so they must not invalidate its parsed HTML.
     if (result.data === undefined) return {};
-    try { return { html: renderMarkdownDocument(result.data) }; }
+    try { return { html: renderMarkdownDocument(result.data, source => {
+      // File delivery stores absolute server paths; only the owning task's image endpoint may load them.
+      if (!source.startsWith("/") || source.startsWith("//")) return undefined;
+      try {
+        const path = decodeURIComponent(source);
+        return path.startsWith("/") && !path.startsWith("//") ? apiUrl("jobs/figure", { id, path }) : undefined;
+      } catch { return undefined; }
+    }) }; }
     catch { return { error: new Error("Markdown 暂时无法预览，请切换源码或下载文件查看。") }; }
-  }, [result.data]);
+  }, [id, result.data]);
 
   /** Copies the exact server output, preserving Markdown and formula delimiters. */
   async function copy() {
@@ -60,6 +67,7 @@ export function MarkdownResult({ id, ready }: { id: string; ready: boolean }) {
           <Button size="sm" variant="ghost" aria-pressed={source} onClick={() => setSource(true)}>源码</Button>
         </div>
         <Button size="icon-sm" variant="ghost" title="复制 Markdown 源码" aria-label={copied ? "已复制 Markdown" : "复制 Markdown"} onClick={() => void copy()}>{copied ? <Check size={15} /> : <Copy size={15} />}</Button>
+        <Button asChild size="icon-sm" variant="ghost" title="下载 Markdown" aria-label="下载当前 Markdown"><a href={apiUrl("jobs/result", { id, format: "markdown" })} download={filename}><Download size={15} /></a></Button>
       </div>
     </div>
     {/* Only the document scrolls; mode controls remain visible above long Markdown output. */}

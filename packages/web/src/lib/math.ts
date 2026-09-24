@@ -16,9 +16,24 @@ const mathPlugin = {
     }
   },
 };
-// PDF/model content is untrusted. Images are disabled to avoid unsolicited resource requests.
+// Small formula previews keep images disabled; the document preview resolves images explicitly.
 const markdown = new MarkdownIt({ html: false, linkify: false }).disable("image").use(tex, mathPlugin);
-const documentMarkdown = new MarkdownIt({ html: true, linkify: false }).disable("image").use(tex, mathPlugin);
+const documentMarkdown = new MarkdownIt({ html: true, linkify: false }).use(tex, mathPlugin);
+const inlineImage = /^data:image\/(?:png|jpeg|jp2|jpx);base64,[A-Za-z0-9+/]+={0,2}$/i;
+const validateLink = documentMarkdown.validateLink.bind(documentMarkdown);
+documentMarkdown.validateLink = source => inlineImage.test(source) || validateLink(source);
+const renderImage = documentMarkdown.renderer.rules.image!;
+/** Only embedded image bytes or paths resolved by the owning document may load in the preview. */
+documentMarkdown.renderer.rules.image = (tokens, index, options, env, self) => {
+  const source = String(tokens[index].attrGet("src") ?? "");
+  const resolver = (env as { imageResolver?: (source: string) => string | undefined }).imageResolver;
+  const src = inlineImage.test(source) ? source : resolver?.(source);
+  if (!src) return "";
+  tokens[index].attrSet("src", src);
+  tokens[index].attrSet("loading", "lazy");
+  tokens[index].attrSet("decoding", "async");
+  return renderImage(tokens, index, options, env, self);
+};
 
 /** Allows the server's merged-cell tables while stripping arbitrary HTML, attributes and resource loads. */
 documentMarkdown.renderer.rules.html_block = (tokens, index) => {
@@ -42,8 +57,8 @@ documentMarkdown.renderer.rules.html_inline = (tokens, index) => DOMPurify.sanit
 });
 
 /** Renders the server's complete Markdown, including sanitized tables and bounded formulas. */
-export function renderMarkdownDocument(source: string): string {
-  return documentMarkdown.render(source, { preserveProse: true });
+export function renderMarkdownDocument(source: string, imageResolver?: (source: string) => string | undefined): string {
+  return documentMarkdown.render(source, { preserveProse: true, imageResolver });
 }
 
 /** Produces HTML only through the restricted Markdown/KaTeX renderers, never from raw source HTML. */

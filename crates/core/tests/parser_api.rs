@@ -146,6 +146,14 @@ async fn injected_layout_engine_parses_path_and_bytes() {
         from_path.context.model_revision.as_deref(),
         Some("parser-api-revision")
     );
+    assert_eq!(
+        from_path
+            .context
+            .metadata
+            .get("ocr_enabled")
+            .map(String::as_str),
+        Some("false")
+    );
 }
 
 /// Parser injection must reach the PDFium worker and retain repaired geometry through canonical validation.

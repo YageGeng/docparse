@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::sync::Arc;
 
 use docparse_config::OutputConfig;
@@ -21,7 +22,8 @@ fn structured_renderers_keep_geometry_based_whitespace() {
         LayoutLabel::Content,
         LayoutLabel::Chart,
     ] {
-        let algorithm = label == LayoutLabel::Algorithm;
+        let fenced =
+            matches!(label, LayoutLabel::Algorithm | LayoutLabel::Chart);
         let mut document = document();
         let block = document
             .pages
@@ -67,7 +69,7 @@ fn structured_renderers_keep_geometry_based_whitespace() {
         assert_eq!(
             MarkdownRenderer::new(RenderView::Semantic, "[formula]")
                 .render(&document),
-            if algorithm {
+            if fenced {
                 "```\nbegin\n    nested\n2:  return\n```"
             } else {
                 "begin  \n&nbsp;&nbsp;&nbsp;&nbsp;nested  \n2:&nbsp;&nbsp;return"
@@ -75,6 +77,154 @@ fn structured_renderers_keep_geometry_based_whitespace() {
         );
         assert_eq!(serde_json::to_value(&document).expect("snapshot"), before);
     }
+}
+
+/// Image Markdown keeps delivered pixels while native-only image text stays out of semantic output.
+#[test]
+fn image_markdown_uses_inline_and_file_delivery() {
+    use docparse_core::{
+        FigureDelivery, FigureImage, FigureMediaType, FigureSource,
+        PageImageAsset,
+    };
+
+    let mut document = document();
+    let page = document.pages.first_mut().expect("page");
+    let block = page.blocks.first_mut().expect("block");
+    block.label = LayoutLabel::Image;
+    block.lines.first_mut().expect("line").inline_spans.clear();
+    block.image = Some(
+        FigureImage::builder()
+            .source(FigureSource::Embedded)
+            .media_type(FigureMediaType::Png)
+            .width(1)
+            .height(1)
+            .delivery(FigureDelivery::Inline {
+                data_base64: "AA==".into(),
+            })
+            .build(),
+    );
+    page.images.push(PageImageAsset {
+        id: "p1:img:1".into(),
+        bbox: Bbox::try_from([10.0, 30.0, 90.0, 40.0]).expect("asset bbox"),
+        image: FigureImage::builder()
+            .source(FigureSource::Raster)
+            .media_type(FigureMediaType::Png)
+            .width(1)
+            .height(1)
+            .delivery(FigureDelivery::File {
+                path: "/tmp/figure 1.png".into(),
+            })
+            .build(),
+    });
+    docparse_core::ResultValidator::validate(&document)
+        .expect("valid image result");
+    let renderer = MarkdownRenderer::new(RenderView::Semantic, "[formula]");
+    assert_eq!(
+        renderer.render(&document),
+        "![image](data:image/png;base64,AA==)\n\n![image](</tmp/figure 1.png>)"
+    );
+    let mut portable = Vec::new();
+    renderer
+        .write_with_images(&document, &mut portable, |image, path, writer| {
+            assert_eq!(image.media_type.as_str(), "image/png");
+            assert_eq!(path, "/tmp/figure 1.png");
+            writer.write_all(b"data:image/png;base64,AA==")
+        })
+        .expect("portable Markdown");
+    assert_eq!(
+        String::from_utf8(portable).expect("UTF-8 Markdown"),
+        "![image](data:image/png;base64,AA==)\n\n![image](data:image/png;base64,AA==)"
+    );
+    document
+        .context
+        .metadata
+        .insert("ocr_enabled".into(), "true".into());
+    assert_eq!(
+        renderer.render(&document),
+        "![image](data:image/png;base64,AA==)\n\nhello\n\n![image](</tmp/figure 1.png>)"
+    );
+    document
+        .context
+        .metadata
+        .insert("ocr_enabled".into(), "false".into());
+    assert_eq!(
+        renderer.render(&document),
+        "![image](data:image/png;base64,AA==)\n\n![image](</tmp/figure 1.png>)"
+    );
+    document
+        .context
+        .metadata
+        .insert("ocr_enabled".into(), "true".into());
+    document
+        .pages
+        .first_mut()
+        .expect("page")
+        .blocks
+        .first_mut()
+        .expect("block")
+        .lines
+        .first_mut()
+        .expect("line")
+        .text_items
+        .first_mut()
+        .expect("item")
+        .source = TextSource::Ocr;
+    assert_eq!(
+        renderer.render(&document),
+        "![image](data:image/png;base64,AA==)\n\nhello\n\n![image](</tmp/figure 1.png>)"
+    );
+}
+
+/// Page chrome stays visible within separated pages, while watermarks never enter Markdown.
+#[test]
+fn markdown_separates_pages_without_watermarks() {
+    let mut document = document();
+    let first = document.pages.first_mut().expect("first page");
+    let header = first.blocks.first_mut().expect("header");
+    header.label = LayoutLabel::Header;
+    header.text = "Running title".into();
+    let line = header.lines.first_mut().expect("line");
+    line.text = header.text.clone();
+    line.text_items.first_mut().expect("item").raw_text = line.text.clone();
+    line.inline_spans.clear();
+    let mut second = first.clone();
+    second.page_number = 2;
+    let number = second.blocks.first_mut().expect("number");
+    number.id = BlockId::fallback(2, &docparse_core::RegionPath::root(), 0);
+    number.label = LayoutLabel::Number;
+    number.text = "2".into();
+    let line = number.lines.first_mut().expect("line");
+    line.id = LineId::new(&number.id, 0);
+    line.text = number.text.clone();
+    let item = line.text_items.first_mut().expect("item");
+    item.id = TextItemId::native(2, 0);
+    item.raw_text = line.text.clone();
+    document.pages.push(second);
+    document.context.page_count = 2;
+    document
+        .relations
+        .relations
+        .first_mut()
+        .expect("relation")
+        .kind = RelationKind::RepeatedChrome;
+    docparse_core::ResultValidator::validate(&document)
+        .expect("valid document");
+    let renderer = MarkdownRenderer::new(RenderView::Semantic, "[formula]");
+    assert_eq!(renderer.render(&document), "Running title\n\n---\n\n2");
+
+    let number = document
+        .pages
+        .get_mut(1)
+        .expect("second page")
+        .blocks
+        .first_mut()
+        .expect("block");
+    number.label = LayoutLabel::Watermark;
+    assert_eq!(renderer.render(&document), "Running title");
+    assert_eq!(
+        MarkdownRenderer::new(RenderView::Raw, "[formula]").render(&document),
+        "<!-- page 1 -->\n\nRunning title\n\n<!-- page 2 -->"
+    );
 }
 
 /// Algorithm fences contain literal Markdown syntax and grow when the source itself contains backtick fences.
@@ -270,15 +420,15 @@ fn recognized_formula_json_and_markdown_preserve_source_text() {
         .expect_err("JSON formula representations must agree");
 }
 
-/// A measured word inside a larger PDF text run must not consume adjacent prose or sentence punctuation.
+/// A measured formula must preserve adjacent prose, wrapped words, and list boundaries.
 #[test]
-fn inline_formula_uses_exact_byte_spans_inside_a_text_item() {
+fn inline_formula_preserves_prose_and_list_markers() {
     let mut document = document();
     let page = document.pages.first_mut().expect("page");
     let block = page.blocks.first_mut().expect("block");
     let line = block.lines.first_mut().expect("line");
     let item = line.text_items.first_mut().expect("item");
-    item.raw_text = "learning rate of 7, next".into();
+    item.raw_text = "learning rate of 7, next over-".into();
     line.text = item.raw_text.clone();
     block.text = line.text.clone();
     line.inline_spans.clear();
@@ -299,10 +449,42 @@ fn inline_formula_uses_exact_byte_spans_inside_a_text_item() {
             .markdown(Some("$7$".into()))
             .build(),
     );
+    let block = page.blocks.first_mut().expect("block");
+    let mut continuation = block.lines.first().expect("line").clone();
+    continuation.id = LineId::new(&block.id, 1);
+    continuation.text = "lap by assigning its volume".into();
+    continuation.bbox =
+        Bbox::try_from([10.0, 20.0, 90.0, 30.0]).expect("line bbox");
+    let item = continuation.text_items.first_mut().expect("item");
+    item.id = TextItemId::native(1, 1);
+    item.raw_text = continuation.text.clone();
+    item.bbox = continuation.bbox;
+    block.lines.push(continuation);
+    let mut list_line = block.lines.last().expect("continuation").clone();
+    list_line.id = LineId::new(&block.id, 2);
+    list_line.text = "* another [item]".into();
+    list_line.bbox =
+        Bbox::try_from([10.0, 30.0, 90.0, 40.0]).expect("list bbox");
+    let item = list_line.text_items.first_mut().expect("list item");
+    item.id = TextItemId::native(1, 2);
+    item.raw_text = list_line.text.clone();
+    item.bbox = list_line.bbox;
+    block.lines.push(list_line);
+    block.bbox = Bbox::try_from([10.0, 10.0, 90.0, 40.0]).expect("block bbox");
+    block.text =
+        "learning rate of 7, next over- lap by assigning its volume * another [item]"
+            .into();
+    docparse_core::ResultValidator::validate(&document)
+        .expect("valid parsed document");
     assert_eq!(
         MarkdownRenderer::new(RenderView::Semantic, "[formula]")
             .render(&document),
-        "learning rate of $7$, next"
+        "learning rate of $7$, next overlap by assigning its volume\n* another \\[item\\]"
+    );
+    assert!(
+        MarkdownRenderer::new(RenderView::Raw, "[formula]")
+            .render(&document)
+            .contains("over-\nlap")
     );
 }
 
@@ -345,7 +527,7 @@ fn disjoint_formula_slices_preserve_intervening_source() {
     assert_eq!(
         MarkdownRenderer::new(RenderView::Semantic, "[formula]")
             .render(&document),
-        "$a+b$ 引用 "
+        "$a+b$ 引用"
     );
 }
 

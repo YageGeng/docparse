@@ -30,3 +30,12 @@ for (const path of ["../../../packages/web/src/lib/math.ts", "../../../packages/
   }
   console.log(`Passed rendered math, Markdown, source error and untrusted-content checks: ${path}`);
 }
+
+// The full-document preview accepts only embedded images and caller-approved task files.
+const { renderMarkdownDocument } = await import("../../../packages/web/src/lib/math.ts");
+assert.match(renderMarkdownDocument("![inline](data:image/png;base64,AA==)"), /<img[^>]+src="data:image\/png;base64,AA=="/);
+assert.match(renderMarkdownDocument("![file](</tmp/figure 1.png>)", source => {
+  assert.equal(source, "/tmp/figure%201.png");
+  return `/api/figure?path=${encodeURIComponent(decodeURIComponent(source))}`;
+}), /<img[^>]+src="\/api\/figure\?path=%2Ftmp%2Ffigure%201.png"/);
+assert.doesNotMatch(renderMarkdownDocument("![remote](https://example.invalid/a.png)"), /<img\b/i);

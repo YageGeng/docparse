@@ -94,6 +94,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/docparse/jobs/figure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Streams only images inside this task's retained figure directory.
+         * @description Read a file-delivered figure owned by a completed task. Paths outside that task's figure directory are rejected.
+         */
+        get: operations["figure"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/docparse/jobs/list": {
         parameters: {
             query?: never;
@@ -366,6 +386,7 @@ export interface components {
             model_region_id?: components["schemas"]["ModelRegionId"] | null;
             polygon?: components["schemas"]["Polygon"] | null;
             raw_label?: string | null;
+            /** @description Canonical layout hints retained even when optional evidence is hidden. */
             semantic_hints: {
                 [key: string]: string;
             };
@@ -436,6 +457,8 @@ export interface components {
         };
         /** @description Stable identity for one residual XY-cut region. */
         FallbackRegionId: string;
+        /** Format: binary */
+        FigureBinary: string;
         /** @description Exactly one place the figure bytes are delivered. */
         FigureDelivery: {
             path: string;
@@ -1165,6 +1188,70 @@ export interface operations {
                 };
             };
             /** @description Task database unavailable before streaming starts (5031002) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    figure: {
+        parameters: {
+            query: {
+                /** @description Identifier of the completed parse task. */
+                id: string;
+                /** @description Absolute path recorded in the task's figure delivery. */
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Figure image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": components["schemas"]["FigureBinary"];
+                    "image/jpeg": components["schemas"]["FigureBinary"];
+                    "image/jp2": components["schemas"]["FigureBinary"];
+                    "image/jpx": components["schemas"]["FigureBinary"];
+                };
+            };
+            /** @description Invalid or unowned image path */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Task not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Task is not complete */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Database or figure storage unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

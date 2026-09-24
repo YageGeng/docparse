@@ -37,12 +37,16 @@ async fn documentation_covers_routes_and_wire_schemas() {
     let bytes = to_bytes(response.into_body(), 2 * 1024 * 1024)
         .await
         .expect("spec body");
+    if let Ok(path) = std::env::var("DOCPARSE_OPENAPI_OUTPUT") {
+        std::fs::write(path, &bytes).expect("write generated API schema");
+    }
     let spec: Value = serde_json::from_slice(&bytes).expect("OpenAPI JSON");
     // Include monitoring in both operation coverage and the expected path count.
     let routes = [
         ("/api/jobs", "post"),
         ("/api/jobs/status", "get"),
         ("/api/jobs/events", "get"),
+        ("/api/jobs/figure", "get"),
         ("/api/jobs/result", "get"),
         ("/api/jobs/list", "get"),
         ("/api/jobs/source", "get"),
@@ -63,6 +67,15 @@ async fn documentation_covers_routes_and_wire_schemas() {
             "missing {method} {path}"
         );
     }
+    // The image endpoint streams bytes rather than a JSON array of integer values.
+    assert_eq!(
+        spec.pointer("/components/schemas/FigureBinary/type"),
+        Some(&Value::String("string".into()))
+    );
+    assert_eq!(
+        spec.pointer("/components/schemas/FigureBinary/format"),
+        Some(&Value::String("binary".into()))
+    );
     check_references(&spec, &spec);
     let page = spec
         .pointer("/paths/~1api~1jobs~1result/get/parameters")

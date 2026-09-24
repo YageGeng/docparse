@@ -687,10 +687,18 @@ impl DocParser {
         })?;
         let mut context_builder = DocumentContextBuilder::builder()
             .page_count(1)
-            .metadata(BTreeMap::from([(
-                "standalone_page_number".to_owned(),
-                source_page_number.to_string(),
-            )]))
+            .metadata(BTreeMap::from([
+                (
+                    "standalone_page_number".to_owned(),
+                    source_page_number.to_string(),
+                ),
+                (
+                    "ocr_enabled".to_owned(),
+                    (self.config.ocr().policy
+                        != docparse_config::OcrPolicy::Disabled)
+                        .to_string(),
+                ),
+            ]))
             .model_revision(Some(
                 self.layout_engine.model_revision().to_owned(),
             ))

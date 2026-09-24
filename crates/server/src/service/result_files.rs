@@ -4,6 +4,7 @@ use crate::{
     error::{ApiResult, SerializeSnafu, StorageSnafu, TaskSnafu},
     storage::SharedStorage,
 };
+use base64::{engine::general_purpose::STANDARD, write::EncoderWriter};
 use docparse_core::{DocumentResult, PageError};
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -13,6 +14,9 @@ use std::{
     ops::Range,
     path::PathBuf,
 };
+
+/// Markdown projection revision shared by disk caches and HTTP validators.
+pub(crate) const MARKDOWN_CACHE_REVISION: &str = "v7";
 
 /// Byte ranges refer directly to the original JSON; only document metadata is duplicated.
 #[derive(Serialize, Deserialize)]
@@ -99,8 +103,12 @@ impl SharedStorage {
             ),
             None => "index.json".to_owned(),
         };
-        // Algorithm fences change Markdown bytes; regenerate earlier cached presentations.
-        let version = if markdown.is_some() { "v3" } else { "v1" };
+        // Portable file figures change Markdown bytes; regenerate cached presentations.
+        let version = if markdown.is_some() {
+            MARKDOWN_CACHE_REVISION
+        } else {
+            "v1"
+        };
         let cache = self.path(&format!("{name}.{version}.{suffix}"))?;
         let placeholder = markdown.map(str::to_owned);
         let storage = self.clone();
@@ -168,13 +176,33 @@ impl SharedStorage {
                                         code: ApiCode::COMMON_INTERNAL_ERROR,
                                     },
                                 )?;
-                            let markdown =
-                                docparse_core::MarkdownRenderer::new(
-                                    docparse_core::RenderView::Semantic,
-                                    placeholder,
-                                )
-                                .render(&document.data);
-                            writer.write_all(markdown.as_bytes()).context(
+                            // Stream owned figures into the cache without retaining their Base64 or a second document buffer.
+                            docparse_core::MarkdownRenderer::new(
+                                docparse_core::RenderView::Semantic,
+                                placeholder,
+                            )
+                            .write_with_images(
+                                &document.data,
+                                &mut writer,
+                                |image, path, writer| {
+                                    let owned = storage
+                                        .figure_path_blocking(&name, path)
+                                        .map_err(std::io::Error::other)?;
+                                    let mut file = std::fs::File::open(owned)?;
+                                    write!(
+                                        writer,
+                                        "data:{};base64,",
+                                        image.media_type.as_str()
+                                    )?;
+                                    let mut encoded =
+                                        EncoderWriter::new(writer, &STANDARD);
+                                    let _ =
+                                        std::io::copy(&mut file, &mut encoded)?;
+                                    let _ = encoded.finish()?;
+                                    Ok(())
+                                },
+                            )
+                            .context(
                                 StorageSnafu {
                                     stage: "result-write-markdown",
                                     code: ApiCode::service_unavailable(5031003),
