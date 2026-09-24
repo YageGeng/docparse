@@ -149,6 +149,7 @@ export function PdfPage({
         >
           {page.blocks.map((block) => {
             const bounds = block.bbox;
+            const reference = block.label === "reference";
             const points = block.polygon?.length
               ? block.polygon.map((point) => `${point.x},${point.y}`).join(" ")
               : `${bounds.left},${bounds.top} ${bounds.right},${bounds.top} ${bounds.right},${bounds.bottom} ${bounds.left},${bounds.bottom}`;
@@ -156,13 +157,14 @@ export function PdfPage({
               <polygon
                 key={block.id}
                 points={points}
-                className={`region ${block.id === selected ? "is-selected" : ""}`}
-                tabIndex={0}
-                role="button"
-                aria-label={`区域 ${block.final_order + 1}：${blockLabel(block.label)}`}
-                aria-pressed={block.id === selected}
-                onClick={() => onSelect?.(block.id)}
-                onKeyDown={(event) => {
+                className={`region ${reference ? "is-reference" : ""} ${block.id === selected ? "is-selected" : ""}`}
+                tabIndex={reference ? undefined : 0}
+                role={reference ? undefined : "button"}
+                aria-hidden={reference || undefined}
+                aria-label={reference ? undefined : `区域 ${block.final_order + 1}：${blockLabel(block)}`}
+                aria-pressed={reference ? undefined : block.id === selected}
+                onClick={reference ? undefined : () => onSelect?.(block.id)}
+                onKeyDown={reference ? undefined : (event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
                     onSelect?.(block.id);

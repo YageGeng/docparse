@@ -342,15 +342,20 @@ function showPage(number: number): void {
     (b.bbox.right - b.bbox.left) * (b.bbox.bottom - b.bbox.top) - (a.bbox.right - a.bbox.left) * (a.bbox.bottom - a.bbox.top));
   for (const block of blocks) {
     const bounds = block.bbox;
-    const group = svg("g", { class: "overlay", tabindex: "0", role: "button", "aria-label": `Region ${block.final_order + 1}: ${block.label.replaceAll("_", " ")}`, "aria-pressed": "false" });
+    const reference = block.label === "reference";
+    const group = svg("g", reference
+      ? { class: "overlay reference-overlay", "aria-hidden": "true" }
+      : { class: "overlay", tabindex: "0", role: "button", "aria-label": `Region ${block.final_order + 1}: ${block.label.replaceAll("_", " ")}`, "aria-pressed": "false" });
     group.dataset.blockId = block.id;
-    if (block.label === "reference") group.classList.add("reference-overlay");
     // The actual footprint owns hit testing; empty AABB corners must not catch pointer clicks.
     group.append(block.polygon?.length ? svg("polygon", { points: block.polygon.map(point => `${point.x},${point.y}`).join(" "), stroke: color(block.label), fill: color(block.label) }) : svg("rect", { x: String(bounds.left), y: String(bounds.top), width: String(bounds.right - bounds.left), height: String(bounds.bottom - bounds.top), stroke: color(block.label), fill: color(block.label) }));
     const label = svg("text", { x: String(Math.max(1, bounds.left + 2)), y: String(Math.max(7, bounds.top + 7)), fill: color(block.label) });
     label.textContent = String(block.final_order + 1); group.append(label);
-    group.addEventListener("click", () => selectBlock(block.id));
-    group.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectBlock(block.id); } });
+    // Reference outlines stay visible while content regions receive pointer and keyboard input.
+    if (!reference) {
+      group.addEventListener("click", () => selectBlock(block.id));
+      group.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectBlock(block.id); } });
+    }
     sheet.append(group);
   }
   ui.viewer.replaceChildren(sheet);

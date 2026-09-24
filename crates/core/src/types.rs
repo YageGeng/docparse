@@ -654,6 +654,7 @@ pub struct Block {
     #[builder(default)]
     pub evidence: Vec<Evidence>,
     #[builder(default)]
+    /// Canonical layout hints retained even when optional evidence is hidden.
     pub semantic_hints: BTreeMap<String, String>,
     pub lines: Vec<Line>,
     /// Non-owning table cells; absent when the layout is not a confidently recovered table.
@@ -757,6 +758,10 @@ enum BlockTextBoundary {
 }
 
 impl Block {
+    /// Marks sparse merged geometry that cannot use rectangular containment for validation.
+    pub(crate) const SPARSE_LAYOUT_HINT: &'static str =
+        "sparse_layout_envelope";
+
     /// Identifies annotations kept outside body composition and content overlap diagnostics.
     pub fn is_detached(&self) -> bool {
         matches!(self.label, LayoutLabel::Reference | LayoutLabel::Watermark)

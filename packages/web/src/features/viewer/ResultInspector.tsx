@@ -223,10 +223,10 @@ export function ResultInspector({
                     <span>
                       {String(block.final_order + 1).padStart(2, "0")}
                     </span>
-                    {blockLabel(block.label)}
+                    {blockLabel(block)}
                   </button>
                   {/* Figure bytes accompany, rather than replace, extracted text and PDF selection. */}
-                  {block.image && <FigureView image={block.image} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block.label)}`} />}
+                  {block.image && <FigureView image={block.image} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block)}`} />}
                   {block.table ? (
                     <TableView table={block.table} />
                   ) : (["inline_formula", "display_formula"].includes(typeof block.label === "string" ? block.label : "") && page.formulas?.some(formula => formula.block_id === block.id && formula.latex)) ? null : (

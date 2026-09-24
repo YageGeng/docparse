@@ -406,9 +406,9 @@ fn character_cleanup_is_a_read_only_presentation() {
     );
 }
 
-/// Configured JSON must retain merged source regions just like the direct serializer.
+/// Browser JSON omits absorbed layout bounds while direct serialization retains provenance.
 #[test]
-fn configured_json_preserves_merged_layout_sources() {
+fn configured_json_omits_merged_layout_sources() {
     let mut document = document();
     let block = document
         .pages
@@ -437,10 +437,19 @@ fn configured_json_preserves_merged_layout_sources() {
             .expect("configured JSON");
     let configured: serde_json::Value =
         serde_json::from_str(&rendered).expect("parse JSON");
-    assert_eq!(
-        configured.pointer("/pages/0/blocks/0/source_regions"),
-        direct.pointer("/pages/0/blocks/0/source_regions")
+    assert!(direct.pointer("/pages/0/blocks/0/source_regions").is_some());
+    assert!(
+        configured
+            .pointer("/pages/0/blocks/0/source_region")
+            .is_none()
     );
+    assert!(
+        configured
+            .pointer("/pages/0/blocks/0/source_regions")
+            .is_none()
+    );
+    let _: DocumentResult = serde_json::from_value(configured)
+        .expect("browser JSON stays schema-compatible");
 }
 
 /// Verifies the overlay emits PNG bytes and XML-escapes model-controlled labels.

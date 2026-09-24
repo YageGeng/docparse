@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use docparse_layout::Bbox;
 
 use crate::{
-    DocumentResult, NodeRef, PageResult, TextItemRange, ValidationError,
+    Block, DocumentResult, NodeRef, PageResult, TextItemRange, ValidationError,
 };
 
 const GEOMETRY_TOLERANCE: f64 = 0.01;
@@ -615,8 +615,18 @@ impl ResultValidator {
                 .skip(index + 1)
                 .filter(|block| !block.is_detached())
             {
-                if block.bbox.contains_bbox(other.bbox)
-                    || other.bbox.contains_bbox(block.bbox)
+                // Sparse unions can contain independent content in empty corners,
+                // including after optional evidence is hidden from browser JSON.
+                let sparse = |candidate: &Block| {
+                    candidate
+                        .semantic_hints
+                        .get(Block::SPARSE_LAYOUT_HINT)
+                        .is_some_and(|value| value == "true")
+                };
+                if (block.bbox.contains_bbox(other.bbox)
+                    || other.bbox.contains_bbox(block.bbox))
+                    && !sparse(block)
+                    && !sparse(other)
                 {
                     tracing::error!(
                         "page {} content layouts {} and {} still satisfy the merge criteria",

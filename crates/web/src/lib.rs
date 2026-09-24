@@ -408,7 +408,9 @@ impl WebParser {
             docparse_common::timing::Timings::channel();
         let timer = timings
             .start(docparse_common::timing::TimingStage::ResultSerialize);
-        let result = document
+        // The browser receives the same final-layout view as native HTTP output;
+        // absorbed source bounds remain only in the validated in-memory document.
+        let result = JsonRenderer::view_with_config(&document, &self.output)
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|error| WebError::value("SerializationFailed", error));
         drop(timer);

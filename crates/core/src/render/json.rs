@@ -189,7 +189,7 @@ impl Serialize for ConfiguredBlocks<'_> {
     }
 }
 
-/// Borrowed block view that can replace evidence with an empty sequence.
+/// Borrowed block view that hides absorbed layout bounds and optional evidence.
 struct ConfiguredBlock<'a> {
     block: &'a Block,
     include_evidence: bool,
@@ -201,9 +201,15 @@ impl Serialize for ConfiguredBlock<'_> {
     where
         S: Serializer,
     {
+        // Canonical in-memory provenance remains available to validators and exports;
+        // the browser receives only the final layout box after a multi-source merge.
+        let expose_sources = self.block.source_regions.len() <= 1;
         let mut state = serializer.serialize_struct(
             "Block",
-            15 + usize::from(!self.block.source_regions.is_empty())
+            14 + usize::from(expose_sources)
+                + usize::from(
+                    expose_sources && !self.block.source_regions.is_empty(),
+                )
                 + usize::from(self.block.markdown.is_some())
                 + usize::from(self.block.table.is_some())
                 + usize::from(self.block.image.is_some()),
@@ -219,12 +225,15 @@ impl Serialize for ConfiguredBlock<'_> {
         state.serialize_field("confidence", &self.block.confidence)?;
         state.serialize_field("bbox", &self.block.bbox)?;
         state.serialize_field("polygon", &self.block.polygon)?;
-        state.serialize_field("source_region", &self.block.source_region)?;
-        if !self.block.source_regions.is_empty() {
-            state.serialize_field(
-                "source_regions",
-                &self.block.source_regions,
-            )?;
+        if expose_sources {
+            state
+                .serialize_field("source_region", &self.block.source_region)?;
+            if !self.block.source_regions.is_empty() {
+                state.serialize_field(
+                    "source_regions",
+                    &self.block.source_regions,
+                )?;
+            }
         }
         state
             .serialize_field("model_region_id", &self.block.model_region_id)?;

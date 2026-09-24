@@ -22,9 +22,10 @@ const blockLabels: Record<string, string> = {
   aside_text: "旁注",
 };
 
-/** Preserves the schema's unknown-label variant instead of assuming every layout label is a string. */
-export function blockLabel(value: Block["label"]): string {
-  const raw = typeof value === "string" ? value : value.unknown;
+/** Distinguishes inferred lists from model contents while preserving unknown labels. */
+export function blockLabel(block: Block): string {
+  const raw = typeof block.label === "string" ? block.label : block.label.unknown;
+  if (raw === "content" && block.label_source === "Heuristic") return "结构化列表";
   return blockLabels[raw] ?? raw.replaceAll("_", " ");
 }
 

@@ -691,6 +691,13 @@ button:disabled {
   stroke-width: 1.8;
   fill: #3b82f61f;
 }
+.region.is-reference,
+.region.is-reference.is-selected {
+  fill: none;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+  cursor: default;
+}
 .inspector {
   min-width: 0;
   min-height: 0;

@@ -17,7 +17,7 @@ export interface FigureImage {
   delivery: { type: "file"; path: string } | { type: "inline"; data_base64: string };
 }
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; image?: FigureImage; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region?: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; image?: FigureImage; [key: string]: unknown }
 /** A non-owning source slice. Byte offsets address UTF-8, not JavaScript UTF-16 strings. */
 export interface TableTextSpan { text_item_id: string; byte_range: { start: number; end: number }; bbox: Bbox }
 /** Cell-local physical line with the original source references. */
