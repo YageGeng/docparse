@@ -16,7 +16,9 @@ use std::{
 use typed_builder::TypedBuilder;
 
 // Image metadata now distinguishes encoded files from deferred RGBA pixels.
-pub const PROTOCOL_VERSION: u32 = 5;
+// Version 6 packs every image payload into one shared blob so a render reply
+// stays inside the Unix descriptor budget.
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const WORKER_BINARY: &str = "docparse-pdfium-worker";
 
@@ -109,37 +111,47 @@ pub struct Request {
     pub command: Command,
 }
 
+/// Byte range of one image payload inside the shared image blob.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct ImageByteSpan {
+    offset: u64,
+    length: u64,
+}
+
+/// Image metadata paired with the range of its bytes in `Raster::image_bytes`.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct TransferredImage {
+    image: crate::figure::EmbeddedImage,
+    span: Option<ImageByteSpan>,
+}
+
 /// Validated transforms and an immutable shared pixel segment.
 #[derive(Debug, Serialize, Deserialize, TypedBuilder)]
 pub struct Raster {
     pub page_number: u32,
     pub transform: PageTransform,
     pub pixels: IpcSharedMemory,
-    /// Metadata stays in the render message while original files and deferred pixels use shared memory.
+    /// Metadata stays in the render message. Payloads share `image_bytes`.
     #[builder(default, setter(skip))]
-    pub(crate) images:
-        Vec<(crate::figure::EmbeddedImage, Option<IpcSharedMemory>)>,
+    pub(crate) images: Vec<TransferredImage>,
+    /// Every embedded-image payload, concatenated into one descriptor.
+    pub(crate) image_bytes: IpcSharedMemory,
 }
+
 impl From<RenderedPage> for Raster {
-    /// Publishes pixels without serializing their byte array into the IPC message.
+    /// Publishes pixels and image payloads in two shared-memory regions.
+    ///
+    /// Unix IPC allows 64 file descriptors per message. One region per image
+    /// trips that limit on pages with many embedded figures.
     fn from(page: RenderedPage) -> Self {
+        let (images, blob) = pack_image_payloads(page.embedded_images);
         let mut raster = Self::builder()
             .page_number(page.page_number)
             .transform(page.transform)
             .pixels(IpcSharedMemory::from_bytes(page.image.data()))
+            .image_bytes(IpcSharedMemory::from_bytes(&blob))
             .build();
-        // Pair each payload with its metadata instead of maintaining parallel scan arrays.
-        raster.images = page
-            .embedded_images
-            .into_iter()
-            .map(|mut image| {
-                let bytes = image
-                    .bytes
-                    .take()
-                    .map(|bytes| IpcSharedMemory::from_bytes(&bytes));
-                (image, bytes)
-            })
-            .collect();
+        raster.images = images;
         raster
     }
 }
@@ -184,16 +196,78 @@ impl TryFrom<Raster> for RenderedPage {
             .image(Arc::new(image))
             .build();
         // Restore payloads only for this admitted page; pre-scan carries no image buffers.
-        rendered.embedded_images = value
-            .images
-            .into_iter()
-            .map(|(mut image, bytes)| {
-                image.bytes = bytes.map(|memory| memory.to_vec());
-                image
-            })
-            .collect();
+        rendered.embedded_images =
+            unpack_image_payloads(value.images, &value.image_bytes)?;
         Ok(rendered)
     }
+}
+
+/// Concatenate image payloads so a render reply stays within the Unix descriptor limit.
+fn pack_image_payloads(
+    images: Vec<crate::figure::EmbeddedImage>,
+) -> (Vec<TransferredImage>, Vec<u8>) {
+    // One allocation keeps the pack step from holding a grown buffer and its
+    // reallocation at the same time; the payloads are exactly sized here.
+    let total_bytes = images
+        .iter()
+        .filter_map(|image| image.bytes.as_ref())
+        .map(Vec::len)
+        .sum();
+    let mut blob = Vec::with_capacity(total_bytes);
+    let transferred = images
+        .into_iter()
+        .map(|mut image| {
+            let span = image.bytes.take().map(|bytes| {
+                let span = ImageByteSpan {
+                    offset: blob.len() as u64,
+                    length: bytes.len() as u64,
+                };
+                blob.extend_from_slice(&bytes);
+                span
+            });
+            TransferredImage { image, span }
+        })
+        .collect();
+    (transferred, blob)
+}
+
+/// Copy each image's bytes back out of the shared blob.
+fn unpack_image_payloads(
+    images: Vec<TransferredImage>,
+    blob: &[u8],
+) -> Result<Vec<crate::figure::EmbeddedImage>, PdfiumRuntimeError> {
+    images
+        .into_iter()
+        .map(|transferred| {
+            let mut image = transferred.image;
+            if let Some(span) = transferred.span {
+                let start = usize::try_from(span.offset).map_err(|_error| {
+                    PdfiumRuntimeError::Transport(
+                        "invalid IPC image payload offset".into(),
+                    )
+                })?;
+                let length =
+                    usize::try_from(span.length).map_err(|_error| {
+                        PdfiumRuntimeError::Transport(
+                            "invalid IPC image payload length".into(),
+                        )
+                    })?;
+                let end = start.checked_add(length).ok_or_else(|| {
+                    PdfiumRuntimeError::Transport(
+                        "invalid IPC image payload range".into(),
+                    )
+                })?;
+                let bytes = blob.get(start..end).ok_or_else(|| {
+                    PdfiumRuntimeError::Transport(
+                        "IPC image payload extends past the shared buffer"
+                            .into(),
+                    )
+                })?;
+                image.bytes = Some(bytes.to_vec());
+            }
+            Ok(image)
+        })
+        .collect()
 }
 
 /// Snapshot JSON preserves canonical Serde omission and tagged-enum rules.
@@ -637,5 +711,98 @@ mod tests {
             RenderedPage::try_from(receiver.recv().expect("receive"))
                 .expect("restore");
         assert_eq!(restored.embedded_images, expected);
+    }
+
+    /// One render reply must carry more image payloads than a Unix message can attach as file descriptors.
+    #[test]
+    fn many_image_payloads_round_trip_through_one_ipc_message() {
+        let transform = PageTransform::try_from(
+            PageTransformInput::builder()
+                .page_to_viewport(AffineTransform::identity())
+                .viewport_width(4.0)
+                .viewport_height(4.0)
+                .render_width(4)
+                .render_height(4)
+                .model_width(4)
+                .model_height(4)
+                .rotation(PageRotation::Degrees0)
+                .build(),
+        )
+        .expect("transform");
+        let image = PageImage::try_from(
+            PageImageInput::builder()
+                .width(4)
+                .height(4)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(vec![255_u8; 48]))
+                .build(),
+        )
+        .expect("raster");
+        let mut rendered = RenderedPage::builder()
+            .page_number(1)
+            .image(Arc::new(image))
+            .transform(transform)
+            .build();
+        // 70 payloads plus the page bitmap exceeds ipc-channel's 64-descriptor Unix limit.
+        rendered.embedded_images = (0..70)
+            .map(|index| {
+                crate::figure::EmbeddedImage::builder()
+                    .bounds(
+                        Bbox::try_from([1.0, 2.0, 3.0, 4.0]).expect("bounds"),
+                    )
+                    .pixel_width(1)
+                    .pixel_height(1)
+                    .format(Some(crate::figure::EmbeddedImageFormat::Rgba))
+                    .bytes(Some(vec![index]))
+                    .build()
+            })
+            .collect();
+        let expected = rendered.embedded_images.clone();
+        let (sender, receiver) = ipc_channel::ipc::channel().expect("channel");
+        sender.send(Raster::from(rendered)).expect("send");
+        let restored =
+            RenderedPage::try_from(receiver.recv().expect("receive"))
+                .expect("restore");
+        assert_eq!(restored.embedded_images, expected);
+    }
+
+    /// Corrupt spans are rejected instead of slicing outside the shared blob.
+    #[test]
+    fn image_payload_spans_are_range_checked() {
+        let image = || {
+            crate::figure::EmbeddedImage::builder()
+                .bounds(Bbox::try_from([1.0, 2.0, 3.0, 4.0]).expect("bounds"))
+                .pixel_width(1)
+                .pixel_height(1)
+                .format(Some(crate::figure::EmbeddedImageFormat::Rgba))
+                .build()
+        };
+        let cases = [
+            // Payload runs past the end of the shared blob.
+            ImageByteSpan {
+                offset: 2,
+                length: 2,
+            },
+            // Offset plus length overflows usize.
+            ImageByteSpan {
+                offset: u64::MAX,
+                length: 2,
+            },
+            // Empty span beyond the end of the shared blob.
+            ImageByteSpan {
+                offset: 4,
+                length: 0,
+            },
+        ];
+        for span in cases {
+            let transferred = TransferredImage {
+                image: image(),
+                span: Some(span),
+            };
+            assert!(matches!(
+                unpack_image_payloads(vec![transferred], &[0, 1, 2]),
+                Err(PdfiumRuntimeError::Transport(_))
+            ));
+        }
     }
 }

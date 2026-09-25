@@ -34,7 +34,7 @@ pub(crate) enum EmbeddedImageFormat {
 
 /// One embedded image carried from PDFium into page fusion.
 ///
-/// `bytes` stay off the JSON snapshot. IPC sends them in a shared-memory side channel.
+/// `bytes` stay off the JSON snapshot. IPC carries every payload in one shared-memory region.
 #[derive(
     Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, TypedBuilder,
 )]

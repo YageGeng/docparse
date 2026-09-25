@@ -25,11 +25,12 @@ async fn raster_roundtrip_validates_shared_pixel_length() {
     let decoded = RenderedPage::try_from(encoded).expect("valid raster");
     assert_eq!(decoded.transform, raster.transform);
     assert_eq!(decoded.image.data(), raster.image.data());
-    // The builder supplies empty optional image payloads for this invalid raster.
+    // The builder supplies an empty image blob for this invalid raster.
     let invalid = Raster::builder()
         .page_number(1)
         .transform(raster.transform)
         .pixels(IpcSharedMemory::from_bytes(&[0]))
+        .image_bytes(IpcSharedMemory::from_bytes(&[]))
         .build();
     RenderedPage::try_from(invalid)
         .expect_err("short shared raster must be rejected");
