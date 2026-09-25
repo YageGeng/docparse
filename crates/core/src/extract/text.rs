@@ -10,12 +10,54 @@ use super::glyph::GlyphNormalizer;
 use crate::line::TextAxes;
 
 use crate::{
-    ExtractError, PdfProvenance, RepairAction, TextItem, TextItemId,
-    TextSource, TextStyle, UnicodeMappingStatus,
+    ExtractError, FLAG_FIXED_PITCH, FLAG_ITALIC, PdfProvenance, RepairAction,
+    TextItem, TextItemId, TextSource, TextStyle, UnicodeMappingStatus,
+    font_evidence_is_bold,
 };
 
 const MAX_INLINE_GAP: f64 = 15.0;
 const ROTATION_TOLERANCE_DEGREES: f64 = 2.0;
+
+/// Name fragments that mark a heavy, slanted, or fixed-pitch face. Subset fonts keep
+/// opaque names, so the weight and descriptor flags stay the fallback evidence.
+/// Matching is case-insensitive and deliberately omits `ultra`: it can name a width
+/// (`UniversLTStd-UltraCn`) or a lighter weight (`UltraLight`) as well as a heavy one
+/// (`Gotham-Ultra`), so weight and descriptor flags remain the reliable evidence.
+const BOLD_NAME_FRAGMENTS: [&str; 3] = ["bold", "black", "heavy"];
+const ITALIC_NAME_FRAGMENTS: [&str; 2] = ["italic", "oblique"];
+const MONOSPACE_NAME_FRAGMENTS: [&str; 3] =
+    ["courier", "monospace", "consolas"];
+
+/// Presentation traits derived from one font face's name, weight, and descriptor flags.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FaceTraits {
+    bold: bool,
+    italic: bool,
+    monospace: bool,
+}
+
+impl FaceTraits {
+    /// Classifies a face from the evidence PDFium reported for each of its glyphs.
+    fn classify(
+        name: Option<&str>,
+        weight: Option<u16>,
+        flags: Option<u32>,
+    ) -> Self {
+        let folded = name.unwrap_or_default().to_ascii_lowercase();
+        let named = |fragments: &[&str]| {
+            fragments.iter().any(|fragment| folded.contains(fragment))
+        };
+        let bold =
+            named(&BOLD_NAME_FRAGMENTS) || font_evidence_is_bold(weight, flags);
+        let flags = flags.unwrap_or(0);
+        Self {
+            bold,
+            italic: named(&ITALIC_NAME_FRAGMENTS) || flags & FLAG_ITALIC != 0,
+            monospace: named(&MONOSPACE_NAME_FRAGMENTS)
+                || flags & FLAG_FIXED_PITCH != 0,
+        }
+    }
+}
 
 /// One normalized PDFium character fact in canonical viewport coordinates.
 #[derive(Debug, Clone, TypedBuilder)]
@@ -129,6 +171,11 @@ impl TryFrom<TextItemDraft> for TextItem {
 
     /// Converts a validated draft without overwriting raw text or geometry facts.
     fn try_from(draft: TextItemDraft) -> Result<Self, Self::Error> {
+        let face = FaceTraits::classify(
+            draft.font_name.as_deref(),
+            draft.font_weight,
+            draft.font_flags,
+        );
         let style = (draft.font_name.is_some()
             || draft.font_size.is_some()
             || draft.font_flags.is_some()
@@ -144,6 +191,9 @@ impl TryFrom<TextItemDraft> for TextItem {
                 .font_descent(draft.font_descent)
                 .weight(draft.font_weight)
                 .flags(draft.font_flags)
+                .bold(face.bold)
+                .italic(face.italic)
+                .monospace(face.monospace)
                 .fill_color(draft.fill_color)
                 .stroke_color(draft.stroke_color)
                 .text_matrix(draft.text_matrix)
@@ -907,7 +957,9 @@ mod tests {
     use ::pdfium::Library;
     use docparse_layout::Bbox;
 
-    use super::{SegmentBuilder, TextCharFact, extract_page_text_items};
+    use super::{
+        FaceTraits, SegmentBuilder, TextCharFact, extract_page_text_items,
+    };
     use crate::UnicodeMappingStatus;
 
     /// Creates one character fact with a five-point glyph box.
@@ -946,6 +998,109 @@ mod tests {
             builder.push(fact).expect("test facts must be accepted");
         }
         builder.finish().expect("test segments must finish")
+    }
+
+    /// Verifies font evidence alone decides the bold, italic, and monospace traits.
+    #[test]
+    fn face_traits_read_name_weight_and_flags() {
+        // A subset prefix and family suffix must not hide the style token.
+        let bold = FaceTraits::classify(
+            Some("AAAAAB+TimesNewRomanPS-BoldMT"),
+            Some(0),
+            None,
+        );
+        assert!(bold.bold && !bold.italic && !bold.monospace);
+
+        // The descriptor flag carries italic even when the name is opaque.
+        let italic = FaceTraits::classify(Some("t1xtt"), None, Some(0x80044));
+        assert!(italic.italic && !italic.bold);
+
+        let named_italic =
+            FaceTraits::classify(Some("TeXGyreTermes-Italic"), Some(0), None);
+        assert!(named_italic.italic);
+
+        // An opaque name still reports a usable weight class.
+        let heavy =
+            FaceTraits::classify(Some("font000000002f481122"), Some(700), None);
+        assert!(heavy.bold);
+
+        let mono = FaceTraits::classify(Some("Courier"), None, None);
+        assert!(mono.monospace);
+
+        // Regular faces, light faces, and out-of-range weights stay unflagged.
+        assert_eq!(
+            FaceTraits::classify(
+                Some("Minion-Regular"),
+                Some(390),
+                Some(0x80020)
+            ),
+            FaceTraits::default()
+        );
+        assert_eq!(
+            FaceTraits::classify(Some("MyriadPro-Light"), Some(250), None),
+            FaceTraits::default()
+        );
+        assert!(
+            !FaceTraits::classify(Some("CIDFont+F1"), Some(3300), None).bold
+        );
+        // `ultra` is intentionally not a bold name token, so width/light variants stay unflagged.
+        assert!(
+            !FaceTraits::classify(Some("UniversLTStd-UltraCn"), None, None)
+                .bold
+        );
+        assert!(
+            !FaceTraits::classify(Some("HelveticaNeue-UltraLight"), None, None)
+                .bold
+        );
+        // The descriptor flags decide bold as well as italic.
+        assert!(FaceTraits::classify(Some("t1xtt"), None, Some(0xC0004)).bold);
+        assert!(
+            FaceTraits::classify(Some("t1xtt"), None, Some(0x80001)).monospace
+        );
+    }
+
+    /// Verifies the derived traits reach the serialized text item style.
+    #[test]
+    fn text_item_style_carries_face_traits() {
+        let mut bold = fact('A', 0.0, 0.0);
+        bold.font_name = Some("Arial-BoldMT".to_owned());
+        let draft = build([bold]).into_iter().next().expect("one draft");
+        let item = crate::TextItem::try_from(draft).expect("draft converts");
+
+        let style = item.style.expect("font evidence produces a style");
+        assert!(style.bold);
+        assert!(!style.italic);
+    }
+
+    /// Verifies the shared reader agrees with the classifier for both flag and evidence.
+    #[test]
+    fn style_is_bold_reads_the_flag_and_the_raw_evidence() {
+        assert!(crate::TextStyle::builder().bold(true).build().is_bold());
+        assert!(
+            crate::TextStyle::builder()
+                .weight(Some(700))
+                .build()
+                .is_bold()
+        );
+        assert!(
+            crate::TextStyle::builder()
+                .flags(Some(1 << 18))
+                .build()
+                .is_bold()
+        );
+        assert!(
+            !crate::TextStyle::builder()
+                .weight(Some(400))
+                .build()
+                .is_bold()
+        );
+        // An out-of-range weight is not a weight class.
+        assert!(
+            !crate::TextStyle::builder()
+                .weight(Some(3300))
+                .build()
+                .is_bold()
+        );
     }
 
     /// Verifies explicit newlines and vertical jumps end the current segment.

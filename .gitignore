@@ -27,9 +27,11 @@
 *.tmp
 *.swp
 
-# Python cache
-/**/__pycache__
-/.venv/
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
 
 # docparse configuration
 docparse.*.toml
@@ -38,6 +40,10 @@ docparse.*.toml
 output.json
 output.md
 result.md
+
+# Local ParseBench harness. Remove this entry and rely on the harness's own
+# .gitignore if the benchmark should be versioned.
+/benchmark/
 
 # Browser build artifacts
 /packages/wasm-web/node_modules/

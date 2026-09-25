@@ -4,11 +4,10 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
 import torch
-from transformers import AutoImageProcessor, TableTransformerForObjectDetection
-
+from PIL import Image
 from tatr_onnx import ExportModel, prepare
+from transformers import AutoImageProcessor, TableTransformerForObjectDetection
 
 
 def main():

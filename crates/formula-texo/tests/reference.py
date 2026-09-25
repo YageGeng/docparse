@@ -6,8 +6,8 @@ Use this file's full path for tests/reference.py. Model files are downloaded sep
 """
 import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort

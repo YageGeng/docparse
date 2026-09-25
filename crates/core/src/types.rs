@@ -393,6 +393,30 @@ pub struct SourceRegionEvidence {
     pub model_order: Option<i64>,
 }
 
+/// Font-descriptor flag bits PDFium reports alongside an embedded face.
+pub(crate) const FLAG_FIXED_PITCH: u32 = 1 << 0;
+pub(crate) const FLAG_ITALIC: u32 = 1 << 6;
+pub(crate) const FLAG_FORCE_BOLD: u32 = 1 << 18;
+
+/// Weights at or above this are heavy. PDFium reports `-1` when it has no answer;
+/// values above the OS/2 maximum can appear when the face carries no usable weight
+/// class and are excluded from this range.
+const BOLD_WEIGHT: u16 = 600;
+const MAX_WEIGHT: u16 = 1000;
+
+/// Reports whether the recorded weight and descriptor flags mark a face bold.
+///
+/// This is the single reading of that evidence: the extractor uses it to populate
+/// [`TextStyle::bold`], and [`TextStyle::is_bold`] applies the same fallback for
+/// results written before the flag existed.
+pub(crate) fn font_evidence_is_bold(
+    weight: Option<u16>,
+    flags: Option<u32>,
+) -> bool {
+    weight.is_some_and(|value| (BOLD_WEIGHT..=MAX_WEIGHT).contains(&value))
+        || flags.is_some_and(|value| value & FLAG_FORCE_BOLD != 0)
+}
+
 /// Rich font and paint facts aggregated over one text item.
 #[derive(
     Debug,
@@ -432,6 +456,16 @@ pub struct TextStyle {
     pub stroke_color: Option<[u8; 4]>,
     #[builder(default)]
     pub text_matrix: Option<[f64; 6]>,
+}
+
+impl TextStyle {
+    /// Reports whether this style is bold, from the classifier's flag or the raw evidence.
+    ///
+    /// The evidence fallback keeps results that were produced before the classifier
+    /// wrote `bold` deciding the same way as freshly extracted text.
+    pub(crate) fn is_bold(&self) -> bool {
+        self.bold || font_evidence_is_bold(self.weight, self.flags)
+    }
 }
 
 /// Whether PDFium could map source character codes to Unicode.

@@ -7,7 +7,7 @@ use typed_builder::TypedBuilder;
 use super::grid::{CellGrid, TableGeometry};
 use super::{Table, TableCellLine, TableEvidence, TableTextSpan};
 use crate::line::{ConservativeLineAssembler, LineFragment};
-use crate::{Baseline, Block, TextItem, TextItemId};
+use crate::{Baseline, Block, TextItem, TextItemId, TextStyle};
 
 /// One source slice with separate logical-row and measured text baselines.
 #[derive(TypedBuilder)]
@@ -33,13 +33,9 @@ impl LocatedSpan<'_> {
             .max(1.0)
     }
 
-    /// Interprets available font evidence without changing the raw extracted style flags.
+    /// Interprets available font evidence through the shared style classifier.
     pub(super) fn is_bold(&self) -> bool {
-        self.item.style.as_ref().is_some_and(|style| {
-            style.bold
-                || style.weight.is_some_and(|weight| weight >= 600)
-                || style.flags.is_some_and(|flags| flags & (1 << 18) != 0)
-        })
+        self.item.style.as_ref().is_some_and(TextStyle::is_bold)
     }
 
     /// Reads only the verified slice of the original immutable string.

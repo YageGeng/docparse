@@ -800,8 +800,8 @@ fn repository_default_config_matches_documented_defaults() {
     assert!(config.render.queue_size > 0);
     assert_eq!(config.render.dpi, 144);
     assert_eq!(config.output.formula_placeholder, "[formula]");
-    // The checked-in configuration now follows the same fallback policy as library defaults.
-    assert_eq!(config.tsr.mode, docparse_config::TableMode::Fallback);
+    // The checked-in configuration uses the documented root policy; library defaults stay fallback.
+    assert_eq!(config.tsr.mode, docparse_config::TableMode::TsrOnly);
     assert_eq!(
         RawConfig::default().tsr.mode,
         docparse_config::TableMode::Fallback
@@ -809,6 +809,14 @@ fn repository_default_config_matches_documented_defaults() {
     assert_eq!(
         docparse_config::TableMode::default(),
         docparse_config::TableMode::Fallback
+    );
+    assert_eq!(
+        config.ocr.policy,
+        docparse_config::OcrPolicy::MissingRegions
+    );
+    assert_eq!(
+        RawConfig::default().ocr.policy,
+        docparse_config::OcrPolicy::Disabled
     );
 }
 

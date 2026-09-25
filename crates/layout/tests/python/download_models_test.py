@@ -47,9 +47,15 @@ class DownloadModelsTest(unittest.TestCase):
             with mock.patch.object(self.module, "export_tatr", side_effect=AssertionError("unexpected export")), mock.patch.object(self.module, "urlopen", side_effect=AssertionError("unexpected network")):
                 self.assertTrue(self.module.install_model(output, False, model))
                 self.assertFalse(self.module.install_model(output, False, model))
-            with mock.patch.object(self.module, "export_tatr", side_effect=lambda path: path.write_bytes(b"wrong")):
-                with self.assertRaisesRegex(self.module.ModelDownloadError, "hash mismatch"):
-                    self.module.install_model(output, True, model)
+            with (
+                mock.patch.object(
+                    self.module,
+                    "export_tatr",
+                    side_effect=lambda path: path.write_bytes(b"wrong"),
+                ),
+                self.assertRaisesRegex(self.module.ModelDownloadError, "hash mismatch"),
+            ):
+                self.module.install_model(output, True, model)
             self.module.verify_installation(output, model)
 
     def test_texo_command_installs_and_verifies_its_three_assets(self):

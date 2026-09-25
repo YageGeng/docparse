@@ -43,7 +43,7 @@ batch_size = 1
 queue_size = 8
 
 [tsr]
-mode = "fallback"
+mode = "tsr_only"
 session_size = 2
 batch_size = 1
 queue_size = 16
@@ -66,7 +66,7 @@ model_config_path = "models/rtdetr-table-cell-wireless/inference.yml"
 model_manifest_path = "models/rtdetr-table-cell-wireless/model-manifest.json"
 
 [ocr]
-policy = "disabled"
+policy = "missing_regions"
 
 [ocr.detection]
 session_size = 2

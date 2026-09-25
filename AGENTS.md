@@ -20,5 +20,6 @@
 15. `ApiError` stage values must be short, static, lowercase words joined by single hyphens, such as `upload-write-pdf` or `task-renew-lease`. Use them only to identify the current operation; do not use spaces, underscores, sentences, paths, or dynamic identifiers.
 16. Snafu may be added as a crate dependency and used only in `crates/server`. Declare its version in the root workspace dependency table and inherit it only in the server crate. Other crates must not import, derive, or re-export Snafu.
 17. All database queries, migrations, tables, and indexes must use SeaORM, SeaORM Migration, and SeaQuery builders. Handwritten/raw SQL, including SQL strings passed through raw-statement APIs or custom SQL expression fragments, is prohibited. Generate new migration files with `sea-orm-cli` before editing their generated contents; do not create migration files by hand.
+18. All Python code must pass `ruff check` with no warnings before it is committed. Run `uvx ruff check .` from the repository root; when modifying Python under gitignored paths, run `uvx ruff check --no-respect-gitignore .` as well.
 
 @RTK.md

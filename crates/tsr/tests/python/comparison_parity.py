@@ -1,6 +1,6 @@
 """Check real Rust TSR captures against the pinned ONNX models and Paddle-style OpenCV tensors."""
-from pathlib import Path
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np

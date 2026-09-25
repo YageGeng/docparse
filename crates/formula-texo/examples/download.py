@@ -1,8 +1,8 @@
 """Download the three pinned Texo assets into a caller-selected directory."""
 import hashlib
-from pathlib import Path
 import sys
 import urllib.request
+from pathlib import Path
 
 # Pin the corrected output-shape export, matching native and browser artifact verification.
 REVISION = "b2668efe5112082846fde4d446b9bfaab3989533"

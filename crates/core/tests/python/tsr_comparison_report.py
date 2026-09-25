@@ -1,9 +1,9 @@
 """Build a portable visual report from the real production TSR comparison captures."""
-from pathlib import Path
 import base64
 import hashlib
 import html
 import json
+from pathlib import Path
 
 
 def semantic_checks(table, annotation):

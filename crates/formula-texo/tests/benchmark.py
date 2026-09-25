@@ -2,13 +2,12 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import platform
 import time
+from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
-
 from reference import preprocess
 
 

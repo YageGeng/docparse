@@ -10,17 +10,16 @@ import hashlib
 import importlib.util
 import json
 import sys
-from pathlib import Path
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import numpy as np
 import onnx
 import onnxruntime as ort
-from PIL import Image, ImageDraw
 import torch
+from PIL import Image, ImageDraw
 from transformers import AutoImageProcessor, TableTransformerForObjectDetection
-
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))
 from export_tatr import ExportModel, export
