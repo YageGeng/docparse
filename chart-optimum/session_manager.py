@@ -1,4 +1,4 @@
-"""Independent native model owners consume one bounded asynchronous crop queue."""
+"""Independent native model owners consume one bounded asynchronous chart queue."""
 
 import asyncio
 import logging
@@ -12,22 +12,22 @@ from PIL import Image
 from configuration import Settings
 from runtime import generate, load_model
 
-LOG = logging.getLogger("texo.sessions")
-Response = dict[str, str | int | float]
+LOG = logging.getLogger("chart.sessions")
+Response = dict[str, str | int | float | dict | list | None]
 
 
 @dataclass
 class Job:
-    """Retain one caller's image, generation budget, and independently cancelable reply."""
+    """Retain one caller's chart, generation budget, and independently cancelable reply."""
 
     image: Image.Image
-    max_length: int
+    max_new_tokens: int
     future: asyncio.Future[Response]
     admitted: float
 
 
 class SessionManager:
-    """Own model lifetimes and dispatch crops without sharing mutable model state."""
+    """Own model lifetimes and dispatch charts without sharing mutable model state."""
 
     def __init__(self, settings: Settings) -> None:
         """Create bounded admission without loading CUDA or starting owner threads."""
@@ -44,25 +44,23 @@ class SessionManager:
     async def start(self) -> None:
         """Load every model on its own thread before exposing readiness; unwind partial startup."""
         if self._executors:
-            raise RuntimeError("Texo sessions are already started")
+            raise RuntimeError("OneChart sessions are already started")
         loop = asyncio.get_running_loop()
         try:
             for index in range(self.settings.session_size):
                 executor = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix=f"texo-{index}"
+                    max_workers=1, thread_name_prefix=f"chart-{index}"
                 )
                 self._executors.append(executor)
-                # Sequential loading avoids racing global model registration and startup allocations.
-                model, tokenizer = await loop.run_in_executor(executor, load_model)
+                # Sequential loading avoids racing CUDA context creation and startup allocations.
+                model = await loop.run_in_executor(executor, load_model)
                 self._providers = list(model.providers)
                 self._io_binding = bool(model.use_io_binding)
                 self._tasks.append(
-                    asyncio.create_task(
-                        self._consume(index, executor, model, tokenizer)
-                    )
+                    asyncio.create_task(self._consume(index, executor, model))
                 )
                 LOG.info(
-                    "Loaded Texo session %d of %d",
+                    "Loaded OneChart session %d of %d",
                     index + 1,
                     self.settings.session_size,
                 )
@@ -71,26 +69,26 @@ class SessionManager:
             await self.close()
             raise
 
-    async def submit(self, image: Image.Image, max_length: int) -> Response:
+    async def submit(self, image: Image.Image, max_new_tokens: int) -> Response:
         """Wait for bounded queue capacity and inference, canceling abandoned work at either stage."""
         if not self._accepting:
             LOG.warning(
-                "Rejected Texo request because sessions are not accepting requests"
+                "Rejected chart request because sessions are not accepting requests"
             )
-            raise RuntimeError("Texo sessions are not accepting requests")
+            raise RuntimeError("OneChart sessions are not accepting requests")
         future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
         submitted = time.perf_counter()
         waiting = self.queue.full()
         if waiting:
             LOG.debug(
-                "Texo queue capacity %d reached; waiting for space",
+                "OneChart queue capacity %d reached; waiting for space",
                 self.settings.queue_size,
             )
         # Track puts separately so shutdown can wake producers before draining a Python 3.12 queue.
         admission = asyncio.create_task(
-            self.queue.put(Job(image, max_length, future, submitted))
+            self.queue.put(Job(image, max_new_tokens, future, submitted))
         )
-        # Failed reply tracebacks retain this frame, so keep crop ownership only in the queued job.
+        # Failed reply tracebacks retain this frame, so keep chart ownership only in the queued job.
         del image
         self._admissions.add(admission)
         try:
@@ -98,14 +96,14 @@ class SessionManager:
                 await admission
             except asyncio.CancelledError:
                 if not self._accepting:
-                    raise RuntimeError("Texo service stopped") from None
+                    raise RuntimeError("OneChart service stopped") from None
                 raise
             finally:
                 self._admissions.discard(admission)
                 del admission
             if waiting:
                 LOG.debug(
-                    "Texo request admitted after %.1f ms",
+                    "OneChart request admitted after %.1f ms",
                     (time.perf_counter() - submitted) * 1000,
                 )
             return await future
@@ -113,18 +111,16 @@ class SessionManager:
             # Cancel both queued replies and replies whose native inference is already running.
             future.cancel()
 
-    async def _consume(
-        self, index: int, executor: ThreadPoolExecutor, model, tokenizer
-    ) -> None:
-        """Drain ready crops per owner, grouping equal token budgets and isolating caller failures."""
+    async def _consume(self, index: int, executor: ThreadPoolExecutor, model) -> None:
+        """Drain ready charts per owner, grouping equal budgets and isolating caller failures."""
         # A separate coroutine scope drops every job/group reference before the next queue wait.
         while True:
-            await self._consume_batch(index, executor, model, tokenizer)
+            await self._consume_batch(index, executor, model)
 
     async def _consume_batch(
-        self, index: int, executor: ThreadPoolExecutor, model, tokenizer
+        self, index: int, executor: ThreadPoolExecutor, model
     ) -> None:
-        """Own exactly one batch so completed crop pixels cannot survive in the idle consumer."""
+        """Own exactly one batch so completed chart pixels cannot survive in the idle consumer."""
         loop = asyncio.get_running_loop()
         jobs = [await self.queue.get()]
         try:
@@ -145,8 +141,8 @@ class SessionManager:
             groups: dict[int, list[Job]] = defaultdict(list)
             for job in jobs:
                 if not job.future.done():
-                    groups[job.max_length].append(job)
-            for max_length, group in groups.items():
+                    groups[job.max_new_tokens].append(job)
+            for max_new_tokens, group in groups.items():
                 # A budget group may have been canceled while an earlier group used the owner.
                 group = [job for job in group if not job.future.done()]
                 if not group:
@@ -158,9 +154,8 @@ class SessionManager:
                         executor,
                         generate,
                         model,
-                        tokenizer,
                         [job.image for job in group],
-                        max_length,
+                        max_new_tokens,
                     )
                     if len(results) != len(group):
                         raise RuntimeError("model result count mismatch")
@@ -169,28 +164,28 @@ class SessionManager:
                         if not job.future.done():
                             job.future.set_result(
                                 {
-                                    "model": "texo-optimum",
+                                    "model": "onechart-optimum",
                                     **result,
                                     "batch_size": len(group),
-                                    "max_length": max_length,
+                                    "max_new_tokens": max_new_tokens,
                                     "inference_time_ms": elapsed_ms,
                                     "queue_ms": (started - job.admitted) * 1000,
                                 }
                             )
                     LOG.info(
-                        "Session %d completed %d images in %.1f ms",
+                        "Session %d completed %d charts in %.1f ms",
                         index,
                         len(group),
                         elapsed_ms,
                     )
                 except Exception:
                     LOG.exception(
-                        "Texo session %d failed for %d images", index, len(group)
+                        "OneChart session %d failed for %d charts", index, len(group)
                     )
                     for job in group:
                         if not job.future.done():
                             job.future.set_exception(
-                                RuntimeError("Texo inference failed")
+                                RuntimeError("OneChart inference failed")
                             )
                 finally:
                     self._active[index] = 0
@@ -198,14 +193,15 @@ class SessionManager:
             # Cancellation releases each original reply even when a native call still has to finish.
             for job in jobs:
                 if not job.future.done():
-                    job.future.set_exception(RuntimeError("Texo service stopped"))
+                    job.future.set_exception(RuntimeError("OneChart service stopped"))
                 self.queue.task_done()
 
     async def close(self) -> None:
         """Stop admission, release pending callers, and join native work without blocking the event loop."""
         self._accepting = False
         LOG.info(
-            "Stopping Texo sessions with %d pending admissions", len(self._admissions)
+            "Stopping OneChart sessions with %d pending admissions",
+            len(self._admissions),
         )
         for admission in self._admissions:
             admission.cancel()
@@ -217,7 +213,7 @@ class SessionManager:
         while not self.queue.empty():
             job = self.queue.get_nowait()
             if not job.future.done():
-                job.future.set_exception(RuntimeError("Texo service stopped"))
+                job.future.set_exception(RuntimeError("OneChart service stopped"))
             self.queue.task_done()
         # Canceling an asyncio waiter cannot terminate ORT; wait for each actual native owner to return.
         await asyncio.gather(
@@ -227,14 +223,14 @@ class SessionManager:
             )
         )
         self._executors.clear()
-        LOG.info("Texo sessions stopped")
+        LOG.info("OneChart sessions stopped")
 
     def health(self) -> dict[str, object]:
         """Report aggregate occupancy and actual provider metadata across independent consumers."""
         return {
             "status": "ready" if self._accepting else "stopped",
-            "model_id": "alephpi/FormulaNet",
-            "backend": "Optimum ORTModelForVision2Seq.generate",
+            "model_id": "kppkkp/OneChart",
+            "backend": "ONNX Runtime CUDA sessions with an Optimum-exported split decoder",
             "providers": self._providers,
             "use_cache": True,
             "use_io_binding": self._io_binding,

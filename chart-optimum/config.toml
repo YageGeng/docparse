@@ -1,0 +1,9 @@
+# Each owner loads its own vision encoder, embedding table, and decoder sessions.
+session_size = 1
+# Pending requests, excluding the batches already held by session owners.
+queue_size = 128
+# SAM ViT-B attends over all 4096 patches in its four global blocks, so one chart needs about
+# 2.1 GiB of float32 score and softmax buffers while an owner already holds about 1.8 GiB of
+# weights. An 8 GiB card therefore fits one chart per owner. Raise this only with the VRAM to
+# match it; owners always encode their charts one at a time regardless of this limit.
+batch_size = 1

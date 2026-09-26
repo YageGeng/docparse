@@ -1,7 +1,7 @@
 [project]
-name = "optimum-texo"
+name = "chart-optimum"
 version = "0.1.0"
-description = "Texo formula recognition with Optimum, ONNX Runtime CUDA, and server-side batching"
+description = "OneChart chart structure extraction with Optimum, ONNX Runtime CUDA, and server-side batching"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi==0.135.1",
@@ -13,6 +13,7 @@ dependencies = [
   "pillow==12.1.1",
   "python-multipart==0.0.22",
   "torch==2.11.0",
+  "torchvision==0.26.0",
   "transformers==4.40.2",
   "uvicorn==0.42.0",
 ]
@@ -34,6 +35,8 @@ typeCheckingMode = "standard"
 # classifies them differently and demands two contradictory orderings.
 known-first-party = [
   "configuration",
+  "contract",
+  "graphs",
   "prepare_model",
   "preprocessing",
   "runtime",
@@ -53,3 +56,4 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

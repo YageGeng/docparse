@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
 from preprocessing import preprocess
 
 LOGGER = logging.getLogger(__name__)
