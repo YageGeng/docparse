@@ -23,7 +23,8 @@ sqlx_slow_statements_threshold_ms = 1000
 [runtime]
 # Shared by every ONNX session: level1, level2, level3, or all.
 optimization_level = "all"
-# Applied to every model; disable cached memory plans for variable shapes.
+# Cache each session's memory plan so repeated input shapes reuse one allocation layout. A batch
+# below the configured size keeps its own plan instead.
 memory_pattern = true
 continue_on_error = true
 
