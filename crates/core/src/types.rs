@@ -451,6 +451,21 @@ pub struct TextStyle {
     #[builder(default)]
     pub monospace: bool,
     #[builder(default)]
+    #[serde(default)]
+    pub underline: bool,
+    #[builder(default)]
+    #[serde(default)]
+    pub strikeout: bool,
+    #[builder(default)]
+    #[serde(default)]
+    pub superscript: bool,
+    #[builder(default)]
+    #[serde(default)]
+    pub subscript: bool,
+    #[builder(default)]
+    #[serde(default)]
+    pub baseline_shift: Option<f64>,
+    #[builder(default)]
     pub fill_color: Option<[u8; 4]>,
     #[builder(default)]
     pub stroke_color: Option<[u8; 4]>,
@@ -465,6 +480,36 @@ impl TextStyle {
     /// wrote `bold` deciding the same way as freshly extracted text.
     pub(crate) fn is_bold(&self) -> bool {
         self.bold || font_evidence_is_bold(self.weight, self.flags)
+    }
+
+    /// Reports whether this style has an underline.
+    pub fn is_underline(&self) -> bool {
+        self.underline
+    }
+
+    /// Reports whether this style has a strikeout line.
+    pub fn is_strikeout(&self) -> bool {
+        self.strikeout
+    }
+
+    /// Reports whether this style is a superscript run.
+    pub fn is_superscript(&self) -> bool {
+        self.superscript
+    }
+
+    /// Reports whether this style is a subscript run.
+    pub fn is_subscript(&self) -> bool {
+        self.subscript
+    }
+
+    /// Reports whether this style is either a superscript or subscript run.
+    pub fn is_script(&self) -> bool {
+        self.superscript || self.subscript
+    }
+
+    /// Returns the effective physical font size, preferring scaled font height over unscaled base size.
+    pub fn effective_font_size(&self) -> Option<f64> {
+        self.font_height.or(self.font_size)
     }
 }
 
@@ -490,18 +535,27 @@ pub enum UnicodeMappingStatus {
 )]
 pub struct PdfProvenance {
     #[builder(default)]
+    #[serde(default)]
     pub char_codes: Vec<u32>,
     #[builder(default)]
+    #[serde(default)]
     pub mcid: Option<i32>,
     #[builder(default)]
+    #[serde(default)]
     pub text_object_index: Option<u32>,
     pub unicode_mapping: UnicodeMappingStatus,
     #[builder(default)]
+    #[serde(default)]
     pub generated_space: bool,
     #[builder(default)]
+    #[serde(default)]
     pub link: Option<String>,
     #[builder(default)]
+    #[serde(default)]
     pub strike: bool,
+    #[builder(default)]
+    #[serde(default)]
+    pub underline: bool,
 }
 
 /// One continuous native or OCR text fact.
@@ -568,6 +622,80 @@ impl TextItem {
                 && self.provenance.as_ref().is_some_and(|p| {
                     p.unicode_mapping == UnicodeMappingStatus::Missing
                 })
+    }
+
+    /// Reports whether this text item has underline decoration.
+    pub fn is_underline(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.underline)
+            || self.provenance.as_ref().is_some_and(|p| p.underline)
+    }
+
+    /// Sets the underline decoration flag on this item's style and provenance.
+    pub fn set_underline(&mut self, underline: bool) {
+        if let Some(style) = &mut self.style {
+            style.underline = underline;
+        } else if underline {
+            self.style = Some(TextStyle::builder().underline(true).build());
+        }
+        if let Some(prov) = &mut self.provenance {
+            prov.underline = underline;
+        }
+    }
+
+    /// Reports whether this text item has strikeout decoration.
+    pub fn is_strikeout(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.strikeout)
+            || self.provenance.as_ref().is_some_and(|p| p.strike)
+    }
+
+    /// Sets the strikeout decoration flag on this item's style and provenance.
+    pub fn set_strikeout(&mut self, strikeout: bool) {
+        if let Some(style) = &mut self.style {
+            style.strikeout = strikeout;
+        } else if strikeout {
+            self.style = Some(TextStyle::builder().strikeout(true).build());
+        }
+        if let Some(prov) = &mut self.provenance {
+            prov.strike = strikeout;
+        }
+    }
+
+    /// Reports whether this text item is a superscript run.
+    pub fn is_superscript(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.superscript)
+    }
+
+    /// Reports whether this text item is a subscript run.
+    pub fn is_subscript(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.subscript)
+    }
+
+    /// Reports whether this text item is either a superscript or subscript run.
+    pub fn is_script(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.is_script())
+    }
+
+    /// Reports whether this text item has bold styling.
+    pub fn is_bold(&self) -> bool {
+        self.style.as_ref().is_some_and(TextStyle::is_bold)
+    }
+
+    /// Reports whether this text item has italic styling.
+    pub fn is_italic(&self) -> bool {
+        self.style.as_ref().is_some_and(|s| s.italic)
+    }
+
+    /// Returns the baseline shift in points if this item is a super/subscript run.
+    pub fn baseline_shift(&self) -> Option<f64> {
+        self.style.as_ref().and_then(|s| s.baseline_shift)
+    }
+
+    /// Returns the effective physical font size of this item, falling back to the bounding box height.
+    pub fn effective_font_size(&self) -> f64 {
+        self.style
+            .as_ref()
+            .and_then(TextStyle::effective_font_size)
+            .unwrap_or_else(|| self.bbox.height().max(1.0))
     }
 }
 
@@ -645,6 +773,210 @@ impl Line {
                             .repair_actions
                             .contains(&RepairAction::EncodedHyphen)
                 })
+    }
+
+    /// Returns the dominant font size among items in this line.
+    pub fn dominant_font_size(&self) -> f64 {
+        self.text_items
+            .iter()
+            .map(TextItem::effective_font_size)
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// Evaluates whether an item acts as a superscript or subscript using precalculated line metrics.
+    pub(crate) fn evaluate_script_tag(
+        &self,
+        item: &TextItem,
+        dominant_size: f64,
+        line_base_y: f64,
+    ) -> Option<&'static str> {
+        if item.is_superscript() {
+            return Some("sup");
+        }
+        if item.is_subscript() {
+            return Some("sub");
+        }
+        if dominant_size <= 0.0 {
+            return None;
+        }
+        let font_size = item.effective_font_size();
+        if font_size / dominant_size > 0.85 {
+            return None;
+        }
+        let item_base_y = item
+            .baseline
+            .map(|b| (b.start.y + b.end.y) * 0.5)
+            .unwrap_or(item.bbox.bottom);
+        let shift = line_base_y - item_base_y;
+        let threshold = dominant_size * 0.05;
+        if shift > threshold {
+            Some("sup")
+        } else if shift < -threshold {
+            Some("sub")
+        } else {
+            None
+        }
+    }
+
+    /// Checks whether an item at `index` acts as a superscript or subscript within this line.
+    pub fn item_script_tag(&self, index: usize) -> Option<&'static str> {
+        let item = self.text_items.get(index)?;
+        let dominant_size = self.dominant_font_size();
+        let line_base_y = self
+            .baseline
+            .map(|b| (b.start.y + b.end.y) * 0.5)
+            .unwrap_or(self.bbox.bottom);
+        self.evaluate_script_tag(item, dominant_size, line_base_y)
+    }
+
+    /// Formats line text with optional inline markdown and HTML formatting for styles and decorations.
+    ///
+    /// Following the decoration and formatting hierarchy from `pdf-inspector`:
+    /// - Underline: `<u>...</u>`
+    /// - Strikeout: `<s>...</s>` (exclusive with underline; strikeout takes priority if both are present)
+    /// - Superscript: `<sup>...</sup>`
+    /// - Subscript: `<sub>...</sub>`
+    /// - Bold: `**...**` (omitted if inside underline or strikeout for clean tag nesting)
+    /// - Italic: `*...*` (omitted if inside underline or strikeout for clean tag nesting)
+    pub fn text_with_formatting(
+        &self,
+        format_bold: bool,
+        format_italic: bool,
+        format_decorations: bool,
+        format_scripts: bool,
+    ) -> String {
+        if !format_bold
+            && !format_italic
+            && !format_decorations
+            && !format_scripts
+        {
+            return self.text.clone();
+        }
+
+        let (dominant_size, line_base_y) = if format_scripts {
+            let size = self.dominant_font_size();
+            let base_y = self
+                .baseline
+                .map(|b| (b.start.y + b.end.y) * 0.5)
+                .unwrap_or(self.bbox.bottom);
+            (size, base_y)
+        } else {
+            (0.0, 0.0)
+        };
+
+        let capacity = self
+            .text_items
+            .iter()
+            .map(|item| item.raw_text.len().saturating_add(8))
+            .sum();
+        let mut result = String::with_capacity(capacity);
+        let mut current_bold = false;
+        let mut current_italic = false;
+        let mut current_underline = false;
+        let mut current_strikeout = false;
+
+        for item in &self.text_items {
+            let text = &item.raw_text;
+            if text.is_empty() {
+                continue;
+            }
+
+            let script_tag = if format_scripts {
+                self.evaluate_script_tag(item, dominant_size, line_base_y)
+            } else {
+                None
+            };
+            let is_script = script_tag.is_some();
+            let own_strikeout = format_decorations && item.is_strikeout();
+            let own_underline =
+                format_decorations && item.is_underline() && !own_strikeout;
+            let own_bold = format_bold
+                && item.is_bold()
+                && !own_underline
+                && !own_strikeout;
+            let own_italic = format_italic
+                && item.is_italic()
+                && !own_underline
+                && !own_strikeout;
+
+            // Script items inherit whatever font style (bold/italic) is open around them,
+            // but use their own drawn ink decorations (underline/strikeout).
+            let (item_strikeout, item_underline, item_bold, item_italic) =
+                if is_script {
+                    (own_strikeout, own_underline, current_bold, current_italic)
+                } else {
+                    (own_strikeout, own_underline, own_bold, own_italic)
+                };
+
+            // Close previous styles if they change
+            if current_italic && !item_italic {
+                result.push('*');
+                current_italic = false;
+            }
+            if current_bold && !item_bold {
+                result.push_str("**");
+                current_bold = false;
+            }
+            if current_underline && !item_underline {
+                result.push_str("</u>");
+                current_underline = false;
+            }
+            if current_strikeout && !item_strikeout {
+                result.push_str("</s>");
+                current_strikeout = false;
+            }
+
+            // Open new styles
+            if item_underline && !current_underline {
+                result.push_str("<u>");
+                current_underline = true;
+            }
+            if item_strikeout && !current_strikeout {
+                result.push_str("<s>");
+                current_strikeout = true;
+            }
+            if item_bold && !current_bold {
+                result.push_str("**");
+                current_bold = true;
+            }
+            if item_italic && !current_italic {
+                result.push('*');
+                current_italic = true;
+            }
+
+            if let Some(tag) = script_tag {
+                result.push('<');
+                result.push_str(tag);
+                result.push('>');
+                result.push_str(text);
+                result.push_str("</");
+                result.push_str(tag);
+                result.push('>');
+            } else {
+                result.push_str(text);
+            }
+        }
+
+        // Close any remaining open styles
+        if current_italic {
+            result.push('*');
+        }
+        if current_bold {
+            result.push_str("**");
+        }
+        if current_underline {
+            result.push_str("</u>");
+        }
+        if current_strikeout {
+            result.push_str("</s>");
+        }
+
+        result
+    }
+
+    /// Formats line text with full inline markdown and HTML formatting tags.
+    pub fn formatted_text(&self) -> String {
+        self.text_with_formatting(true, true, true, true)
     }
 }
 
@@ -1320,5 +1652,96 @@ mod tests {
             "First line Second  line"
         );
         assert_eq!(Block::derive_text(&LayoutLabel::Text, &[]), "");
+    }
+
+    /// Verifies line text formatting correctly applies HTML/Markdown tags for styles, decorations, and scripts.
+    #[test]
+    fn line_text_with_formatting_applies_tags() {
+        use crate::{TextItem, TextItemId, TextSource, TextStyle};
+
+        let block_id = BlockId::model(1, 0, 0);
+        let bbox = Bbox::try_from([0.0, 0.0, 100.0, 10.0]).expect("bbox");
+
+        let items = vec![
+            TextItem::builder()
+                .id(TextItemId::native(1, 0))
+                .raw_text("Normal ".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 1))
+                .raw_text("Bold ".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().bold(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 2))
+                .raw_text("Underline ".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().underline(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 3))
+                .raw_text("Struck ".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().strikeout(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 4))
+                .raw_text("Super".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().superscript(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 5))
+                .raw_text(" and ".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 6))
+                .raw_text("Sub".to_owned())
+                .bbox(bbox)
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().subscript(true).build()))
+                .build(),
+        ];
+
+        let line = Line::builder()
+            .id(LineId::new(&block_id, 0))
+            .text("Normal Bold Underline Struck Super and Sub".to_owned())
+            .bbox(bbox)
+            .direction(WritingDirection::LeftToRight)
+            .text_items(items)
+            .build();
+
+        // Plain text when all formatting is disabled
+        assert_eq!(
+            line.text_with_formatting(false, false, false, false),
+            "Normal Bold Underline Struck Super and Sub"
+        );
+
+        // Decorations only
+        assert_eq!(
+            line.text_with_formatting(false, false, true, false),
+            "Normal Bold <u>Underline </u><s>Struck </s>Super and Sub"
+        );
+
+        // Scripts only
+        assert_eq!(
+            line.text_with_formatting(false, false, false, true),
+            "Normal Bold Underline Struck <sup>Super</sup> and <sub>Sub</sub>"
+        );
+
+        // All formatting enabled
+        assert_eq!(
+            line.formatted_text(),
+            "Normal **Bold **<u>Underline </u><s>Struck </s><sup>Super</sup> and <sub>Sub</sub>"
+        );
     }
 }

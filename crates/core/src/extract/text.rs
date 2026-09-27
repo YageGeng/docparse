@@ -113,6 +113,8 @@ pub(crate) struct TextCharFact {
     pub(crate) link: Option<String>,
     #[builder(default)]
     pub(crate) strike: bool,
+    #[builder(default)]
+    pub(crate) underline: bool,
 }
 
 /// Intermediate text fact before conversion to the public nested result type.
@@ -160,6 +162,8 @@ pub(crate) struct TextItemDraft {
     #[builder(default)]
     pub(crate) strike: bool,
     #[builder(default)]
+    pub(crate) underline: bool,
+    #[builder(default)]
     pub(crate) repair_actions: Vec<RepairAction>,
     pub(crate) extraction_order: u32,
     #[builder(default)]
@@ -181,24 +185,28 @@ impl TryFrom<TextItemDraft> for TextItem {
             || draft.font_flags.is_some()
             || draft.fill_color.is_some()
             || draft.stroke_color.is_some()
-            || draft.text_matrix.is_some())
-        .then(|| {
-            TextStyle::builder()
-                .font_name(draft.font_name)
-                .font_size(draft.font_size)
-                .font_height(draft.font_height)
-                .font_ascent(draft.font_ascent)
-                .font_descent(draft.font_descent)
-                .weight(draft.font_weight)
-                .flags(draft.font_flags)
-                .bold(face.bold)
-                .italic(face.italic)
-                .monospace(face.monospace)
-                .fill_color(draft.fill_color)
-                .stroke_color(draft.stroke_color)
-                .text_matrix(draft.text_matrix)
-                .build()
-        });
+            || draft.text_matrix.is_some()
+            || draft.strike
+            || draft.underline)
+            .then(|| {
+                TextStyle::builder()
+                    .font_name(draft.font_name)
+                    .font_size(draft.font_size)
+                    .font_height(draft.font_height)
+                    .font_ascent(draft.font_ascent)
+                    .font_descent(draft.font_descent)
+                    .weight(draft.font_weight)
+                    .flags(draft.font_flags)
+                    .bold(face.bold)
+                    .italic(face.italic)
+                    .monospace(face.monospace)
+                    .strikeout(draft.strike)
+                    .underline(draft.underline)
+                    .fill_color(draft.fill_color)
+                    .stroke_color(draft.stroke_color)
+                    .text_matrix(draft.text_matrix)
+                    .build()
+            });
         let provenance = PdfProvenance::builder()
             .char_codes(draft.char_codes)
             .mcid(draft.mcid)
@@ -207,6 +215,7 @@ impl TryFrom<TextItemDraft> for TextItem {
             .generated_space(draft.generated_space)
             .link(draft.link)
             .strike(draft.strike)
+            .underline(draft.underline)
             .build();
         Ok(TextItem::builder()
             .id(draft.id)
@@ -277,6 +286,8 @@ pub(crate) struct CurrentSegment {
     #[builder(default)]
     strike: bool,
     #[builder(default)]
+    underline: bool,
+    #[builder(default)]
     repair_actions: Vec<RepairAction>,
     #[builder(default)]
     words: Vec<crate::TableWord>,
@@ -321,6 +332,7 @@ impl CurrentSegment {
             .text_object_index(fact.text_object_index)
             .link(fact.link)
             .strike(fact.strike)
+            .underline(fact.underline)
             .build()
     }
 
@@ -378,7 +390,9 @@ impl CurrentSegment {
         };
         let backtrack = incoming.left + average_width * 0.5 < previous.left;
         let style_changed = self.font_name != fact.font_name
-            || self.font_flags != fact.font_flags;
+            || self.font_flags != fact.font_flags
+            || self.strike != fact.strike
+            || self.underline != fact.underline;
         vertical_shift > line_threshold
             || gap > MAX_INLINE_GAP
             || backtrack
@@ -517,6 +531,7 @@ impl CurrentSegment {
             self.link = fact.link;
         }
         self.strike |= fact.strike;
+        self.underline |= fact.underline;
     }
 
     /// Returns the average strict glyph width for gap recovery.
@@ -587,6 +602,7 @@ impl CurrentSegment {
             .text_object_index(self.text_object_index)
             .link(self.link)
             .strike(self.strike)
+            .underline(self.underline)
             .repair_actions(self.repair_actions)
             .extraction_order(extraction_order)
             .build()
@@ -708,6 +724,9 @@ pub(crate) fn extract_page_text_items(
     table_evidence: &mut crate::TableEvidence,
     resolver: Option<&dyn crate::GlyphResolver>,
 ) -> Result<Vec<TextItem>, ExtractError> {
+    let candidate_rules = super::decoration::HorizontalRule::from_paths(
+        &page.path_objects(view_box),
+    );
     let mut builder = SegmentBuilder::new(page_number);
     // Font recovery runs before segmentation so every consumer shares corrected source facts.
     let mut glyphs = GlyphNormalizer::new(text_page, resolver);
@@ -855,6 +874,23 @@ pub(crate) fn extract_page_text_items(
                     && center.y <= f64::from(link.rect.bottom)
             })
             .map(|link| link.uri.clone());
+        let mid_x = center.x;
+        let baseline_y = origin.map(|p| p.y).unwrap_or(strict.bottom);
+        let eff_font_size = font_height
+            .unwrap_or(font_size)
+            .max(loose.height())
+            .max(1.0);
+        let underline = candidate_rules.iter().any(|r| {
+            r.is_underline_for_char(
+                mid_x,
+                baseline_y,
+                strict.bottom,
+                eff_font_size,
+            )
+        });
+        let strike = candidate_rules
+            .iter()
+            .any(|r| r.is_strikeout_for_char(mid_x, strict.top, strict.bottom));
         builder.push(
             TextCharFact::builder()
                 .character(value)
@@ -885,6 +921,8 @@ pub(crate) fn extract_page_text_items(
                         .is_some_and(|object| object.watermark),
                 )
                 .link(link)
+                .strike(strike)
+                .underline(underline)
                 .build(),
         )?;
     }
@@ -907,7 +945,7 @@ pub(crate) fn extract_page_text_items(
             page_number
         );
     }
-    drafts
+    let mut items: Vec<TextItem> = drafts
         .into_iter()
         .map(|draft| {
             let object = draft
@@ -943,7 +981,12 @@ pub(crate) fn extract_page_text_items(
             item.polygon = polygon;
             Ok(item)
         })
-        .collect()
+        .collect::<Result<Vec<TextItem>, ExtractError>>()?;
+
+    // Correlate geometric vector paths with text items to detect underlines and strikeouts.
+    super::decoration::assign_decorations(&mut items, &candidate_rules);
+
+    Ok(items)
 }
 
 #[cfg(test)]

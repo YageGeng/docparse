@@ -52,7 +52,7 @@ impl LineMetrics {
             let count = item.raw_text.chars().count().max(1);
             character_count += count;
             if let Some(style) = &item.style {
-                if let Some(font_size) = style.font_size {
+                if let Some(font_size) = style.effective_font_size() {
                     font_size_sum += font_size * count as f64;
                     font_size_characters += count;
                     // OCR provides numeric hints, but they must keep the tolerant estimated-size policy.
@@ -123,7 +123,7 @@ impl LineMetrics {
                         (
                             item.style
                                 .as_ref()
-                                .and_then(|style| style.font_size)
+                                .and_then(|style| style.effective_font_size())
                                 .unwrap_or(0.0),
                             baseline,
                         )

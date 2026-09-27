@@ -14,7 +14,10 @@ use std::{
 };
 
 mod crop;
+mod symbols;
+
 use crop::FormulaCrop;
+use symbols::MathCharMapping;
 
 impl FormulaResult {
     /// Applies one crop's deadline and records its result without affecting neighboring formulas.
@@ -26,9 +29,15 @@ impl FormulaResult {
         timeout: Duration,
         timings: &Timings,
     ) {
+        let Some(engine) = engine else {
+            // Non-model path: reconstruct formula from native text items, symbols, and scripts.
+            self.reconstruct_heuristic_formula(page);
+            return;
+        };
+
         let result = crate::wasm_compat::timeout(
             timeout,
-            self.recognize_crop(page, rendered, engine, timings),
+            self.recognize_crop(page, rendered, Some(engine), timings),
         )
         .await
         .unwrap_or_else(|_elapsed| {
@@ -521,6 +530,94 @@ impl FormulaResult {
             }
         }
     }
+
+    /// Appends raw text to destination with TeXCM bugged characters and math symbols mapped to LaTeX.
+    fn append_remapped_math_text(dest: &mut String, text: &str) {
+        for c in text.chars() {
+            if let Some(latex) = MathCharMapping::to_latex(c) {
+                dest.push_str(latex);
+            } else {
+                dest.push(c);
+            }
+        }
+    }
+
+    /// Synthesizes LaTeX and Markdown representations directly from underlying text items when models are unavailable or fail.
+    fn reconstruct_heuristic_formula(&mut self, page: &PageResult) {
+        let items: Vec<_> = page
+            .iter_text_items()
+            .filter(|item| {
+                self.text_spans
+                    .iter()
+                    .any(|span| span.text_item_id == item.id)
+                    || self.bbox.contains_bbox(item.bbox)
+                    || (self.bbox.intersection_area(item.bbox)
+                        / item.bbox.area().max(f64::EPSILON)
+                        >= 0.45)
+            })
+            .collect();
+
+        if items.is_empty() {
+            return;
+        }
+
+        let mut latex = String::new();
+        for item in &items {
+            let raw = item.raw_text.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            let is_script = item.is_superscript() || item.is_subscript();
+            if !latex.is_empty() && !latex.ends_with(' ') && !is_script {
+                latex.push(' ');
+            }
+
+            let mut script_buf = String::new();
+            Self::append_remapped_math_text(&mut script_buf, raw);
+            let converted = script_buf.trim();
+
+            if item.is_superscript() {
+                if converted.chars().count() == 1 {
+                    latex.push('^');
+                    latex.push_str(converted);
+                } else {
+                    latex.push_str("^{");
+                    latex.push_str(converted);
+                    latex.push('}');
+                }
+            } else if item.is_subscript() {
+                if converted.chars().count() == 1 {
+                    latex.push('_');
+                    latex.push_str(converted);
+                } else {
+                    latex.push_str("_{");
+                    latex.push_str(converted);
+                    latex.push('}');
+                }
+            } else {
+                latex.push_str(converted);
+            }
+        }
+
+        let trimmed = latex.trim();
+        if !trimmed.is_empty() {
+            self.latex = Some(trimmed.to_string());
+            self.markdown = Some(if self.label == LayoutLabel::InlineFormula {
+                format!("${trimmed}$")
+            } else {
+                format!("$$\n{trimmed}\n$$")
+            });
+            self.engine = "heuristic-native".to_string();
+            self.error = None;
+            tracing::info!(
+                "reconstructed heuristic formula {} on page {}: {}",
+                self.id.as_str(),
+                page.page_number,
+                trimmed
+            );
+        }
+    }
+
     /// Attaches to a recovered cell, existing inline span, or source model block without taking text ownership.
     fn attach(&mut self, page: &PageResult) {
         let formula_bbox = self.bbox;
@@ -1864,6 +1961,108 @@ mod tests {
         assert!(
             html.contains("<td>learning *rate* of $7$</td>"),
             "HTML table fallback must not expose Markdown escape backslashes"
+        );
+    }
+
+    /// Verifies heuristic formula reconstruction parses native items, math symbols, TeXCM codes, and scripts.
+    #[test]
+    fn heuristic_formula_reconstructs_latex_with_scripts_and_symbols() {
+        use crate::{
+            Line, LineId, TextItem, TextItemId, TextSource, TextStyle,
+            WritingDirection,
+        };
+
+        let block_id = crate::BlockId::model(1, 0, 0);
+        let bbox = Bbox::try_from([10.0, 10.0, 90.0, 30.0]).expect("bbox");
+
+        let items = vec![
+            TextItem::builder()
+                .id(TextItemId::native(1, 0))
+                .raw_text("x".into())
+                .bbox(Bbox::try_from([10.0, 15.0, 20.0, 25.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 1))
+                .raw_text("2".into())
+                .bbox(Bbox::try_from([20.0, 10.0, 25.0, 18.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().superscript(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 2))
+                .raw_text("þ".into()) // TeXCM encoding for '+'
+                .bbox(Bbox::try_from([27.0, 15.0, 35.0, 25.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 3))
+                .raw_text("y".into())
+                .bbox(Bbox::try_from([37.0, 15.0, 45.0, 25.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 4))
+                .raw_text("i".into())
+                .bbox(Bbox::try_from([45.0, 20.0, 50.0, 28.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .style(Some(TextStyle::builder().subscript(true).build()))
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 5))
+                .raw_text("¼".into()) // TeXCM encoding for '='
+                .bbox(Bbox::try_from([52.0, 15.0, 60.0, 25.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .build(),
+            TextItem::builder()
+                .id(TextItemId::native(1, 6))
+                .raw_text("α".into()) // Greek letter alpha
+                .bbox(Bbox::try_from([62.0, 15.0, 72.0, 25.0]).expect("bbox"))
+                .source(TextSource::Native)
+                .build(),
+        ];
+
+        let line = Line::builder()
+            .id(LineId::new(&block_id, 0))
+            .text("x2þyi¼α".into())
+            .bbox(bbox)
+            .direction(WritingDirection::LeftToRight)
+            .text_items(items)
+            .build();
+
+        let block = crate::Block::builder()
+            .id(block_id.clone())
+            .label(LayoutLabel::Text)
+            .label_source(crate::LabelSource::Model)
+            .text(line.text.clone())
+            .bbox(bbox)
+            .final_order(0)
+            .lines(vec![line])
+            .build();
+
+        let page = PageResult::builder()
+            .page_number(1)
+            .width(100.0)
+            .height(100.0)
+            .rotation(0)
+            .blocks(vec![block])
+            .build();
+
+        let mut formula = FormulaResult::builder()
+            .id(ModelRegionId::detected(1, 1))
+            .label(LayoutLabel::DisplayFormula)
+            .bbox(bbox)
+            .block_id(Some(block_id))
+            .build();
+
+        formula.reconstruct_heuristic_formula(&page);
+
+        assert_eq!(formula.engine, "heuristic-native");
+        assert!(formula.error.is_none());
+        assert_eq!(formula.latex.as_deref(), Some(r"x^2 + y_i = \alpha"));
+        assert_eq!(
+            formula.markdown.as_deref(),
+            Some("$$\nx^2 + y_i = \\alpha\n$$")
         );
     }
 }

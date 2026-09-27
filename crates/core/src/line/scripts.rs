@@ -317,9 +317,9 @@ impl LineFragment {
                     .into_iter()
                     .map(|item| (item.bbox, vec![item]))
                     .collect();
-                atoms.extend(
-                    nested.into_iter().map(|child| (child.bbox, child.items)),
-                );
+                for child in nested {
+                    atoms.push((child.bbox, child.items));
+                }
                 atoms.sort_by(|a, b| {
                     if fragment.direction == WritingDirection::RightToLeft {
                         b.0.right.total_cmp(&a.0.right)

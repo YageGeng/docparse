@@ -1,3 +1,4 @@
+pub(crate) mod decoration;
 mod font_cmap;
 mod glyph;
 mod glyph_names;
