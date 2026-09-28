@@ -11,7 +11,7 @@ pub use config::{
     LayoutConfig, LogConfig, ModelFiles, OcrConfig, OcrModelConfig, OcrPolicy,
     OptimizationLevel, OutputConfig, PpFormulaConfig, RawConfig, RenderConfig,
     RuntimeConfig, ServerConfig, TableCellConfig, TableCellModel, TableMode,
-    TexoFormulaConfig, TsrConfig, TsrModel,
+    TexoFormulaConfig, TsrConfig, TsrModel, WebUi,
 };
 pub use error::ConfigError;
 

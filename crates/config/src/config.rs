@@ -80,6 +80,19 @@ pub struct ServerConfig {
     /// Prefix shared by all HTTP endpoints and their generated OpenAPI paths.
     #[builder(default = "/api".to_owned(), setter(into))]
     pub api_prefix: String,
+    /// Optional workbench (WebUI) source, mounted below the API prefix at `{api_prefix}/webui`.
+    #[builder(default, setter(strip_option))]
+    pub webui: Option<WebUi>,
+}
+
+/// Where the workbench build comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WebUi {
+    /// Serves the build from this directory; a relative path resolves beside the configuration file.
+    Disk(PathBuf),
+    /// Serves the build compiled into the binary by the `embed-web` feature.
+    Embedded,
 }
 
 impl Default for ServerConfig {

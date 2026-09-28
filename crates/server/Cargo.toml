@@ -9,6 +9,8 @@ description = "Durable native PDF parsing jobs over HTTP and SSE"
 
 [features]
 default = []
+# Embeds the built workbench so a single binary serves both the API and the UI.
+embed-web = ["dep:rust-embed"]
 # Forward the unified parser provider without model-specific overrides.
 coreml = ["docparse-core/coreml"]
 cuda = ["docparse-core/cuda"]
@@ -37,7 +39,11 @@ axum.workspace = true
 http-body.workspace = true
 # reqwest 0.13 gates query serialization separately from JSON and renamed the Rustls feature.
 reqwest = { workspace = true, features = ["query", "rustls"] }
+tower.workspace = true
 tower-http.workspace = true
+
+# static assets
+rust-embed = { workspace = true, optional = true }
 
 # api documentation
 utoipa.workspace = true
@@ -81,7 +87,6 @@ image.workspace = true
 
 # testing
 flate2.workspace = true
-tower.workspace = true
 
 [lints]
 workspace = true

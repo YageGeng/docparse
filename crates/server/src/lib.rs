@@ -11,4 +11,5 @@ pub mod routers;
 pub mod service;
 pub mod state;
 pub mod storage;
+pub(crate) mod workbench;
 pub mod worker;

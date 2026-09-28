@@ -5,6 +5,8 @@ import { chromium } from "../../../packages/wasm-web/node_modules/playwright/ind
 
 // Use an existing completed document from the production server; never intercept or replace API responses.
 const origin = process.argv[2] ?? "http://127.0.0.1:5173";
+// The workbench is mounted below the API prefix, so the app base differs from the API root.
+const webui = `${origin}/api/v1/docparse/webui`;
 const id = process.argv[3];
 assert(id, "Supply a completed production job");
 const output = resolve("target/workbench-web");
@@ -38,7 +40,7 @@ async function assertLayout() {
 }
 
 try {
-  await page.goto(`${origin}/document?job=${encodeURIComponent(id)}&page=9`);
+  await page.goto(`${webui}/document?job=${encodeURIComponent(id)}&page=9`);
   await page.getByRole("tab", { name: "Markdown", exact: true }).click();
   await page.getByRole("article", { name: "Markdown 预览" }).waitFor({ timeout: 60000 });
   assert.equal(await page.getByRole("tab").count(), 3);

@@ -1,13 +1,22 @@
 use crate::{
     code::ApiCode,
-    error::{PanicHandler, RequestSnafu},
+    error::{ApiError, PanicHandler, RequestSnafu},
     middlewares::trace,
     routers::{common, docs, jobs},
     state::AppState,
+    workbench,
 };
-use axum::{Extension, Router, extract::DefaultBodyLimit, middleware};
+use axum::{
+    Extension, Router,
+    body::Body,
+    extract::DefaultBodyLimit,
+    http::{Request, Uri},
+    middleware,
+    response::Redirect,
+};
 use docparse_config::{ConfigError, ServerConfig};
 use std::sync::Arc;
+use tower::{ServiceBuilder, service_fn};
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::{
@@ -53,26 +62,64 @@ pub fn router(
     };
     let (router, document) = router.split_for_parts();
 
-    Ok(router
+    let mut router = router
         .route(
             "/metrics",
             axum::routing::get(crate::routers::monitoring::metrics),
         )
+        // Unmatched routes keep the typed JSON envelope. The workbench is nested
+        // below the API prefix, so no API path can ever reach the application shell.
+        .fallback(|| async { ApiError::route_not_found() })
         // Routing failures produce typed errors before serialization, preserving Axum's Allow header.
-        .fallback(|| async {
-            RequestSnafu {
-                stage: "http-route-find",
-                code: ApiCode::COMMON_NOT_FOUND,
-            }
-            .build()
-        })
         .method_not_allowed_fallback(|| async {
             RequestSnafu {
                 stage: "http-route-method",
                 code: ApiCode::method_not_allowed(405000),
             }
             .build()
-        })
+        });
+
+    // The workbench is mounted at `{api_prefix}/webui`, and the root redirects there
+    // so the UI stays discoverable without claiming the root namespace.
+    if let Some(workbench) = workbench::Workbench::resolve(config)? {
+        let mount = workbench.mount().to_owned();
+        let workbench = Arc::new(workbench);
+        let index = format!("{mount}/");
+        router = router
+            .route(
+                "/",
+                axum::routing::get(move |uri: Uri| {
+                    let index = index.clone();
+                    async move {
+                        // A bookmarked deep link keeps its query through the hop.
+                        let target = match uri.query() {
+                            Some(query) => format!("{index}?{query}"),
+                            None => index,
+                        };
+                        Redirect::temporary(&target)
+                    }
+                }),
+            )
+            .nest_service(
+                &mount,
+                ServiceBuilder::new()
+                    // The workbench subtree is routine traffic, while API and failure
+                    // responses keep their INFO lines.
+                    .layer(middleware::from_fn(
+                        crate::middlewares::mark_routine,
+                    ))
+                    .service(service_fn(move |request: Request<Body>| {
+                        let workbench = Arc::clone(&workbench);
+                        async move {
+                            Ok::<_, std::convert::Infallible>(
+                                workbench.respond(request).await,
+                            )
+                        }
+                    })),
+            );
+    }
+
+    Ok(router
         .layer(Extension(Arc::new(document)))
         // Multipart framing receives a small separate allowance; PDF bytes have their own exact limit.
         .layer(DefaultBodyLimit::max(

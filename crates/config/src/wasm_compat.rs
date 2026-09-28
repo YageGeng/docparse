@@ -11,7 +11,7 @@ mod platform {
     pub(crate) struct PlatformOptions;
 
     use std::env;
-    use std::path::{Path, PathBuf};
+    use std::path::{Component, Path, PathBuf};
 
     use figment::Figment;
     use figment::providers::{Env, Format, Serialized, Toml};
@@ -131,7 +131,7 @@ mod platform {
                     path: config_path,
                     source: Box::new(source),
                 })?;
-            config.resolve_paths(&base_directory);
+            config.resolve_paths(&base_directory)?;
             Ok(config)
         }
 
@@ -213,13 +213,36 @@ mod platform {
     }
 
     impl RawConfig {
-        /// Resolves model artifacts and file logs beside the primary configuration file, independent of the working directory.
-        fn resolve_paths(&mut self, base_directory: &Path) {
+        /// Resolves model artifacts, file logs, and the workbench directory beside the primary configuration file, independent of the working directory.
+        fn resolve_paths(
+            &mut self,
+            base_directory: &Path,
+        ) -> Result<(), ConfigError> {
             // File logs follow model path semantics so service launches from other directories remain predictable.
             if let Some(path) = &mut self.log.file
                 && path.is_relative()
             {
                 *path = base_directory.join(&*path);
+            }
+            // The workbench directory follows the same policy, so a service manager's
+            // working directory never decides which assets are served.
+            if let Some(crate::WebUi::Disk(root)) = &mut self.server.webui {
+                // An empty or current-directory value would publish the directory that
+                // holds the configuration file, credentials included, so it is rejected
+                // instead of being joined.
+                let names_no_directory = root.as_os_str().is_empty()
+                    || root.components().all(|component| {
+                        matches!(component, Component::CurDir)
+                    });
+                if names_no_directory {
+                    return Err(ConfigError::InvalidValue {
+                        field: "server.webui",
+                        reason: "must name a build directory rather than the current directory",
+                    });
+                }
+                if root.is_relative() {
+                    *root = base_directory.join(&*root);
+                }
             }
             if let Some(cells) = &mut self.tsr.cell_detection {
                 for path in [
@@ -274,6 +297,7 @@ mod platform {
                     *path = base_directory.join(&*path);
                 }
             }
+            Ok(())
         }
     }
 

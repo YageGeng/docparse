@@ -8,6 +8,12 @@ max_uploads = 100
 host = "127.0.0.1"
 port = 8080
 api_prefix = "/api/v1/docparse"
+# Workbench (WebUI) served from this process and mounted at `{api_prefix}/webui`.
+# Use a directory, whose relative path resolves beside this configuration file and
+# which must contain a readable index.html, or the build compiled into the binary
+# by `cargo build -p docparse-server --features embed-web`.
+# webui = { disk = "packages/web/dist" }
+webui = "embedded"
 
 [database]
 url = "postgresql://postgres:testpassword@127.0.0.1:5432/docparse"

@@ -24,9 +24,13 @@ through your deployment environment rather than checked-in files or CLI argument
 
 ```bash
 rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
-rtk cargo run -p docparse-server --release -- \
+rtk cargo run -p docparse-server --release --features embed-web -- \
   --storage-dir /srv/docparse/shared --config docparse.toml
 ```
+
+The shipped `docparse.toml` selects `webui = "embedded"`, so the build needs
+`--features embed-web`; with `webui = { disk = "..." }` a plain build serves the same
+workbench from that directory instead.
 
 The default listener uses `server.host = "127.0.0.1"` and `server.port = 8080`.
 `server.api_prefix` defaults to `/api` and applies to every endpoint, including

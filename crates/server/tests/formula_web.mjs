@@ -5,6 +5,8 @@ import { chromium } from "../../../packages/wasm-web/node_modules/playwright/ind
 
 const pdf = resolve(process.argv[2]);
 const origin = process.argv[3] ?? "http://127.0.0.1:5173";
+// The workbench is mounted below the API prefix, so the app base differs from the API root.
+const webui = `${origin}/api/v1/docparse/webui`;
 const output = resolve(process.argv[4] ?? "target/formula-render-review/http");
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -13,7 +15,7 @@ const page = await context.newPage();
 const errors = [];
 page.on("pageerror", error => errors.push(error.message));
 try {
-  await page.goto(origin);
+  await page.goto(webui);
   const uploaded = page.waitForResponse(response => response.url().endsWith("/api/v1/docparse/jobs") && response.request().method() === "POST");
   await page.getByLabel("选择 PDF 文件", { exact: true }).setInputFiles(pdf);
   const response = await uploaded;
@@ -42,7 +44,7 @@ try {
   let inspected = 0;
   for (const resultPage of document.pages.filter(page => page.formulas?.length)) {
     const formula = resultPage.formulas[0];
-    await page.goto(`${origin}/document?job=${job.id}&page=${resultPage.page_number}${formula.block_id ? `&block=${encodeURIComponent(formula.block_id)}` : ""}`);
+    await page.goto(`${webui}/document?job=${job.id}&page=${resultPage.page_number}${formula.block_id ? `&block=${encodeURIComponent(formula.block_id)}` : ""}`);
     await page.locator(`[data-formula-id="${formula.id}"]`).waitFor({ state: "attached", timeout: 30000 });
     const selectedBlock = resultPage.blocks.find(block => block.id === formula.block_id);
     if (selectedBlock?.markdown) {

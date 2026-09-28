@@ -446,7 +446,7 @@ impl TryFrom<RawConfig> for ValidatedConfig {
 }
 
 impl ServerConfig {
-    /// Validates process admission, the listener, and literal routes before allocating resources.
+    /// Validates process admission, the listener, and literal routes; the workbench mount is resolved separately.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(1..=1024).contains(&self.max_uploads) {
             return Err(ConfigError::InvalidValue {

@@ -42,6 +42,10 @@ pub async fn request_trace(request: Request, next: Next) -> Response {
             .get(axum::http::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse().ok());
+        let routine = response
+            .extensions()
+            .get::<crate::middlewares::RoutineCompletion>()
+            .is_some();
         let (parts, body) = response.into_parts();
         let mut body = TransferBody::builder()
             .body(body)
@@ -50,6 +54,7 @@ pub async fn request_trace(request: Request, next: Next) -> Response {
             .span(tracing::Span::current())
             .dispatcher(tracing::dispatcher::get_default(Clone::clone))
             .expected(expected)
+            .routine(routine)
             .build();
         // HEAD and no-body statuses may never be polled by the HTTP server.
         if head
@@ -79,10 +84,16 @@ struct TransferBody {
     finished: bool,
     #[builder(default)]
     expected: Option<u64>,
+    /// Routine completions are logged at `DEBUG` instead of `INFO`.
+    #[builder(default)]
+    routine: bool,
 }
 
 impl TransferBody {
     /// Reports exactly one terminal outcome without logging response content or sensitive headers.
+    ///
+    /// Failures keep `WARN` for every response; routine completions drop to
+    /// `DEBUG` so static assets do not dominate the log.
     fn finish(&mut self, outcome: &str) {
         if self.finished {
             return;
@@ -90,8 +101,15 @@ impl TransferBody {
         self.finished = true;
         tracing::dispatcher::with_default(&self.dispatcher, || {
             self.span.in_scope(|| {
-                if outcome == "completed" {
+                if outcome == "completed" && !self.routine {
                     tracing::info!(
+                        "{} body completed: {} bytes in {} ms",
+                        self.description,
+                        self.bytes,
+                        self.started.elapsed().as_millis()
+                    );
+                } else if outcome == "completed" {
+                    tracing::debug!(
                         "{} body completed: {} bytes in {} ms",
                         self.description,
                         self.bytes,

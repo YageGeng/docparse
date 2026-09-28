@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { chromium } from "../../../packages/wasm-web/node_modules/playwright/index.mjs";
 
 const origin = process.argv[2] ?? "http://127.0.0.1:5173";
+// The workbench is mounted below the API prefix, so the app base differs from the API root.
+const webui = `${origin}/api/v1/docparse/webui`;
 const output = resolve(process.argv[3] ?? "target/directory-upload-review");
 const temporary = await mkdtemp(join(tmpdir(), "docparse-directory-"));
 const folder = join(temporary, "documents");
@@ -35,7 +37,7 @@ try {
   const health = await page.request.get(`${origin}/api/v1/docparse/health`);
   assert.equal(health.status(), 200, "The configured production backend must be available");
   assert.equal((await health.json()).success, true);
-  await page.goto(origin);
+  await page.goto(webui);
   const picker = page.getByLabel("选择包含 PDF 的目录", { exact: true });
   assert(await picker.evaluate(input => input.webkitdirectory), "The input must select a directory hierarchy");
   await picker.setInputFiles(empty);

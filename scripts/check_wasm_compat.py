@@ -25,6 +25,10 @@ ALLOWED.update({
     "crates/core/src/pdfium/worker.rs",
     # This declaration-only module selects the optional native IPC implementation.
     "crates/core/src/pdfium/mod.rs",
+    # The workbench module selects the optional embedded-asset source; the server
+    # crate is native-only, so these feature cfgs never reach a browser target.
+    "crates/server/src/workbench.rs",
+    "crates/server/tests/workbench.rs",
     "crates/layout/src/wasm_compat/session_pool.rs",
     "crates/layout/src/wasm_compat/backend.rs",
 })

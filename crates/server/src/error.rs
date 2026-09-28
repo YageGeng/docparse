@@ -72,6 +72,16 @@ impl ApiError {
             | Self::Multipart { code, .. } => *code,
         }
     }
+
+    /// Reports an unmatched HTTP route for the router fallback.
+    #[inline(always)]
+    pub(crate) fn route_not_found() -> Self {
+        RequestSnafu {
+            stage: "http-route-find",
+            code: ApiCode::COMMON_NOT_FOUND,
+        }
+        .build()
+    }
 }
 
 impl ErrorCode for ApiError {

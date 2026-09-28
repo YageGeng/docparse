@@ -5,6 +5,8 @@ import { chromium } from "../../../packages/wasm-web/node_modules/playwright/ind
 
 // Exercise the production API and an existing real parse; no fixture backend or intercepted responses.
 const origin = process.argv[2] ?? "http://127.0.0.1:5173";
+// The workbench is mounted below the API prefix, so the app base differs from the API root.
+const webui = `${origin}/api/v1/docparse/webui`;
 const id = process.argv[3];
 assert(id, "Supply a completed production job containing formulas and tables");
 const output = resolve("target/markdown-web");
@@ -26,7 +28,7 @@ try {
   const json = await page.request.get(`${origin}/api/v1/docparse/jobs/result?id=${encodeURIComponent(id)}&page=1`);
   assert.equal(json.status(), 200);
   assert((await json.json()).data.page, "JSON must remain available alongside Markdown");
-  await page.goto(`${origin}/document?job=${encodeURIComponent(id)}`);
+  await page.goto(`${webui}/document?job=${encodeURIComponent(id)}`);
   await page.getByRole("tab", { name: "Markdown", exact: true }).click();
   const preview = page.getByRole("article", { name: "Markdown 预览" });
   await preview.waitFor({ timeout: 60000 });

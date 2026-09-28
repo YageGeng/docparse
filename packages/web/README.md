@@ -15,8 +15,11 @@ connection, including upload metadata and the task-history index. Start the
 native server in one terminal, choosing the backend feature for your host:
 
 ```sh
-rtk cargo run -p docparse-server --release --features cuda
+rtk cargo run -p docparse-server --release --features cuda --features embed-web
 ```
+
+The extra `embed-web` feature matches the shipped `docparse.toml`, which serves the
+workbench compiled into the binary; drop it while `webui = { disk = "..." }` is set.
 
 In a second terminal, install and start the workbench:
 
@@ -25,16 +28,17 @@ rtk npm ci --prefix packages/web
 rtk npm run dev --prefix packages/web
 ```
 
-Open <http://127.0.0.1:5173>. Use Node.js 22.13 or newer for the pinned Vite and PDF.js;
-this package was validated with Node.js 26.8.2. The dev server listens on loopback
-and proxies `/api/v1/docparse` to `http://127.0.0.1:8080` by default.
+Open <http://127.0.0.1:5173/api/v1/docparse/webui/>. Use Node.js 22.13 or newer for the
+pinned Vite and PDF.js; this package was validated with Node.js 26.8.2. The dev server
+serves the application at `{VITE_API_PREFIX}/webui/`, the same path the server uses, and
+proxies the API routes below `VITE_API_PREFIX` to `http://127.0.0.1:8080` by default.
 
 Copy `packages/web/.env.example` to `packages/web/.env.local` for local settings
 and API type generation.
-`VITE_API_PREFIX` must match `server.api_prefix`. `VITE_API_TARGET` controls the
-development/preview proxy, and `VITE_BASE_PATH` controls the static application
-mount point. Neither is a place for credentials. Restart Vite after changing
-environment settings or dependencies.
+`VITE_API_PREFIX` must match `server.api_prefix`; it drives both the API calls and the
+WebUI base path, which is `{VITE_API_PREFIX}/webui/`. `VITE_BASE_PATH` overrides that
+base path, and `VITE_API_TARGET` controls the development proxy. Neither is a place for
+credentials. Restart Vite after changing environment settings or dependencies.
 
 ```sh
 rtk npm run check --prefix packages/web
@@ -43,11 +47,29 @@ rtk npm run preview --prefix packages/web
 ```
 
 The build produces `packages/web/dist/`, including the PDF.js worker, fonts, CMaps, ICC profiles, image
-decoders and their license notices. Production needs only a static web server and
-a same-origin proxy to Axum. Route application navigations such as `/document` to
-`index.html`; preserve the configured API prefix, allow streaming uploads, and
-disable response buffering for SSE. Keep SSE idle timeouts above the server's
-15-second heartbeat. Configure upload limits consistently at the ingress and API.
+decoders and their license notices. No separate static host is used: `docparse-server`
+serves the workbench from the same origin as the API, mounted at `{api_prefix}/webui`.
+Select the source with one key in `docparse.toml`:
+
+```toml
+[server]
+# Read the build from disk on every request, so a rebuild needs no restart.
+webui = { disk = "packages/web/dist" }
+# Or compile it in with `cargo build -p docparse-server --features embed-web`.
+webui = "embedded"
+```
+
+The server mounts the WebUI at `{api_prefix}/webui`, so with the default prefix the
+application lives at `/api/v1/docparse/webui/` and `/` redirects there. Navigations such
+as `/api/v1/docparse/webui/document` return `index.html`, missing hashed assets stay
+`404`, and every path outside the mount keeps the typed JSON error envelope, so an API
+path can never receive the application shell. Inside the mount an extension-less path
+that is not a file answers with the shell, which is what client-side routing needs. A relative `disk` path resolves beside
+the configuration file, not the working directory, and the directory must contain a
+readable `index.html` or startup fails; run `npm run build` first. The embedded source is
+fixed at compile time, so a frontend change needs a rebuild and a restart; a release
+build then needs no `dist` at runtime, while a debug build keeps reading the `dist`
+directory it was compiled against.
 
 The existing trusted-ingress boundary applies: task history is deployment-wide.
 Tenant-specific access requires corresponding authorization and query filtering
@@ -56,9 +78,10 @@ in the backend before deploying a multi-tenant workbench.
 ### HTTP compression
 
 `npm run build` creates gzip siblings for compressible assets using Node's built-in
-zlib. Configure the static host to serve them with `Content-Encoding: gzip` and
-`Vary: Accept-Encoding`; see `nginx.conf.example`. The API independently compresses
-JSON and Markdown through tower-http. Do not manually decompress fetch/XHR
+zlib. The server sends them with `Content-Encoding: gzip` and `Vary: Accept-Encoding`
+for clients that accept gzip, and falls back to the plain file otherwise. The API
+independently compresses JSON and Markdown through tower-http. Do not manually
+decompress fetch/XHR
 responses or set `Accept-Encoding` in browser JavaScript. Proxies must preserve
 encoding headers and stream uploads and SSE without buffering. Match the API prefix
 in the browser build, proxy configuration and server configuration.

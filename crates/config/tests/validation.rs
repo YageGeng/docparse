@@ -2,7 +2,7 @@ use std::fs;
 
 use docparse_config::{
     ConfigError, ConfigLoader, DatabaseConfig, RawConfig, ServerConfig,
-    ValidatedConfig,
+    ValidatedConfig, WebUi,
 };
 
 /// Texo defaults to one consumer and rejects empty pools without imposing a hardware ceiling.
@@ -27,12 +27,15 @@ fn texo_sessions_are_positive_and_default_to_one() {
     }
 }
 
+/// Capacities every loader fixture must provide before its own settings.
+const REQUIRED_SETTINGS: &str = "render.workers = 1\nrender.queue_size = 16\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 16\nocr.orientation.queue_size = 16\nformula.queue_size = 4\n";
+
 /// Loads code defaults through the real loader so model paths become absolute.
 fn loaded_defaults() -> RawConfig {
     let directory =
         tempfile::tempdir().expect("the test directory must be created");
     let config_path = directory.path().join("docparse.toml");
-    fs::write(&config_path, "render.workers = 1\nrender.queue_size = 16\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 16\nocr.orientation.queue_size = 16\nformula.queue_size = 4\n")
+    fs::write(&config_path, REQUIRED_SETTINGS)
         .expect("the test configuration must be writable");
     ConfigLoader::new(config_path)
         .load_raw()
@@ -398,4 +401,91 @@ fn figure_file_delivery_requires_a_directory() {
     ));
     inline.figures.directory = Some(std::path::PathBuf::from("figures"));
     ValidatedConfig::try_from(inline).expect("file figures");
+}
+
+/// A relative workbench directory resolves beside the configuration file.
+#[test]
+fn relative_workbench_directory_follows_the_configuration_file() {
+    let directory =
+        tempfile::tempdir().expect("the test directory must be created");
+    let config_path = directory.path().join("docparse.toml");
+    fs::write(
+        &config_path,
+        format!("{REQUIRED_SETTINGS}[server.webui]\ndisk = \"web\"\n"),
+    )
+    .expect("the test configuration must be writable");
+    let raw = ConfigLoader::new(config_path)
+        .load_raw()
+        .expect("the workbench configuration must load");
+    assert_eq!(
+        raw.server.webui,
+        Some(WebUi::Disk(directory.path().join("web"))),
+        "a service manager's working directory must not decide the workbench path"
+    );
+}
+
+/// The workbench directory must name a directory instead of the configuration directory.
+#[test]
+fn workbench_directory_must_name_a_directory() {
+    let directory =
+        tempfile::tempdir().expect("the test directory must be created");
+    let config_path = directory.path().join("docparse.toml");
+    for value in [".", ""] {
+        fs::write(
+            &config_path,
+            format!("{REQUIRED_SETTINGS}[server.webui]\ndisk = \"{value}\"\n"),
+        )
+        .expect("the test configuration must be writable");
+        let error = ConfigLoader::new(&config_path)
+            .load_raw()
+            .expect_err("the configuration directory must not be served");
+        assert!(
+            matches!(
+                error,
+                ConfigError::InvalidValue {
+                    field: "server.webui",
+                    ..
+                }
+            ),
+            "{error}"
+        );
+    }
+}
+
+/// One explicit key selects the workbench source, and an empty prefix still mounts it.
+#[test]
+fn workbench_source_is_a_single_explicit_key() {
+    let directory =
+        tempfile::tempdir().expect("the test directory must be created");
+    let config_path = directory.path().join("docparse.toml");
+    fs::write(
+        &config_path,
+        format!("{REQUIRED_SETTINGS}[server]\nwebui = \"embedded\"\n"),
+    )
+    .expect("the test configuration must be writable");
+    let raw = ConfigLoader::new(&config_path)
+        .load_raw()
+        .expect("the embedded source must load");
+    assert_eq!(raw.server.webui, Some(WebUi::Embedded));
+
+    // The retired directory flag is no longer part of the schema.
+    fs::write(
+        &config_path,
+        format!("{REQUIRED_SETTINGS}[server]\nweb_root = \"web\"\n"),
+    )
+    .expect("the test configuration must be writable");
+    assert!(
+        ConfigLoader::new(&config_path).load_raw().is_err(),
+        "the retired web_root key must be rejected"
+    );
+
+    // The workbench is nested below the prefix, so a root prefix no longer collides.
+    for prefix in ["", "/"] {
+        ServerConfig::builder()
+            .api_prefix(prefix)
+            .webui(WebUi::Disk("/srv/workbench".into()))
+            .build()
+            .validate()
+            .expect("the mount path extends an empty prefix");
+    }
 }
