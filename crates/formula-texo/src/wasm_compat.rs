@@ -10,6 +10,10 @@ use docparse_formula::{
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "cuda.rs"]
+mod cuda;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "session_manager.rs"]
 mod session_manager;
 

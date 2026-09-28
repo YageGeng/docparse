@@ -35,6 +35,7 @@ impl SessionManager {
                     index,
                     backend.execution_provider()
                 );
+                let cuda = super::cuda::CudaIoContext::detect(&backend, index)?;
                 let mut model = ModelSessions {
                     encoder: SessionBuilder::try_from(backend)?
                         .commit_from_memory(&artifacts.encoder)?,
@@ -42,7 +43,9 @@ impl SessionManager {
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
-                Ok(move |requests: &mut Vec<Request>| model.recognize(requests))
+                Ok(move |requests: &mut Vec<Request>| {
+                    model.recognize(requests, cuda.as_ref())
+                })
             },
         )
         .await
@@ -106,7 +109,11 @@ impl SessionManager {
 
 impl ModelSessions {
     /// Keeps each batch's KV cache local to its owner; canceled peers cannot terminate another page's generation.
-    fn recognize(&mut self, requests: &mut Vec<Request>) -> BatchResult {
+    fn recognize(
+        &mut self,
+        requests: &mut Vec<Request>,
+        cuda: Option<&super::cuda::CudaIoContext>,
+    ) -> BatchResult {
         let mut values = Vec::new();
         // Validate and prepare each crop separately so malformed input from one PDF cannot fail its batch peers.
         for request in std::mem::take(requests) {
@@ -149,57 +156,69 @@ impl ModelSessions {
         let options = ort::session::RunOptions::new()?;
         let generation =
             Request::measure(requests, TimingStage::FormulaInference, || {
-                let pixels = Tensor::from_array(input.0)?;
-                // Standard runs return host outputs and let ORT manage transfers and completion.
-                let physical = docparse_common::telemetry::Inference::new(
-                    "formula_texo",
-                    "encoder",
-                    requests.len(),
-                );
-                let outputs = self.encoder.run_with_options(
-                    ort::inputs!["pixel_values" => pixels],
-                    &options,
-                );
-                physical.finish(outputs.is_ok());
-                let hidden =
-                    outputs?.remove("last_hidden_state").ok_or_else(|| {
-                        FormulaError::Invalid(
-                            "missing Texo image features".into(),
-                        )
-                    })?;
-                let mut generation = Generation::new(hidden, requests.len())?;
-                for _ in 1..MAX_LENGTH {
-                    if requests.iter().all(Request::cancelled) {
-                        return Err(FormulaError::Invalid(
-                            "Texo batch canceled".into(),
-                        ));
-                    }
-                    if generation
-                        .cancel(requests.iter().map(Request::cancelled))
-                    {
-                        break;
-                    }
-                    let inputs = generation.inputs()?;
-                    let physical = docparse_common::telemetry::Inference::new(
-                        "formula_texo",
-                        "decoder",
-                        requests.len(),
+                if let Some(cuda) = cuda {
+                    return cuda.recognize(
+                        &mut self.encoder,
+                        &mut self.decoder,
+                        &input,
+                        requests,
+                        &options,
                     );
-                    let outputs =
-                        self.decoder.run_with_options(inputs, &options);
-                    physical.finish(outputs.is_ok());
-                    let output = StepOutput::try_from(outputs?)?;
-                    if generation.advance(output)? {
-                        break;
-                    }
                 }
-                Ok::<_, FormulaError>(generation)
+                self.recognize_standard(&input, requests, &options)
             })?;
         Ok(Request::measure(
             requests,
             TimingStage::FormulaDecode,
             || generation.decode(&self.tokenizer),
         ))
+    }
+
+    /// Executes standard session inference with host-managed tensor copies between decoding steps.
+    fn recognize_standard(
+        &mut self,
+        input: &crate::preprocess::FormulaInput,
+        requests: &[Request],
+        options: &ort::session::RunOptions,
+    ) -> Result<Generation, FormulaError> {
+        let pixels = Tensor::from_array(input.0.clone())?;
+        // Standard runs return host outputs and let ORT manage transfers and completion.
+        let physical = docparse_common::telemetry::Inference::new(
+            "formula_texo",
+            "encoder",
+            requests.len(),
+        );
+        let outputs = self
+            .encoder
+            .run_with_options(ort::inputs!["pixel_values" => pixels], options);
+        physical.finish(outputs.is_ok());
+        let hidden = outputs?.remove("last_hidden_state").ok_or_else(|| {
+            FormulaError::Invalid("missing Texo image features".into())
+        })?;
+        let mut generation = Generation::new(hidden, requests.len())?;
+        for _ in 1..MAX_LENGTH {
+            if requests.iter().all(Request::cancelled) {
+                return Err(FormulaError::Invalid(
+                    "Texo batch canceled".into(),
+                ));
+            }
+            if generation.cancel(requests.iter().map(Request::cancelled)) {
+                break;
+            }
+            let inputs = generation.inputs()?;
+            let physical = docparse_common::telemetry::Inference::new(
+                "formula_texo",
+                "decoder",
+                requests.len(),
+            );
+            let outputs = self.decoder.run_with_options(inputs, options);
+            physical.finish(outputs.is_ok());
+            let output = StepOutput::try_from(outputs?)?;
+            if generation.advance(output)? {
+                break;
+            }
+        }
+        Ok(generation)
     }
 }
 

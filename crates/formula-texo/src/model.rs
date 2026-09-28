@@ -15,7 +15,7 @@ use typed_builder::TypedBuilder;
 /// Maximum sequence length, including BOS, from the pinned generation configuration.
 pub const MAX_LENGTH: usize = 1024;
 const VOCAB_SIZE: usize = 687;
-const CACHE_NAMES: [&str; 8] = [
+pub(crate) const CACHE_NAMES: [&str; 8] = [
     "past_key_values.0.decoder.key",
     "past_key_values.0.decoder.value",
     "past_key_values.0.encoder.key",
@@ -183,9 +183,9 @@ pub(crate) struct Generation {
     pub(crate) hidden: DynValue,
     pub(crate) cache: Vec<DynValue>,
     tokens: Vec<Vec<u32>>,
-    next: Vec<i64>,
+    pub(crate) next: Vec<i64>,
     finished: Vec<bool>,
-    step: usize,
+    pub(crate) step: usize,
 }
 
 impl Generation {
