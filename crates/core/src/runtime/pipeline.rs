@@ -59,7 +59,10 @@ struct ScannedDocument {
 
 impl ScannedDocument {
     /// Orders completed pages, merges scan diagnostics, and links and validates the final document.
-    fn finish(
+    ///
+    /// Linking, validation and result assembly scan the whole document, so they run on the
+    /// blocking pool while the owned scan output moves with them.
+    async fn finish(
         self,
         mut pages: Vec<PageResult>,
         timings: &Timings,
@@ -71,8 +74,8 @@ impl ScannedDocument {
             mut page_errors,
             ..
         } = self;
-        let page_count = context.page_count;
         pages.sort_by_key(|page| page.page_number);
+
         for page in &mut pages {
             if let Some(warning) = pre_scan_warnings.remove(&page.page_number) {
                 page.warnings.push(warning);
@@ -88,22 +91,70 @@ impl ScannedDocument {
 
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Linking {
-                total: page_count,
+                total: context.page_count,
             });
         }
+        let link_timings = timings.clone();
+        docparse_common::run_cpu(
+            move || -> Result<DocumentResult, ParseRuntimeError> {
+                let _linking = link_timings.start(TimingStage::LinkValidate);
+                let relations = DocumentLinker::new().link(&context, &pages)?;
+                let result = DocumentResult::builder()
+                    .schema_version(SchemaVersion::V2_0)
+                    .context((*context).clone())
+                    .pages(pages)
+                    .relations(relations)
+                    .errors(page_errors)
+                    .build();
+                ResultValidator::validate(&result)?;
+                Ok(result)
+            },
+        )
+        .await
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))?
+    }
+}
 
-        let linking = timings.start(TimingStage::LinkValidate);
-        let relations = DocumentLinker::new().link(&context, &pages)?;
-        let result = DocumentResult::builder()
-            .schema_version(SchemaVersion::V2_0)
-            .context((*context).clone())
-            .pages(pages)
-            .relations(relations)
-            .errors(page_errors)
-            .build();
-        ResultValidator::validate(&result)?;
-        drop(linking);
-        Ok(result)
+/// Classifies page watermarks and builds the document context that later stages share.
+///
+/// Both phases rescan every page's items and have no configured bound, so the caller runs
+/// them on the blocking pool with the owned scan output.
+fn classify_and_build_context(
+    config: Arc<ValidatedConfig>,
+    mut extracted_pages: BTreeMap<u32, ExtractedPage>,
+    mut context_builder: DocumentContextBuilder,
+    timings: Timings,
+) -> Result<
+    (Arc<DocumentContext>, BTreeMap<u32, ExtractedPage>),
+    ParseRuntimeError,
+> {
+    let _context_timer = timings.start(TimingStage::DocumentContext);
+    // Freeze watermark decisions before body-font/chrome statistics or any page fusion.
+    if let Err(error) = crate::watermark::classify(
+        extracted_pages.values_mut(),
+        config.fusion(),
+    ) {
+        tracing::error!("watermark classification failed: {}", error);
+        return Err(PageAnalysisError::Line(error).into());
+    }
+    for extracted in extracted_pages.values() {
+        if let Err(error) =
+            context_builder.push_page(crate::PageProbe::from(extracted))
+        {
+            tracing::error!(
+                "document context rejected page {}: {}",
+                extracted.page_number,
+                error
+            );
+            return Err(error.into());
+        }
+    }
+    match context_builder.build() {
+        Ok(context) => Ok((context, extracted_pages)),
+        Err(error) => {
+            tracing::error!("document context construction failed: {}", error);
+            Err(error.into())
+        }
     }
 }
 
@@ -214,7 +265,7 @@ impl ParseRuntime {
                 observer,
             )
             .await?;
-        let result = scanned.finish(pages, &timings, observer)?;
+        let result = scanned.finish(pages, &timings, observer).await?;
         // Failed or cancelled parses drop all owners and remove their uncommitted directory.
         if owned_assets {
             figure_assets.keep(true);
@@ -259,7 +310,7 @@ impl ParseRuntime {
         let mut extracted_pages = BTreeMap::new();
         let mut pre_scan_warnings = BTreeMap::new();
         let mut page_errors = Vec::new();
-        let mut context_builder = DocumentContextBuilder::builder()
+        let context_builder = DocumentContextBuilder::builder()
             .page_count(page_count)
             .metadata(BTreeMap::from([
                 (
@@ -335,44 +386,26 @@ impl ParseRuntime {
                 }
             }
         }
-        let context_timer = timings.start(TimingStage::DocumentContext);
-        // Freeze watermark decisions before body-font/chrome statistics or any page fusion.
-        if let Err(error) = crate::watermark::classify(
-            extracted_pages.values_mut(),
-            self.config.fusion(),
-        ) {
-            tracing::error!("watermark classification failed: {}", error);
-            return Err(PageAnalysisError::Line(error).into());
-        }
-        for extracted in extracted_pages.values() {
-            if let Err(error) =
-                context_builder.push_page(crate::PageProbe::from(extracted))
-            {
-                tracing::error!(
-                    "document context rejected page {}: {}",
-                    extracted.page_number,
-                    error
-                );
-                return Err(error.into());
-            }
-        }
-        let context = match context_builder.build() {
-            Ok(context) => context,
-            Err(error) => {
-                tracing::error!(
-                    "document context construction failed: {}",
-                    error
-                );
-                return Err(error.into());
-            }
-        };
+        // Document-wide classification and context building rescan every page's items, so
+        // they belong on the blocking pool like every other parser CPU hop.
+        let config = Arc::clone(&self.config);
+        let context_timings = timings.clone();
+        let (context, extracted_pages) = docparse_common::run_cpu(move || {
+            classify_and_build_context(
+                config,
+                extracted_pages,
+                context_builder,
+                context_timings,
+            )
+        })
+        .await
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Analyzing {
                 completed: 0,
                 total: page_count,
             });
         }
-        drop(context_timer);
         Ok(ScannedDocument::builder()
             .context(context)
             .extracted_pages(extracted_pages)

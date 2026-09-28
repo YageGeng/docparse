@@ -1,9 +1,12 @@
 //! Concurrent table requests over already-owned layout blocks; providers own queue backpressure.
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
 use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use docparse_common::timing::{TimingStage, Timings};
 use docparse_config::FusionConfig;
@@ -14,14 +17,33 @@ use docparse_layout::{
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use typed_builder::TypedBuilder;
 
+use super::ParseRuntimeError;
+use crate::line::FormulaRegion;
 use crate::page::PageTableDraft;
+use crate::table::TableAssembler;
 use crate::{
-    Block, Evidence, PageWarning, TableMode, TableOptions,
+    Block, Evidence, PageWarning, TableEvidence, TableMode, TableOptions,
     TableStructureEngine, TableStructureError, TsrRequestReason, TsrTableInput,
     TsrTableRequest,
 };
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Immutable page inputs shared by every table request on that page.
+///
+/// A blocking hop cannot borrow from the draft, so each request clones this context: the arcs
+/// share the page evidence while the image and transform stay cheap copies.
+#[derive(Clone, TypedBuilder)]
+struct TableContext {
+    config: Arc<FusionConfig>,
+    evidence: Arc<TableEvidence>,
+    formulas: Arc<[FormulaRegion]>,
+    image: PageImage,
+    transform: PageTransform,
+    timings: Timings,
+    page: u32,
+    engine: Arc<dyn TableStructureEngine>,
+}
 
 /// Shares table policy and the provider across all pages of a parse.
 pub(crate) struct TableRuntime {
@@ -44,135 +66,57 @@ impl TableRuntime {
     }
 
     /// Submits all ready same-page tables concurrently and preserves result ownership and failures.
+    ///
+    /// The draft is taken and returned by value so this page can own its evidence across the
+    /// blocking hops below: every synchronous section runs on the blocking pool, which keeps
+    /// grid solving and crop copying off the async executor threads.
     pub(crate) async fn resolve(
         &self,
-        draft: &mut PageTableDraft,
+        mut draft: PageTableDraft,
         image: &PageImage,
         transform: &PageTransform,
         config: &FusionConfig,
         timings: &Timings,
-    ) {
+    ) -> Result<PageTableDraft, ParseRuntimeError> {
         if self.options.mode == TableMode::RulesOnly {
-            draft.reconstruct_local(config, timings);
-            return;
+            let config = config.clone();
+            let timings = timings.clone();
+            let restored = docparse_common::run_cpu(move || {
+                let mut draft = draft;
+                draft.reconstruct_local(&config, &timings);
+                draft
+            })
+            .await
+            .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
+            return Ok(restored);
         }
         let Some(engine) = &self.engine else {
-            return;
+            return Ok(draft);
         };
-        let page = draft.extracted.page_number;
-        let assembler = crate::table::TableAssembler::new(
-            config,
-            &draft.extracted.table_evidence,
-            &draft.formula_regions,
-        );
-        let assembler = &assembler;
+        let context = TableContext::builder()
+            .config(Arc::new(config.clone()))
+            .evidence(Arc::new(draft.extracted.table_evidence.clone()))
+            .formulas(Arc::from(draft.formula_regions.as_slice()))
+            .image(image.clone())
+            .transform(transform.clone())
+            .timings(timings.clone())
+            .page(draft.extracted.page_number)
+            .engine(Arc::clone(engine))
+            .build();
         // Model queues decide when requests can enter; the parser does not impose an additional task window.
-        let mut requests: FuturesUnordered<_> = draft
-            .blocks
-            .iter_mut()
-            .filter(|b| b.label == LayoutLabel::Table)
-            .map(|block| async move {
-            let reason = if self.options.mode == TableMode::Fallback {
-                let _timer =
-                    timings.for_page(page).start(TimingStage::TableRules);
-                match assembler.reconstruct(block) {
-                    Ok(()) => return Vec::new(),
-                    Err(message) => {
-                        tracing::debug!(
-                            "local table {} requires external structure: {}",
-                            block.id.as_str(),
-                            message
-                        );
-                        TsrRequestReason::RulesFailed { message }
-                    }
-                }
-            } else {
-                TsrRequestReason::TsrOnly
-            };
-            let request = TsrTableRequest::try_from(
-                TableCrop::builder()
-                    .page(page)
-                    .block(block)
-                    .image(image)
-                    .transform(transform)
-                    .reason(reason.clone())
-                    .build(),
-            );
-            let result = match request {
-                Ok(mut request) => {
-                    request.timings = timings.for_page(page);
-                    tracing::info!(
-                        "requesting table structure {} from {} for page {} block {}",
-                        request.request_id,
-                        engine.name(),
-                        page,
-                        block.id.as_str()
-                    );
-                    let result = self
-                        .recognize(Arc::clone(engine), request.clone(), timings)
-                        .await;
-                    match result {
-                        Ok(input) => {
-                            let _fill = timings
-                                .for_page(page)
-                                .start(TimingStage::TableFill);
-                            assembler
-                                .reconstruct_external(block, &request, input, engine.geometry_policy())
-                                .map(|()| {
-                                    let details = std::collections::BTreeMap::from([
-                                        ("request_id".to_owned(), request.request_id.clone()),
-                                        ("engine".to_owned(), engine.name().to_owned()),
-                                        ("reason".to_owned(), match reason {
-                                            TsrRequestReason::RulesFailed { message } => message,
-                                            TsrRequestReason::TsrOnly => "tsr_only".to_owned(),
-                                        }),
-                                    ]);
-                                    block.evidence.push(
-                                        Evidence::builder()
-                                            .kind("external_table_structure".to_owned())
-                                            .details(details)
-                                            .build(),
-                                    );
-                                    tracing::info!(
-                                        "completed table structure {} for page {} block {}",
-                                        request.request_id,
-                                        page,
-                                        block.id.as_str()
-                                    );
-                                })
-                        }
-                        Err(error) => Err(error),
-                    }
-                }
-                Err(error) => Err(error),
-            };
-            if let Err(error) = result {
-                tracing::warn!(
-                    "external table {} on page {} failed with {}: {}",
-                    block.id.as_str(),
-                    page,
-                    error.code(),
-                    error
-                );
-                vec![PageWarning {
-                    code: error.code().to_owned(),
-                    stage: "table".to_owned(),
-                    message: format!("table {}: {}", block.id.as_str(), error),
-                }, PageWarning {
-                    code: "TableStructureUnavailable".to_owned(),
-                    stage: "table".to_owned(),
-                    message: format!(
-                        "table {} retains source lines: {}",
-                        block.id.as_str(),
-                        error
-                    ),
-                }]
-            } else {
-                Vec::new()
+        {
+            let mut requests: FuturesUnordered<_> = draft
+                .blocks
+                .iter_mut()
+                .filter(|block| block.label == LayoutLabel::Table)
+                .map(|block| {
+                    let context = context.clone();
+                    async move { self.resolve_block(block, &context).await }
+                })
+                .collect();
+            while let Some(warnings) = requests.next().await {
+                draft.warnings.extend(warnings?);
             }
-        }).collect();
-        while let Some(warnings) = requests.next().await {
-            draft.warnings.extend(warnings);
         }
         // Completion order must not change deterministic page diagnostics.
         draft.warnings.sort_by(|left, right| {
@@ -182,6 +126,191 @@ impl TableRuntime {
                 &right.message,
             ))
         });
+        Ok(draft)
+    }
+
+    /// Resolves one table block, which owns itself across every blocking hop.
+    ///
+    /// The staged copy is what buys that ownership; it is small next to the grid solver it
+    /// feeds, and it keeps the draft borrowed only by the caller that owns it.
+    async fn resolve_block(
+        &self,
+        block: &mut Block,
+        context: &TableContext,
+    ) -> Result<Vec<PageWarning>, ParseRuntimeError> {
+        let mut staged = block.clone();
+        let reason = if self.options.mode == TableMode::Fallback {
+            let (restored, probe) = docparse_common::run_cpu({
+                let context = context.clone();
+                move || {
+                    let _timer = context
+                        .timings
+                        .for_page(context.page)
+                        .start(TimingStage::TableRules);
+                    let assembler = TableAssembler::new(
+                        context.config.as_ref(),
+                        context.evidence.as_ref(),
+                        context.formulas.as_ref(),
+                    );
+                    let outcome = assembler.reconstruct(&mut staged);
+                    (staged, outcome)
+                }
+            })
+            .await
+            .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
+            staged = restored;
+            match probe {
+                Ok(()) => {
+                    *block = staged;
+                    return Ok(Vec::new());
+                }
+                Err(message) => {
+                    tracing::debug!(
+                        "local table {} requires external structure: {}",
+                        staged.id.as_str(),
+                        message
+                    );
+                    TsrRequestReason::RulesFailed { message }
+                }
+            }
+        } else {
+            TsrRequestReason::TsrOnly
+        };
+        let (restored, request) = docparse_common::run_cpu({
+            let context = context.clone();
+            let reason = reason.clone();
+            move || {
+                let request = TsrTableRequest::try_from(
+                    TableCrop::builder()
+                        .page(context.page)
+                        .block(&staged)
+                        .image(&context.image)
+                        .transform(&context.transform)
+                        .reason(reason)
+                        .build(),
+                );
+                (staged, request)
+            }
+        })
+        .await
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
+        staged = restored;
+        let result = match request {
+            Ok(mut request) => {
+                request.timings = context.timings.for_page(context.page);
+                tracing::info!(
+                    "requesting table structure {} from {} for page {} block {}",
+                    request.request_id,
+                    context.engine.name(),
+                    context.page,
+                    staged.id.as_str()
+                );
+                let result = self
+                    .recognize(
+                        Arc::clone(&context.engine),
+                        request.clone(),
+                        &context.timings,
+                    )
+                    .await;
+                match result {
+                    Ok(input) => {
+                        let (restored, outcome) =
+                            docparse_common::run_cpu({
+                                let context = context.clone();
+                                move || {
+                                    let _fill = context
+                                        .timings
+                                        .for_page(context.page)
+                                        .start(TimingStage::TableFill);
+                                    let assembler = TableAssembler::new(
+                                        context.config.as_ref(),
+                                        context.evidence.as_ref(),
+                                        context.formulas.as_ref(),
+                                    );
+                                    let outcome = assembler
+                                        .reconstruct_external(
+                                            &mut staged,
+                                            &request,
+                                            input,
+                                            context.engine.geometry_policy(),
+                                        )
+                                        .map(|()| {
+                                            let details = BTreeMap::from([
+                                                (
+                                                    "request_id".to_owned(),
+                                                    request.request_id.clone(),
+                                                ),
+                                                (
+                                                    "engine".to_owned(),
+                                                    context
+                                                        .engine
+                                                        .name()
+                                                        .to_owned(),
+                                                ),
+                                                (
+                                                    "reason".to_owned(),
+                                                    match reason {
+                                                        TsrRequestReason::RulesFailed { message } => message,
+                                                        TsrRequestReason::TsrOnly => "tsr_only".to_owned(),
+                                                    },
+                                                ),
+                                            ]);
+                                            staged.evidence.push(
+                                                Evidence::builder()
+                                                    .kind("external_table_structure".to_owned())
+                                                    .details(details)
+                                                    .build(),
+                                            );
+                                            tracing::info!(
+                                                "completed table structure {} for page {} block {}",
+                                                request.request_id,
+                                                context.page,
+                                                staged.id.as_str()
+                                            );
+                                        });
+                                    (staged, outcome)
+                                }
+                            })
+                            .await
+                            .map_err(|error| {
+                                ParseRuntimeError::Task(error.to_string())
+                            })?;
+                        staged = restored;
+                        outcome
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        };
+        *block = staged;
+        if let Err(error) = result {
+            tracing::warn!(
+                "external table {} on page {} failed with {}: {}",
+                block.id.as_str(),
+                context.page,
+                error.code(),
+                error
+            );
+            Ok(vec![
+                PageWarning {
+                    code: error.code().to_owned(),
+                    stage: "table".to_owned(),
+                    message: format!("table {}: {}", block.id.as_str(), error),
+                },
+                PageWarning {
+                    code: "TableStructureUnavailable".to_owned(),
+                    stage: "table".to_owned(),
+                    message: format!(
+                        "table {} retains source lines: {}",
+                        block.id.as_str(),
+                        error
+                    ),
+                },
+            ])
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     /// Includes model-queue waits in the deadline and drops the provider future on cancellation.

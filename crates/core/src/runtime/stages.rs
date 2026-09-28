@@ -233,15 +233,15 @@ impl PageStage<crate::page::PageTableDraft> {
             formulas,
             ..
         } = self;
-        tables
+        draft = tables
             .resolve(
-                &mut draft,
+                draft,
                 &rendered.image,
                 &rendered.transform,
                 config.fusion(),
                 &timings,
             )
-            .await;
+            .await?;
         // Table assembly has finished; retain its measured source words for exact formula byte ranges.
         let words = std::mem::take(&mut draft.extracted.table_evidence.words);
         let embedded_images =
