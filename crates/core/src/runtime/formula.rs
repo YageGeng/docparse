@@ -23,15 +23,14 @@ impl FormulaResult {
     /// Applies one crop's deadline and records its result without affecting neighboring formulas.
     async fn recognize(
         &mut self,
-        page: &PageResult,
-        rendered: &RenderedPage,
+        page: &Arc<PageResult>,
+        rendered: &Arc<RenderedPage>,
         engine: Option<&dyn FormulaEngine>,
         timeout: Duration,
         timings: &Timings,
     ) {
         let Some(engine) = engine else {
-            // Non-model path: reconstruct formula from native text items, symbols, and scripts.
-            self.reconstruct_heuristic_formula(page);
+            // The CPU preparation stage already reconstructed the native-only formulas.
             return;
         };
 
@@ -85,7 +84,7 @@ impl FormulaResult {
                         } else {
                             format!("$$\n{latex}\n$$")
                         });
-                    self.retain_unrecognized_punctuation(page);
+                    // Native punctuation is reconciled with all projections in the final CPU stage.
                 }
             }
             Err(error) => {
@@ -103,8 +102,8 @@ impl FormulaResult {
     /// Holds shared admission across raster cropping and inference, keeping retained pixels bounded.
     async fn recognize_crop(
         &mut self,
-        page: &PageResult,
-        rendered: &RenderedPage,
+        page: &Arc<PageResult>,
+        rendered: &Arc<RenderedPage>,
         engine: Option<&dyn FormulaEngine>,
         timings: &Timings,
     ) -> Result<Vec<FormulaOutput>, FormulaError> {
@@ -124,27 +123,37 @@ impl FormulaResult {
             None
         };
         let initial = self.crop_bbox.unwrap_or(self.bbox);
-        let mut crop = FormulaCrop {
-            bbox: initial,
-            rendered,
-            expansion: self.background_limits(page),
-        };
-        let image = PageImage::try_from(&mut crop).inspect_err(|error| {
-            tracing::warn!(
-                "formula {} crop failed: {}",
-                self.id.as_str(),
-                error
-            );
-        })?;
-        if crop.bbox != initial {
+        let formula = self.clone();
+        let page = Arc::clone(page);
+        let rendered = Arc::clone(rendered);
+        // Cropping owns admission through completion even when its async waiter times out.
+        let (image, bbox, _admission) = docparse_common::run_cpu(move || {
+            let mut crop = FormulaCrop {
+                bbox: initial,
+                rendered: &rendered,
+                expansion: formula.background_limits(&page),
+            };
+            let image =
+                PageImage::try_from(&mut crop).inspect_err(|error| {
+                    tracing::warn!(
+                        "formula {} crop failed: {}",
+                        formula.id.as_str(),
+                        error
+                    );
+                })?;
+            Ok::<_, FormulaError>((image, crop.bbox, _admission))
+        })
+        .await
+        .map_err(|error| FormulaError::Invalid(error.to_string()))??;
+        if bbox != initial {
             tracing::debug!(
                 "aligned inline formula {} crop from {:?} to background boundaries {:?}",
                 self.id.as_str(),
                 initial,
-                crop.bbox
+                bbox
             );
         }
-        self.crop_bbox = (crop.bbox != self.bbox).then_some(crop.bbox);
+        self.crop_bbox = (bbox != self.bbox).then_some(bbox);
         engine
             .recognize_named(vec![Arc::new(image)], timings.clone())
             .await
@@ -712,97 +721,110 @@ impl PageResult {
 
     /// Continuously submits independent crops to shared engines and isolates failures by region.
     pub(crate) async fn recognize_formulas(
-        &mut self,
+        mut self,
         mut detections: Vec<LayoutDetection>,
-        rendered: &RenderedPage,
-        engine: Option<&dyn FormulaEngine>,
-        config: &ValidatedConfig,
-        timings: &Timings,
-        words: &std::collections::BTreeMap<
-            crate::TextItemId,
-            Vec<crate::TableWord>,
-        >,
-    ) {
-        self.filter_formula_detections(
-            &mut detections,
-            engine,
-            config.formula(),
-        );
-        if detections.is_empty() {
-            // Inline-only pages can exit before normal projection; keep degradation warnings deterministic.
-            self.warnings.sort_by(|a, b| {
-                (&a.stage, &a.code, &a.message)
-                    .cmp(&(&b.stage, &b.code, &b.message))
-            });
-            return;
-        }
-        let mut formulas: Vec<_> = detections
-            .into_iter()
-            .map(|detection| {
-                let mut formula = FormulaResult::builder()
-                    .engine(
-                        engine
-                            .map_or("unavailable", FormulaEngine::name)
-                            .to_owned(),
-                    )
-                    .id(ModelRegionId::detected(
-                        self.page_number,
-                        detection.source_detection_index,
-                    ))
-                    .label(detection.label)
-                    .bbox(detection.bbox)
-                    .build();
-                formula.attach(self);
-                formula.bind_text_spans(self, words);
-                formula.refine_crop(self);
-                formula
-            })
-            .collect();
-        let parallelism = config.formula().active_capacity();
-        // All consumers contribute to active capacity on the shared formula queue.
-        let window = (parallelism + config.formula().queue_size)
+        rendered: RenderedPage,
+        engine: Option<Arc<dyn FormulaEngine>>,
+        config: Arc<ValidatedConfig>,
+        timings: Timings,
+        words: BTreeMap<crate::TextItemId, Vec<crate::TableWord>>,
+    ) -> Result<Self, super::ParseRuntimeError> {
+        let preparing_engine = engine.as_ref().map(Arc::clone);
+        let preparing_config = Arc::clone(&config);
+        let (page, mut formulas) = docparse_common::run_cpu(move || {
+            self.filter_formula_detections(
+                &mut detections,
+                preparing_engine.as_deref(),
+                preparing_config.formula(),
+            );
+            let formulas: Vec<_> = detections
+                .into_iter()
+                .map(|detection| {
+                    let mut formula = FormulaResult::builder()
+                        .engine(
+                            preparing_engine
+                                .as_deref()
+                                .map_or("unavailable", FormulaEngine::name)
+                                .to_owned(),
+                        )
+                        .id(ModelRegionId::detected(
+                            self.page_number,
+                            detection.source_detection_index,
+                        ))
+                        .label(detection.label)
+                        .bbox(detection.bbox)
+                        .build();
+                    formula.attach(&self);
+                    formula.bind_text_spans(&self, &words);
+                    formula.refine_crop(&self);
+                    if preparing_engine.is_none() {
+                        formula.reconstruct_heuristic_formula(&self);
+                    }
+                    formula
+                })
+                .collect();
+            (Arc::new(self), formulas)
+        })
+        .await
+        .map_err(|error| super::ParseRuntimeError::Task(error.to_string()))?;
+        let window = (config.formula().active_capacity()
+            + config.formula().queue_size)
             .min(formulas.len())
             .max(1);
-        tracing::info!(
-            "submitting {} formula regions on page {} to shared queues with window {}",
-            formulas.len(),
-            self.page_number,
-            window
-        );
-        {
-            let page = &*self;
+        if !formulas.is_empty() {
+            tracing::info!(
+                "submitting {} formula regions on page {} to shared queues with window {}",
+                formulas.len(),
+                page.page_number,
+                window
+            );
+        }
+        if engine.is_some() {
+            let rendered = Arc::new(rendered);
             let timeout = Duration::from_millis(config.formula().timeout_ms);
             let requests: Vec<_> = formulas
                 .iter_mut()
                 .map(|formula| {
-                    formula.recognize(page, rendered, engine, timeout, timings)
+                    formula.recognize(
+                        &page,
+                        &rendered,
+                        engine.as_deref(),
+                        timeout,
+                        &timings,
+                    )
                 })
                 .collect();
             let requests = stream::iter(requests).buffer_unordered(window);
             tokio::pin!(requests);
             while requests.next().await.is_some() {}
         }
-        for formula in &formulas {
-            if let Some(error) = &formula.error {
-                self.warnings.push(PageWarning {
-                    code: "FormulaRecognitionFailed".into(),
-                    stage: "formula".into(),
-                    message: format!("{}: {error}", formula.id.as_str()),
-                });
+        docparse_common::run_cpu(move || {
+            // A timed-out crop may still read the page; clone only in that cancellation case, off the executor.
+            let mut page = Arc::unwrap_or_clone(page);
+            for formula in &mut formulas {
+                if let Some(error) = &formula.error {
+                    page.warnings.push(PageWarning {
+                        code: "FormulaRecognitionFailed".into(),
+                        stage: "formula".into(),
+                        message: format!("{}: {error}", formula.id.as_str()),
+                    });
+                } else if engine.is_some() && formula.latex.is_some() {
+                    formula.retain_unrecognized_punctuation(&page);
+                }
             }
-        }
-        tracing::info!(
-            "completed formula recognition on page {}: {} succeeded, {} failed",
-            self.page_number,
-            formulas.iter().filter(|f| f.latex.is_some()).count(),
-            formulas.iter().filter(|f| f.error.is_some()).count()
-        );
-        self.formulas = formulas;
-        self.project_formulas(&config.output().formula_placeholder);
-        self.warnings.sort_by(|a, b| {
-            (&a.stage, &a.code, &a.message)
-                .cmp(&(&b.stage, &b.code, &b.message))
-        });
+            if !formulas.is_empty() {
+                tracing::info!("completed formula recognition on page {}: {} succeeded, {} failed",
+                    page.page_number,
+                    formulas.iter().filter(|f| f.latex.is_some()).count(),
+                    formulas.iter().filter(|f| f.error.is_some()).count());
+                page.formulas = formulas;
+                page.project_formulas(&config.output().formula_placeholder);
+            }
+            page.warnings.sort_by(|a, b| {
+                (&a.stage, &a.code, &a.message).cmp(&(&b.stage, &b.code, &b.message))
+            });
+            page
+        }).await.map_err(|error| super::ParseRuntimeError::Task(error.to_string()))
     }
 
     /// Delegates presentation to the owning block or cell while leaving canonical source text unchanged.
@@ -1319,19 +1341,25 @@ mod tests {
                         .rotation(0)
                         .blocks(blocks)
                         .build();
-                    let engine = CropCapture(std::sync::Mutex::new(Vec::new()));
-                    page.recognize_formulas(
-                        vec![detection],
-                        &rendered,
-                        Some(&engine),
-                        &ValidatedConfig::try_from(
-                            docparse_config::RawConfig::default(),
+                    let engine = Arc::new(CropCapture(std::sync::Mutex::new(
+                        Vec::new(),
+                    )));
+                    page = page
+                        .recognize_formulas(
+                            vec![detection],
+                            rendered.clone(),
+                            Some(Arc::clone(&engine) as Arc<dyn FormulaEngine>),
+                            Arc::new(
+                                ValidatedConfig::try_from(
+                                    docparse_config::RawConfig::default(),
+                                )
+                                .expect("config"),
+                            ),
+                            Timings::default(),
+                            Default::default(),
                         )
-                        .expect("config"),
-                        &Timings::default(),
-                        &Default::default(),
-                    )
-                    .await;
+                        .await
+                        .expect("formula CPU work");
                     let captured = engine.0.lock().expect("crops");
                     let captured = captured.first().expect("crop");
                     let formula = page.formulas.first().expect("formula");

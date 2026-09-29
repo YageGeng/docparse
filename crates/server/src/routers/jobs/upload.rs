@@ -1,6 +1,8 @@
 use crate::{
     code::ApiCode,
-    error::{ApiResult, DatabaseSnafu, RequestSnafu, StorageSnafu},
+    error::{
+        ApiResult, CpuTaskSnafu, DatabaseSnafu, RequestSnafu, StorageSnafu,
+    },
     model::{
         base::ApiResponse,
         error::ApiErrorResponse,
@@ -146,7 +148,7 @@ pub async fn upload(
                 // body, but the reactor pays one hop per batch instead of CPU per chunk.
                 if staged.len() >= HASH_BATCH_BYTES {
                     let mut batch = std::mem::take(&mut staged);
-                    (hash, staged) = docparse_common::run_cpu(move || {
+                    (hash, staged) = docparse_common::run_http_cpu(move || {
                         let mut hash = hash;
                         hash.update(&batch);
                         // Return the allocation with the hasher so the next batch needs no growth or copies during reallocation.
@@ -181,8 +183,15 @@ pub async fn upload(
             code: ApiCode::service_unavailable(5031003),
         })?;
         drop(writer);
-        hash.update(&staged);
-        let hash = hash.finalize().to_hex().to_string();
+        let hash = docparse_common::run_http_cpu(move || {
+            hash.update(&staged);
+            hash.finalize().to_hex().to_string()
+        })
+        .await
+        .context(CpuTaskSnafu {
+            stage: "upload-finalize-hash",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?;
         tracing::info!(
             "received PDF job {} with {} bytes; persisting input",
             id,

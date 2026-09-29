@@ -670,52 +670,62 @@ impl DocParser {
         };
         let tables =
             options.table_runtime(&self.config, self.table_engine.as_ref())?;
-        let source_page_number = input.extracted.page_number;
-        crate::watermark::classify(
-            std::iter::once(&mut input.extracted),
-            self.config.fusion(),
-        )
-        .map_err(|source| {
-            tracing::error!(
-                "watermark classification failed on standalone page {}: {}",
-                source_page_number,
-                source
-            );
-            DocParseError::ParsePage {
-                source: Box::new(source),
-            }
-        })?;
-        let mut context_builder = DocumentContextBuilder::builder()
-            .page_count(1)
-            .metadata(BTreeMap::from([
-                (
-                    "standalone_page_number".to_owned(),
-                    source_page_number.to_string(),
-                ),
-                (
-                    "ocr_enabled".to_owned(),
-                    (self.config.ocr().policy
-                        != docparse_config::OcrPolicy::Disabled)
-                        .to_string(),
-                ),
-            ]))
-            .model_revision(Some(
-                self.layout_engine.model_revision().to_owned(),
+        let config = Arc::clone(&self.config);
+        let model_revision = self.layout_engine.model_revision().to_owned();
+        // Standalone pages need the same CPU isolation as document-wide context construction.
+        let (input, context) = docparse_common::run_cpu(move || {
+            let source_page_number = input.extracted.page_number;
+            crate::watermark::classify(
+                std::iter::once(&mut input.extracted),
+                config.fusion(),
+            )
+            .map_err(|source| {
+                tracing::error!(
+                    "watermark classification failed on standalone page {}: {}",
+                    source_page_number,
+                    source
+                );
+                DocParseError::ParsePage {
+                    source: Box::new(source),
+                }
+            })?;
+            let mut context_builder = DocumentContextBuilder::builder()
+                .page_count(1)
+                .metadata(BTreeMap::from([
+                    (
+                        "standalone_page_number".to_owned(),
+                        source_page_number.to_string(),
+                    ),
+                    (
+                        "ocr_enabled".to_owned(),
+                        (config.ocr().policy
+                            != docparse_config::OcrPolicy::Disabled)
+                            .to_string(),
+                    ),
+                ]))
+                .model_revision(Some(model_revision))
+                .build();
+            // Context statistics are one-page local while the returned page keeps its source identity.
+            let mut probe = PageProbe::from(&input.extracted);
+            probe.page_number = 1;
+            context_builder.push_page(probe).map_err(|source| {
+                DocParseError::ParsePage {
+                    source: Box::new(source),
+                }
+            })?;
+            let context = context_builder.build().map_err(|source| {
+                DocParseError::ParsePage {
+                    source: Box::new(source),
+                }
+            })?;
+            Ok::<_, DocParseError>((input, context))
+        })
+        .await
+        .map_err(|error| {
+            DocParseError::from(crate::runtime::ParseRuntimeError::Task(
+                error.to_string(),
             ))
-            .build();
-        // Context statistics are one-page local while the returned page keeps its source identity.
-        let mut probe = PageProbe::from(&input.extracted);
-        probe.page_number = 1;
-        context_builder.push_page(probe).map_err(|source| {
-            DocParseError::ParsePage {
-                source: Box::new(source),
-            }
-        })?;
-        let context = context_builder.build().map_err(|source| {
-            DocParseError::ParsePage {
-                source: Box::new(source),
-            }
-        })?;
+        })??;
         if let Some(observer) = observer {
             observer.on_progress(crate::ParseProgress::Analyzing {
                 completed: 0,
@@ -764,7 +774,15 @@ impl DocParser {
         }
         // Library calls publish on successful completion; external owners decide after their own commit.
         if result.is_ok() && owned_assets {
-            figure_assets.keep(true);
+            docparse_common::run_cpu(move || figure_assets.keep(true))
+                .await
+                .map_err(|error| {
+                    DocParseError::from(
+                        crate::runtime::ParseRuntimeError::Task(
+                            error.to_string(),
+                        ),
+                    )
+                })?;
         }
         result
     }

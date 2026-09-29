@@ -10,11 +10,22 @@ use tracing_subscriber::layer::SubscriberExt;
 pub fn subscriber(
     config: &LogConfig,
 ) -> Result<
-    impl tracing::Subscriber + Send + Sync,
+    (
+        impl tracing::Subscriber + Send + Sync,
+        Vec<tracing_appender::non_blocking::WorkerGuard>,
+    ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let environment = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(&config.directives))?;
+    // Bounded, lossy queues keep slow disks/pipes off request threads. Guards flush on shutdown.
+    let (stdout, stdout_guard) =
+        tracing_appender::non_blocking::NonBlockingBuilder::default()
+            .buffered_lines_limit(8192)
+            .lossy(true)
+            .thread_name("docparse-log-stdout")
+            .finish(std::io::stdout());
+    let mut guards = vec![stdout_guard];
     let file_layer = if let Some(path) = &config.file {
         if let Some(parent) = path
             .parent()
@@ -23,27 +34,37 @@ pub fn subscriber(
             std::fs::create_dir_all(parent)?;
         }
         // Append preserves earlier profiling evidence across service restarts.
+        let (writer, guard) =
+            tracing_appender::non_blocking::NonBlockingBuilder::default()
+                .buffered_lines_limit(8192)
+                .lossy(true)
+                .thread_name("docparse-log-file")
+                .finish(
+                    OpenOptions::new().create(true).append(true).open(path)?,
+                );
+        guards.push(guard);
         Some(
             tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 // A distinct formatter type isolates span caches from stdout without changing field text.
                 .fmt_fields(DefaultFields::new().delimited(""))
-                .with_writer(
-                    OpenOptions::new().create(true).append(true).open(path)?,
-                ),
+                .with_writer(writer),
         )
     } else {
         None
     };
-    Ok(tracing_subscriber::registry()
-        .with(filter(environment))
-        // Keep stdout active when file logging is configured, with color only on terminals.
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_ansi(std::io::stdout().is_terminal())
-                .with_writer(std::io::stdout),
-        )
-        .with(file_layer))
+    Ok((
+        tracing_subscriber::registry()
+            .with(filter(environment))
+            // Keep stdout active when file logging is configured, with color only on terminals.
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(std::io::stdout().is_terminal())
+                    .with_writer(stdout),
+            )
+            .with(file_layer),
+        guards,
+    ))
 }
 
 /// Reserved for correlation spans; ordinary events retain their module targets and RUST_LOG levels.

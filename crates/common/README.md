@@ -18,3 +18,27 @@ and batch size. Full queues backpressure producers, and short batches run immedi
 Its task-local ownership scope is independent of logging. CPU submissions retain
 leases through uncollected outputs, and model requests retain them through actual
 execution after caller cancellation.
+
+On native targets, `run_cpu` uses a separate process-owned Tokio blocking pool,
+limited to `max(1, available_parallelism - 1)` concurrent operations. Admission is
+asynchronous. Canceled inputs waiting for admission and completed but uncollected
+outputs are destroyed on their CPU pool, never synchronously by the canceling
+executor. Admitted work retains its permit through output destruction; task
+tracking also covers cleanup before admission. `drain_cpu()` waits for both. It
+does not consume the calling runtime's filesystem/blocking workers. CPU closures
+must finish without waiting for another `run_cpu` operation. Applications stop
+producers and call `drain_cpu()` before process shutdown. Native initialization
+uses `run_blocking` instead, preserving the calling runtime's cleanup boundary.
+Model admission and replies wait asynchronously; only actual model execution owns
+a native session thread.
+
+Native `run_http_cpu` shares these ownership guarantees but uses an independent
+pool capped at `min(2, available_parallelism)` workers. Upload hashing, result
+index decoding, and cache generation use that pool so parser saturation cannot
+hold their admission. HTTP computation still shares its own finite capacity;
+neither pool reserves physical CPU time. `drain_cpu()` drains both pools after
+applications stop their producers.
+
+Thread cleanup excludes the originating thread before dispatching joins. A worker
+may release its own `ThreadManager` via drop or `shutdown()` without scheduling a
+join that would cycle with that worker's runtime shutdown.

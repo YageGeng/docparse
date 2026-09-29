@@ -72,7 +72,7 @@ impl TableRuntime {
     /// grid solving and crop copying off the async executor threads.
     pub(crate) async fn resolve(
         &self,
-        mut draft: PageTableDraft,
+        draft: PageTableDraft,
         image: &PageImage,
         transform: &PageTransform,
         config: &FusionConfig,
@@ -93,31 +93,57 @@ impl TableRuntime {
         let Some(engine) = &self.engine else {
             return Ok(draft);
         };
-        let context = TableContext::builder()
-            .config(Arc::new(config.clone()))
-            .evidence(Arc::new(draft.extracted.table_evidence.clone()))
-            .formulas(Arc::from(draft.formula_regions.as_slice()))
-            .image(image.clone())
-            .transform(transform.clone())
-            .timings(timings.clone())
-            .page(draft.extracted.page_number)
-            .engine(Arc::clone(engine))
-            .build();
-        // Model queues decide when requests can enter; the parser does not impose an additional task window.
-        {
-            let mut requests: FuturesUnordered<_> = draft
-                .blocks
-                .iter_mut()
-                .filter(|block| block.label == LayoutLabel::Table)
-                .map(|block| {
+        let config = Arc::new(config.clone());
+        let image = image.clone();
+        let transform = transform.clone();
+        let timings = timings.clone();
+        let engine = Arc::clone(engine);
+        let (mut draft, context) = docparse_common::run_cpu(move || {
+            let context = TableContext::builder()
+                .config(config)
+                .evidence(Arc::new(draft.extracted.table_evidence.clone()))
+                .formulas(Arc::from(draft.formula_regions.as_slice()))
+                .image(image)
+                .transform(transform)
+                .timings(timings)
+                .page(draft.extracted.page_number)
+                .engine(engine)
+                .build();
+            (draft, context)
+        })
+        .await
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
+        // Model queues own admission. Move each block through its CPU stages without cloning its text graph.
+        let count = draft.blocks.len();
+        let mut completed: Vec<Option<Block>> =
+            (0..count).map(|_| None).collect();
+        let mut requests: FuturesUnordered<_> =
+            std::mem::take(&mut draft.blocks)
+                .into_iter()
+                .enumerate()
+                .map(|(index, block)| {
                     let context = context.clone();
-                    async move { self.resolve_block(block, &context).await }
+                    async move {
+                        if block.label == LayoutLabel::Table {
+                            self.resolve_block(block, &context).await.map(
+                                |(block, warnings)| (index, block, warnings),
+                            )
+                        } else {
+                            Ok((index, block, Vec::new()))
+                        }
+                    }
                 })
                 .collect();
-            while let Some(warnings) = requests.next().await {
-                draft.warnings.extend(warnings?);
-            }
+        while let Some(result) = requests.next().await {
+            let (index, block, warnings) = result?;
+            *completed.get_mut(index).expect("original block index") =
+                Some(block);
+            draft.warnings.extend(warnings);
         }
+        draft.blocks = completed
+            .into_iter()
+            .map(|block| block.expect("completed block"))
+            .collect();
         // Completion order must not change deterministic page diagnostics.
         draft.warnings.sort_by(|left, right| {
             (&left.stage, &left.code, &left.message).cmp(&(
@@ -131,14 +157,12 @@ impl TableRuntime {
 
     /// Resolves one table block, which owns itself across every blocking hop.
     ///
-    /// The staged copy is what buys that ownership; it is small next to the grid solver it
-    /// feeds, and it keeps the draft borrowed only by the caller that owns it.
+    /// Owned blocks move through CPU hops while page evidence remains shared.
     async fn resolve_block(
         &self,
-        block: &mut Block,
+        mut staged: Block,
         context: &TableContext,
-    ) -> Result<Vec<PageWarning>, ParseRuntimeError> {
-        let mut staged = block.clone();
+    ) -> Result<(Block, Vec<PageWarning>), ParseRuntimeError> {
         let reason = if self.options.mode == TableMode::Fallback {
             let (restored, probe) = docparse_common::run_cpu({
                 let context = context.clone();
@@ -161,8 +185,7 @@ impl TableRuntime {
             staged = restored;
             match probe {
                 Ok(()) => {
-                    *block = staged;
-                    return Ok(Vec::new());
+                    return Ok((staged, Vec::new()));
                 }
                 Err(message) => {
                     tracing::debug!(
@@ -283,34 +306,34 @@ impl TableRuntime {
             }
             Err(error) => Err(error),
         };
-        *block = staged;
-        if let Err(error) = result {
+        let warnings = if let Err(error) = result {
             tracing::warn!(
                 "external table {} on page {} failed with {}: {}",
-                block.id.as_str(),
+                staged.id.as_str(),
                 context.page,
                 error.code(),
                 error
             );
-            Ok(vec![
+            vec![
                 PageWarning {
                     code: error.code().to_owned(),
                     stage: "table".to_owned(),
-                    message: format!("table {}: {}", block.id.as_str(), error),
+                    message: format!("table {}: {}", staged.id.as_str(), error),
                 },
                 PageWarning {
                     code: "TableStructureUnavailable".to_owned(),
                     stage: "table".to_owned(),
                     message: format!(
                         "table {} retains source lines: {}",
-                        block.id.as_str(),
+                        staged.id.as_str(),
                         error
                     ),
                 },
-            ])
+            ]
         } else {
-            Ok(Vec::new())
-        }
+            Vec::new()
+        };
+        Ok((staged, warnings))
     }
 
     /// Includes model-queue waits in the deadline and drops the provider future on cancellation.

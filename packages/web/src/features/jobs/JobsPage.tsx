@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
 import {
   onlineManager,
   type InfiniteData,
@@ -9,21 +8,17 @@ import {
 import { AlertDialog } from "radix-ui";
 import {
   ArrowDown,
-  ArrowRight,
-  FileText,
   FolderOpen,
   LoaderCircle,
   Plus,
   Search,
-  Trash2,
 } from "lucide-react";
 import { request, type Job, type JobList, type JobStatus } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { fileSize, jobDuration, jobProgress, jobQueueDuration, jobTime } from "@/lib/format";
 import { useJobs } from "./queries";
 import { UploadPanel } from "./UploadPanel";
+import { JobRow } from "./JobRow";
 
 const filters = [
   [undefined, "全部"],
@@ -42,6 +37,7 @@ export function JobsPage() {
   const searchInput = useRef<HTMLInputElement>(null);
   const deleteTrigger = useRef<HTMLButtonElement>(null);
   const [deleting, setDeleting] = useState<Job>();
+  const [previewId, setPreviewId] = useState<string>();
   const client = useQueryClient();
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 250);
@@ -90,6 +86,7 @@ export function JobsPage() {
 
   /** Opens an accessible in-page confirmation and remembers where keyboard focus should return. */
   function deleteResult(job: Job, trigger: HTMLButtonElement) {
+    setPreviewId(undefined);
     deletion.reset();
     deleteTrigger.current = trigger;
     setDeleting(job);
@@ -138,7 +135,7 @@ export function JobsPage() {
               <button
                 key={label}
                 aria-pressed={status === value}
-                onClick={() => setStatus(value)}
+                onClick={() => { setStatus(value); setPreviewId(undefined); }}
               >
                 {label}
               </button>
@@ -151,7 +148,7 @@ export function JobsPage() {
               ref={searchInput}
               type="search"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => { setSearch(event.target.value); setPreviewId(undefined); }}
               placeholder="搜索文件名…"
               maxLength={200}
             />
@@ -213,100 +210,16 @@ export function JobsPage() {
               </thead>
               <tbody>
                 {items.map((job) => (
-                  <tr key={job.id}>
-                    <td>
-                      <div className="flex items-center gap-3">
-                        <div className="file-icon">
-                          <FileText size={21} />
-                        </div>
-                        <div className="min-w-0">
-                          {/* Keep the upload page mounted so opening a document cannot abort its queue. */}
-                          <Link
-                            className="document-name"
-                            to={`/document?job=${job.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="在新标签页打开"
-                          >
-                            {job.filename || `文档 ${job.id.slice(0, 8)}.pdf`}
-                            <span className="sr-only">（在新标签页打开）</span>
-                          </Link>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {fileSize(job.size_bytes)}
-                            <span className="mx-2 text-slate-300">·</span>
-                            <span className="font-mono">
-                              {job.id.slice(0, 8)}
-                            </span>
-                          </p>
-                          {/* Keep queue and completion metadata available when narrow screens hide their columns. */}
-                          <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden" title="创建任务至首次开始解析的等待时间">
-                            排队耗时 {jobQueueDuration(job, queueNow)}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden">
-                            解析耗时 {jobDuration(job)}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground tabular-nums sm:hidden">
-                            完成时间 {jobTime(job.finished_at)}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <StatusBadge status={job.status} />
-                    </td>
-                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
-                      {jobProgress(job).label}
-                    </td>
-                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground tabular-nums sm:table-cell">
-                      {jobQueueDuration(job, queueNow)}
-                    </td>
-                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground tabular-nums sm:table-cell">
-                      {jobDuration(job)}
-                    </td>
-                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell">
-                      {jobTime(job.created_at)}
-                    </td>
-                    <td className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell">
-                      {jobTime(job.finished_at)}
-                    </td>
-                    <td>
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Match the filename link to preserve active uploads from either entry point. */}
-                        <Link
-                          className="row-open"
-                          to={`/document?job=${job.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`在新标签页打开 ${job.filename || job.id}`}
-                        >
-                          <ArrowRight size={17} />
-                        </Link>
-                        {(job.status === "succeeded" ||
-                          job.status === "failed") && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-muted-foreground hover:text-destructive"
-                            disabled={deletion.isPending}
-                            onClick={(event) =>
-                              deleteResult(job, event.currentTarget)
-                            }
-                            aria-label={`删除 ${job.filename || job.id} 的解析结果`}
-                          >
-                            {deletion.isPending &&
-                            deletion.variables === job.id ? (
-                              <LoaderCircle
-                                className="animate-spin"
-                                size={16}
-                              />
-                            ) : (
-                              <Trash2 size={16} />
-                            )}
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    now={queueNow}
+                    open={previewId === job.id}
+                    onOpenChange={(open) => setPreviewId((current) => open ? job.id : current === job.id ? undefined : current)}
+                    onDelete={deleteResult}
+                    deleting={deletion.isPending}
+                    deletingId={deletion.variables}
+                  />
                 ))}
               </tbody>
             </table>

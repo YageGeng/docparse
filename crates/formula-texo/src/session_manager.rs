@@ -70,38 +70,51 @@ impl SessionManager {
             worker_size,
             batch_size,
         );
-        for index in 0..worker_size {
-            let initialize = Arc::clone(&initialize);
-            let session = SessionWorker::new(move || initialize(index)).await?;
-            let receiver = receiver.clone();
-            let name = name.clone();
-            let metrics = Arc::clone(&metrics);
-            workers.spawn(Box::pin(async move {
-                let _alive = metrics.alive(1);
-                while let Some(batch) = receiver.recv().await {
-                    let mut requests = batch.take_ready(batch_size);
-                    if requests.is_empty() {
-                        continue;
+        let initialized = async {
+            for index in 0..worker_size {
+                let initialize = Arc::clone(&initialize);
+                let session =
+                    SessionWorker::new(move || initialize(index)).await?;
+                let receiver = receiver.clone();
+                let name = name.clone();
+                let metrics = Arc::clone(&metrics);
+                workers.spawn(Box::pin(async move {
+                    let _alive = metrics.alive(1);
+                    while let Some(batch) = receiver.recv().await {
+                        let mut requests = batch.take_ready(batch_size);
+                        if requests.is_empty() {
+                            continue;
+                        }
+                        for request in &mut requests {
+                            request.engine.clone_from(&name);
+                        }
+                        let _batch = metrics.batch();
+                        // The native owner retains requests and observes their original response cancellation through every decoder step.
+                        if let Err(error) = session
+                            .run(move |model| {
+                                let result = model(&mut requests);
+                                Request::complete_batch(requests, result);
+                            })
+                            .await
+                        {
+                            tracing::error!(
+                                "Texo consumer execution failed: {}",
+                                error
+                            );
+                        }
                     }
-                    for request in &mut requests {
-                        request.engine.clone_from(&name);
-                    }
-                    let _batch = metrics.batch();
-                    // The native owner retains requests and observes their original response cancellation through every decoder step.
-                    if let Err(error) = session
-                        .run(move |model| {
-                            let result = model(&mut requests);
-                            Request::complete_batch(requests, result);
-                        })
-                        .await
-                    {
-                        tracing::error!(
-                            "Texo consumer execution failed: {}",
-                            error
-                        );
-                    }
-                }
-            }))?;
+                }))?;
+            }
+            Ok::<_, FormulaError>(())
+        }
+        .await;
+        if let Err(error) = initialized {
+            tracing::error!(
+                "Texo initialization failed; closing partial consumers: {}",
+                error
+            );
+            workers.shutdown().await?;
+            return Err(error);
         }
         Ok(workers)
     }

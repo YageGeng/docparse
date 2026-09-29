@@ -65,6 +65,7 @@ mod platform {
                 kind.as_str(),
                 provider
             ));
+            let initialized = async {
             for _ in 0..session_size {
                 let model = Arc::clone(&artifacts.model);
                 let tokenizer = Arc::clone(&artifacts.tokenizer);
@@ -153,6 +154,16 @@ mod platform {
                 }
                 tracing::debug!("closed native PP formula queue");
             }))?;
+            }
+            Ok::<_, FormulaError>(())
+            }.await;
+            if let Err(error) = initialized {
+                tracing::error!(
+                    "PP formula initialization failed; closing partial consumers: {}",
+                    error
+                );
+                runner.workers.shutdown().await?;
+                return Err(error);
             }
             Ok(runner)
         }

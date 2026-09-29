@@ -55,3 +55,43 @@ async fn canceled_blocking_work_holds_its_delivery() {
         .expect("released capacity")
         .expect("queue");
 }
+
+/// Async model replies must retain the ambient delivery even when the operation has no image capture.
+#[tokio::test]
+async fn canceled_session_work_holds_its_delivery() {
+    let queue = PageQueue::new(1);
+    let lease = queue.reserve().await.expect("slot");
+    let session = Arc::new(
+        docparse_common::SessionWorker::new(|| {
+            Ok::<_, docparse_common::TaskError>(())
+        })
+        .await
+        .expect("session"),
+    );
+    let (started, entered) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let task = tokio::spawn(async move {
+        lease
+            .scope(session.run(move |_| {
+                started.send(()).expect("session entered");
+                blocked
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("release session");
+            }))
+            .await
+    });
+    entered.await.expect("native work");
+    task.abort();
+    task.await.expect_err("caller canceled");
+    let premature =
+        tokio::time::timeout(Duration::from_millis(30), queue.reserve()).await;
+    release.send(()).expect("finish native work");
+    assert!(
+        premature.is_err(),
+        "native work released its ambient page slot too early"
+    );
+    tokio::time::timeout(Duration::from_secs(1), queue.reserve())
+        .await
+        .expect("slot restored")
+        .expect("queue");
+}

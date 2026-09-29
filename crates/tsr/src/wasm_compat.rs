@@ -22,16 +22,12 @@ struct Request {
     context: TimingContext,
     #[builder(default)]
     queued: Option<docparse_common::timing::StageTimer>,
-    /// Native blocking replies outlive a canceled future, so they need a separate caller-lifetime signal.
-    #[builder(default)]
-    caller: Option<oneshot::Sender<()>>,
 }
 
 impl Request {
-    /// Recognizes native caller cancellation even while its blocking completion receiver remains alive.
+    /// Recognizes cancellation from the asynchronous reply receiver.
     fn cancelled(&self) -> bool {
         self.response.is_closed()
-            || self.caller.as_ref().is_some_and(oneshot::Sender::is_closed)
     }
 
     /// Ends each caller's queue interval and starts its share of the batch execution interval.
@@ -124,14 +120,6 @@ mod tests {
         let mut replies = Vec::new();
         for value in 0..5 {
             let (response, reply) = oneshot::channel();
-            // Native cancellation must work even though its blocking reply receiver is still alive.
-            let caller = if value == 2 {
-                let (caller, lifetime) = oneshot::channel();
-                drop(lifetime);
-                Some(caller)
-            } else {
-                None
-            };
             sender
                 .send(
                     Request::builder()
@@ -144,7 +132,6 @@ mod tests {
                             ),
                         ))
                         .response(response)
-                        .caller(caller)
                         .context(TimingContext::new(Timings::default()))
                         .build(),
                 )
@@ -153,7 +140,8 @@ mod tests {
                 .expect("ready queue has space for every test request");
             replies.push(reply);
         }
-        let cancelled_reply = replies.remove(2);
+        // Native and browser requests now share direct reply-receiver cancellation.
+        drop(replies.remove(2));
         drop(replies.remove(2));
         drop(sender);
         let kind = ModelKind::Structure(docparse_config::TsrModel::SlanetPlus);
@@ -191,7 +179,6 @@ mod tests {
             Request::complete(requests, timers, Ok(outputs));
         }
         assert!(receiver.recv().await.is_none());
-        assert!(cancelled_reply.await.is_err());
         for (reply, expected) in replies.into_iter().zip([0.0, 1.0, 4.0]) {
             let ModelResult::Cells(boxes) =
                 reply.await.expect("response").expect("result")
@@ -228,7 +215,6 @@ mod tests {
 mod platform {
     use super::*;
     use crate::TsrArtifacts;
-    use docparse_common::run_cpu;
 
     use docparse_common::SessionManager;
 
@@ -308,21 +294,13 @@ mod platform {
         /// Keeps the last model owner off the inference thread until even canceled native work has completed.
         pub(super) async fn submit(
             self: Arc<Self>,
-            mut request: Request,
+            request: Request,
             receiver: oneshot::Receiver<Result<ModelResult, TsrError>>,
         ) -> Result<ModelResult, TsrError> {
-            let (caller, _caller_lifetime) = oneshot::channel();
-            request.caller = Some(caller);
-            run_cpu(move || {
-                self.manager.send(request)?;
-                // Only finite work occupies the caller's blocking pool; idle models use their own threads.
-                receiver.blocking_recv().map_err(|_closed| {
-                    TsrError::Inference {
-                        message: "TSR response lost".to_owned(),
-                    }
-                })?
-            })
-            .await?
+            self.manager.send_async(request).await?;
+            receiver.await.map_err(|_closed| TsrError::Inference {
+                message: "TSR response lost".into(),
+            })?
         }
     }
 

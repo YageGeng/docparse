@@ -38,6 +38,13 @@ pub enum ApiError {
         stage: &'static str,
         code: ApiCode,
     },
+    /// Isolated CPU task failures retain their runtime diagnostics.
+    #[snafu(display("CPU task failed at {stage}: {source}"))]
+    CpuTask {
+        source: docparse_common::TaskError,
+        stage: &'static str,
+        code: ApiCode,
+    },
     #[snafu(display("serialization failed at {stage}: {source}"))]
     Serialize {
         source: serde_json::Error,
@@ -67,6 +74,7 @@ impl ApiError {
             | Self::Database { code, .. }
             | Self::Storage { code, .. }
             | Self::Task { code, .. }
+            | Self::CpuTask { code, .. }
             | Self::Serialize { code, .. }
             | Self::Parse { code, .. }
             | Self::Multipart { code, .. } => *code,

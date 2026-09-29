@@ -1,4 +1,47 @@
 use docparse_server::storage::SharedStorage;
+
+/// Canceling a contended deletion must not leave an uncancellable file-lock waiter in the blocking pool.
+#[test]
+fn cancelled_delete_leaves_blocking_capacity_available() {
+    let directory = tempfile::tempdir().expect("storage");
+    std::fs::create_dir(directory.path().join(".locks")).expect("locks");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.path().join(".locks/result.json"))
+        .expect("coordination lock");
+    lock.lock().expect("hold competing artifact lock");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("runtime");
+    let available = runtime.block_on(async {
+        let storage =
+            SharedStorage::new(directory.path()).await.expect("storage");
+        tokio::time::timeout(
+            std::time::Duration::from_millis(40),
+            storage.remove("result.json"),
+        )
+        .await
+        .expect_err("competing lock keeps deletion pending");
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            tokio::task::spawn_blocking(|| 42),
+        )
+        .await
+    });
+    drop(lock);
+    drop(runtime);
+    assert_eq!(
+        available
+            .expect("canceled deletion left the pool available")
+            .expect("blocking task"),
+        42
+    );
+}
 use std::io::Write;
 
 /// Waiters for one result lock must leave capacity for an unrelated document's artifact.

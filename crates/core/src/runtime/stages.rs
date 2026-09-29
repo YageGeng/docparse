@@ -101,8 +101,12 @@ impl PageAnalysisInput {
         let analyzer = PageAnalyzer::new(Arc::clone(&config))
             .with_timings(timings.clone());
         let preparation = timings.start(TimingStage::TextPrepare);
-        let draft = analyzer.prepare(extracted, detections, context)?;
-        drop(preparation);
+        let draft = docparse_common::run_cpu(move || {
+            let _preparation = preparation;
+            analyzer.prepare(extracted, detections, context)
+        })
+        .await
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
         Ok(PageStage::builder()
             .config(config)
             .ocr_engine(ocr_engine)
@@ -307,15 +311,16 @@ impl PageStage<PageFormulaDraft> {
             ..
         } = self;
         if config.formula().inline_enabled || config.formula().display_enabled {
-            page.recognize_formulas(
-                formulas,
-                &rendered,
-                formula_engine.as_deref(),
-                &config,
-                &timings,
-                &words,
-            )
-            .await;
+            page = page
+                .recognize_formulas(
+                    formulas,
+                    rendered,
+                    formula_engine,
+                    config,
+                    timings,
+                    words,
+                )
+                .await?;
         }
         if let Some(warning) = layout_warning {
             page.warnings.push(warning);

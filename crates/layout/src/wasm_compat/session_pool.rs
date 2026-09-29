@@ -20,15 +20,12 @@ struct Request {
     context: TimingContext,
     #[builder(default)]
     queued: Option<StageTimer>,
-    #[builder(default)]
-    caller: Option<oneshot::Sender<()>>,
 }
 
 impl Request {
-    /// Blocking replies need the original async lifetime in addition to receiver cancellation.
+    /// Reply ownership directly observes cancellation of the asynchronous caller.
     fn cancelled(&self) -> bool {
         self.response.is_closed()
-            || self.caller.as_ref().is_some_and(oneshot::Sender::is_closed)
     }
     /// Records admission under the original caller's tracing subscriber.
     fn end_queue(&mut self) {
@@ -91,7 +88,7 @@ impl docparse_common::SessionRequest for Request {
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
-    use docparse_common::{SessionManager, run_cpu};
+    use docparse_common::SessionManager;
     use ort::session::{HasSelectedOutputs, Session};
 
     /// One mutable native ORT session held by a unique lease.
@@ -186,26 +183,19 @@ mod platform {
             .await?;
             Ok(Arc::new(Self { manager }))
         }
-        /// Holds the manager off session threads until even canceled native inference releases its input.
+        /// Admits and awaits model work without occupying a blocking thread.
         pub(super) async fn submit(
             self: Arc<Self>,
-            mut request: Request,
+            request: Request,
             receiver: oneshot::Receiver<Result<ModelOutputs, LayoutError>>,
         ) -> Result<ModelOutputs, LayoutError> {
-            let (caller, _lifetime) = oneshot::channel();
-            request.caller = Some(caller);
-            run_cpu(move || {
-                self.manager
-                    .send(request)
-                    .map_err(|source| LayoutError::TaskJoin { source })?;
-                receiver.blocking_recv().map_err(|error| {
-                    LayoutError::Engine {
-                        message: error.to_string(),
-                    }
-                })?
-            })
-            .await
-            .map_err(|source| LayoutError::TaskJoin { source })?
+            self.manager
+                .send_async(request)
+                .await
+                .map_err(|source| LayoutError::TaskJoin { source })?;
+            receiver.await.map_err(|error| LayoutError::Engine {
+                message: error.to_string(),
+            })?
         }
     }
     #[cfg(test)]

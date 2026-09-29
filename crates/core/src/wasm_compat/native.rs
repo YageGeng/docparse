@@ -142,6 +142,24 @@ pub struct FigureAssets {
     directory: Mutex<Option<tempfile::TempDir>>,
 }
 
+impl Drop for FigureAssets {
+    /// Cancellation may release the final directory owner on an async thread; defer recursive deletion.
+    fn drop(&mut self) {
+        let directory = self
+            .directory
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(directory) = directory {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                drop(runtime.spawn_blocking(move || drop(directory)));
+            } else {
+                drop(directory);
+            }
+        }
+    }
+}
+
 impl FigureAssets {
     /// Creates a lazy owner without touching disk, including for file-free documents.
     pub(crate) fn new(

@@ -1,7 +1,9 @@
 //! Small derived files accelerate immutable results without changing their canonical JSON bytes.
 use crate::{
     code::ApiCode,
-    error::{ApiResult, RequestSnafu, SerializeSnafu, StorageSnafu, TaskSnafu},
+    error::{
+        ApiResult, CpuTaskSnafu, RequestSnafu, SerializeSnafu, StorageSnafu,
+    },
     storage::{ARTIFACT_BUILD_TIMEOUT, SharedStorage},
 };
 use base64::{engine::general_purpose::STANDARD, write::EncoderWriter};
@@ -139,7 +141,7 @@ impl SharedStorage {
                 let storage = storage.clone();
                 let span = span.clone();
                 let dispatcher = dispatcher.clone();
-                let building = tokio::task::spawn_blocking(move || {
+                let building = docparse_common::run_http_cpu(move || {
                     let _permit = permit;
                     tracing::dispatcher::with_default(&dispatcher, || {
                         span.in_scope(|| -> ApiResult<Option<PathBuf>> {
@@ -320,7 +322,7 @@ impl SharedStorage {
                         })
                     })
                 });
-                if let Some(path) = building.await.context(TaskSnafu {
+                if let Some(path) = building.await.context(CpuTaskSnafu {
                     stage: "result-cache-task",
                     code: ApiCode::COMMON_INTERNAL_ERROR,
                 })?? {

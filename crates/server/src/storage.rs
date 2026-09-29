@@ -52,6 +52,8 @@ pub struct SharedStorage {
     root: PathBuf,
     /// Bounds concurrent derived-artifact builds across every request and endpoint.
     pub(crate) artifact_permits: Arc<Semaphore>,
+    /// Retained by real filesystem cleanup even after the requesting future is canceled.
+    cleanup_permits: Arc<Semaphore>,
 }
 
 impl SharedStorage {
@@ -78,6 +80,7 @@ impl SharedStorage {
         Ok(Self {
             root,
             artifact_permits: Arc::new(Semaphore::new(ARTIFACT_PERMITS)),
+            cleanup_permits: Arc::new(Semaphore::new(ARTIFACT_PERMITS)),
         })
     }
 
@@ -159,61 +162,96 @@ impl SharedStorage {
         let root = self.root.clone();
         let storage = self.clone();
         let name = name.to_owned();
-        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            // Coordination never locks the data inode, so mandatory SMB locks cannot disrupt result readers.
-            let lock = storage.result_lock(&name)?;
-            lock.lock()?;
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
-                let prefix = format!(
-                    "{}.",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                );
-                for entry in std::fs::read_dir(&root)? {
-                    let entry = entry?;
-                    if entry.file_name().to_string_lossy().starts_with(&prefix)
-                    {
-                        // Only attempt-owned figure directories are recursive; never follow directory symlinks.
-                        let removal = if entry.file_type()?.is_dir()
-                            && entry
-                                .file_name()
-                                .to_string_lossy()
-                                .starts_with(&format!("{name}.figures-"))
-                        {
-                            std::fs::remove_dir_all(entry.path())
-                        } else {
-                            std::fs::remove_file(entry.path())
-                        };
-                        match removal {
-                            Ok(()) => {}
-                            Err(error)
-                                if error.kind()
-                                    == std::io::ErrorKind::NotFound => {}
-                            Err(error) => return Err(error),
+        loop {
+            let permit = Arc::clone(&self.cleanup_permits)
+                .acquire_owned()
+                .await
+                .expect("cleanup admission stays open");
+            let path = path.clone();
+            let root = root.clone();
+            let storage = storage.clone();
+            let name = name.clone();
+            let removed = tokio::task::spawn_blocking(
+                move || -> std::io::Result<bool> {
+                    let _permit = permit;
+                    // Coordination never locks the data inode, so mandatory SMB locks cannot disrupt result readers.
+                    let lock = storage.result_lock(&name)?;
+                    match lock.try_lock() {
+                        Ok(()) => {}
+                        Err(std::fs::TryLockError::WouldBlock) => {
+                            return Ok(false);
+                        }
+                        Err(std::fs::TryLockError::Error(error)) => {
+                            return Err(error);
                         }
                     }
-                }
+                    if path
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                    {
+                        let prefix = format!(
+                            "{}.",
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                        );
+                        for entry in std::fs::read_dir(&root)? {
+                            let entry = entry?;
+                            if entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with(&prefix)
+                            {
+                                // Only attempt-owned figure directories are recursive; never follow directory symlinks.
+                                let removal = if entry.file_type()?.is_dir()
+                                    && entry
+                                        .file_name()
+                                        .to_string_lossy()
+                                        .starts_with(&format!(
+                                            "{name}.figures-"
+                                        )) {
+                                    std::fs::remove_dir_all(entry.path())
+                                } else {
+                                    std::fs::remove_file(entry.path())
+                                };
+                                match removal {
+                                    Ok(()) => {}
+                                    Err(error)
+                                        if error.kind()
+                                            == std::io::ErrorKind::NotFound => {
+                                    }
+                                    Err(error) => return Err(error),
+                                }
+                            }
+                        }
+                    }
+                    match std::fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound => {
+                        }
+                        Err(error) => return Err(error),
+                    }
+                    // Also sync after NotFound: a previous interrupted attempt may have unlinked without syncing.
+                    std::fs::File::open(root)?.sync_all()?;
+                    Ok(true)
+                },
+            )
+            .await
+            .context(TaskSnafu {
+                stage: "storage-remove-task",
+                code: ApiCode::COMMON_INTERNAL_ERROR,
+            })?
+            .context(StorageSnafu {
+                stage: "storage-remove-file",
+                code: ApiCode::service_unavailable(5031003),
+            })?;
+            if removed {
+                return Ok(());
             }
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-            // Also sync after NotFound: a previous interrupted attempt may have unlinked without syncing.
-            std::fs::File::open(root)?.sync_all()?;
-            Ok(())
-        })
-        .await
-        .context(TaskSnafu {
-            stage: "storage-remove-task",
-            code: ApiCode::COMMON_INTERNAL_ERROR,
-        })?
-        .context(StorageSnafu {
-            stage: "storage-remove-file",
-            code: ApiCode::service_unavailable(5031003),
-        })
+            // Contended cross-process locks retain no blocking thread or cleanup permit.
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
     }
 
     /// Opens a stable coordination inode; callers choose blocking or nonblocking acquisition.
@@ -317,7 +355,18 @@ impl SharedStorage {
 
     /// Checks storage writability without retaining a health-check artifact.
     pub async fn ready(&self) -> ApiResult<()> {
-        drop(self.temporary().await?);
-        Ok(())
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || {
+            NamedTempFile::new_in(root)?.close()
+        })
+        .await
+        .context(TaskSnafu {
+            stage: "storage-ready-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?
+        .context(StorageSnafu {
+            stage: "storage-ready-file",
+            code: ApiCode::service_unavailable(5031003),
+        })
     }
 }

@@ -362,10 +362,38 @@ keep them compatible during a rolling release.
 
 After draining, dropping the parser closes its model queues and joins the dedicated
 native threads, including ONNX destruction and thread-local cleanup. Idle sessions
-use no Tokio blocking capacity and can outlive their construction runtime. Finite
-initialization and inference waits retain ownership through caller cancellation;
-runtime shutdown waits for that outstanding work. This prevents CUDA cleanup from
-racing process-wide library teardown without reserving blocking workers for idle models.
+use no Tokio blocking capacity and can outlive their construction runtime. Model
+admission and replies wait asynchronously; native operations retain their inputs
+through caller cancellation. Thread joins run outside async workers, and runtime
+shutdown waits for native cleanup.
+
+Parser preprocessing, IPC decoding/copying and result serialization run on a
+separate CPU pool with `max(1, available_parallelism - 1)` slots. Canceled work
+retains its slot through destruction of uncollected output. Cancellation of an
+already completed result or an input still waiting for admission also defers
+destruction to the pool; shutdown tracks and drains those cleanups.
+
+Upload hashing, result-index decoding, response-prefix serialization, and derived
+artifact builds use a separate HTTP CPU pool capped at
+`min(2, available_parallelism)` workers. Even cached page reads and conditional
+responses therefore remain independent of parser CPU admission in the combined
+API/worker role. HTTP computations share their own bounded capacity, which is
+also drained during shutdown.
+
+HTTP compression uses a separate one-poll admission limit on the HTTP runtime's
+blocking pool, never the parser CPU queue. Each poll releases its slot before the
+client consumes its returned frame, so slow clients do not reserve compression
+capacity while waiting for I/O. Source representations already carrying
+`Content-Encoding`, including precompressed WebUI assets, bypass compression
+admission entirely. Filesystem work retains the HTTP runtime's blocking pool,
+with at most one worker used for compression. Contended result deletion uses
+nonblocking file-lock attempts and asynchronous retry; actual deletions have a
+separate three-operation limit that survives caller cancellation.
+
+This isolates executor threads and bounds CPU concurrency, but does not reserve
+physical CPU time against ONNX inference or other processes. Deploy `--role api`
+and `--role worker` separately with CPU resource limits when HTTP latency must
+remain predictable under full compute load.
 
 Inputs are content-addressed. Duplicate publication compares existing bytes and
 rejects conflicting or corrupt objects instead of acknowledging the filename alone. Results use per-attempt names and are synchronized
@@ -424,6 +452,11 @@ configuration file. File output always disables ANSI colors; stdout uses colors
 only when attached to a terminal. Both outputs share the same event filter. Omit
 `file` for stdout-only logging. Unwritable destinations stop startup before
 database or model initialization.
+
+Stdout and file writes use separate background writers with bounded 8,192-line
+queues. On saturation they drop new log lines instead of blocking HTTP or parser
+threads. Shutdown retains and flushes their `WorkerGuard`s; library callers of
+`logging::subscriber` must keep the returned guards alive with the subscriber.
 
 SQLx query logging has separate database settings with these defaults:
 

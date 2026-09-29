@@ -568,7 +568,11 @@ impl PdfiumReservation {
         timings: Timings,
     ) -> Result<Box<dyn PdfiumSession>, PdfiumRuntimeError> {
         let _opening = timings.start(TimingStage::PdfOpen);
-        let source = Source::try_from(input)?;
+        let source = docparse_common::run_cpu(move || Source::try_from(input))
+            .await
+            .map_err(|error| {
+                PdfiumRuntimeError::Transport(error.to_string())
+            })??;
         let lease = self.lease.take().expect("unconsumed PDFium reservation");
         let outcome = lease.request(Command::Open(source), None).await?;
         let Outcome::Opened(pages) = outcome else {
@@ -612,9 +616,14 @@ impl PdfiumSession for RemoteSession {
                 page_number,
                 resolve_glyphs: resolver.is_some(),
             };
-            let decoded = PreScannedPage::try_from(
-                self.lease.request(command, resolver).await?,
-            );
+            let outcome = self.lease.request(command, resolver).await?;
+            // IPC transport is asynchronous, but decoding the page graph is CPU work.
+            let decoded = docparse_common::run_cpu(move || {
+                PreScannedPage::try_from(outcome)
+            })
+            .await
+            .map_err(|error| PdfiumRuntimeError::Transport(error.to_string()))
+            .and_then(|result| result);
             if decoded.is_err() {
                 self.lease.cancelled.cancel();
             }
@@ -660,7 +669,15 @@ impl PdfiumSession for RemoteSession {
                 Outcome::Rendered(raster)
                     if raster.page_number == page_number =>
                 {
-                    let decoded = RenderedPage::try_from(raster);
+                    // Shared-memory raster and embedded-image copies belong on the CPU pool too.
+                    let decoded = docparse_common::run_cpu(move || {
+                        RenderedPage::try_from(raster)
+                    })
+                    .await
+                    .map_err(|error| {
+                        PdfiumRuntimeError::Transport(error.to_string())
+                    })
+                    .and_then(|result| result);
                     if decoded.is_err() {
                         self.lease.cancelled.cancel();
                     }

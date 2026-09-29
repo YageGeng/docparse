@@ -13,6 +13,8 @@ pub use runtime::{
     TaskError, WasmBoxedFuture, WasmCompatSend, WasmCompatSync, panic_message,
     run_cpu,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use runtime::{drain_cpu, run_blocking, run_http_cpu};
 pub use thread::ThreadManager;
 pub use timeout::{Elapsed, timeout};
 

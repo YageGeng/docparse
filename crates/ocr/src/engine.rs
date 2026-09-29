@@ -263,6 +263,7 @@ impl PaddleOcrEngine {
                             Ok::<_, OcrError>((crop, input))
                         })
                         .await??;
+                    let mut rotated = false;
                     if let (Some(classifier), Some(input)) =
                         (&self.classifier, orientation)
                     {
@@ -280,17 +281,17 @@ impl PaddleOcrEngine {
                                 "missing orientation result".into(),
                             )
                         })?;
-                        if result.rotated
+                        rotated = result.rotated
                             && result.confidence
-                                >= self.config.orientation_threshold
-                        {
-                            crop.rotate_half_turn()?;
-                        }
+                                >= self.config.orientation_threshold;
                     }
                     let timer = timings.clone();
                     let (quad, input) = docparse_common::run_cpu(move || {
                         let _timer =
                             timer.start(TimingStage::OcrRecognitionPreprocess);
+                        if rotated {
+                            crop.rotate_half_turn()?;
+                        }
                         let input = ImageTensor::recognition(
                             &[&crop.image],
                             max_width,

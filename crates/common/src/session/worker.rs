@@ -1,5 +1,5 @@
 //! Dedicated native session execution and cancellation-safe ownership.
-use crate::{TaskError, ThreadManager, run_cpu};
+use crate::{TaskError, ThreadManager, run_blocking};
 use std::sync::Arc;
 
 type SessionOperation<S> = Box<dyn FnOnce(&mut S) + Send>;
@@ -9,14 +9,14 @@ pub struct SessionWorker<S> {
     owner: Arc<SessionOwner<S>>,
 }
 
-/// Closes the queue before joining; finite initialization and inference tasks retain this owner through cancellation.
+/// Closes admission before thread cleanup; native operations retain their inputs through cancellation.
 struct SessionOwner<S> {
     sender: Option<tokio::sync::mpsc::Sender<SessionOperation<S>>>,
     _threads: ThreadManager,
 }
 
 impl<S> Drop for SessionOwner<S> {
-    /// Joins native destruction and thread-local cleanup before the last owner can finish dropping.
+    /// Closes the queue before handing the native thread to cleanup.
     fn drop(&mut self) {
         drop(self.sender.take());
     }
@@ -37,7 +37,7 @@ impl<S: 'static> SessionWorker<S> {
                 span.in_scope(initialize)
             })
         };
-        run_cpu(move || {
+        run_blocking(move || {
             let (sender, mut requests) =
                 tokio::sync::mpsc::channel::<SessionOperation<S>>(1);
             let (ready, initialized) = tokio::sync::oneshot::channel();
@@ -58,18 +58,27 @@ impl<S: 'static> SessionWorker<S> {
                 }
             })?;
             // Install ownership before waiting: cancellation and initialization errors must also close and join the thread.
-            let worker = Self {
+            let mut worker = Self {
                 owner: Arc::new(SessionOwner {
                     sender: Some(sender),
                     _threads: threads,
                 }),
             };
-            initialized.blocking_recv().map_err(|closed| {
-                TaskError::from_message(format!(
-                    "{}: {closed}",
-                    "model initialization thread stopped"
-                ))
-            })??;
+            let result = initialized
+                .blocking_recv()
+                .map_err(|closed| {
+                    E::from(TaskError::from_message(format!(
+                        "model initialization thread stopped: {closed}"
+                    )))
+                })
+                .and_then(|result| result);
+            if let Err(error) = result {
+                let owner = Arc::get_mut(&mut worker.owner)
+                    .expect("initialization owns the only session handle");
+                drop(owner.sender.take());
+                owner._threads.join();
+                return Err(error);
+            }
             Ok::<_, E>(worker)
         })
         .await
@@ -82,55 +91,52 @@ impl<S: 'static> SessionWorker<S> {
         F: FnOnce(&mut S) -> R + Send + 'static,
         R: Send + 'static,
     {
-        let owner = Arc::clone(&self.owner);
-        // This receiver belongs to the async caller, so queued requests still observe cancellation.
-        let (caller, _caller_lifetime) = tokio::sync::oneshot::channel::<()>();
+        let (response, result) = tokio::sync::oneshot::channel();
+        let lease = crate::PageLease::current();
         // Capture each invocation separately because the same session thread serves different PDFs.
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-        run_cpu(move || {
-            let (response, result) = tokio::sync::oneshot::channel();
-            owner
-                .sender
-                .as_ref()
-                .ok_or_else(|| {
-                    TaskError::from_message("model execution thread stopped")
-                })?
-                .blocking_send(Box::new(move |session| {
-                    tracing::dispatcher::with_default(&dispatcher, || {
-                        span.in_scope(|| {
-                            if caller.is_closed() {
-                                // Release captured leases before waking the waiter that owns the thread's join handle.
-                                drop(operation);
-                                return;
-                            }
-                            let value = operation(session);
-                            let _ = response.send(value);
-                        })
+        self.owner
+            .sender
+            .as_ref()
+            .ok_or_else(|| {
+                TaskError::from_message("model execution thread stopped")
+            })?
+            .send(Box::new(move |session| {
+                tracing::dispatcher::with_default(&dispatcher, || {
+                    span.in_scope(|| {
+                        if response.is_closed() {
+                            // Queued cancellation releases captures without executing native inference.
+                            drop(operation);
+                            return;
+                        }
+                        let value = operation(session);
+                        // Retain ambient delivery ownership through native execution and uncollected replies.
+                        let _ = response.send((value, lease));
                     })
-                }))
-                .map_err(|closed| {
-                    TaskError::from_message(format!(
-                        "{}: {closed}",
-                        "model execution thread stopped"
-                    ))
-                })?;
-            // Only finite work occupies Tokio's pool. Retain the owner until native work releases its captures,
-            // even when the caller is cancelled, so the session can never try to join its own thread.
-            result.blocking_recv().map_err(|closed| {
+                })
+            }))
+            .await
+            .map_err(|closed| {
                 TaskError::from_message(format!(
                     "{}: {closed}",
-                    "model execution response lost"
+                    "model execution thread stopped"
                 ))
-            })
+            })?;
+        // The session thread owns the operation and its inputs until completion; waiting needs no OS thread.
+        result.await.map(|(value, _lease)| value).map_err(|closed| {
+            TaskError::from_message(format!(
+                "{}: {closed}",
+                "model execution response lost"
+            ))
         })
-        .await?
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionWorker, TaskError, run_cpu};
+    use super::{SessionWorker, TaskError};
+    use crate::run_cpu;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},

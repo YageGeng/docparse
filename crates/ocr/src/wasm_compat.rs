@@ -22,15 +22,12 @@ struct Request {
     context: TimingContext,
     #[builder(default)]
     queued: Option<StageTimer>,
-    #[builder(default)]
-    caller: Option<oneshot::Sender<()>>,
 }
 
 impl Request {
-    /// Finite native reply waits must also observe the original async caller's lifetime.
+    /// Reply ownership directly observes cancellation of the asynchronous caller.
     fn cancelled(&self) -> bool {
         self.response.is_closed()
-            || self.caller.as_ref().is_some_and(oneshot::Sender::is_closed)
     }
     /// Finishes queue timing under the correct page and subscriber.
     fn end_queue(&mut self) {
@@ -123,7 +120,7 @@ impl SessionRunner {
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
-    use docparse_common::{SessionManager, run_cpu};
+    use docparse_common::SessionManager;
 
     /// Each OCR stage owns independent sessions consuming one shared ready-input queue.
     pub(crate) struct SessionRunner {
@@ -168,21 +165,16 @@ mod platform {
             Ok(Arc::new(Self { manager }))
         }
 
-        /// Keeps the last session owner outside its own execution thread through finite native work.
+        /// Admits and awaits model work without occupying a blocking thread.
         pub(super) async fn submit(
             self: Arc<Self>,
-            mut request: Request,
+            request: Request,
             receiver: oneshot::Receiver<Result<ModelOutput, OcrError>>,
         ) -> Result<ModelOutput, OcrError> {
-            let (caller, _lifetime) = oneshot::channel();
-            request.caller = Some(caller);
-            run_cpu(move || {
-                self.manager.send(request)?;
-                receiver
-                    .blocking_recv()
-                    .map_err(|error| OcrError::InvalidData(error.to_string()))?
-            })
-            .await?
+            self.manager.send_async(request).await?;
+            receiver
+                .await
+                .map_err(|error| OcrError::InvalidData(error.to_string()))?
         }
     }
 

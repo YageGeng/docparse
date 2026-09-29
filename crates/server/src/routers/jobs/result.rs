@@ -1,7 +1,8 @@
 use crate::{
     code::ApiCode,
     error::{
-        ApiResult, DatabaseSnafu, RequestSnafu, SerializeSnafu, StorageSnafu,
+        ApiResult, CpuTaskSnafu, DatabaseSnafu, RequestSnafu, SerializeSnafu,
+        StorageSnafu,
     },
     model::{
         base::ApiResponse,
@@ -106,11 +107,18 @@ pub async fn result(
             stage: "result-read-index",
             code: ApiCode::service_unavailable(5031003),
         })?;
-        let index: ResultIndex =
-            serde_json::from_slice(&bytes).context(SerializeSnafu {
-                stage: "result-decode-index",
-                code: ApiCode::COMMON_INTERNAL_ERROR,
-            })?;
+        let index: ResultIndex = docparse_common::run_http_cpu(move || {
+            serde_json::from_slice(&bytes)
+        })
+        .await
+        .context(CpuTaskSnafu {
+            stage: "result-decode-index-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?
+        .context(SerializeSnafu {
+            stage: "result-decode-index",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })?;
         if page.is_some_and(|number| number > index.page_count) {
             return RequestSnafu {
                 stage: "result-check-page",
@@ -152,14 +160,24 @@ pub async fn result(
         StatusCode::NOT_MODIFIED.into_response()
     } else if let (Some(number), Some(index)) = (page, index) {
         // Only the selected byte range enters the HTTP body; canonical page JSON is never decoded or copied here.
-        let prefix = format!(
-            "{{\"data\":{{\"page_count\":{},\"errors\":{},\"page\":",
-            index.page_count,
-            serde_json::to_string(&index.errors).context(SerializeSnafu {
-                stage: "result-encode-errors",
-                code: ApiCode::COMMON_INTERNAL_ERROR
-            })?
-        );
+        let (prefix, index) = docparse_common::run_http_cpu(move || {
+            let prefix = format!(
+                "{{\"data\":{{\"page_count\":{},\"errors\":{},\"page\":",
+                index.page_count,
+                serde_json::to_string(&index.errors).context(
+                    SerializeSnafu {
+                        stage: "result-encode-errors",
+                        code: ApiCode::COMMON_INTERNAL_ERROR
+                    }
+                )?
+            );
+            Ok::<_, crate::error::ApiError>((prefix, index))
+        })
+        .await
+        .context(CpuTaskSnafu {
+            stage: "result-encode-prefix-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })??;
         let suffix =
             Bytes::from_static(b"},\"success\":true,\"message\":\"Success\"}");
         let body = if let Some(range) = index.pages.get(&number) {

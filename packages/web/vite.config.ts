@@ -22,6 +22,20 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          // Keep the heavyweight viewer libraries separate while preserving the route's lazy-loading boundary.
+          codeSplitting: {
+            includeDependenciesRecursively: false,
+            groups: [
+              { name: "pdfjs", test: /[\\/]node_modules[\\/]pdfjs-dist[\\/]/ },
+              { name: "katex", test: /[\\/]node_modules[\\/]katex[\\/]/ },
+            ],
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         [`^${prefix}/(?:${apiRoutes})(?:[/?]|$)`]: {

@@ -136,8 +136,9 @@ fn file_subscriber_appends_plaintext() {
         .file(path.clone())
         .build();
     for _ in 0..2 {
-        let subscriber = docparse_server::logging::subscriber(&config)
-            .expect("file subscriber");
+        let (subscriber, guards) =
+            docparse_server::logging::subscriber(&config)
+                .expect("file subscriber");
         tracing::subscriber::with_default(subscriber, || {
             // Recording a field later must not duplicate it through both formatters' span caches.
             let span = tracing::info_span!(
@@ -147,6 +148,7 @@ fn file_subscriber_appends_plaintext() {
             span.record("trace_id", "file-trace");
             span.in_scope(|| tracing::info!("file-logging-probe"));
         });
+        drop(guards);
     }
     let output = std::fs::read_to_string(path).expect("persisted logs");
     assert_eq!(output.matches("file-logging-probe").count(), 2);
@@ -184,7 +186,7 @@ fn workbench_url_is_clickable() {
         .directives("info")
         .file(path.clone())
         .build();
-    let subscriber =
+    let (subscriber, guards) =
         docparse_server::logging::subscriber(&log).expect("subscriber");
     let config = docparse_config::ServerConfig::builder()
         .webui(docparse_config::WebUi::Disk(directory.path().to_owned()))
@@ -194,6 +196,7 @@ fn workbench_url_is_clickable() {
     tracing::subscriber::with_default(subscriber, || {
         docparse_server::app::announce_workbench(bound, &config);
     });
+    drop(guards);
     let output = std::fs::read_to_string(&path).expect("persisted logs");
     assert!(
         output
@@ -207,7 +210,7 @@ fn workbench_url_is_clickable() {
         .directives("info")
         .file(silent.clone())
         .build();
-    let subscriber =
+    let (subscriber, guards) =
         docparse_server::logging::subscriber(&log).expect("subscriber");
     tracing::subscriber::with_default(subscriber, || {
         docparse_server::app::announce_workbench(
@@ -215,6 +218,7 @@ fn workbench_url_is_clickable() {
             &docparse_config::ServerConfig::builder().build(),
         );
     });
+    drop(guards);
     let output = std::fs::read_to_string(&silent).expect("persisted logs");
     assert!(
         !output.contains("workbench available"),

@@ -88,6 +88,14 @@ in the browser build, proxy configuration and server configuration.
 
 ## Behavior
 
+Document names use a single-line window sized from the first 24 Unicode graphemes,
+so long filenames cannot stretch the history table. Overflow scrolls slowly back
+and forth and pauses on hover or keyboard focus. Reduced-motion preferences disable
+the animation and retain horizontal scrolling. Hovering a row, focusing its controls,
+or tapping its PDF/info icon opens a viewport-aware detail card with the full name,
+status, page count, progress, timing, task identity and any error. Escape dismisses
+the card; document links continue to open in a new tab without interrupting uploads.
+
 History and document details show the server-persisted parsing duration, including
 result saving and excluding upload and queueing. Reloads retain the same value.
 Retries use the final attempt's duration; unfinished or historical jobs without a

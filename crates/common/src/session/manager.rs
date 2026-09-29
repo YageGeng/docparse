@@ -1,6 +1,6 @@
 //! Shared native session lifecycle, independent of model types.
 use crate::queue::BlockingQueue;
-use crate::{SessionRequest, TaskError, ThreadManager, run_cpu};
+use crate::{SessionRequest, TaskError, ThreadManager, run_blocking};
 use std::sync::Arc;
 
 /// Sessions per available core above which the fan-out is reported as suspicious.
@@ -56,7 +56,7 @@ impl<R: SessionRequest> SessionManager<R> {
         W: FnMut(Vec<R>) + 'static,
         E: From<TaskError> + Send + 'static,
     {
-        run_cpu(move || {
+        run_blocking(move || {
             Self::start(name, session_size, batch_size, queue_size, initialize)
         })
         .await
@@ -133,39 +133,48 @@ impl<R: SessionRequest> SessionManager<R> {
             ),
         };
         let initialize = Arc::new(initialize);
-        for index in 0..session_size {
-            let metrics = Arc::clone(&manager.metrics);
-            let queue = Arc::clone(&queue);
-            let initialize = Arc::clone(&initialize);
-            let dispatch = dispatch.clone();
-            let (ready, initialized) = tokio::sync::oneshot::channel();
-            manager.threads.spawn(
-                format!("docparse-session-{index}"),
-                move || {
-                    let _exit = SessionExit(Arc::clone(&queue));
-                    tracing::dispatcher::with_default(&dispatch, || {
-                        let mut model = match initialize(index) {
-                            Ok(model) => model,
-                            Err(error) => {
-                                let _ = ready.send(Err(error));
+        let started = (|| -> Result<(), E> {
+            for index in 0..session_size {
+                let metrics = Arc::clone(&manager.metrics);
+                let queue = Arc::clone(&queue);
+                let initialize = Arc::clone(&initialize);
+                let dispatch = dispatch.clone();
+                let (ready, initialized) = tokio::sync::oneshot::channel();
+                manager.threads.spawn(
+                    format!("docparse-session-{index}"),
+                    move || {
+                        let _exit = SessionExit(Arc::clone(&queue));
+                        tracing::dispatcher::with_default(&dispatch, || {
+                            let mut model = match initialize(index) {
+                                Ok(model) => model,
+                                Err(error) => {
+                                    let _ = ready.send(Err(error));
+                                    return;
+                                }
+                            };
+                            drop(initialize);
+                            if ready.send(Ok(())).is_err() {
                                 return;
                             }
-                        };
-                        drop(initialize);
-                        if ready.send(Ok(())).is_err() {
-                            return;
-                        }
-                        let _alive = metrics.alive(1);
-                        while let Some(requests) = queue.pop(batch_size) {
-                            let _batch = metrics.batch();
-                            model(requests);
-                        }
-                    });
-                },
-            )?;
-            initialized.blocking_recv().map_err(|error| {
-                TaskError::from_message(error.to_string())
-            })??;
+                            let _alive = metrics.alive(1);
+                            while let Some(requests) = queue.pop(batch_size) {
+                                let _batch = metrics.batch();
+                                model(requests);
+                            }
+                        });
+                    },
+                )?;
+                initialized.blocking_recv().map_err(|error| {
+                    TaskError::from_message(error.to_string())
+                })??;
+            }
+            Ok(())
+        })();
+        if let Err(error) = started {
+            // Initialization runs in blocking code; finish partial teardown before reporting its failure.
+            manager.close();
+            manager.threads.join();
+            return Err(error);
         }
         tracing::info!(
             "started {} model sessions with batch limit {}",
@@ -175,9 +184,14 @@ impl<R: SessionRequest> SessionManager<R> {
         Ok::<_, E>(Arc::new(manager))
     }
 
-    /// Admits one crop from finite blocking submission work that retains the manager through its reply.
+    /// Admits one crop from synchronous native callers; async callers use send_async instead.
     pub fn send(&self, request: R) -> Result<(), TaskError> {
         self.queue.push(request)
+    }
+
+    /// Waits for native queue capacity without occupying an executor or blocking thread.
+    pub async fn send_async(&self, request: R) -> Result<(), TaskError> {
+        self.queue.push_async(request).await
     }
 
     /// Publishes an atomic caller packet without preserving its boundary during consumer batching.

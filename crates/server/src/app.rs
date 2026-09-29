@@ -159,6 +159,9 @@ pub fn router(
             state.options.max_upload_bytes + 64 * 1024,
         ))
         .layer(CatchPanicLayer::custom(PanicHandler))
+        .layer(middleware::from_fn(
+            crate::middlewares::cpu_body::mark_precompressed,
+        ))
         // Compress incrementally; PDF byte ranges and event delivery must retain their original representation.
         .layer(
             CompressionLayer::new()
@@ -170,6 +173,9 @@ pub fn router(
                         .and(NotForContentType::new("application/pdf")),
                 ),
         )
+        .layer(middleware::from_fn(
+            crate::middlewares::cpu_body::offload_compression,
+        ))
         .layer(middleware::from_fn(trace::request_trace))
         .with_state(state))
 }

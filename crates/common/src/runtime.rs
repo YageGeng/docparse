@@ -45,6 +45,145 @@ impl TaskError {
 #[cfg(not(target_arch = "wasm32"))]
 mod platform {
     use super::*;
+    use std::sync::LazyLock;
+
+    /// CPU work has its own finite pool so file I/O never queues behind inference preparation.
+    struct CpuPool {
+        runtime: tokio::runtime::Runtime,
+        permits: tokio::sync::Semaphore,
+        tasks: tokio_util::task::TaskTracker,
+    }
+
+    impl CpuPool {
+        /// Builds an independent finite pool whose drain includes canceled input and output cleanup.
+        fn new(
+            name: &'static str,
+            threads: usize,
+        ) -> Result<Self, std::io::Error> {
+            // Only spawn_blocking uses this runtime; no async worker or reactor is needed.
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .max_blocking_threads(threads)
+                .thread_name(name)
+                .build()?;
+            let tasks = tokio_util::task::TaskTracker::new();
+            // Closed trackers still accept tokens; wait() becomes a reusable emptiness barrier.
+            tasks.close();
+            tracing::info!(
+                "initialized isolated CPU pool {} with {} threads",
+                name,
+                threads
+            );
+            Ok(Self {
+                runtime,
+                permits: tokio::sync::Semaphore::new(threads),
+                tasks,
+            })
+        }
+
+        /// Retains inputs before admission and outputs until collection or background destruction.
+        async fn run<F, T>(&'static self, operation: F) -> Result<T, TaskError>
+        where
+            F: FnOnce() -> T + Send + 'static,
+            T: Send + 'static,
+        {
+            // A span enters its own subscriber but does not install its default dispatcher.
+            let span = tracing::Span::current();
+            let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+            let caller = tokio::runtime::Handle::try_current().ok();
+            let pending = CpuOwned {
+                value: Some((
+                    operation,
+                    crate::PageLease::current(),
+                    self.tasks.token(),
+                )),
+                pool: self,
+                caller: caller.clone(),
+            };
+            let permit = self
+                .permits
+                .acquire()
+                .await
+                .expect("CPU admission stays open");
+            self.runtime
+                .spawn_blocking(move || {
+                    let (operation, lease, token) = pending.into_inner();
+                    let _caller =
+                        caller.as_ref().map(tokio::runtime::Handle::enter);
+                    let output =
+                        tracing::dispatcher::with_default(&dispatcher, || {
+                            if let Some(lease) = &lease {
+                                return lease
+                                    .scope_sync(|| span.in_scope(operation));
+                            }
+                            span.in_scope(operation)
+                        });
+                    CpuOwned {
+                        // Tuple fields drop in order, retaining admission and drain ownership through cleanup.
+                        value: Some((output, lease, permit, token)),
+                        pool: self,
+                        caller: caller.clone(),
+                    }
+                })
+                .await
+                .map(|output| {
+                    let (output, _lease, _permit, _token) = output.into_inner();
+                    output
+                })
+                .map_err(TaskError::from)
+        }
+    }
+
+    /// Dropping a future may destroy a completed JoinHandle on the executor; keep that destruction off-thread.
+    struct CpuOwned<T: Send + 'static> {
+        value: Option<T>,
+        pool: &'static CpuPool,
+        caller: Option<tokio::runtime::Handle>,
+    }
+
+    impl<T: Send + 'static> CpuOwned<T> {
+        /// Transfers a normally consumed value without scheduling any cleanup task.
+        fn into_inner(mut self) -> T {
+            self.value.take().expect("CPU-owned value")
+        }
+    }
+
+    impl<T: Send + 'static> Drop for CpuOwned<T> {
+        /// Cleanup bypasses admission because an uncollected output may still hold the last permit.
+        fn drop(&mut self) {
+            if let Some(value) = self.value.take() {
+                let caller = self.caller.take();
+                drop(self.pool.runtime.spawn_blocking(move || {
+                    // Native owners may schedule further joins; retain the originating shutdown boundary.
+                    let _caller =
+                        caller.as_ref().map(tokio::runtime::Handle::enter);
+                    drop(value);
+                }));
+            }
+        }
+    }
+
+    // Process-owned execution survives short-lived library callers and their cancellation.
+    static CPU: LazyLock<Result<CpuPool, std::io::Error>> =
+        LazyLock::new(|| {
+            CpuPool::new(
+                "docparse-cpu",
+                std::thread::available_parallelism()
+                    .map_or(1, usize::from)
+                    .saturating_sub(1)
+                    .max(1),
+            )
+        });
+    // HTTP hashing and result projections must never queue behind parser admission.
+    // ponytail: cap HTTP compute at two workers; tune only with measured HTTP CPU contention.
+    static HTTP_CPU: LazyLock<Result<CpuPool, std::io::Error>> =
+        LazyLock::new(|| {
+            CpuPool::new(
+                "docparse-http-cpu",
+                std::thread::available_parallelism()
+                    .map_or(1, usize::from)
+                    .min(2),
+            )
+        });
     impl From<tokio::task::JoinError> for TaskError {
         /// Retains the native task failure without exposing Tokio in shared APIs.
         fn from(error: tokio::task::JoinError) -> Self {
@@ -58,23 +197,53 @@ mod platform {
         F: FnOnce() -> T + WasmCompatSend + 'static,
         T: WasmCompatSend + 'static,
     {
-        // A span enters its own subscriber but does not make that subscriber the thread's default dispatcher.
+        let pool = CPU.as_ref().map_err(|error| {
+            tracing::error!("failed to initialize CPU pool: {}", error);
+            TaskError::from_message(error.to_string())
+        })?;
+        pool.run(operation).await
+    }
+
+    /// Runs HTTP request computation with capacity independent of parsing and filesystem I/O.
+    pub async fn run_http_cpu<F, T>(operation: F) -> Result<T, TaskError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let pool = HTTP_CPU.as_ref().map_err(|error| {
+            tracing::error!("failed to initialize HTTP CPU pool: {}", error);
+            TaskError::from_message(error.to_string())
+        })?;
+        pool.run(operation).await
+    }
+
+    /// Keeps finite blocking initialization attached to the caller's shutdown boundary.
+    pub async fn run_blocking<F, T>(operation: F) -> Result<T, TaskError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-        let lease = crate::PageLease::current();
         tokio::task::spawn_blocking(move || {
-            let output = tracing::dispatcher::with_default(&dispatcher, || {
-                if let Some(lease) = &lease {
-                    return lease.scope_sync(|| span.in_scope(operation));
-                }
+            tracing::dispatcher::with_default(&dispatcher, || {
                 span.in_scope(operation)
-            });
-            // Uncollected outputs also retain the delivery when the async caller has been canceled.
-            (output, lease)
+            })
         })
         .await
-        .map(|(output, _lease)| output)
         .map_err(TaskError::from)
+    }
+
+    /// Drains both CPU pools after producers stop, including canceled admission and uncollected results.
+    pub async fn drain_cpu() -> Result<(), TaskError> {
+        for pool in [&*CPU, &*HTTP_CPU] {
+            let pool = pool.as_ref().map_err(|error| {
+                tracing::error!("failed to drain CPU pool: {}", error);
+                TaskError::from_message(error.to_string())
+            })?;
+            pool.tasks.wait().await;
+        }
+        Ok(())
     }
 }
 #[cfg(target_arch = "wasm32")]
@@ -90,6 +259,8 @@ mod platform {
     }
 }
 pub use platform::run_cpu;
+#[cfg(not(target_arch = "wasm32"))]
+pub use platform::{drain_cpu, run_blocking, run_http_cpu};
 
 /// Renders a panic payload as text so the original panic message is never lost.
 pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {

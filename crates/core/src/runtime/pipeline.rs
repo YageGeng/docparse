@@ -268,7 +268,9 @@ impl ParseRuntime {
         let result = scanned.finish(pages, &timings, observer).await?;
         // Failed or cancelled parses drop all owners and remove their uncommitted directory.
         if owned_assets {
-            figure_assets.keep(true);
+            docparse_common::run_cpu(move || figure_assets.keep(true))
+                .await
+                .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
         }
         drop(total_timer);
         while let Ok(timing) = timing_receiver.try_recv() {

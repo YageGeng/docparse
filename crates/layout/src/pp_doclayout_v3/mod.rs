@@ -128,13 +128,17 @@ impl LayoutEngine for PpDocLayoutV3Engine {
                 Arc::clone(&self.pool).run(inputs, timings.clone()).await?;
             let postprocess_timer =
                 timings.start(TimingStage::LayoutPostprocess);
-            let detections = postprocess::postprocess_page(
-                outputs.boxes.view(),
-                outputs.count,
-                threshold,
-                &transform,
-            )?;
-            drop(postprocess_timer);
+            let detections = crate::wasm_compat::run_cpu(move || {
+                let _timer = postprocess_timer;
+                postprocess::postprocess_page(
+                    outputs.boxes.view(),
+                    outputs.count,
+                    threshold,
+                    &transform,
+                )
+            })
+            .await
+            .map_err(|source| LayoutError::TaskJoin { source })??;
             tracing::info!(
                 "completed PP-DocLayoutV3 inference for page {} with {} detections",
                 page_number,

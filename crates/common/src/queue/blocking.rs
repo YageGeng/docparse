@@ -17,9 +17,11 @@ struct QueueState<R> {
 }
 
 /// One crop-counted queue is shared by all consumers of a model.
+#[derive(typed_builder::TypedBuilder)]
 pub struct BlockingQueue<R> {
     state: Mutex<QueueState<R>>,
     changed: Condvar,
+    available: tokio::sync::Notify,
     metrics: Arc<QueueMetrics>,
 }
 
@@ -32,19 +34,65 @@ impl<R: SessionRequest> BlockingQueue<R> {
     /// Creates a bounded crop queue independently of consumer initialization.
     pub fn new(name: &'static str, capacity: usize) -> Self {
         assert!(capacity > 0, "queue capacity must be positive");
-        Self {
-            state: Mutex::new(QueueState {
+        Self::builder()
+            .state(Mutex::new(QueueState {
                 requests: VecDeque::new(),
                 closed: false,
-            }),
-            changed: Condvar::new(),
-            metrics: QueueMetrics::new(name, capacity),
-        }
+            }))
+            .changed(Condvar::new())
+            .available(tokio::sync::Notify::new())
+            .metrics(QueueMetrics::new(name, capacity))
+            .build()
     }
 
     /// Publishes one request through the same admission path as atomic caller packets.
     pub fn push(&self, request: R) -> Result<(), TaskError> {
         self.push_batch(vec![request])
+    }
+
+    /// Shares native ready batching while suspending asynchronous producers on full admission.
+    pub async fn push_async(&self, mut request: R) -> Result<(), TaskError> {
+        let admission = Admission::new(
+            "docparse_queue_admission_wait_seconds",
+            self.metrics.name,
+        );
+        let mut blocked = None;
+        loop {
+            // Register before inspecting capacity so dequeue/close cannot race the waiter to sleep.
+            let notified = self.available.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let mut state = self.state.lock().map_err(|error| {
+                    TaskError::from_message(error.to_string())
+                })?;
+                if state.closed || request.cancelled() {
+                    let closed = state.closed;
+                    admission.finish(if closed {
+                        "closed"
+                    } else {
+                        "cancelled"
+                    });
+                    drop(state);
+                    request.end_queue();
+                    return if closed {
+                        Err(TaskError::from_message("model queue closed"))
+                    } else {
+                        Ok(())
+                    };
+                }
+                if state.requests.len() < self.metrics.capacity {
+                    admission.finish("admitted");
+                    state
+                        .requests
+                        .push_back(Queued::new(request, &self.metrics));
+                    self.changed.notify_all();
+                    return Ok(());
+                }
+                blocked.get_or_insert_with(|| self.metrics.blocked());
+            }
+            notified.await;
+        }
     }
 
     /// Admits a caller packet atomically while bounding every unconsumed crop.
@@ -127,6 +175,7 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 }
             }
             self.changed.notify_all();
+            self.available.notify_waiters();
             drop(state);
             for request in requests.iter_mut().chain(&mut canceled) {
                 request.end_queue();
@@ -146,6 +195,7 @@ impl<R: SessionRequest> BlockingQueue<R> {
         state.closed = true;
         let discarded = std::mem::take(&mut state.requests);
         self.changed.notify_all();
+        self.available.notify_waiters();
         drop(state);
         for request in discarded {
             let mut request = request.take("discarded");
@@ -167,6 +217,29 @@ mod tests {
         }
         /// No observer exists in this queue-only test.
         fn end_queue(&mut self) {}
+    }
+
+    /// Async admission must wake on both dequeue and close without parking the single executor thread.
+    #[tokio::test]
+    async fn async_admission_observes_capacity_and_closure() {
+        let queue = BlockingQueue::new("test", 1);
+        queue.push(Request(0, false)).expect("first packet");
+        let waiting = queue.push_async(Request(1, false));
+        tokio::pin!(waiting);
+        assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+        assert_eq!(queue.pop(1).expect("first").first().expect("request").0, 0);
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+            .await
+            .expect("wake after dequeue")
+            .expect("admission");
+        let waiting = queue.push_async(Request(2, false));
+        tokio::pin!(waiting);
+        assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+        queue.close();
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+            .await
+            .expect("wake after close")
+            .expect_err("closed queue rejects waiting producers");
     }
 
     /// Caller packet boundaries cannot leave ready capacity unused or lose an unconsumed tail.

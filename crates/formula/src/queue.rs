@@ -234,6 +234,17 @@ impl FormulaWorkers {
         &self.name
     }
 
+    /// Stops partial consumer groups and awaits their native cleanup without blocking the async caller.
+    pub async fn shutdown(mut self) -> Result<(), FormulaError> {
+        for abort in &self.aborts {
+            abort.abort();
+        }
+        for owner in std::mem::take(&mut self.owners) {
+            owner.shutdown().await?;
+        }
+        Ok(())
+    }
+
     /// Starts one independently owned consumer that can be stopped without closing peer groups.
     pub fn spawn(
         &mut self,

@@ -1,8 +1,8 @@
 use crate::{
     code::ApiCode,
     error::{
-        ApiResult, DatabaseSnafu, ParseSnafu, RequestSnafu, SerializeSnafu,
-        StorageSnafu, TaskSnafu,
+        ApiResult, CpuTaskSnafu, DatabaseSnafu, ParseSnafu, RequestSnafu,
+        SerializeSnafu, StorageSnafu, TaskSnafu,
     },
     model::{base::ApiResponse, error::ErrorCode},
     storage::SharedStorage,
@@ -192,7 +192,7 @@ impl Worker {
                 let writer_span = tracing::Span::current();
                 let writer_dispatcher = tracing::dispatcher::get_default(Clone::clone);
                 let (temporary, publishing) =
-                    tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&writer_dispatcher, || writer_span.in_scope(|| -> ApiResult<_> {
+                    docparse_common::run_cpu(move || tracing::dispatcher::with_default(&writer_dispatcher, || writer_span.in_scope(|| -> ApiResult<_> {
                         // Cancelled waiters cannot remove files while their real writer is still publishing.
                         let _assets = writer_assets;
                         // Move timing ownership into the real writer; cancelling its async waiter cannot stop it.
@@ -221,7 +221,7 @@ impl Worker {
                         Ok((temporary, publishing))
                     })))
                     .await
-                    .context(TaskSnafu {
+                    .context(CpuTaskSnafu {
                         stage: "result-write-task",
                         code: ApiCode::COMMON_INTERNAL_ERROR,
                     })??;
@@ -321,7 +321,9 @@ impl Worker {
             .await;
             // Preserve ambiguous acknowledgements for recovery; never remove possibly committed assets.
             if outcome.is_ok() && matches!(&completion, Ok(true)) {
-                figure_assets.keep(true);
+                let assets = Arc::clone(&figure_assets);
+                docparse_common::run_blocking(move || assets.keep(true)).await
+                    .context(CpuTaskSnafu { stage: "result-keep-figures", code: ApiCode::COMMON_INTERNAL_ERROR })?;
             }
             let accepted = completion.with_context(|source| DatabaseSnafu {
                 stage: "task-finish-attempt",
