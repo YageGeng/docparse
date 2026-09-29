@@ -18,7 +18,7 @@ const messages: Record<number, string> = {
   4001001: "请选择有效的 PDF 文件。",
   4001002: "请求参数无效，请重新打开任务。",
   4041001: "没有找到这个任务。上传可能尚未完成。",
-  4081001: "上传超时，请检查任务是否已保存后重试。",
+  4081001: "上传超时，请重试上传。",
   4091001: "这个提交编号已被使用，请开始新的上传。",
   4091002: "结果仍在生成中，请稍候。",
   4091003: "解析失败，暂时无法下载结果。",
@@ -146,7 +146,7 @@ export function uploadPdf(
       }
     };
     xhr.onerror = () =>
-      reject(new Error("连接中断，提交状态尚未确认。可以检查任务后重试。"));
+      reject(new Error("连接中断，请重试上传。"));
     xhr.onabort = () =>
       reject(new Error("上传已中断。已保存的任务仍会继续处理。"));
     xhr.onloadend = () => signal.removeEventListener("abort", abort);
