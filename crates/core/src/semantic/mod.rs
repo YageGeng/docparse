@@ -1,4 +1,5 @@
 mod formula;
+mod list;
 mod normalize;
 mod paragraph;
 

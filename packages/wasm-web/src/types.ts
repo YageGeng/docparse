@@ -16,8 +16,21 @@ export interface FigureImage {
   height: number;
   delivery: { type: "file"; path: string } | { type: "inline"; data_base64: string };
 }
+/** Source numbering family, independent of normalized Markdown markers. */
+export type ListKind = "unordered" | "decimal" | "bare_decimal" | "alpha_lower" | "alpha_upper" | "roman_lower" | "roman_upper";
+/** Source-backed item; parent line references may resume after descendants, but never cross prose or siblings. */
+export interface ListItem {
+  group: number;
+  level: number;
+  kind: ListKind;
+  marker: string;
+  ordinal?: number;
+  line_ids: string[];
+  /** UTF-8 byte offset after the marker and its separating whitespace. */
+  marker_end: number;
+}
 /** A layout block with its original nested text facts. */
-export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region?: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; table?: Table; image?: FigureImage; [key: string]: unknown }
+export interface Block { id: string; label: string; text: string; markdown?: string; bbox: Bbox; polygon: Point[] | null; source_region?: SourceRegionEvidence | null; source_regions?: SourceRegionEvidence[]; final_order: number; lines: Line[]; list_items?: ListItem[]; table?: Table; image?: FigureImage; [key: string]: unknown }
 /** A non-owning source slice. Byte offsets address UTF-8, not JavaScript UTF-16 strings. */
 export interface TableTextSpan { text_item_id: string; byte_range: { start: number; end: number }; bbox: Bbox }
 /** Cell-local physical line with the original source references. */
@@ -181,7 +194,7 @@ export interface ParseOptions {
   onPageImage?: (image: PageImageResult) => void;
 }
 /** Supported projections of a canonical document. */
-export type RenderFormat = "json" | "text" | "markdown";
+export type RenderFormat = "json" | "markdown";
 
 /** Public asynchronous parser operations. */
 export interface DocParser {

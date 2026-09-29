@@ -8,13 +8,13 @@ use docparse_core::{
     DocumentResult, Evidence, InlineContentStatus, InlineSpan, JsonRenderer,
     LabelSource, Line, LineId, MarkdownRenderer, NodeRef, OverlayRenderer,
     PageResult, RelationKind, RenderView, SchemaVersion, TextItem, TextItemId,
-    TextItemRange, TextRenderer, TextSource, WritingDirection,
+    TextItemRange, TextSource, WritingDirection,
 };
 use docparse_layout::{
     Bbox, LayoutLabel, PageImage, PageImageInput, PixelFormat,
 };
 
-/// Structured text and Markdown preserve physical indentation while leaving source text and formula ranges intact.
+/// Structured Markdown preserves physical indentation while leaving source text and formula ranges intact.
 #[test]
 fn structured_renderers_keep_geometry_based_whitespace() {
     for label in [
@@ -61,11 +61,6 @@ fn structured_renderers_keep_geometry_based_whitespace() {
         })
         .collect();
         let before = serde_json::to_value(&document).expect("snapshot");
-        assert_eq!(
-            TextRenderer::new(RenderView::Semantic, "[formula]")
-                .render(&document),
-            "begin\n    nested\n2:  return"
-        );
         assert_eq!(
             MarkdownRenderer::new(RenderView::Semantic, "[formula]")
                 .render(&document),
@@ -340,13 +335,10 @@ fn renderers_preserve_canonical_document() {
         serde_json::to_vec(&document).expect("document must serialize");
 
     let json = JsonRenderer::render(&document).expect("JSON must render");
-    let text =
-        TextRenderer::new(RenderView::Raw, "[formula]").render(&document);
     let markdown =
         MarkdownRenderer::new(RenderView::Raw, "[formula]").render(&document);
 
     assert!(json.contains("schema_version"));
-    assert_eq!(text, "hello[formula]");
     assert!(markdown.contains("hello[formula]"));
     assert_eq!(
         before,
@@ -567,10 +559,6 @@ fn character_cleanup_is_a_read_only_presentation() {
             .render(&document)
             .contains("architec-\n    ture")
     );
-    assert_eq!(
-        TextRenderer::new(RenderView::Raw, "[formula]").render(&document),
-        "architec-\n  ture   works\nwell-\nKnown"
-    );
     assert_eq!(document, before);
     document
         .pages
@@ -660,9 +648,9 @@ fn overlay_encodes_background_and_escaped_svg() {
     assert!(output.svg.contains("future&lt;&amp;&gt;"));
 }
 
-/// Verifies text renderers never infer spaces between separate source items.
+/// Verifies Markdown never infers spaces between separate source items.
 #[test]
-fn text_renderers_do_not_invent_cross_item_spaces() {
+fn markdown_does_not_invent_cross_item_spaces() {
     let mut document = document();
     let line = document
         .pages
@@ -686,10 +674,6 @@ fn text_renderers_do_not_invent_cross_item_spaces() {
             .build(),
     );
 
-    assert_eq!(
-        TextRenderer::new(RenderView::Raw, "[formula]").render(&document),
-        "helloworld"
-    );
     assert!(
         MarkdownRenderer::new(RenderView::Raw, "[formula]")
             .render(&document)

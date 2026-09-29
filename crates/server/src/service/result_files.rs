@@ -19,7 +19,7 @@ use std::{
 };
 
 /// Markdown projection revision shared by disk caches and HTTP validators.
-pub(crate) const MARKDOWN_CACHE_REVISION: &str = "v7";
+pub(crate) const MARKDOWN_CACHE_REVISION: &str = "v9";
 
 /// Byte ranges refer directly to the original JSON; only document metadata is duplicated.
 #[derive(Serialize, Deserialize)]

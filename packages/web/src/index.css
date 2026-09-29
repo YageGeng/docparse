@@ -998,6 +998,13 @@ button:disabled {
 .content-block.is-spatial > p,
 .content-block.is-spatial .inline-prose { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .content-block.is-spatial > p { white-space: pre; overflow-x: auto; }
+/* Semantic body lists share readable nesting in the content and full-document previews. */
+.inline-prose ul { list-style: disc; padding-left: 1.75em; }
+.inline-prose ol { list-style: decimal; padding-left: 1.75em; }
+.inline-prose :is(ul, ol) { margin-block: .35em; }
+.inline-prose :is(ul, ol) :is(ul, ol) { margin-block: .15em; }
+.inline-prose li > p { margin-block: .2em; }
+.block-label .list-badge { border: 1px solid #c7d2fe; border-radius: 5px; background: #eef2ff; padding: 1px 5px; color: #4f46e5; font-size: 10px; font-weight: 500; }
 .content-block.is-spatial .inline-prose .formula-preview { overflow-x: auto; }
 .content-block.is-spatial .inline-prose .formula-preview p { white-space: nowrap; }
 .table-scroll {

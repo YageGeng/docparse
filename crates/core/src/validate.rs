@@ -80,6 +80,139 @@ impl ResultValidator {
         )
     }
 
+    /// Checks list references and marker boundaries without treating annotations as additional text owners.
+    fn validate_block_lists(
+        block: &Block,
+        path: &str,
+    ) -> Result<(), ValidationError> {
+        if block.list_items.is_empty() {
+            return Ok(());
+        }
+        let invalid = |message: &str| {
+            Self::invalid(format!("{path}.list_items"), message)
+        };
+        if block.label != docparse_layout::LayoutLabel::Text
+            || block.table.is_some()
+        {
+            return Err(invalid(
+                "only body Text layouts may contain recovered lists",
+            ));
+        }
+        let lines: std::collections::BTreeMap<_, _> = block
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| (&line.id, (index, line)))
+            .collect();
+        let mut previous_group = None;
+        let mut previous_start = None;
+        let mut owners = vec![None; block.lines.len()];
+        for (item_index, item) in block.list_items.iter().enumerate() {
+            if previous_group != Some(item.group)
+                && (item.level != 0
+                    || previous_group.is_some_and(|group| item.group <= group))
+            {
+                return Err(invalid(
+                    "list groups must be ordered and start at level zero",
+                ));
+            }
+            if (item.kind == crate::ListKind::Unordered)
+                != item.ordinal.is_none()
+            {
+                return Err(invalid(
+                    "ordered markers need an ordinal; unordered markers must not have one",
+                ));
+            }
+            let first = item
+                .line_ids
+                .first()
+                .and_then(|id| lines.get(id))
+                .map(|(_, line)| *line)
+                .ok_or_else(|| {
+                    invalid("list item needs a source line in its own block")
+                })?;
+            let Some(prefix) = first.text.get(..item.marker_end) else {
+                return Err(invalid(
+                    "marker prefix must end on a valid UTF-8 source boundary",
+                ));
+            };
+            if item.marker.trim().is_empty()
+                || prefix.trim() != item.marker
+                || item.marker_end >= first.text.len()
+                || !item.matches_source(first)
+            {
+                return Err(invalid(
+                    "marker prefix must match the source and leave a nonempty body",
+                ));
+            }
+            let mut previous_line = None;
+            for (part, id) in item.line_ids.iter().enumerate() {
+                let (index, _) = lines.get(id).ok_or_else(|| {
+                    invalid("list line belongs to a different block")
+                })?;
+                if previous_line.is_some_and(|previous| *index <= previous)
+                    || part == 0
+                        && previous_start
+                            .is_some_and(|previous| *index <= previous)
+                {
+                    return Err(invalid(
+                        "list items and their lines must follow source order",
+                    ));
+                }
+                let owner =
+                    owners.get_mut(*index).expect("indexed source line");
+                if owner.replace((item_index, part)).is_some() {
+                    return Err(invalid(
+                        "list lines must be uniquely referenced",
+                    ));
+                }
+                if part == 0 {
+                    previous_start = Some(*index);
+                }
+                previous_line = Some(*index);
+            }
+            previous_group = Some(item.group);
+        }
+        // A continuation may skip descendants, but cannot cross a sibling, another group, or unrelated prose.
+        let mut active = Vec::new();
+        let mut group = None;
+        for owner in owners {
+            let Some((item_index, part)) = owner else {
+                active.clear();
+                continue;
+            };
+            let item =
+                block.list_items.get(item_index).expect("indexed list item");
+            if part == 0 {
+                if group != Some(item.group) {
+                    active.clear();
+                } else if active.is_empty() {
+                    return Err(invalid(
+                        "a list group cannot cross unrelated prose",
+                    ));
+                }
+                if item.level as usize > active.len() {
+                    return Err(invalid(
+                        "list nesting cannot skip an active parent",
+                    ));
+                }
+                active.truncate(item.level as usize);
+                active.push(item_index);
+                group = Some(item.group);
+            } else {
+                let Some(level) =
+                    active.iter().position(|active| *active == item_index)
+                else {
+                    return Err(invalid(
+                        "list continuation must belong to an active ancestor",
+                    ));
+                };
+                active.truncate(level + 1);
+            }
+        }
+        Ok(())
+    }
+
     /// Validates one page and recursively records globally unique child IDs.
     fn validate_page_node(
         page: &PageResult,
@@ -454,6 +587,7 @@ impl ResultValidator {
                 }
             }
 
+            Self::validate_block_lists(block, &block_path)?;
             for (line_index, line) in block.lines.iter().enumerate() {
                 let line_path = format!("{block_path}.lines[{line_index}]");
                 Self::validate_id_page(

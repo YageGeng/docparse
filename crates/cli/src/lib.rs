@@ -12,7 +12,7 @@ use base64::{engine::general_purpose::STANDARD, write::EncoderWriter};
 use docparse_config::{ConfigLoader, ValidatedConfig};
 use docparse_core::{
     DocParser, DocumentResult, JsonRenderer, MarkdownRenderer, RenderView,
-    TextRenderer, write_pdf_overlays,
+    write_pdf_overlays,
 };
 use docparse_layout::{ModelManifest, inspect_model};
 
@@ -117,7 +117,7 @@ async fn parse_command(
         OutputView::Semantic => RenderView::Semantic,
     };
     if let Some(output) = arguments.output {
-        // JSON and Markdown write directly into the atomic file; plain text retains its existing renderer.
+        // Both formats stream directly into the atomic output file.
         atomic_write(&output, arguments.force, |file| {
             match arguments.format {
                 OutputFormat::Json => JsonRenderer::write_with_config(
@@ -126,13 +126,6 @@ async fn parse_command(
                     &mut *file,
                 )
                 .map_err(anyhow::Error::from),
-                OutputFormat::Text => file
-                    .write_all(
-                        TextRenderer::new(view, formula_placeholder)
-                            .render(&document)
-                            .as_bytes(),
-                    )
-                    .context("failed to stream text output"),
                 OutputFormat::Markdown => write_portable_markdown(
                     &document,
                     view,
@@ -146,9 +139,6 @@ async fn parse_command(
     let rendered = match arguments.format {
         OutputFormat::Json => {
             JsonRenderer::render_with_config(&document, config.output())?
-        }
-        OutputFormat::Text => {
-            TextRenderer::new(view, formula_placeholder).render(&document)
         }
         OutputFormat::Markdown => {
             // The public stdout API returns a String, so only explicit file output is memory bounded.

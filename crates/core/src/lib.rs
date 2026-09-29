@@ -44,7 +44,7 @@ pub use parser::{
 pub use progress::{ParseObserver, ParseProgress, Timing};
 pub use render::{
     JsonRenderer, MarkdownRenderer, OverlayArtifacts, OverlayRenderer,
-    RenderError, RenderView, TextRenderer,
+    RenderError, RenderView,
 };
 pub use table::{
     Table, TableCell, TableCellLine, TableEvidence, TableMode, TableOptions,

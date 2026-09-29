@@ -980,6 +980,58 @@ impl Line {
     }
 }
 
+/// Source numbering family retained independently of normalized Markdown markers.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ListKind {
+    /// A visible bullet, square, dash, or star.
+    Unordered,
+    /// Decimal digits followed by explicit list punctuation.
+    Decimal,
+    /// Decimal digits confirmed by a consecutive aligned sequence.
+    BareDecimal,
+    /// A confirmed sequence of lowercase letters.
+    AlphaLower,
+    /// A confirmed sequence of uppercase letters.
+    AlphaUpper,
+    /// A confirmed sequence of lowercase Roman numerals.
+    RomanLower,
+    /// A confirmed sequence of uppercase Roman numerals.
+    RomanUpper,
+}
+
+/// One non-owning list item inside a body-text layout; source text and geometry remain canonical.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    TypedBuilder,
+    utoipa::ToSchema,
+)]
+pub struct ListItem {
+    /// Zero-based list group within the owning block; prose or a numbering restart starts another group.
+    pub group: u32,
+    /// Zero-based nesting depth, inferred from physical indentation.
+    pub level: u32,
+    /// Original marker family, before Markdown normalization.
+    pub kind: ListKind,
+    /// Original visible marker, such as `•`, `(2)`, or `iii.`.
+    pub marker: String,
+    /// Numeric value for ordered markers; absent for unordered items.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<u32>,
+    /// Source lines in reading order; parent continuations may follow descendant items, but never unrelated prose or siblings.
+    pub line_ids: Vec<LineId>,
+    /// UTF-8 byte offset after the marker and its separating whitespace in the first source line.
+    pub marker_end: usize,
+}
+
 /// One final semantic block that exclusively owns its lines.
 #[derive(
     Debug,
@@ -994,7 +1046,7 @@ pub struct Block {
     pub id: BlockId,
     pub label: LayoutLabel,
     pub text: String,
-    /// Paragraph presentation with recognized inline formulas; original text and source items remain unchanged.
+    /// Semantic presentation with recovered lists and recognized inline formulas; source facts remain unchanged.
     #[builder(default)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub markdown: Option<String>,
@@ -1023,6 +1075,10 @@ pub struct Block {
     /// Canonical layout hints retained even when optional evidence is hidden.
     pub semantic_hints: BTreeMap<String, String>,
     pub lines: Vec<Line>,
+    /// Non-owning list items recovered only in Text layouts; absent in legacy and non-list results.
+    #[builder(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_items: Vec<ListItem>,
     /// Non-owning table cells; absent when the layout is not a confidently recovered table.
     #[builder(default)]
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -267,19 +267,19 @@ Platform conditions are restricted to `wasm_compat.rs` and explicitly listed com
 
 ```bash
 rtk docparse parse INPUT.pdf --config docparse.toml --format json
-rtk docparse parse INPUT.pdf --format text --view semantic
+rtk docparse parse INPUT.pdf --format markdown --view semantic
 rtk docparse parse INPUT.pdf --format markdown --output result.md --force
 rtk docparse parse INPUT.pdf --overlay-dir diagnostics
 rtk docparse inspect-model --config docparse.toml
 ```
 
-JSON preserves the complete schema, evidence, warnings, and relations. Text/Markdown semantic views suppress repeated page furniture only at presentation time. Overlays reopen the PDF serially to produce PNG/SVG files without rerunning ONNX inference.
+JSON preserves the complete schema, evidence, warnings, and relations. The Markdown semantic view suppresses repeated page furniture only at presentation time. Overlays reopen the PDF serially to produce PNG/SVG files without rerunning ONNX inference.
 
 ## Watermarks and rotated bounds
 
 Watermarks are detached before body statistics, layout assignment, XY-cut, paragraph
 assembly, formula attachment, and reading-order constraints. They remain independent
-`watermark` blocks at the end of each page; text and Markdown retain their text.
+`watermark` blocks at the end of each page; JSON and Markdown retain their text.
 The derived label has no PP-DocLayoutV3 class index. Original text facts remain uniquely
 owned and carry `watermark` source metadata plus rule evidence when applicable.
 

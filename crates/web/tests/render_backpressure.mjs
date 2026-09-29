@@ -43,7 +43,7 @@ try {
       const parser = await createParser(options);
       try {
         const document = await parser.parse(new Uint8Array(bytes));
-        runs.push({ capacity, pages: document.pages.map(page => page.page_number), errors: document.errors, text: await parser.render(document, "text") });
+        runs.push({ capacity, pages: document.pages.map(page => page.page_number), errors: document.errors, markdown: await parser.render(document, "markdown") });
       } finally { await parser.close(); }
     }
     let parser = await createParser(options);
@@ -66,7 +66,7 @@ try {
     assert.deepEqual(run.pages, [1, 2, 3]);
     assert.deepEqual(run.errors, []);
   }
-  assert.equal(report.runs[0].text, report.runs[1].text);
+  assert.equal(report.runs[0].markdown, report.runs[1].markdown);
   assert.ok(report.canceled && report.canceled !== "unexpected success", "active parse must be canceled");
   assert.equal(report.restoredPages, 3);
   assert.deepEqual(report.restoredErrors, []);

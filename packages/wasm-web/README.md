@@ -40,6 +40,8 @@ Copy the complete `packages/wasm-web/dist/` directory to any static-site directo
 
 ## Usage
 
+`parser.render(document, format)` supports `"json"` and `"markdown"`.
+
 ```javascript
 import { prepareModels } from "/assets/docparse/index.js";
 
@@ -265,7 +267,7 @@ Draw `Block.polygon` when present, falling back to `Block.bbox`. Polygon vertice
 in the same viewport point space as the bbox. The example uses this contour for SVG
 hit testing and PNG export, including slanted watermarks. `label: "watermark"` denotes
 an independent block excluded from body fusion and reading-order constraints; its
-text remains inspectable and retained in text/Markdown output.
+text remains inspectable and retained in JSON/Markdown output.
 
 ## Lifecycle
 
@@ -345,7 +347,7 @@ Fixture generators require reportlab, and the Chinese generator also requires py
 
 ## Structured tables
 
-Final `table` blocks may include a `table` object with zero-based rows/columns, positive `row_span`/`column_span`, header flags, and cell-local lines. Header inference considers explicit tags, separator bands, and available font weight/style evidence. `table.source` identifies tagged PDF structure, vector-rule guidance, or text alignment. Plain text uses row-major tabs/newlines; ordinary single-header tables render as Markdown, while merged or multi-level headers render as escaped HTML. The configured JSON renderer retains the complete table structure even when generic evidence is hidden.
+Final `table` blocks may include a `table` object with zero-based rows/columns, positive `row_span`/`column_span`, header flags, and cell-local lines. Header inference considers explicit tags, separator bands, and available font weight/style evidence. `table.source` identifies tagged PDF structure, vector-rule guidance, or text alignment. Canonical table text uses row-major tabs/newlines; ordinary single-header tables render as Markdown, while merged or multi-level headers render as escaped HTML. The configured JSON renderer retains the complete table structure even when generic evidence is hidden.
 
 Set `config.tsr.batch_size` and `config.tsr.cell_detection.batch_size` independently
 to cap structure and detector crops per ONNX invocation (1–32, default 1).

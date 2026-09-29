@@ -1,12 +1,10 @@
 mod json;
 mod markdown;
 mod overlay;
-mod text;
 
 pub use json::JsonRenderer;
 pub use markdown::MarkdownRenderer;
 pub use overlay::{OverlayArtifacts, OverlayRenderer};
-pub use text::TextRenderer;
 
 /// Selects literal page content or a relation-aware presentation view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

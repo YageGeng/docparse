@@ -152,7 +152,8 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   report.tests.push(`PASS: actual ${parser.executionProvider} backend and GPU command submission contract`);
   assert(storage.byteLength === bytes.length + 16, "Caller buffer was detached");
   assert(document.pages.length === 1 && document.errors.length === 0, "Single-page parsing degraded or failed");
-  assert((await parser.render(document, "text")).length > 0, "Rust text renderer returned no content");
+  await rejects(parser.render(document, "text"), "InvalidFormat");
+  assert((await parser.render(document, "markdown")).length > 0, "Rust Markdown renderer returned no content");
   report.tests.push("PASS: real PDF bytes, offset view, Busy, canonical result and Rust renderer"); render();
 
   await verifyReferenceInput(bytes, "extraction_metadata");

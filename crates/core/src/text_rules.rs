@@ -38,28 +38,18 @@ pub(crate) fn suspicious_codepoint(value: u32) -> bool {
         || (0x100000..=0x10FFFD).contains(&value)
 }
 
-/// Recognizes source list markers only at line start and only when followed by whitespace.
+/// Shares visible bullet characters between paragraph boundaries and body-list recovery.
+pub(crate) const LIST_BULLETS: &[char] = &[
+    '-', '*', '–', '•', '·', '◦', '▪', '▸', '▶', '●', '○', '■', '□', '\u{F0B7}',
+];
+
+/// Recognizes unambiguous paragraph boundaries without accepting isolated lettered or bare-number prefixes.
 pub(crate) fn is_list_marker(text: impl Iterator<Item = char>) -> bool {
     let mut chars = text.skip_while(|c| c.is_whitespace());
     let Some(first) = chars.next() else {
         return false;
     };
-    if matches!(
-        first,
-        '-' | '*'
-            | '–'
-            | '•'
-            | '·'
-            | '◦'
-            | '▪'
-            | '▸'
-            | '▶'
-            | '●'
-            | '○'
-            | '■'
-            | '□'
-            | '\u{F0B7}'
-    ) {
+    if LIST_BULLETS.contains(&first) {
         return chars.next().is_some_and(char::is_whitespace);
     }
     if !first.is_ascii_digit() {

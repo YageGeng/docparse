@@ -8,6 +8,9 @@ use crate::{
     Block, DocumentResult, FigureDelivery, FigureImage, RenderView, TextSource,
 };
 
+/// A hidden reference definition separates CommonMark lists without requiring HTML support.
+const LIST_GROUP_BREAK: &str = "[docparse-list-break]: #";
+
 /// Minimal semantic Markdown renderer that preserves canonical traversal order.
 #[derive(Debug, Clone)]
 pub struct MarkdownRenderer {
@@ -64,6 +67,7 @@ impl MarkdownRenderer {
         for page in &document.pages {
             let mut parts = Vec::new();
             let mut previous_prose = false;
+            let mut previous_list = false;
             if self.view == RenderView::Raw {
                 parts.push(MarkdownPart::Text(format!(
                     "<!-- page {} -->",
@@ -84,6 +88,7 @@ impl MarkdownRenderer {
                 {
                     continue;
                 }
+                let after_list = std::mem::replace(&mut previous_list, false);
                 let formulas: Vec<_> = page
                     .formulas
                     .iter()
@@ -165,6 +170,25 @@ impl MarkdownRenderer {
                         LabelPolicy::from(&block.label),
                         LabelPolicy::FlowText
                     );
+                if prose && !block.list_items.is_empty() {
+                    let first = block.lines.first().map(|line| &line.id);
+                    let last = block.lines.last().map(|line| &line.id);
+                    if after_list
+                        && block
+                            .list_items
+                            .first()
+                            .and_then(|item| item.line_ids.first())
+                            == first
+                    {
+                        parts.push(MarkdownPart::Text(
+                            LIST_GROUP_BREAK.to_owned(),
+                        ));
+                    }
+                    previous_list = block
+                        .list_items
+                        .iter()
+                        .any(|item| item.line_ids.last() == last);
+                }
                 // Heal adjacent body blocks using the same boundary rule as physical lines.
                 if body
                     && previous_prose
@@ -259,6 +283,12 @@ impl Block {
             );
             return format!("{fence}\n{text}\n{fence}");
         }
+        if prose
+            && self.label == LayoutLabel::Text
+            && !self.list_items.is_empty()
+        {
+            return self.render_list_markdown(placeholder, formulas);
+        }
         // Use one whitespace policy for JSON summaries, Markdown and formula-enriched previews.
         if LabelPolicy::from(&self.label).preserves_line_breaks() {
             return Self::layout_text(&self.lines, true, |line| {
@@ -306,6 +336,170 @@ impl Block {
         }
         text
     }
+
+    /// Renders source-backed list items and intervening prose without duplicating their physical lines.
+    fn render_list_markdown(
+        &self,
+        placeholder: &str,
+        formulas: &[&crate::FormulaResult],
+    ) -> String {
+        let mut items = self.list_items.iter().peekable();
+        // Active ancestors retain only their next source reference and rendered body indentation.
+        let mut active: Vec<(&crate::ListItem, usize, usize)> = Vec::new();
+        let mut output = String::new();
+        let mut group = None;
+        let mut previous_owner = None;
+        for line in &self.lines {
+            let mut join = false;
+            let skip_prefix;
+            if items
+                .peek()
+                .is_some_and(|item| item.line_ids.first() == Some(&line.id))
+            {
+                let item = items.next().expect("list start");
+                if !output.is_empty() {
+                    if group == Some(item.group) {
+                        output.push('\n');
+                    } else if group.is_some() {
+                        // A reference definition separates CommonMark lists and stays invisible even with HTML disabled.
+                        output.push_str("\n\n");
+                        output.push_str(LIST_GROUP_BREAK);
+                        output.push_str("\n\n");
+                    } else {
+                        output.push_str("\n\n");
+                    }
+                }
+                if group != Some(item.group) {
+                    active.clear();
+                }
+                active.truncate(item.level as usize);
+                let indent = active.last().map_or(0, |(_, _, indent)| *indent);
+                let marker = item.ordinal.map_or_else(
+                    || "-".to_owned(),
+                    |ordinal| format!("{ordinal}."),
+                );
+                output.extend(std::iter::repeat_n(' ', indent));
+                output.push_str(&marker);
+                output.push(' ');
+                active.push((item, 1, indent + marker.len() + 1));
+                skip_prefix = item.marker_end;
+                group = Some(item.group);
+                previous_owner = item.line_ids.first();
+            } else if let Some(level) =
+                active.iter().rposition(|(item, next, _)| {
+                    item.line_ids.get(*next) == Some(&line.id)
+                })
+            {
+                active.truncate(level + 1);
+                let (item, next, indent) =
+                    active.last_mut().expect("matched ancestor");
+                if previous_owner == item.line_ids.first() {
+                    join = true;
+                } else {
+                    output.push_str("\n\n");
+                    output.extend(std::iter::repeat_n(' ', *indent));
+                }
+                *next += 1;
+                skip_prefix = 0;
+                previous_owner = item.line_ids.first();
+            } else {
+                if previous_owner.is_some() {
+                    output.push_str("\n\n");
+                } else {
+                    join = !output.is_empty();
+                }
+                active.clear();
+                group = None;
+                previous_owner = None;
+                skip_prefix = 0;
+            }
+            let rendered = line.render_markdown_formulas_after(
+                placeholder,
+                formulas,
+                true,
+                skip_prefix,
+            );
+            let mut words = rendered.split_whitespace();
+            let Some(first) = words.next() else {
+                continue;
+            };
+            if join {
+                if is_soft_hyphen_break(&output, first) {
+                    let _ = output.pop();
+                } else {
+                    output.push(' ');
+                }
+            }
+            output.push_str(first);
+            for word in words {
+                output.push(' ');
+                output.push_str(word);
+            }
+        }
+        output
+    }
+
+    /// Projects lists and anchored formulas through the same renderer while preserving source ownership.
+    pub(crate) fn project_markdown(
+        &mut self,
+        formulas: &[crate::FormulaResult],
+        placeholder: &str,
+    ) {
+        self.markdown = None;
+        let inline: Vec<_> = formulas.iter()
+            .filter(|formula| {
+                formula.block_id.as_ref() == Some(&self.id)
+                    && formula.label == LayoutLabel::InlineFormula
+                && formula.line_id.is_some()
+                && formula.markdown.is_some()
+                && (!formula.text_spans.is_empty()
+                    || formula.text_item_range.is_some_and(|range| range.start < range.end)
+                    || self.lines.iter().any(|line| {
+                        formula.line_id.as_ref() == Some(&line.id)
+                            && line.inline_spans.iter().any(|span| {
+                                span.bbox == formula.bbox
+                                    && span.content_status == crate::InlineContentStatus::Missing
+                            })
+                    }))
+            })
+            .collect();
+        if !inline.is_empty() || !self.list_items.is_empty() {
+            // Formula replacement must not collapse algorithm/TOC indentation in the browser projection.
+            if crate::label_policy::LabelPolicy::from(&self.label)
+                .preserves_line_breaks()
+            {
+                // Keep block Markdown consistent with complete-document algorithm fences.
+                self.markdown = Some(self.render_markdown_text(
+                    placeholder,
+                    false,
+                    &inline,
+                ));
+                return;
+            }
+
+            if self.joins_prose_lines() {
+                // Keep browser Markdown and complete-document export on the same prose policy.
+                self.markdown =
+                    Some(self.render_markdown_text(placeholder, true, &inline));
+                return;
+            }
+
+            // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
+            self.markdown = Some(
+                self.lines
+                    .iter()
+                    .map(|line| {
+                        line.render_markdown_formulas(
+                            placeholder,
+                            &inline,
+                            true,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+    }
 }
 
 impl FigureImage {
@@ -335,6 +529,22 @@ impl crate::Line {
         formulas: &[&crate::FormulaResult],
         escape_prose: bool,
     ) -> String {
+        self.render_markdown_formulas_after(
+            placeholder,
+            formulas,
+            escape_prose,
+            0,
+        )
+    }
+
+    /// Removes a list prefix as a source-byte replacement so formula anchors and UTF-8 offsets stay unchanged.
+    fn render_markdown_formulas_after(
+        &self,
+        placeholder: &str,
+        formulas: &[&crate::FormulaResult],
+        escape_prose: bool,
+        skip_prefix: usize,
+    ) -> String {
         let source: String = self
             .text_items
             .iter()
@@ -348,6 +558,9 @@ impl crate::Line {
             );
         }
         let mut replacements = Vec::new();
+        if skip_prefix > 0 && source.get(..skip_prefix).is_some() {
+            replacements.push((std::iter::once(0..skip_prefix).collect(), ""));
+        }
         for formula in
             formulas.iter().filter(|formula| formula.line_id.is_some())
         {

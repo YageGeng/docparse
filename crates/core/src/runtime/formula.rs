@@ -832,7 +832,7 @@ impl PageResult {
         for block in &mut self.blocks {
             block.markdown = None;
             let Some(table) = &mut block.table else {
-                block.project_inline_formulas(&self.formulas, placeholder);
+                block.project_markdown(&self.formulas, placeholder);
                 continue;
             };
             let sources: BTreeMap<_, _> = block
@@ -854,69 +854,6 @@ impl PageResult {
                     .collect();
                 cell.project_formulas(formulas, &sources);
             }
-        }
-    }
-}
-
-impl crate::Block {
-    /// Projects only anchored inline formulas, preserving literal prose and source ownership.
-    fn project_inline_formulas(
-        &mut self,
-        formulas: &[FormulaResult],
-        placeholder: &str,
-    ) {
-        let inline: Vec<_> = formulas.iter()
-            .filter(|formula| {
-                formula.block_id.as_ref() == Some(&self.id)
-                    && formula.label == LayoutLabel::InlineFormula
-                && formula.line_id.is_some()
-                && formula.markdown.is_some()
-                && (!formula.text_spans.is_empty()
-                    || formula.text_item_range.is_some_and(|range| range.start < range.end)
-                    || self.lines.iter().any(|line| {
-                        formula.line_id.as_ref() == Some(&line.id)
-                            && line.inline_spans.iter().any(|span| {
-                                span.bbox == formula.bbox
-                                    && span.content_status == crate::InlineContentStatus::Missing
-                            })
-                    }))
-            })
-            .collect();
-        if !inline.is_empty() {
-            // Formula replacement must not collapse algorithm/TOC indentation in the browser projection.
-            if crate::label_policy::LabelPolicy::from(&self.label)
-                .preserves_line_breaks()
-            {
-                // Keep block Markdown consistent with complete-document algorithm fences.
-                self.markdown = Some(self.render_markdown_text(
-                    placeholder,
-                    false,
-                    &inline,
-                ));
-                return;
-            }
-
-            if self.joins_prose_lines() {
-                // Keep browser Markdown and complete-document export on the same prose policy.
-                self.markdown =
-                    Some(self.render_markdown_text(placeholder, true, &inline));
-                return;
-            }
-
-            // Reuse UTF-8-aware range replacement; prose must remain literal in browser Markdown.
-            self.markdown = Some(
-                self.lines
-                    .iter()
-                    .map(|line| {
-                        line.render_markdown_formulas(
-                            placeholder,
-                            &inline,
-                            true,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
         }
     }
 }

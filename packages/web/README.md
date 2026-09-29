@@ -272,3 +272,8 @@ completed real document containing at least nine pages:
 ```sh
 rtk proxy node crates/server/tests/workbench_web.mjs http://127.0.0.1:5173 <job-uuid>
 ```
+
+Body-text lists use the server's `list_items` metadata and `block.markdown`
+projection. The content panel displays the recovered item count and nested
+Markdown lists; formula details appear only when the block actually owns formulas.
+Directory, algorithm and chart regions keep their existing presentation.

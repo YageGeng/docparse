@@ -1,6 +1,6 @@
 /** Generated from docparse-server's utoipa OpenAPI document. Do not edit by hand. */
 export interface paths {
-    "/api/v1/docparse/docs": {
+    "/api/docs": {
         parameters: {
             query?: never;
             header?: never;
@@ -17,7 +17,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/health": {
+    "/api/health": {
         parameters: {
             query?: never;
             header?: never;
@@ -34,7 +34,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs": {
+    "/api/jobs": {
         parameters: {
             query?: never;
             header?: never;
@@ -54,7 +54,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/delete": {
+    "/api/jobs/delete": {
         parameters: {
             query?: never;
             header?: never;
@@ -74,7 +74,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/events": {
+    "/api/jobs/events": {
         parameters: {
             query?: never;
             header?: never;
@@ -94,7 +94,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/figure": {
+    "/api/jobs/figure": {
         parameters: {
             query?: never;
             header?: never;
@@ -114,7 +114,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/list": {
+    "/api/jobs/list": {
         parameters: {
             query?: never;
             header?: never;
@@ -134,7 +134,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/result": {
+    "/api/jobs/result": {
         parameters: {
             query?: never;
             header?: never;
@@ -154,7 +154,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/source": {
+    "/api/jobs/source": {
         parameters: {
             query?: never;
             header?: never;
@@ -174,7 +174,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/jobs/status": {
+    "/api/jobs/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -191,7 +191,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/monitoring/history": {
+    "/api/monitoring/history": {
         parameters: {
             query?: never;
             header?: never;
@@ -208,7 +208,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/monitoring/snapshot": {
+    "/api/monitoring/snapshot": {
         parameters: {
             query?: never;
             header?: never;
@@ -225,7 +225,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/openapi.json": {
+    "/api/openapi.json": {
         parameters: {
             query?: never;
             header?: never;
@@ -242,7 +242,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/docparse/ready": {
+    "/api/ready": {
         parameters: {
             query?: never;
             header?: never;
@@ -379,7 +379,9 @@ export interface components {
             label: components["schemas"]["LayoutLabel"];
             label_source: components["schemas"]["LabelSource"];
             lines: components["schemas"]["Line"][];
-            /** @description Paragraph presentation with recognized inline formulas; original text and source items remain unchanged. */
+            /** @description Non-owning list items recovered only in Text layouts; absent in legacy and non-list results. */
+            list_items?: components["schemas"]["ListItem"][];
+            /** @description Semantic presentation with recovered lists and recognized inline formulas; source facts remain unchanged. */
             markdown?: string | null;
             /** Format: int64 */
             model_order?: number | null;
@@ -607,6 +609,37 @@ export interface components {
         };
         /** @description Stable identity for one final line. */
         LineId: string;
+        /** @description One non-owning list item inside a body-text layout; source text and geometry remain canonical. */
+        ListItem: {
+            /**
+             * Format: int32
+             * @description Zero-based list group within the owning block; prose or a numbering restart starts another group.
+             */
+            group: number;
+            /** @description Original marker family, before Markdown normalization. */
+            kind: components["schemas"]["ListKind"];
+            /**
+             * Format: int32
+             * @description Zero-based nesting depth, inferred from physical indentation.
+             */
+            level: number;
+            /** @description Source lines in reading order; parent continuations may follow descendant items, but never unrelated prose or siblings. */
+            line_ids: components["schemas"]["LineId"][];
+            /** @description Original visible marker, such as `•`, `(2)`, or `iii.`. */
+            marker: string;
+            /** @description UTF-8 byte offset after the marker and its separating whitespace in the first source line. */
+            marker_end: number;
+            /**
+             * Format: int32
+             * @description Numeric value for ordered markers; absent for unordered items.
+             */
+            ordinal?: number | null;
+        };
+        /**
+         * @description Source numbering family retained independently of normalized Markdown markers.
+         * @enum {string}
+         */
+        ListKind: "unordered" | "decimal" | "bare_decimal" | "alpha_lower" | "alpha_upper" | "roman_lower" | "roman_upper";
         /** @description Stable identity for one model detection row. */
         ModelRegionId: string;
         /** @description Non-owning reference used by document-level relations. */
@@ -721,14 +754,15 @@ export interface components {
         };
         /** @description Stable PDF provenance that excludes temporary handles and pointer values. */
         PdfProvenance: {
-            char_codes: number[];
-            generated_space: boolean;
+            char_codes?: number[];
+            generated_space?: boolean;
             link?: string | null;
             /** Format: int32 */
             mcid?: number | null;
-            strike: boolean;
+            strike?: boolean;
             /** Format: int32 */
             text_object_index?: number | null;
+            underline?: boolean;
             unicode_mapping: components["schemas"]["UnicodeMappingStatus"];
         };
         /** @description Multipart contract for a streamed upload; the handler continues to process chunks instead of buffering this DTO. */
@@ -874,6 +908,8 @@ export interface components {
         TextSource: "Native" | "Ocr";
         /** @description Rich font and paint facts aggregated over one text item. */
         TextStyle: {
+            /** Format: double */
+            baseline_shift?: number | null;
             bold: boolean;
             fill_color?: number[] | null;
             /** Format: int32 */
@@ -890,8 +926,12 @@ export interface components {
             font_size_estimated: boolean;
             italic: boolean;
             monospace: boolean;
+            strikeout?: boolean;
             stroke_color?: number[] | null;
+            subscript?: boolean;
+            superscript?: boolean;
             text_matrix?: number[] | null;
+            underline?: boolean;
             /** Format: int32 */
             weight?: number | null;
         };

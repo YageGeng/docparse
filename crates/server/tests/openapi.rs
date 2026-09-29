@@ -240,6 +240,8 @@ async fn documentation_covers_routes_and_wire_schemas() {
         "TextItem",
         "Table",
         "TableCell",
+        "ListItem",
+        "ListKind",
         "ApiErrorResponse",
         "ParseProgress",
     ] {

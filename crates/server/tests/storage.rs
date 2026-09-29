@@ -201,7 +201,7 @@ async fn markdown_cache_rebuilds_and_inlines_file_figures() {
         .await
         .expect("current Markdown");
     assert_ne!(cache, old_cache);
-    assert!(cache.to_string_lossy().contains(".v7."));
+    assert!(cache.to_string_lossy().contains(".v9."));
     assert_eq!(
         std::fs::read_to_string(cache).expect("Markdown"),
         "![image](data:image/png;base64,iVBORw==)"

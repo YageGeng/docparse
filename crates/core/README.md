@@ -37,9 +37,46 @@ inline formulas measured 354 to 143 microseconds per page (median, 1,000 replays
 per sample); this measures crop preparation only, excluding PDF rendering, text
 refinement and model inference.
 
-DocParse 的原生 PDF 文本提取、文档上下文、版面/文字融合、异步 parser、稳定 schema、关系和 JSON/Text/Markdown/SVG 输出 crate。
+DocParse's native PDF text extraction, document context, layout/text fusion, asynchronous parser, stable schema, relations, and JSON/Markdown/SVG output crate.
 
 主要入口是 `DocParser`/`DocParserBuilder`。自定义 layout/OCR 通过 `Arc<dyn LayoutEngine>` 与 `Arc<dyn OcrEngine>` 注入；默认解析运行 production PP-DocLayoutV3。完整 API 和 E2E 命令见仓库根目录 `README.md`。
+
+## Body list recovery
+
+Only `Text` layouts participate in list recovery. Contents/directory (`Content`),
+`Algorithm`, `Chart`, titles, abstracts, tables, margins, footnotes and all other
+labels retain their existing rules. A non-Text layout or a column boundary also
+stops recovery across neighboring regions. Blocks with pending or delivered images
+remain separate owners while still allowing list recovery inside their own lines.
+
+Decimal markers (`1.`, `2)`, `(3)`, `4、`) and visible bullets produce source-backed
+`Block.list_items`. Lettered and Roman markers require consecutive aligned
+siblings starting at one; bare numbers require at least three. Indentation and
+local font/line spacing determine nesting and hanging continuations. When a model
+splits one confirmed list across neighboring body layouts, those layouts become a
+single canonical owner. TextItem IDs, original text and coordinates are retained;
+parent-qualified Line IDs are finalized after the merge. Absorbed source boxes
+remain internal provenance and are omitted from the configured JSON view.
+
+Each list item records its group, kind, original marker, optional ordinal, nesting
+level, source Line IDs and the UTF-8 byte offset after its first-line marker.
+A parent may resume after its descendants; its references remain ordered but may
+be noncontiguous. `ResultValidator` checks active ancestry, unique references and
+numbering against source text, rejecting continuations across prose or siblings.
+Semantic Markdown normalizes bullets to `-` and ordered markers to decimal
+numbering, while JSON preserves their original spelling. Continuations and nested
+items share the same formula-safe renderer used by `Block.markdown` and the Web
+content view. Numbering restarts use an invisible CommonMark reference definition
+(`\u005bdocparse-list-break\u005d: #`) to keep adjacent lists separate even when HTML is
+disabled. Raw Markdown retains the source markers and physical lines.
+
+Each body run is classified once using source positions. Merging remaps those
+positions to final Line IDs without repeating detection. Markdown rendering walks
+source lines with an ancestor stack instead of building per-block tree indexes.
+
+Older JSON without `list_items` remains readable. New list structure is produced
+by parsing again; changing the Markdown cache revision does not rewrite previously
+stored JSON. Cross-page list joining is not performed.
 
 ## Character recovery
 
@@ -77,8 +114,7 @@ is supplied separately; missing, oversized or malformed shards yield no match.
 Type3 glyphs for which PDFium exposes no outline cannot use this fallback.
 Browser callers can inject a resolver without filesystem access.
 
-Plain text removes common page margins and NUL placeholders. Semantic Markdown
-collapses prose whitespace and joins lowercase continuations after line-end
+Semantic Markdown collapses prose whitespace and joins lowercase continuations after line-end
 hyphens, including adjacent prose blocks. This heuristic can also join genuine
 hyphenated compounds. Raw Markdown retains physical lines; tables, algorithms,
 vertical text and blocks containing inline formulas bypass prose cleanup.
@@ -91,8 +127,8 @@ physical rows and horizontal spacing. Like LiteParse's projection, spacing uses
 the median of source-box width divided by Unicode character count; gaps become
 proportional spaces relative to the block's left (or right-to-left) origin.
 Same-row fragments such as an algorithm line number and its statement are joined
-without turning them into separate rows. JSON summaries and plain text share this
-projection; Markdown uses hard breaks and non-breaking spaces so HTML rendering
+without turning them into separate rows. JSON summaries use this projection;
+Markdown uses hard breaks and non-breaking spaces so HTML rendering
 retains indentation. Algorithms instead use fenced code blocks with literal spaces
 and newlines; the backtick fence grows when the source contains backticks that could
 otherwise close it. Recognized formula source remains literal inside the algorithm

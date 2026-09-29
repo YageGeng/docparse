@@ -18,7 +18,7 @@ pub struct Cli {
 /// Supported top-level commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Parse a PDF into canonical JSON, plain text, or Markdown.
+    /// Parse a PDF into canonical JSON or Markdown.
     Parse(ParseArgs),
     /// Validate and print the configured PP-DocLayoutV3 artifact contract.
     InspectModel(InspectModelArgs),
@@ -81,11 +81,10 @@ pub struct InspectModelArgs {
 pub enum OutputFormat {
     #[default]
     Json,
-    Text,
     Markdown,
 }
 
-/// Supported presentation projections for text-like formats.
+/// Supported presentation projections for Markdown.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum OutputView {
     #[default]

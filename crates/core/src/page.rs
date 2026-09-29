@@ -410,6 +410,9 @@ impl PageAnalyzer {
                     crate::Block::derive_text(&block.label, &block.lines);
             }
         }
+        // A model may split each list row into its own Text layout; recover only confirmed adjacent body runs.
+        ordered.blocks =
+            SemanticAssembler::recover_list_layouts(ordered.blocks)?;
         if !references.is_empty() {
             tracing::debug!(
                 "kept {} empty reference annotations outside body layout on page {}",
@@ -510,7 +513,7 @@ impl PageAnalyzer {
                 .then_with(|| left.code.cmp(&right.code))
                 .then_with(|| left.message.cmp(&right.message))
         });
-        let page = PageResult::builder()
+        let mut page = PageResult::builder()
             .page_number(extracted.page_number)
             .width(extracted.width)
             .height(extracted.height)
@@ -520,6 +523,13 @@ impl PageAnalyzer {
             .warnings(warnings)
             .diagnostics(diagnostics)
             .build();
+        // Final ownership and reading order are stable here; this entire stage already runs on the CPU pool.
+        for block in &mut page.blocks {
+            block.project_markdown(
+                &[],
+                &self.config.output().formula_placeholder,
+            );
+        }
         let actual_native_ids: BTreeMap<_, usize> = page
             .iter_text_items()
             .chain(page.replaced_native_text.iter())

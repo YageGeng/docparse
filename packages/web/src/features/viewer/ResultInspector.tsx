@@ -207,7 +207,9 @@ export function ResultInspector({
                   ))}
                 </details>
               )}
-              {page.blocks.map((block) => (
+              {page.blocks.map((block) => {
+                const formulas = page.formulas?.filter(formula => formula.block_id === block.id) ?? [];
+                return (
                 <article
                   id={`content-${block.id}`}
                   key={block.id}
@@ -222,6 +224,7 @@ export function ResultInspector({
                       {String(block.final_order + 1).padStart(2, "0")}
                     </span>
                     {blockLabel(block)}
+                    {!!block.list_items?.length && <span className="list-badge">列表 · {block.list_items.length} 项</span>}
                   </button>
                   {/* Figure bytes accompany, rather than replace, extracted text and PDF selection. */}
                   {block.image && <FigureView image={block.image} documentId={documentId} name={`第 ${page.page_number} 页 · 区域 ${block.final_order + 1} · ${blockLabel(block)}`} />}
@@ -240,9 +243,11 @@ export function ResultInspector({
                       {block.text || "此区域没有可提取的文字。"}
                     </p>
                   )}
-                  {block.markdown ? <details className="formula-details"><summary>公式详情与复制</summary><FormulaView formulas={page.formulas?.filter(formula => formula.block_id === block.id) ?? []} /></details> : <FormulaView formulas={page.formulas?.filter(formula => formula.block_id === block.id) ?? []} />}
+                  {/* List Markdown also uses this projection; show formula controls only when this block owns formulas. */}
+                  {block.markdown && formulas.length > 0 ? <details className="formula-details"><summary>公式详情与复制</summary><FormulaView formulas={formulas} /></details> : <FormulaView formulas={formulas} />}
                 </article>
-              ))}
+                );
+              })}
               {/* Unmatched images remain visible in Content after removing the separate image tab. */}
               {page.images?.map(asset => <article key={asset.id} className="content-block">
                 <h3 className="mb-2 text-xs font-medium text-muted-foreground">页面图片</h3>

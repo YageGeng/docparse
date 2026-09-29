@@ -11,7 +11,7 @@ use js::{FunctionExt, ValueExt};
 use docparse_config::{OutputConfig, RawConfig, ValidatedConfig};
 use docparse_core::{
     DocParser, DocumentResult, JsonRenderer, MarkdownRenderer, ParseObserver,
-    ParseProgress, TextRenderer,
+    ParseProgress,
 };
 use docparse_layout::ModelArtifacts;
 use serde::{Deserialize, Serialize};
@@ -360,11 +360,6 @@ impl WebParser {
         match format {
             "json" => JsonRenderer::render_with_config(&document, &self.output)
                 .map_err(|error| WebError::value("RenderFailed", error)),
-            "text" => Ok(TextRenderer::new(
-                docparse_core::RenderView::Semantic,
-                self.output.formula_placeholder.clone(),
-            )
-            .render(&document)),
             "markdown" => Ok(MarkdownRenderer::new(
                 docparse_core::RenderView::Semantic,
                 self.output.formula_placeholder.clone(),
@@ -372,7 +367,7 @@ impl WebParser {
             .render(&document)),
             _ => Err(WebError::value(
                 "InvalidFormat",
-                "expected json, text or markdown",
+                "expected json or markdown",
             )),
         }
     }

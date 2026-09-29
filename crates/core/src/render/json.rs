@@ -211,6 +211,7 @@ impl Serialize for ConfiguredBlock<'_> {
                     expose_sources && !self.block.source_regions.is_empty(),
                 )
                 + usize::from(self.block.markdown.is_some())
+                + usize::from(!self.block.list_items.is_empty())
                 + usize::from(self.block.table.is_some())
                 + usize::from(self.block.image.is_some()),
         )?;
@@ -247,6 +248,9 @@ impl Serialize for ConfiguredBlock<'_> {
         }
         state.serialize_field("semantic_hints", &self.block.semantic_hints)?;
         state.serialize_field("lines", &self.block.lines)?;
+        if !self.block.list_items.is_empty() {
+            state.serialize_field("list_items", &self.block.list_items)?;
+        }
         if let Some(table) = &self.block.table {
             state.serialize_field("table", table)?;
         }

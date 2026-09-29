@@ -28,3 +28,19 @@ fn binary_rejects_unknown_command() {
         .stderr(predicate::str::contains("unrecognized subcommand"))
         .stderr(predicate::str::contains("stack backtrace").not());
 }
+
+/// Rejects the retired text format before loading configuration or parsing a PDF.
+#[test]
+fn binary_rejects_text_output_format() {
+    let mut command =
+        Command::cargo_bin("docparse").expect("binary must build");
+
+    command
+        .args(["parse", "input.pdf", "--format", "text"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'text'"))
+        .stderr(predicate::str::contains(
+            "[possible values: json, markdown]",
+        ));
+}
