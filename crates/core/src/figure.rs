@@ -191,9 +191,12 @@ impl<'a> FigureCatalog<'a> {
     ) -> BTreeMap<u32, FigureMatch> {
         let mut composite_detections = BTreeSet::new();
         let mut composite_images = vec![false; self.images.len()];
-        for detection in detections.iter().filter(|detection| {
-            detection.label == docparse_layout::LayoutLabel::Image
-        }) {
+        // Any visual figure region containing multiple embedded images is treated as composite;
+        // it must fallback to a rendered page crop and not match individual component images.
+        for detection in detections
+            .iter()
+            .filter(|detection| detection.label.is_figure())
+        {
             let parts: Vec<_> = self.parts(detection.bbox, page).collect();
             if parts.len() > 1 {
                 composite_detections.insert(detection.source_detection_index);
@@ -282,12 +285,11 @@ impl<'a> FigureCatalog<'a> {
         for block in blocks.iter_mut().filter(|block| {
             block.label.is_figure() || block.embedded_image_index.is_some()
         }) {
-            let parts: Vec<_> =
-                if block.label == docparse_layout::LayoutLabel::Image {
-                    self.parts(block.bbox, page).collect()
-                } else {
-                    Vec::new()
-                };
+            let parts: Vec<_> = if block.label.is_figure() {
+                self.parts(block.bbox, page).collect()
+            } else {
+                Vec::new()
+            };
             let composite = parts.len() > 1;
             let index = block
                 .embedded_image_index
@@ -318,13 +320,16 @@ impl<'a> FigureCatalog<'a> {
             match asset {
                 Ok(image) => {
                     block.image = Some(image);
-                    if composite {
+                    // Composite visual regions and raster fallbacks absorb all embedded sub-parts
+                    // so they are not emitted as duplicate or orphaned images.
+                    if composite || index.is_none() {
                         for index in parts {
                             if let Some(slot) = delivered.get_mut(index) {
                                 *slot = true;
                             }
                         }
-                    } else if let Some(slot) =
+                    }
+                    if let Some(slot) =
                         index.and_then(|index| delivered.get_mut(index))
                     {
                         *slot = true;
@@ -880,6 +885,106 @@ mod tests {
             Some(FigureSource::Raster)
         );
         assert!(remaining.is_empty());
+    }
+
+    /// A multi-image chart or seal region falls back to a page raster crop and absorbs all sub-images.
+    #[test]
+    fn composite_figure_labels_use_raster_and_consume_parts() {
+        let images = vec![
+            image([10.0, 10.0, 130.0, 130.0], true),
+            image([100.0, 30.0, 130.0, 60.0], true),
+        ];
+        // Neither Chart nor Seal should match an individual component when multiple parts overlap.
+        assert!(
+            FigureCatalog::new(&images)
+                .match_detections(
+                    &[
+                        detection(
+                            0,
+                            LayoutLabel::Chart,
+                            [20.0, 20.0, 120.0, 120.0]
+                        ),
+                        detection(
+                            1,
+                            LayoutLabel::Seal,
+                            [20.0, 20.0, 120.0, 120.0]
+                        ),
+                    ],
+                    page(),
+                )
+                .is_empty()
+        );
+
+        let images = vec![
+            image([0.0, 0.0, 2.0, 4.0], true),
+            image([2.0, 0.0, 4.0, 4.0], true),
+        ];
+        let mut blocks = vec![figure_block(
+            0,
+            LayoutLabel::Chart,
+            [0.0, 0.0, 4.0, 4.0],
+            Some(0),
+            None,
+        )];
+        let mut warnings = Vec::new();
+        let remaining = FigureCatalog::new(&images).attach(
+            &mut blocks,
+            &rendered_page(),
+            &super::FigureAssets::new(
+                FigureConfig::default(),
+                "composite-chart-".into(),
+            ),
+            &mut warnings,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            blocks
+                .first()
+                .and_then(|block| block.image.as_ref())
+                .map(|image| image.source),
+            Some(FigureSource::Raster)
+        );
+        assert!(
+            remaining.is_empty(),
+            "composite chart must absorb all sub-parts instead of emitting separate images"
+        );
+    }
+
+    /// When a figure box falls back to raster screenshot crop without matching an embedded container,
+    /// overlapping sub-images are absorbed and not duplicated into unassigned page images.
+    #[test]
+    fn figure_raster_fallback_absorbs_contained_parts() {
+        // An image that is mostly inside the figure block but does not meet container match threshold.
+        let images = vec![image([0.0, 0.0, 2.0, 2.0], true)];
+        let mut blocks = vec![figure_block(
+            0,
+            LayoutLabel::Image,
+            [0.0, 0.0, 4.0, 4.0],
+            None,
+            None,
+        )];
+        let mut warnings = Vec::new();
+        let remaining = FigureCatalog::new(&images).attach(
+            &mut blocks,
+            &rendered_page(),
+            &super::FigureAssets::new(
+                FigureConfig::default(),
+                "fallback-absorb-".into(),
+            ),
+            &mut warnings,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            blocks
+                .first()
+                .and_then(|block| block.image.as_ref())
+                .map(|image| image.source),
+            Some(FigureSource::Raster)
+        );
+        assert!(
+            remaining.is_empty(),
+            "raster fallback figure must absorb overlapping parts"
+        );
     }
 
     /// Expansion that would contain another block is refused; an isolated figure still expands.
