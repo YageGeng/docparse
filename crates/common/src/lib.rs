@@ -10,7 +10,8 @@ pub mod timing;
 
 pub use queue::{PageLease, PageQueue, Queue, SessionRequest};
 pub use runtime::{
-    TaskError, WasmBoxedFuture, WasmCompatSend, WasmCompatSync, run_cpu,
+    TaskError, WasmBoxedFuture, WasmCompatSend, WasmCompatSync, panic_message,
+    run_cpu,
 };
 pub use thread::ThreadManager;
 pub use timeout::{Elapsed, timeout};

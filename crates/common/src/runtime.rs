@@ -90,3 +90,12 @@ mod platform {
     }
 }
 pub use platform::run_cpu;
+
+/// Renders a panic payload as text so the original panic message is never lost.
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_owned())
+}

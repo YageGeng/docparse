@@ -1,8 +1,8 @@
 //! Small derived files accelerate immutable results without changing their canonical JSON bytes.
 use crate::{
     code::ApiCode,
-    error::{ApiResult, SerializeSnafu, StorageSnafu, TaskSnafu},
-    storage::SharedStorage,
+    error::{ApiResult, RequestSnafu, SerializeSnafu, StorageSnafu, TaskSnafu},
+    storage::{ARTIFACT_BUILD_TIMEOUT, SharedStorage},
 };
 use base64::{engine::general_purpose::STANDARD, write::EncoderWriter};
 use docparse_core::{DocumentResult, PageError};
@@ -13,6 +13,7 @@ use std::{
     io::{BufReader, BufWriter, Write},
     ops::Range,
     path::PathBuf,
+    sync::Arc,
 };
 
 /// Markdown projection revision shared by disk caches and HTTP validators.
@@ -115,152 +116,228 @@ impl SharedStorage {
         let name = name.to_owned();
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-        tokio::task::spawn_blocking(move || {
-            tracing::dispatcher::with_default(&dispatcher, || {
-                span.in_scope(|| -> ApiResult<PathBuf> {
-                    if cache.try_exists().context(StorageSnafu {
-                        stage: "result-check-cache",
-                        code: ApiCode::service_unavailable(5031003),
-                    })? {
-                        return Ok(cache);
-                    }
-                    // A writable coordination file supports NFS locking without locking payload reads on SMB.
-                    let _lock =
-                        storage.lock_result(&name).context(StorageSnafu {
-                            stage: "result-lock-artifacts",
-                            code: ApiCode::service_unavailable(5031003),
-                        })?;
-                    // Reopen only after locking: a deletion that won the race must prevent cache recreation.
-                    let file =
-                        std::fs::File::open(&source).context(StorageSnafu {
-                            stage: "result-open-source",
-                            code: ApiCode::service_unavailable(5031003),
-                        })?;
-                    if cache.try_exists().context(StorageSnafu {
-                        stage: "result-check-cache",
-                        code: ApiCode::service_unavailable(5031003),
-                    })? {
-                        return Ok(cache);
-                    }
-                    let started = std::time::Instant::now();
-                    tracing::info!(
-                        "building result artifact {}",
-                        cache.display()
-                    );
-                    let root = source
-                        .parent()
-                        .unwrap_or_else(|| std::path::Path::new("."));
-                    let mut temporary = tempfile::NamedTempFile::new_in(root)
-                        .context(StorageSnafu {
-                        stage: "result-create-cache",
-                        code: ApiCode::service_unavailable(5031003),
-                    })?;
-                    {
-                        let mut writer = BufWriter::with_capacity(
-                            256 * 1024,
-                            temporary.as_file_mut(),
-                        );
-                        if let Some(placeholder) = placeholder {
-                            /// Markdown uses the same canonical stored document as the original download handler.
-                            #[derive(Deserialize)]
-                            struct StoredDocument {
-                                data: DocumentResult,
+        // A finished artifact needs no admission: without this fast path every cache hit would
+        // queue behind document-sized builds.
+        if tokio::fs::try_exists(&cache).await.context(StorageSnafu {
+            stage: "result-check-cache",
+            code: ApiCode::service_unavailable(5031003),
+        })? {
+            return Ok(cache);
+        }
+        // One deadline covers admission, lock retries and building. An actual build retains its
+        // permit and file lock through completion even if this caller is cancelled or times out.
+        let build = async {
+            loop {
+                let permit = Arc::clone(&self.artifact_permits)
+                    .acquire_owned()
+                    .await
+                    .expect("the artifact semaphore is never closed");
+                let cache = cache.clone();
+                let source = source.clone();
+                let placeholder = placeholder.clone();
+                let name = name.clone();
+                let storage = storage.clone();
+                let span = span.clone();
+                let dispatcher = dispatcher.clone();
+                let building = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    tracing::dispatcher::with_default(&dispatcher, || {
+                        span.in_scope(|| -> ApiResult<Option<PathBuf>> {
+                            if cache.try_exists().context(StorageSnafu {
+                                stage: "result-check-cache",
+                                code: ApiCode::service_unavailable(5031003),
+                            })? {
+                                return Ok(Some(cache));
                             }
-                            let document: StoredDocument =
-                                serde_json::from_reader(
-                                    BufReader::with_capacity(256 * 1024, &file),
-                                )
-                                .context(
-                                    SerializeSnafu {
-                                        stage: "result-decode-json",
-                                        code: ApiCode::COMMON_INTERNAL_ERROR,
+                            // A writable coordination file supports NFS locking without locking payload reads on SMB.
+                            let lock = storage.result_lock(&name).context(
+                                StorageSnafu {
+                                    stage: "result-lock-artifacts",
+                                    code: ApiCode::service_unavailable(5031003),
+                                },
+                            )?;
+                            // Never park a blocking thread or a global build permit behind a contended file lock.
+                            match lock.try_lock() {
+                                Ok(()) => {}
+                                Err(std::fs::TryLockError::WouldBlock) => {
+                                    return Ok(None);
+                                }
+                                Err(std::fs::TryLockError::Error(error)) => {
+                                    return Err(error).context(StorageSnafu {
+                                        stage: "result-lock-artifacts",
+                                        code: ApiCode::service_unavailable(
+                                            5031003,
+                                        ),
+                                    });
+                                }
+                            }
+                            // Reopen only after locking: a deletion that won the race must prevent cache recreation.
+                            let file = std::fs::File::open(&source).context(
+                                StorageSnafu {
+                                    stage: "result-open-source",
+                                    code: ApiCode::service_unavailable(5031003),
+                                },
+                            )?;
+                            if cache.try_exists().context(StorageSnafu {
+                                stage: "result-check-cache",
+                                code: ApiCode::service_unavailable(5031003),
+                            })? {
+                                return Ok(Some(cache));
+                            }
+                            let started = std::time::Instant::now();
+                            tracing::info!(
+                                "building result artifact {}",
+                                cache.display()
+                            );
+                            let root = source
+                                .parent()
+                                .unwrap_or_else(|| std::path::Path::new("."));
+                            let mut temporary =
+                                tempfile::NamedTempFile::new_in(root).context(
+                                    StorageSnafu {
+                                        stage: "result-create-cache",
+                                        code: ApiCode::service_unavailable(
+                                            5031003,
+                                        ),
                                     },
                                 )?;
-                            // Stream owned figures into the cache without retaining their Base64 or a second document buffer.
-                            docparse_core::MarkdownRenderer::new(
-                                docparse_core::RenderView::Semantic,
-                                placeholder,
-                            )
-                            .write_with_images(
-                                &document.data,
-                                &mut writer,
-                                |image, path, writer| {
-                                    let owned = storage
-                                        .figure_path_blocking(&name, path)
-                                        .map_err(std::io::Error::other)?;
-                                    let mut file = std::fs::File::open(owned)?;
-                                    write!(
-                                        writer,
-                                        "data:{};base64,",
-                                        image.media_type.as_str()
-                                    )?;
-                                    let mut encoded =
-                                        EncoderWriter::new(writer, &STANDARD);
-                                    let _ =
-                                        std::io::copy(&mut file, &mut encoded)?;
-                                    let _ = encoded.finish()?;
-                                    Ok(())
-                                },
-                            )
-                            .context(
+                            {
+                                let mut writer = BufWriter::with_capacity(
+                                    256 * 1024,
+                                    temporary.as_file_mut(),
+                                );
+                                if let Some(placeholder) = placeholder {
+                                    /// Markdown uses the same canonical stored document as the original download handler.
+                                    #[derive(Deserialize)]
+                                    struct StoredDocument {
+                                        data: DocumentResult,
+                                    }
+                                    let document: StoredDocument =
+                                        serde_json::from_reader(
+                                            BufReader::with_capacity(
+                                                256 * 1024,
+                                                &file,
+                                            ),
+                                        )
+                                        .context(SerializeSnafu {
+                                            stage: "result-decode-json",
+                                            code:
+                                                ApiCode::COMMON_INTERNAL_ERROR,
+                                        })?;
+                                    // Stream owned figures into the cache without retaining their Base64 or a second document buffer.
+                                    docparse_core::MarkdownRenderer::new(
+                                        docparse_core::RenderView::Semantic,
+                                        placeholder,
+                                    )
+                                    .write_with_images(
+                                        &document.data,
+                                        &mut writer,
+                                        |image, path, writer| {
+                                            let owned = storage
+                                                .figure_path_blocking(
+                                                    &name, path,
+                                                )
+                                                .map_err(
+                                                    std::io::Error::other,
+                                                )?;
+                                            let mut file =
+                                                std::fs::File::open(owned)?;
+                                            write!(
+                                                writer,
+                                                "data:{};base64,",
+                                                image.media_type.as_str()
+                                            )?;
+                                            let mut encoded =
+                                                EncoderWriter::new(
+                                                    writer, &STANDARD,
+                                                );
+                                            let _ = std::io::copy(
+                                                &mut file,
+                                                &mut encoded,
+                                            )?;
+                                            let _ = encoded.finish()?;
+                                            Ok(())
+                                        },
+                                    )
+                                    .context(StorageSnafu {
+                                        stage: "result-write-markdown",
+                                        code: ApiCode::service_unavailable(
+                                            5031003,
+                                        ),
+                                    })?;
+                                } else {
+                                    let bytes = std::fs::read(&source)
+                                        .context(StorageSnafu {
+                                            stage: "result-read-index-source",
+                                            code: ApiCode::service_unavailable(
+                                                5031003,
+                                            ),
+                                        })?;
+                                    let index = ResultIndex::try_from(
+                                        bytes.as_slice(),
+                                    )
+                                    .context(SerializeSnafu {
+                                        stage: "result-build-index",
+                                        code: ApiCode::COMMON_INTERNAL_ERROR,
+                                    })?;
+                                    serde_json::to_writer(&mut writer, &index)
+                                        .context(SerializeSnafu {
+                                            stage: "result-write-index",
+                                            code:
+                                                ApiCode::COMMON_INTERNAL_ERROR,
+                                        })?;
+                                }
+                                writer.flush().context(StorageSnafu {
+                                    stage: "result-flush-cache",
+                                    code: ApiCode::service_unavailable(5031003),
+                                })?;
+                            }
+                            temporary.as_file().sync_all().context(
                                 StorageSnafu {
-                                    stage: "result-write-markdown",
+                                    stage: "result-sync-cache",
                                     code: ApiCode::service_unavailable(5031003),
                                 },
                             )?;
-                        } else {
-                            let bytes = std::fs::read(&source).context(
-                                StorageSnafu {
-                                    stage: "result-read-index-source",
+                            temporary
+                                .persist(&cache)
+                                .map_err(|error| error.error)
+                                .context(StorageSnafu {
+                                    stage: "result-publish-cache",
                                     code: ApiCode::service_unavailable(5031003),
-                                },
-                            )?;
-                            let index = ResultIndex::try_from(bytes.as_slice())
-                                .context(SerializeSnafu {
-                                    stage: "result-build-index",
-                                    code: ApiCode::COMMON_INTERNAL_ERROR,
                                 })?;
-                            serde_json::to_writer(&mut writer, &index)
-                                .context(SerializeSnafu {
-                                    stage: "result-write-index",
-                                    code: ApiCode::COMMON_INTERNAL_ERROR,
+                            std::fs::File::open(root)
+                                .and_then(|directory| directory.sync_all())
+                                .context(StorageSnafu {
+                                    stage: "result-sync-directory",
+                                    code: ApiCode::service_unavailable(5031003),
                                 })?;
-                        }
-                        writer.flush().context(StorageSnafu {
-                            stage: "result-flush-cache",
-                            code: ApiCode::service_unavailable(5031003),
-                        })?;
-                    }
-                    temporary.as_file().sync_all().context(StorageSnafu {
-                        stage: "result-sync-cache",
-                        code: ApiCode::service_unavailable(5031003),
-                    })?;
-                    temporary
-                        .persist(&cache)
-                        .map_err(|error| error.error)
-                        .context(StorageSnafu {
-                            stage: "result-publish-cache",
-                            code: ApiCode::service_unavailable(5031003),
-                        })?;
-                    std::fs::File::open(root)
-                        .and_then(|directory| directory.sync_all())
-                        .context(StorageSnafu {
-                            stage: "result-sync-directory",
-                            code: ApiCode::service_unavailable(5031003),
-                        })?;
-                    tracing::info!(
-                        "built result artifact {} in {} ms",
-                        cache.display(),
-                        started.elapsed().as_millis()
-                    );
-                    Ok(cache)
-                })
-            })
-        })
-        .await
-        .context(TaskSnafu {
-            stage: "result-cache-task",
-            code: ApiCode::COMMON_INTERNAL_ERROR,
-        })?
+                            tracing::info!(
+                                "built result artifact {} in {} ms",
+                                cache.display(),
+                                started.elapsed().as_millis()
+                            );
+                            Ok(Some(cache))
+                        })
+                    })
+                });
+                if let Some(path) = building.await.context(TaskSnafu {
+                    stage: "result-cache-task",
+                    code: ApiCode::COMMON_INTERNAL_ERROR,
+                })?? {
+                    return Ok(path);
+                }
+                // ponytail: poll cross-process locks every 25 ms; coalesce same-result callers if contention becomes hot.
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        };
+        tokio::time::timeout(ARTIFACT_BUILD_TIMEOUT, build)
+            .await
+            .map_err(|_elapsed| {
+                RequestSnafu {
+                    stage: "result-artifact-timeout",
+                    code: ApiCode::service_unavailable(5031003),
+                }
+                .build()
+            })?
     }
 }

@@ -148,11 +148,7 @@ impl Workbench {
             );
             return Err(entry_error());
         }
-        tracing::info!(
-            "serving the workbench from {} at {}",
-            root.display(),
-            mount
-        );
+        tracing::info!("serving the workbench from {}", root.display());
         Ok(Self {
             mount: mount.to_owned(),
             assets: Assets::Directory(
@@ -171,7 +167,7 @@ impl Workbench {
 ///
 /// An empty or root prefix mounts the workbench at `/webui`, which keeps the
 /// workbench reachable without claiming the whole root namespace.
-fn mount_path(api_prefix: &str) -> String {
+pub(crate) fn mount_path(api_prefix: &str) -> String {
     let prefix = api_prefix.trim_end_matches('/');
     format!("{prefix}/{MOUNT_SEGMENT}")
 }
@@ -476,10 +472,7 @@ impl Workbench {
                 reason: "embed-web found no workbench build with an index.html in this binary",
             });
         }
-        tracing::info!(
-            "serving the workbench embedded in this binary at {}",
-            mount
-        );
+        tracing::info!("serving the workbench embedded in this binary");
         Ok(Self {
             mount: mount.to_owned(),
             assets: Assets::Embedded(

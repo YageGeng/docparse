@@ -84,7 +84,8 @@ pub async fn events(
     query: Result<Query<JobQuery>, QueryRejection>,
 ) -> ApiResult<Response> {
     // Query extraction keeps task identifiers out of route templates and works with native EventSource.
-    let Query(JobQuery { id }) = query.map_err(|_rejection| {
+    let Query(JobQuery { id }) = query.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "job-events-parse-id",
             code: ApiCode::bad_request(4001002),

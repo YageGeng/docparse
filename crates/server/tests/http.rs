@@ -1170,6 +1170,57 @@ async fn error_variants_preserve_explicit_codes() {
     }
 }
 
+/// Hash batching must preserve every chunk and the final partial batch before database submission.
+#[tokio::test]
+async fn chunked_upload_publishes_the_complete_content_hash() {
+    let directory = tempfile::tempdir().expect("storage");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let app = router(
+        AppState::new(
+            Default::default(),
+            storage.clone(),
+            HttpOptions::builder().build(),
+            CancellationToken::new(),
+        )
+        .expect("state"),
+        &docparse_config::ServerConfig::default(),
+    )
+    .expect("router");
+    let mut pdf = vec![b'x'; 2 * 1024 * 1024 + 123];
+    pdf.get_mut(..5)
+        .expect("signature")
+        .copy_from_slice(b"%PDF-");
+    let expected = blake3::hash(&pdf).to_hex().to_string();
+    let (parts, body) = upload(Uuid::new_v4(), &pdf).into_parts();
+    let bytes = to_bytes(body, pdf.len() + 4096).await.expect("multipart");
+    let chunks: Vec<_> = bytes
+        .chunks(64 * 1024)
+        .map(|chunk| {
+            Ok::<_, std::io::Error>(axum::body::Bytes::copy_from_slice(chunk))
+        })
+        .collect();
+    let response = app
+        .oneshot(Request::from_parts(
+            parts,
+            Body::from_stream(futures_util::stream::iter(chunks)),
+        ))
+        .await
+        .expect("response");
+    // The intentionally disconnected database rejects submission only after immutable publication.
+    assert!(response.status().is_server_error());
+    let persisted = tokio::fs::read(
+        storage
+            .path(&format!("{expected}.pdf"))
+            .expect("published path"),
+    )
+    .await
+    .expect("published PDF");
+    assert_eq!(
+        persisted, pdf,
+        "hashing must neither drop nor duplicate batch bytes"
+    );
+}
+
 /// Router and extractor failures enter the typed error boundary directly, preserving method headers and upload limits.
 #[tokio::test]
 async fn routing_and_upload_rejections_use_api_errors() {

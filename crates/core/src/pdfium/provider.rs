@@ -83,7 +83,7 @@ impl PdfiumSession for PdfiumExecutor {
     ) -> WasmBoxedFuture<'a, Result<RenderedPage, PdfiumRuntimeError>> {
         Box::pin(self.render_page(page_number, config))
     }
-    /// Joins the local worker before reporting the session closed.
+    /// Waits for the local worker's document and runtime cleanup before reporting closure.
     fn close(
         self: Box<Self>,
     ) -> WasmBoxedFuture<'static, Result<(), PdfiumRuntimeError>> {

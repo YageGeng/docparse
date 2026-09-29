@@ -18,7 +18,9 @@ mod platform {
     ) -> Result<F::Output, ()> {
         tokio::time::timeout(duration, future)
             .await
-            .map_err(|_elapsed| ())
+            .map_err(|elapsed| {
+                tracing::debug!("native timeout elapsed: {elapsed}");
+            })
     }
 }
 
@@ -106,7 +108,8 @@ pub async fn timeout<F: Future>(
     if started.elapsed() >= duration {
         Err(Elapsed)
     } else {
-        result.map_err(|_elapsed| Elapsed)
+        // The platform adapter signals expiry with the unit type, which carries no content.
+        result.map_err(|()| Elapsed)
     }
 }
 

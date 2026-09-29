@@ -82,6 +82,9 @@ tracing-subscriber.workspace = true
 docparse-ocr.workspace = true
 docparse-tsr.workspace = true
 
+# async
+tokio = { workspace = true, features = ["test-util"] }
+
 # inference and image
 image.workspace = true
 

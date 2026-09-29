@@ -28,6 +28,7 @@ typed-builder.workspace = true
 
 # cli and diagnostics
 log.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 # config and serialization

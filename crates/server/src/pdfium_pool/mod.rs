@@ -8,10 +8,13 @@ use docparse_core::{
     GlyphResolver, PdfInput, PdfiumProvider, PdfiumRuntimeError, PdfiumSession,
     PreScannedPage, RenderedPage, WasmBoxedFuture,
 };
-use process::{CLOSE_TIMEOUT, Process};
+use process::{CLOSE_TIMEOUT, OPERATION_TIMEOUT, Process};
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -29,10 +32,13 @@ struct Call {
 }
 
 /// Dropping a lease always notifies its process supervisor, including cancellation during Open.
+#[derive(TypedBuilder)]
 struct Lease {
     commands: mpsc::Sender<Call>,
     cancelled: CancellationToken,
     admission: Mutex<()>,
+    /// Distinguishes a recoverable operation deadline from fatal cancellation or transport loss.
+    unresponsive: Arc<AtomicBool>,
 }
 impl Drop for Lease {
     /// Never returns an unconfirmed document to the idle pool.
@@ -47,23 +53,49 @@ impl Lease {
         command: Command,
         resolver: Option<Arc<dyn GlyphResolver>>,
     ) -> Result<Outcome, PdfiumRuntimeError> {
-        // Cancelling a queued call leaves the active command alone; admitted calls own cancellation.
-        let _admission = tokio::select! {
-            _ = self.cancelled.cancelled() => return Err(PdfiumRuntimeError::Transport("PDFium lease cancelled".into())),
-            guard = self.admission.lock() => guard,
+        let operation = match &command {
+            Command::Open(_) => "open",
+            Command::Close => "close",
+            Command::Render { .. } => "render",
+            _ => "extract",
         };
-        let uncertain = self.cancelled.clone().drop_guard();
-        let (response, reply) = oneshot::channel();
-        let result = tokio::select! {
-            _ = self.cancelled.cancelled() => Err(PdfiumRuntimeError::Transport("PDFium lease cancelled".into())),
-            result = async {
-                self.commands.send(Call::builder().command(command).resolver(resolver).response(response).build()).await
+        let closing = matches!(command, Command::Close);
+        let result = async {
+            // Cancelling a queued call leaves the active command alone; admitted calls own cancellation.
+            let _admission = tokio::select! {
+                _ = self.cancelled.cancelled() => {
+                    return Err(PdfiumRuntimeError::Transport("PDFium lease cancelled".into()));
+                }
+                guard = self.admission.lock() => guard,
+            };
+            let uncertain = self.cancelled.clone().drop_guard();
+            let (response, reply) = oneshot::channel();
+            let exchange = async {
+                self.commands
+                    .send(Call::builder().command(command).resolver(resolver).response(response).build())
+                    .await
                     .map_err(|_error| PdfiumRuntimeError::Transport("PDFium lease stopped".into()))?;
                 reply.await.map_err(|_error| PdfiumRuntimeError::Transport("PDFium lease response closed".into()))?
-            } => result,
-        };
-        if !result.as_ref().is_err_and(PdfiumRuntimeError::is_fatal) {
-            uncertain.disarm();
+            };
+            let result = tokio::select! {
+                _ = self.cancelled.cancelled() => Err(PdfiumRuntimeError::Transport("PDFium lease cancelled".into())),
+                result = exchange => result,
+            };
+            if !result.as_ref().is_err_and(PdfiumRuntimeError::is_fatal) {
+                uncertain.disarm();
+            }
+            result
+        }
+        .await;
+        // The supervisor owns the deadline and process cleanup. Preserve that cause even if
+        // cancellation wins the reply race or a queued operation wakes after the child is retired.
+        if self.unresponsive.load(Ordering::Acquire)
+            && result.as_ref().is_err_and(PdfiumRuntimeError::is_fatal)
+        {
+            if closing {
+                return Ok(Outcome::Closed);
+            }
+            return Err(PdfiumRuntimeError::WorkerUnresponsive { operation });
         }
         result
     }
@@ -204,7 +236,8 @@ impl PdfiumPool {
         });
         initialized
             .await
-            .map_err(|_error| {
+            .map_err(|error| {
+                tracing::warn!("PDFium pool startup task stopped: {error}");
                 PdfiumRuntimeError::Transport(
                     "PDFium pool startup task stopped".into(),
                 )
@@ -260,7 +293,7 @@ impl PdfiumPool {
         self.stopping.cancelled().await;
     }
 
-    /// Supervises one fixed slot; replacement is allowed only after the old process and bridge are reaped.
+    /// Supervises one slot; replacement waits for the old child to exit and its bridge to release IPC.
     async fn supervise(
         slot: usize,
         mut process: Process,
@@ -283,11 +316,13 @@ impl PdfiumPool {
             })?;
             let (commands, mut requests) = mpsc::channel::<Call>(1);
             let cancelled = CancellationToken::new();
-            let lease = Lease {
-                commands,
-                cancelled: cancelled.clone(),
-                admission: Mutex::new(()),
-            };
+            let unresponsive = Arc::new(AtomicBool::new(false));
+            let lease = Lease::builder()
+                .commands(commands)
+                .cancelled(cancelled.clone())
+                .admission(Mutex::new(()))
+                .unresponsive(Arc::clone(&unresponsive))
+                .build();
             // Invalid documents and deliberate cancellation do not consume the crash-restart budget.
             let mut failed = false;
             let offered = tokio::select! {
@@ -367,9 +402,18 @@ impl PdfiumPool {
                             if closing {
                                 tokio::time::timeout(CLOSE_TIMEOUT, exchange).await
                                     .map_err(|_error| PdfiumRuntimeError::Transport("PDFium Close timed out".into()))?
-                            } else { exchange.await }
+                            } else {
+                                // Time the real exchange here so recycling, recovery and metrics share one cause.
+                                tokio::time::timeout(OPERATION_TIMEOUT, exchange).await
+                                    .map_err(|_elapsed| PdfiumRuntimeError::OperationTimeout {
+                                        operation,
+                                        seconds: OPERATION_TIMEOUT.as_secs(),
+                                    })?
+                            }
                         } => {
-                            failed = outcome.as_ref().is_err_and(PdfiumRuntimeError::is_fatal);
+                            failed = outcome.as_ref().is_err_and(|error| {
+                                error.is_fatal() || error.is_operation_timeout()
+                            });
                             outcome
                         },
                     };
@@ -384,6 +428,20 @@ impl PdfiumPool {
                     let fatal = outcome
                         .as_ref()
                         .is_err_and(PdfiumRuntimeError::is_fatal);
+                    // A deadline miss keeps the page recoverable but leaves the child wedged, so the
+                    // slot is recycled immediately instead of serving the rest of its queue.
+                    let timed_out = outcome
+                        .as_ref()
+                        .is_err_and(PdfiumRuntimeError::is_operation_timeout);
+                    if timed_out {
+                        // Publish the recovery state before sending the reply or cancelling waiting callers.
+                        unresponsive.store(true, Ordering::Release);
+                        metrics::counter!(
+                            "docparse_pdfium_operation_timeouts_total",
+                            "operation" => operation
+                        )
+                        .increment(1);
+                    }
                     if let Err(error) = &outcome {
                         tracing::warn!(
                             "PDFium slot {} lease {} request failed: {}",
@@ -393,15 +451,16 @@ impl PdfiumPool {
                         );
                     }
                     let acknowledged = outcome.is_ok()
-                        || outcome
-                            .as_ref()
-                            .is_err_and(|error| !error.is_fatal());
+                        || (!timed_out
+                            && outcome
+                                .as_ref()
+                                .is_err_and(|error| !error.is_fatal()));
                     let _ = call.response.send(outcome);
                     if acknowledged {
                         // The IPC operation has acknowledged completion; the reply or caller owns any remaining image.
                         active_page.take();
                     }
-                    if completed || rejected || fatal {
+                    if completed || rejected || fatal || timed_out {
                         break;
                     }
                 }
@@ -628,5 +687,108 @@ impl PdfiumSession for RemoteSession {
                 )),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A real stopped child must time out once, preserve native fallback and close, and be reaped.
+    #[tokio::test]
+    #[allow(clippy::panic)] // Unexpected protocol replies and supervisor exits must fail this regression.
+    async fn render_timeout_preserves_document_and_records_metric() {
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder();
+        let handle = recorder.handle();
+        // This current-thread test polls the real supervisor itself, so every metric uses this recorder.
+        let _recorder = metrics::set_default_local_recorder(&recorder);
+        let binary = std::env::current_exe()
+            .expect("test executable")
+            .parent()
+            .expect("deps")
+            .parent()
+            .expect("target directory")
+            .join(format!("{WORKER_BINARY}{}", std::env::consts::EXE_SUFFIX));
+        let stopping = CancellationToken::new();
+        let process = Process::start(&binary, &stopping)
+            .await
+            .expect("real PDFium process");
+        let pid = process.child.id().expect("PID");
+        let (available, mut leases) = mpsc::unbounded_channel();
+        let supervisor = PdfiumPool::supervise(
+            0,
+            process,
+            binary,
+            available,
+            stopping.clone(),
+        );
+        tokio::pin!(supervisor);
+        let opening = async {
+            let lease = leases.recv().await.expect("lease");
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../core/tests/fixtures/pdf/extraction_metadata.pdf");
+            let source =
+                Source::try_from(PdfInput::Path(fixture)).expect("source");
+            let outcome = lease
+                .request(Command::Open(source), None)
+                .await
+                .expect("open");
+            let Outcome::Opened(pages) = outcome else {
+                panic!("opened response");
+            };
+            RemoteSession { lease, pages }
+        };
+        let session = tokio::select! {
+            result = &mut supervisor => panic!("supervisor stopped before opening: {result:?}"),
+            session = opening => session,
+        };
+        assert!(
+            std::process::Command::new("kill")
+                .args(["-STOP", &pid.to_string()])
+                .status()
+                .expect("stop owned worker")
+                .success()
+        );
+        let config = RenderConfig::default();
+        let rendered = {
+            let request = session.render_page(1, &config);
+            tokio::pin!(request);
+            assert!(futures_util::poll!(request.as_mut()).is_pending());
+            // Poll the supervisor directly to arm its operation deadline before advancing time.
+            assert!(futures_util::poll!(supervisor.as_mut()).is_pending());
+            tokio::time::pause();
+            tokio::time::advance(
+                OPERATION_TIMEOUT + std::time::Duration::from_secs(1),
+            )
+            .await;
+            tokio::time::resume();
+            assert!(futures_util::poll!(supervisor.as_mut()).is_pending());
+            request.await
+        };
+        let later = session.render_page(1, &config).await;
+        let closed = Box::new(session).close().await;
+        // Always reap the deliberately stopped child before checking the regression assertions.
+        stopping.cancel();
+        let cleanup = supervisor.await;
+        cleanup.expect("reap stopped child");
+        assert!(
+            rendered
+                .expect_err("render deadline")
+                .is_operation_timeout()
+        );
+        assert!(
+            later.expect_err("unusable renderer").is_operation_timeout(),
+            "later pages must remain recoverable"
+        );
+        closed.expect("close must preserve native fallback");
+        let scrape = handle.render();
+        assert!(
+            scrape.lines().any(|line| line
+                .starts_with("docparse_pdfium_operation_timeouts_total{")
+                && line.contains("operation=\"render\"")
+                && line.ends_with(" 1")),
+            "expected exactly one render timeout: {scrape}"
+        );
     }
 }

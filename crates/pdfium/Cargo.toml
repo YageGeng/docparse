@@ -21,6 +21,9 @@ pdfium-sys.workspace = true
 # builder
 typed-builder.workspace = true
 
+# cli and diagnostics
+tracing.workspace = true
+
 [dev-dependencies]
 # testing
 blake3.workspace = true

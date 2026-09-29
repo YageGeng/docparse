@@ -34,7 +34,8 @@ pub async fn source(
     query: Result<Query<JobQuery>, QueryRejection>,
     request: Request,
 ) -> ApiResult<Response> {
-    let Query(JobQuery { id }) = query.map_err(|_rejection| {
+    let Query(JobQuery { id }) = query.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "job-source-parse-id",
             code: ApiCode::bad_request(4001002),

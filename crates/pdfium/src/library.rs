@@ -62,10 +62,17 @@ impl Library {
         path: &str,
         password: Option<&str>,
     ) -> Result<Document<'_>, PdfiumError> {
-        let c_path =
-            CString::new(path).map_err(|_| PdfiumError::FileNotFound)?;
+        let c_path = CString::new(path).map_err(|error| {
+            tracing::warn!("PDF path contains a NUL byte: {error}");
+            PdfiumError::FileNotFound
+        })?;
         let c_password = password
-            .map(|p| CString::new(p).map_err(|_| PdfiumError::OperationFailed))
+            .map(|p| {
+                CString::new(p).map_err(|error| {
+                    tracing::warn!("PDF password contains a NUL byte: {error}");
+                    PdfiumError::OperationFailed
+                })
+            })
             .transpose()?;
 
         let handle = unsafe {
@@ -118,7 +125,12 @@ impl Library {
         password: Option<&str>,
     ) -> Result<Document<'data>, PdfiumError> {
         let c_password = password
-            .map(|p| CString::new(p).map_err(|_| PdfiumError::OperationFailed))
+            .map(|p| {
+                CString::new(p).map_err(|error| {
+                    tracing::warn!("PDF password contains a NUL byte: {error}");
+                    PdfiumError::OperationFailed
+                })
+            })
             .transpose()?;
         let data_length = checked_document_length(data.len())?;
 

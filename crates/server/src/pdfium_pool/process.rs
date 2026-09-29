@@ -3,9 +3,7 @@ use docparse_core::pdfium_ipc::{
 };
 use docparse_core::{GlyphResolver, PdfiumRuntimeError, WasmBoxedFuture};
 use ipc_channel::ipc::{self, IpcSender};
-use std::{
-    path::Path, process::Stdio, sync::Arc, thread::JoinHandle, time::Duration,
-};
+use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Child,
@@ -14,6 +12,11 @@ use tokio::{
 use typed_builder::TypedBuilder;
 
 pub(super) const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Upper bound on one PDFium command round-trip through the bridge.
+///
+/// A wedged child cannot answer; the lease is cancelled so the supervisor replaces it.
+pub(super) const OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One bounded bridge request; only this thread performs blocking IPC operations.
@@ -29,14 +32,13 @@ struct BridgeCall {
     response: oneshot::Sender<Result<Outcome, PdfiumRuntimeError>>,
 }
 
-/// Owns the OS process and its bridge until both have actually terminated.
+/// Owns the child process and waits for its bridge to release all IPC resources.
 #[derive(TypedBuilder)]
 pub(super) struct Process {
     pub child: Child,
     bridge: mpsc::Sender<BridgeCall>,
     #[builder(default)]
-    thread: Option<JoinHandle<()>>,
-    finished: oneshot::Receiver<()>,
+    finished: Option<oneshot::Receiver<()>>,
     // The parent removes rendezvous files even when a child is killed before accept().
     bootstrap_directory: tempfile::TempDir,
 }
@@ -77,7 +79,6 @@ impl Process {
         let mut process = Self::builder()
             .child(child)
             .bridge(bridge)
-            .finished(completed)
             .bootstrap_directory(bootstrap_directory)
             .build();
         let setup = async {
@@ -96,7 +97,8 @@ impl Process {
             let hello: Hello = serde_json::from_slice(&line)?;
             hello.validate()?;
             let (ready, initialized) = oneshot::channel();
-            process.thread = Some(
+            // The bridge signals after all IPC owners are dropped; its OS thread may detach safely.
+            drop(
                 std::thread::Builder::new()
                     .name("docparse-pdfium-ipc".into())
                     .spawn(move || {
@@ -122,6 +124,7 @@ impl Process {
                         let _ = finished.send(());
                     })?,
             );
+            process.finished = Some(completed);
             initialized.await.map_err(|_error| {
                 PdfiumRuntimeError::Transport(
                     "worker handshake channel closed".into(),
@@ -188,7 +191,7 @@ impl Process {
         })
     }
 
-    /// Stops and reaps the child before joining its bridge, even after cancellation or bad input.
+    /// Reaps the child and waits for bridge cleanup, even after cancellation or bad input.
     pub async fn stop(
         mut self,
         graceful: bool,
@@ -234,17 +237,15 @@ impl Process {
                 }
             }
         }
-        if let Some(thread) = self.thread.take() {
-            tokio::time::timeout(CLOSE_TIMEOUT, &mut self.finished).await
+        if let Some(finished) = &mut self.finished {
+            // Await the cleanup notification directly instead of polling the healthy thread's exit.
+            tokio::time::timeout(CLOSE_TIMEOUT, finished).await
                 .map_err(|_error| PdfiumRuntimeError::Transport("PDFium bridge did not stop; a synchronous resolver may be stuck".into()))?
                 .map_err(|_error| PdfiumRuntimeError::Transport("PDFium bridge completion channel closed".into()))?;
-            thread
-                .join()
-                .map_err(|_error| PdfiumRuntimeError::WorkerPanicked)?;
         }
         self.bootstrap_directory.close()?;
         tracing::info!(
-            "PDFium worker {:?} reaped and IPC bridge joined (shutdown acknowledged={})",
+            "PDFium worker {:?} reaped (shutdown acknowledged={})",
             pid,
             acknowledged
         );
@@ -322,11 +323,19 @@ impl Process {
                                     resolver.resolve(&segments)
                                 }),
                             )
-                            .map_err(|_error| {
-                                PdfiumRuntimeError::Transport(
-                                    "glyph resolver panicked".into(),
-                                )
-                            })?;
+                            .map_err(
+                                |payload| {
+                                    tracing::warn!(
+                                        "glyph resolver panicked: {}",
+                                        docparse_common::panic_message(
+                                            &*payload
+                                        )
+                                    );
+                                    PdfiumRuntimeError::Transport(
+                                        "glyph resolver panicked".into(),
+                                    )
+                                },
+                            )?;
                             commands.send(Request {
                                 lease: call.lease,
                                 id,

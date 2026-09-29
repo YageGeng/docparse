@@ -31,7 +31,8 @@ pub async fn delete(
     State(state): State<AppState>,
     query: Result<Query<JobQuery>, QueryRejection>,
 ) -> ApiResult<(StatusCode, ApiResponse<Uuid>)> {
-    let Query(JobQuery { id }) = query.map_err(|_rejection| {
+    let Query(JobQuery { id }) = query.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "job-delete-parse-id",
             code: ApiCode::bad_request(4001002),

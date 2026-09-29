@@ -68,8 +68,16 @@ impl ParseObserver for ProgressObserver {
         self.0.send_replace(Some(progress));
     }
 
-    /// Records slow completed stages at TRACE while retaining the current job correlation.
+    /// Records every completed stage as a metric and slow ones at TRACE.
+    ///
+    /// The stage label is bounded by the stage enum, so production keeps per-stage visibility
+    /// without flooding logs; the TRACE line stays for focused local debugging.
     fn on_timing(&self, timing: docparse_core::Timing) {
+        metrics::histogram!(
+            "docparse_parse_stage_seconds",
+            "stage" => format!("{:?}", timing.stage)
+        )
+        .record(timing.duration_ms / 1000.0);
         // Backpressure commonly exceeds this threshold; require TRACE to avoid flooding production logs.
         if timing.duration_ms >= 1000.0 {
             tracing::trace!(

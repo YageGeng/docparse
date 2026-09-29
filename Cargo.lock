@@ -1189,6 +1189,7 @@ dependencies = [
  "serde_path_to_error",
  "tempfile",
  "thiserror",
+ "tracing",
  "typed-builder",
  "url",
 ]
@@ -1383,6 +1384,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "docparse-pdfium-sys",
+ "tracing",
  "typed-builder",
 ]
 

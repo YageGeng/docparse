@@ -1,5 +1,12 @@
 use super::{PdfInput, PdfiumWorker};
-use std::sync::Arc;
+use std::{
+    future::Future,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use ::pdfium::{Document, Library};
 use docparse_config::{RenderConfig, RuntimeConfig};
@@ -12,6 +19,15 @@ use typed_builder::TypedBuilder;
 
 use crate::ExtractedPage;
 use crate::extract::text::extract_page_text_items;
+
+/// Upper bound on one PDFium worker operation.
+///
+/// A wedged FFI call must fail the page instead of parking the parse forever; the worker thread
+/// itself cannot be interrupted, so it is left to finish and dropped with the executor.
+const OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Graceful shutdown deadline; a healthy worker answers immediately, a wedged one never does.
+const CLOSE_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Fully owned rendered page returned across the PDFium actor boundary.
 #[derive(Debug, Clone, TypedBuilder)]
@@ -176,9 +192,28 @@ pub enum PdfiumRuntimeError {
     /// The worker panicked while owning PDFium resources.
     #[error("PDFium worker panicked")]
     WorkerPanicked,
+    /// One operation exceeded its deadline while the worker was still running.
+    ///
+    /// The page keeps its native fallback; only the worker is unusable afterwards.
+    #[error("PDFium {operation} exceeded {seconds} s")]
+    OperationTimeout {
+        operation: &'static str,
+        seconds: u64,
+    },
+    /// An earlier deadline miss left the worker unusable, so this operation was not submitted.
+    #[error("PDFium worker stopped responding during {operation}")]
+    WorkerUnresponsive { operation: &'static str },
 }
 
 impl PdfiumRuntimeError {
+    /// Reports a deadline miss, which leaves the page recoverable but the worker unusable.
+    pub fn is_operation_timeout(&self) -> bool {
+        matches!(
+            self,
+            Self::OperationTimeout { .. } | Self::WorkerUnresponsive { .. }
+        )
+    }
+
     /// Transport failures cannot be downgraded to page-level native fallback.
     pub fn is_fatal(&self) -> bool {
         matches!(
@@ -188,6 +223,14 @@ impl PdfiumRuntimeError {
                 | Self::WorkerPanicked
                 | Self::ThreadSpawn(_)
         )
+    }
+}
+
+impl From<oneshot::error::RecvError> for PdfiumRuntimeError {
+    /// Preserves reply-channel diagnostics for both startup and command failures.
+    fn from(error: oneshot::error::RecvError) -> Self {
+        tracing::warn!("PDFium reply channel failed: {error}");
+        Self::WorkerStopped
     }
 }
 
@@ -210,10 +253,14 @@ pub(crate) enum PdfiumCommand {
 }
 
 /// Async facade over one dedicated thread that owns the complete PDFium lifetime.
+#[derive(TypedBuilder)]
 pub(crate) struct PdfiumExecutor {
     sender: mpsc::Sender<PdfiumCommand>,
     page_count: u32,
+    #[builder(default, setter(strip_option))]
     worker: Option<PdfiumWorker>,
+    /// Set once an operation misses its deadline; later operations fail without waiting again.
+    unresponsive: AtomicBool,
 }
 
 impl PdfiumExecutor {
@@ -226,14 +273,20 @@ impl PdfiumExecutor {
         let (sender, receiver) = mpsc::channel(1);
         let (ready_sender, ready_receiver) = oneshot::channel();
         let worker = PdfiumWorker::spawn(input, receiver, ready_sender)?;
-        let page_count = ready_receiver
-            .await
-            .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)??;
-        Ok(Self {
-            sender,
-            page_count,
-            worker: Some(worker),
-        })
+        let unresponsive = AtomicBool::new(false);
+        let page_count = Self::await_reply(
+            &unresponsive,
+            async { ready_receiver.await.map_err(PdfiumRuntimeError::from) },
+            "open",
+            OPERATION_TIMEOUT,
+        )
+        .await??;
+        Ok(Self::builder()
+            .sender(sender)
+            .page_count(page_count)
+            .worker(worker)
+            .unresponsive(unresponsive)
+            .build())
     }
 
     /// Returns the fixed positive page count reported when the document opened.
@@ -249,18 +302,18 @@ impl PdfiumExecutor {
     ) -> Result<PreScannedPage, PdfiumRuntimeError> {
         self.validate_page(page_number)?;
         let (response, receiver) = oneshot::channel();
-        self.sender
-            .send(PdfiumCommand::PreScan {
+        self.request(
+            PdfiumCommand::PreScan {
                 page_number,
                 // Only the owned resolver crosses the worker boundary, never a borrowed font.
                 resolver,
                 response,
-            })
-            .await
-            .map_err(|_send_error| PdfiumRuntimeError::WorkerStopped)?;
-        receiver
-            .await
-            .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)?
+            },
+            receiver,
+            "pre-scan",
+            OPERATION_TIMEOUT,
+        )
+        .await?
     }
 
     /// Serially rasterizes one page and returns only owned RGB pixels and transforms.
@@ -271,41 +324,99 @@ impl PdfiumExecutor {
     ) -> Result<RenderedPage, PdfiumRuntimeError> {
         self.validate_page(page_number)?;
         let (response, receiver) = oneshot::channel();
-        self.sender
-            .send(PdfiumCommand::Render {
+        self.request(
+            PdfiumCommand::Render {
                 page_lease: docparse_common::PageLease::current(),
                 page_number,
                 config: config.clone(),
                 response,
-            })
-            .await
-            .map_err(|_send_error| PdfiumRuntimeError::WorkerStopped)?;
-        receiver
-            .await
-            .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)?
+            },
+            receiver,
+            "render",
+            OPERATION_TIMEOUT,
+        )
+        .await?
     }
 
-    /// Requests orderly document shutdown and joins the blocking worker off-runtime.
+    /// Requests orderly document shutdown and waits for worker cleanup without blocking the runtime.
     pub(crate) async fn close(mut self) -> Result<(), PdfiumRuntimeError> {
-        let (response, receiver) = oneshot::channel();
-        let sent = self
-            .sender
-            .send(PdfiumCommand::Shutdown { response })
-            .await
-            .is_ok();
-        if sent {
-            receiver
-                .await
-                .map_err(|_receive_error| PdfiumRuntimeError::WorkerStopped)?;
+        // A worker that already missed a deadline is not asked again: waiting would add another
+        // deadline to a parse that cannot use it any more.
+        if self.unresponsive.load(Ordering::Acquire) {
+            tracing::warn!(
+                "PDFium worker for a {}-page document stopped responding; closing without waiting",
+                self.page_count
+            );
+            return Ok(());
         }
-        if let Some(worker) = self.worker.take() {
+        let (response, receiver) = oneshot::channel();
+        let result = self
+            .request(
+                PdfiumCommand::Shutdown { response },
+                receiver,
+                "close",
+                CLOSE_DEADLINE,
+            )
+            .await;
+        // A shutdown deadline also covers queue admission; never add a join wait after it expires.
+        if !self.unresponsive.load(Ordering::Acquire)
+            && let Some(worker) = self.worker.take()
+        {
             worker.join().await?;
         }
-        if sent {
-            Ok(())
-        } else {
-            Err(PdfiumRuntimeError::WorkerStopped)
+        result
+    }
+
+    /// Bounds queue admission and the reply together, rejecting unusable workers before sending.
+    async fn request<M>(
+        &self,
+        command: PdfiumCommand,
+        receiver: oneshot::Receiver<M>,
+        operation: &'static str,
+        deadline: Duration,
+    ) -> Result<M, PdfiumRuntimeError> {
+        Self::await_reply(
+            &self.unresponsive,
+            async {
+                self.sender.send(command).await.map_err(|error| {
+                    tracing::warn!("PDFium command send failed: {error}");
+                    PdfiumRuntimeError::WorkerStopped
+                })?;
+                receiver.await.map_err(PdfiumRuntimeError::from)
+            },
+            operation,
+            deadline,
+        )
+        .await
+    }
+
+    /// Runs one worker exchange under a deadline, including any queue admission.
+    ///
+    /// A missed deadline leaves the worker running but unusable, so the executor is marked and
+    /// later operations fail without waiting again; the page itself keeps its native fallback.
+    async fn await_reply<M>(
+        unresponsive: &AtomicBool,
+        reply: impl Future<Output = Result<M, PdfiumRuntimeError>>,
+        operation: &'static str,
+        deadline: Duration,
+    ) -> Result<M, PdfiumRuntimeError> {
+        if unresponsive.load(Ordering::Acquire) {
+            return Err(PdfiumRuntimeError::WorkerUnresponsive { operation });
         }
+        crate::wasm_compat::timeout(deadline, reply)
+            .await
+            .map_err(|_elapsed| {
+                unresponsive.store(true, Ordering::Release);
+                tracing::warn!(
+                    "PDFium {} exceeded {} s; the worker is left detached and later pages use native fallback",
+                    operation,
+                    deadline.as_secs()
+                );
+                PdfiumRuntimeError::OperationTimeout {
+                    operation,
+                    seconds: deadline.as_secs(),
+                }
+            })?
     }
 
     /// Rejects invalid page numbers before they enter the actor queue.
@@ -633,6 +744,127 @@ fn page_rotation(rotation: i32) -> PageRotation {
 
 #[cfg(test)]
 mod tests {
+    /// An unusable worker must reject every operation without filling its abandoned queue.
+    #[tokio::test]
+    async fn unresponsive_worker_rejects_commands_before_enqueueing() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let executor = PdfiumExecutor::builder()
+            .sender(sender)
+            .page_count(1)
+            .unresponsive(std::sync::atomic::AtomicBool::new(true))
+            .build();
+        for _ in 0..2 {
+            assert!(
+                executor
+                    .render_page(1, &RenderConfig::default())
+                    .await
+                    .expect_err("unresponsive")
+                    .is_operation_timeout()
+            );
+            assert!(
+                matches!(
+                    receiver.try_recv(),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+                ),
+                "failed worker must not receive another command"
+            );
+            assert!(
+                executor
+                    .pre_scan_page(1, None)
+                    .await
+                    .expect_err("unresponsive")
+                    .is_operation_timeout()
+            );
+            assert!(matches!(
+                receiver.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+        }
+        executor.close().await.expect("close unusable worker");
+    }
+
+    /// A full command queue must consume the same deadline as the worker reply.
+    #[tokio::test]
+    async fn operation_deadline_includes_queue_admission() {
+        let (sender, mut queued) = tokio::sync::mpsc::channel(1);
+        let (response, _reply) = tokio::sync::oneshot::channel();
+        sender
+            .try_send(super::PdfiumCommand::Shutdown { response })
+            .expect("fill queue");
+        let executor = PdfiumExecutor::builder()
+            .sender(sender)
+            .page_count(1)
+            .unresponsive(std::sync::atomic::AtomicBool::new(false))
+            .build();
+        let (response, reply) = tokio::sync::oneshot::channel();
+        let error = executor
+            .request(
+                super::PdfiumCommand::Shutdown { response },
+                reply,
+                "close",
+                std::time::Duration::from_millis(10),
+            )
+            .await
+            .expect_err("admission deadline");
+        assert!(error.is_operation_timeout());
+        queued.try_recv().expect("original command");
+        assert!(
+            matches!(
+                queued.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "timed-out admission must not enqueue its command later"
+        );
+        executor.close().await.expect("close unusable worker");
+    }
+
+    /// A missed deadline marks the worker and skips later waits instead of repeating them.
+    #[tokio::test]
+    async fn missed_deadline_marks_the_worker_unresponsive() {
+        use crate::PdfiumRuntimeError;
+        use std::{sync::atomic::AtomicBool, time::Duration};
+        use tokio::sync::oneshot;
+
+        let unresponsive = AtomicBool::new(false);
+        let (_sender, receiver) = oneshot::channel::<u32>();
+        let error = PdfiumExecutor::await_reply(
+            &unresponsive,
+            async { receiver.await.map_err(PdfiumRuntimeError::from) },
+            "render",
+            Duration::from_millis(10),
+        )
+        .await
+        .expect_err("deadline");
+        assert!(matches!(
+            error,
+            PdfiumRuntimeError::OperationTimeout {
+                operation: "render",
+                ..
+            }
+        ));
+        assert!(
+            !error.is_fatal(),
+            "a deadline must keep the page recoverable"
+        );
+
+        let (_sender, receiver) = oneshot::channel::<u32>();
+        let error = PdfiumExecutor::await_reply(
+            &unresponsive,
+            async { receiver.await.map_err(PdfiumRuntimeError::from) },
+            "render",
+            Duration::from_millis(10),
+        )
+        .await
+        .expect_err("unresponsive");
+        assert!(matches!(
+            error,
+            PdfiumRuntimeError::WorkerUnresponsive {
+                operation: "render"
+            }
+        ));
+        assert!(error.is_operation_timeout());
+    }
+
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 

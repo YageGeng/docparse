@@ -1,6 +1,66 @@
 use docparse_server::storage::SharedStorage;
 use std::io::Write;
 
+/// Waiters for one result lock must leave capacity for an unrelated document's artifact.
+#[tokio::test]
+async fn locked_result_does_not_starve_other_artifacts() {
+    let directory = tempfile::tempdir().expect("directory");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let data = br#"{"data":{"context":{"page_count":1},"pages":[{"page_number":1,"text":"x"}],"errors":[]}}"#;
+    for name in ["locked.json", "other.json"] {
+        std::fs::write(directory.path().join(name), data).expect("source");
+    }
+    std::fs::create_dir(directory.path().join(".locks")).expect("locks");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.path().join(".locks/locked.json"))
+        .expect("lock file");
+    lock.lock().expect("hold result lock");
+    let mut waiters = tokio::task::JoinSet::new();
+    for _ in 0..3 {
+        let storage = storage.clone();
+        waiters.spawn(async move {
+            storage.result_artifact("locked.json", None).await
+        });
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let unrelated = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        storage.result_artifact("other.json", None),
+    )
+    .await;
+    // Release the lock before assertions so failed implementations can finish their blocking tasks.
+    lock.unlock().expect("release result lock");
+    while let Some(result) = waiters.join_next().await {
+        result.expect("join").expect("artifact");
+    }
+    unrelated
+        .expect("unrelated document must not wait for the locked result")
+        .expect("independent artifact");
+}
+
+/// A finished artifact is served from cache without admission or the canonical source.
+#[tokio::test]
+async fn cached_artifact_needs_no_source() {
+    let directory = tempfile::tempdir().expect("directory");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let name = "cached.pdf";
+    let cache = storage
+        .path(&format!("{name}.v1.index.json"))
+        .expect("cache path");
+    tokio::fs::write(&cache, b"{}")
+        .await
+        .expect("cached artifact");
+    let reused = storage
+        .result_artifact(name, None)
+        .await
+        .expect("cache hit");
+    assert_eq!(reused, cache);
+}
+
 /// Only files inside the selected result's figure directory may become browser assets.
 #[tokio::test]
 async fn figure_paths_stay_inside_their_result() {

@@ -64,8 +64,11 @@ impl<S: 'static> SessionWorker<S> {
                     _threads: threads,
                 }),
             };
-            initialized.blocking_recv().map_err(|_closed| {
-                TaskError::from_message("model initialization thread stopped")
+            initialized.blocking_recv().map_err(|closed| {
+                TaskError::from_message(format!(
+                    "{}: {closed}",
+                    "model initialization thread stopped"
+                ))
             })??;
             Ok::<_, E>(worker)
         })
@@ -106,13 +109,19 @@ impl<S: 'static> SessionWorker<S> {
                         })
                     })
                 }))
-                .map_err(|_closed| {
-                    TaskError::from_message("model execution thread stopped")
+                .map_err(|closed| {
+                    TaskError::from_message(format!(
+                        "{}: {closed}",
+                        "model execution thread stopped"
+                    ))
                 })?;
             // Only finite work occupies Tokio's pool. Retain the owner until native work releases its captures,
             // even when the caller is cancelled, so the session can never try to join its own thread.
-            result.blocking_recv().map_err(|_closed| {
-                TaskError::from_message("model execution response lost")
+            result.blocking_recv().map_err(|closed| {
+                TaskError::from_message(format!(
+                    "{}: {closed}",
+                    "model execution response lost"
+                ))
             })
         })
         .await?

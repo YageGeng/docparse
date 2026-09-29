@@ -3,6 +3,11 @@ use crate::queue::BlockingQueue;
 use crate::{SessionRequest, TaskError, ThreadManager, run_cpu};
 use std::sync::Arc;
 
+/// Sessions per available core above which the fan-out is reported as suspicious.
+///
+/// This is an advisory threshold only: deployments stay free to size sessions for their hardware.
+const MAX_PARALLEL_SESSIONS_PER_CORE: usize = 8;
+
 /// Initializes, executes, and destroys each session on its own thread.
 pub struct SessionManager<R: SessionRequest> {
     queue: Arc<BlockingQueue<R>>,
@@ -104,6 +109,18 @@ impl<R: SessionRequest> SessionManager<R> {
             .into());
         }
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        // Session counts stay a deployment choice, but each session owns an OS thread and its own
+        // inference pool, so surface a fan-out that no host can run in parallel.
+        let parallelism = std::thread::available_parallelism()
+            .map(|value| value.get())
+            .unwrap_or(1);
+        if session_size > MAX_PARALLEL_SESSIONS_PER_CORE * parallelism {
+            tracing::warn!(
+                "starting {} model sessions on {} available cores: each session owns an OS thread and its own inference pool",
+                session_size,
+                parallelism
+            );
+        }
         // Pending capacity is configured independently of active consumers and their batch limit.
         let queue = Arc::new(BlockingQueue::new(name, queue_size));
         let mut manager = Self {

@@ -148,7 +148,8 @@ impl Monitoring {
         let scrape = prometheus_parse::Scrape::parse(
             self.handle.render().lines().map(|line| Ok(line.to_owned())),
         )
-        .map_err(|_error| {
+        .map_err(|error| {
+            tracing::warn!("metrics snapshot parse failed: {error}");
             RequestSnafu {
                 stage: "metrics-snapshot",
                 code: ApiCode::COMMON_INTERNAL_ERROR,

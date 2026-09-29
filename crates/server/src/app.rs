@@ -15,7 +15,10 @@ use axum::{
     response::Redirect,
 };
 use docparse_config::{ConfigError, ServerConfig};
-use std::sync::Arc;
+use std::{
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 use tower::{ServiceBuilder, service_fn};
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -26,6 +29,36 @@ use tower_http::{
 };
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
+
+/// Announces the workbench URL once the listening address is known.
+///
+/// Operators open this page directly, so the log carries a full clickable URL instead of only
+/// the mount path; a wildcard bind is reported as loopback because `0.0.0.0` is not clickable.
+pub fn announce_workbench(bound: SocketAddr, config: &ServerConfig) {
+    if config.webui.is_none() {
+        return;
+    }
+    tracing::info!(
+        "workbench available at http://{}{}",
+        clickable_address(bound),
+        workbench::mount_path(&config.api_prefix)
+    );
+}
+
+/// Maps a wildcard bind address to the loopback address a browser can open.
+fn clickable_address(bound: SocketAddr) -> SocketAddr {
+    if !bound.ip().is_unspecified() {
+        return bound;
+    }
+    match bound {
+        SocketAddr::V4(_) => {
+            SocketAddr::from((Ipv4Addr::LOCALHOST, bound.port()))
+        }
+        SocketAddr::V6(_) => {
+            SocketAddr::from((Ipv6Addr::LOCALHOST, bound.port()))
+        }
+    }
+}
 
 /// Service metadata complements the paths and schemas collected directly from handler macros.
 #[derive(OpenApi)]
@@ -139,4 +172,26 @@ pub fn router(
         )
         .layer(middleware::from_fn(trace::request_trace))
         .with_state(state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clickable_address;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    /// Wildcard binds become loopback URLs, and explicit hosts stay untouched.
+    #[test]
+    fn clickable_addresses_are_openable() {
+        assert_eq!(
+            clickable_address(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080))),
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 8080))
+        );
+        assert_eq!(
+            clickable_address(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 8080))),
+            SocketAddr::from((Ipv6Addr::LOCALHOST, 8080))
+        );
+        let explicit =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)), 9000);
+        assert_eq!(clickable_address(explicit), explicit);
+    }
 }

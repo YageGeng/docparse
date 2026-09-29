@@ -51,7 +51,8 @@ pub async fn history(
         axum::extract::rejection::QueryRejection,
     >,
 ) -> ApiResult<ApiResponse<serde_json::Value>> {
-    let Query(query) = query.map_err(|_error| {
+    let Query(query) = query.map_err(|error| {
+        tracing::debug!("metrics history query rejected: {error}");
         RequestSnafu {
             stage: "metrics-history-query",
             code: ApiCode::COMMON_BAD_REQUEST,

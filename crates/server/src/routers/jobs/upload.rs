@@ -19,6 +19,9 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+/// Upload hash batch size; one blocking hop per batch keeps the async executor free.
+const HASH_BATCH_BYTES: usize = 1 << 20;
+
 /// Streams the sole PDF field to shared storage and acknowledges only a committed, idempotent task.
 #[utoipa::path(
     post, path = "/jobs", tag = super::TAG,
@@ -43,7 +46,8 @@ pub async fn upload(
     multipart: Result<Multipart, MultipartRejection>,
 ) -> ApiResult<Response> {
     // Convert extractor rejections at entry; completed responses are never inspected to invent an APICODE.
-    let mut multipart = multipart.map_err(|_rejection| {
+    let mut multipart = multipart.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "upload-read-boundary",
             code: ApiCode::COMMON_BAD_REQUEST,
@@ -87,6 +91,7 @@ pub async fn upload(
             tokio::fs::File::from_std(file),
         );
         let mut hash = blake3::Hasher::new();
+        let mut staged = Vec::with_capacity(HASH_BATCH_BYTES);
         let mut total = 0usize;
         let mut prefix = Vec::<u8>::with_capacity(5);
         let mut seen = false;
@@ -136,7 +141,28 @@ pub async fn upload(
                     }
                     .fail();
                 }
-                hash.update(&chunk);
+                staged.extend_from_slice(&chunk);
+                // Hash bounded batches off the async executor: the digest still covers the whole
+                // body, but the reactor pays one hop per batch instead of CPU per chunk.
+                if staged.len() >= HASH_BATCH_BYTES {
+                    let mut batch = std::mem::take(&mut staged);
+                    (hash, staged) = docparse_common::run_cpu(move || {
+                        let mut hash = hash;
+                        hash.update(&batch);
+                        // Return the allocation with the hasher so the next batch needs no growth or copies during reallocation.
+                        batch.clear();
+                        (hash, batch)
+                    })
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!("upload hash task failed: {error}");
+                        RequestSnafu {
+                            stage: "upload-hash-task",
+                            code: ApiCode::COMMON_INTERNAL_ERROR,
+                        }
+                        .build()
+                    })?;
+                }
                 writer.write_all(&chunk).await.context(StorageSnafu {
                     stage: "upload-write-pdf",
                     code: ApiCode::service_unavailable(5031003),
@@ -155,6 +181,7 @@ pub async fn upload(
             code: ApiCode::service_unavailable(5031003),
         })?;
         drop(writer);
+        hash.update(&staged);
         let hash = hash.finalize().to_hex().to_string();
         tracing::info!(
             "received PDF job {} with {} bytes; persisting input",

@@ -355,8 +355,14 @@ impl HttpFormulaConfig {
             field: "formula.engine.server_url",
             reason: "must be an HTTP(S) base URL without credentials, query, or fragment",
         };
-        let mut endpoint = url::Url::parse(&self.server_url)
-            .map_err(|_parse_error| invalid_url())?;
+        let mut endpoint = url::Url::parse(&self.server_url).map_err(
+            |parse_error| {
+                tracing::warn!(
+                    "formula.engine.server_url is not a valid URL: {parse_error}"
+                );
+                invalid_url()
+            },
+        )?;
         if !matches!(endpoint.scheme(), "http" | "https")
             || endpoint.host_str().is_none()
             || !endpoint.username().is_empty()

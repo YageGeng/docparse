@@ -63,7 +63,8 @@ pub async fn figure(
     query: Result<Query<JobFigureQuery>, QueryRejection>,
     request: Request,
 ) -> ApiResult<Response> {
-    let Query(JobFigureQuery { id, path }) = query.map_err(|_rejection| {
+    let Query(JobFigureQuery { id, path }) = query.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "figure-parse-query",
             code: ApiCode::bad_request(4001002),

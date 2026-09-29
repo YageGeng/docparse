@@ -27,7 +27,8 @@ pub async fn list(
     State(state): State<AppState>,
     query: Result<Query<JobListQuery>, QueryRejection>,
 ) -> ApiResult<ApiResponse<JobList>> {
-    let Query(query) = query.map_err(|_rejection| {
+    let Query(query) = query.map_err(|rejection| {
+        tracing::debug!("request rejected: {}", rejection);
         RequestSnafu {
             stage: "job-list-parse-query",
             code: ApiCode::bad_request(4001002),

@@ -98,7 +98,8 @@ impl Callbacks {
         if value.is_null() || value.is_undefined() {
             return Ok(None);
         }
-        value.dyn_into().map(Some).map_err(|_value| {
+        value.dyn_into().map(Some).map_err(|js_value| {
+            tracing::debug!("callback {name} is not callable: {js_value:?}");
             super::WebError::value(
                 "InvalidOptions",
                 format!("callback {name} must be a function"),

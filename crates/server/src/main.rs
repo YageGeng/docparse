@@ -10,6 +10,7 @@ use docparse_server::{
     logging,
     pdfium_pool::PdfiumPool,
     state::{AppState, HttpOptions},
+    storage::ARTIFACT_PERMITS,
     storage::SharedStorage,
     worker::{Worker, WorkerOptions},
 };
@@ -70,9 +71,26 @@ struct Arguments {
     job_timeout_seconds: u64,
 }
 
+/// Estimated simultaneous model waits per page, used only for runtime sizing.
+// ponytail: this is a heuristic, not a fan-out bound; tune from measured queue pressure when model concurrency changes.
+const ESTIMATED_MODEL_WAITS_PER_PAGE: usize = 27;
+
+/// Limits for the estimated blocking pool; actual model concurrency is configured separately.
+const MIN_BLOCKING_THREADS: usize = 512;
+const MAX_BLOCKING_THREADS: usize = 4096;
+
+/// Adds headroom to estimated page and storage work without claiming a worst-case concurrency bound.
+fn blocking_threads(page_slots: usize, max_uploads: usize) -> usize {
+    page_slots
+        .saturating_mul(ESTIMATED_MODEL_WAITS_PER_PAGE)
+        .saturating_add(max_uploads)
+        .saturating_add(ARTIFACT_PERMITS)
+        .saturating_mul(2)
+        .clamp(MIN_BLOCKING_THREADS, MAX_BLOCKING_THREADS)
+}
+
 /// Starts the configured API and worker after initializing their shared resources.
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
     let raw = arguments.load_config()?;
 
@@ -81,6 +99,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|error| -> Box<dyn Error> { error })?
         .try_init()?;
 
+    let blocking =
+        blocking_threads(raw.render.queue_size, raw.server.max_uploads);
+    tracing::info!(
+        "runtime admits {} blocking threads for {} page slots",
+        blocking,
+        raw.render.queue_size
+    );
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .max_blocking_threads(blocking)
+        .build()?;
+    runtime.block_on(run(arguments, raw))
+}
+
+/// Runs the configured role until shutdown.
+async fn run(
+    arguments: Arguments,
+    raw: RawConfig,
+) -> Result<(), Box<dyn Error>> {
     let monitoring = docparse_server::service::monitoring::Monitoring::install(
         raw.monitoring.prometheus_url.as_deref(),
         match arguments.role {
@@ -248,9 +285,10 @@ async fn run_services(
         let listener =
             tokio::net::TcpListener::bind((server.host.as_str(), server.port))
                 .await?;
+        let bound = listener.local_addr()?;
         tracing::info!(
             "HTTP server listening on {} with at most {} concurrent uploads",
-            listener.local_addr()?,
+            bound,
             state.options.max_uploads
         );
         // The same configuration drives binding and the final documented route prefix.
@@ -265,7 +303,10 @@ async fn run_services(
                 )
                 .with_state(state)
         } else {
-            app::router(state, &server)?
+            let router = app::router(state, &server)?;
+            // The workbench resolved during routing, so its URL is only announced once serving.
+            app::announce_workbench(bound, &server);
+            router
         };
         axum::serve(listener, router)
             .with_graceful_shutdown(shutdown.clone().cancelled_owned())
@@ -320,6 +361,14 @@ mod tests {
         format!(
             "render.workers = {workers}\nrender.queue_size = 2\nlayout.queue_size = 1\ntsr.queue_size = 1\ntsr.cell_detection.queue_size = 1\nocr.detection.queue_size = 1\nocr.recognition.queue_size = 1\nocr.orientation.queue_size = 1\nformula.queue_size = 1\nserver.max_uploads = {uploads}\n"
         )
+    }
+
+    /// Sizing preserves deployment defaults and saturates oversized inputs instead of wrapping.
+    #[test]
+    fn blocking_pool_tracks_page_slots() {
+        assert_eq!(blocking_threads(1, 1), 512);
+        assert_eq!(blocking_threads(64, 100), 3662);
+        assert_eq!(blocking_threads(usize::MAX, usize::MAX), 4096);
     }
 
     /// Worker CLI settings override configuration without restoring an independent full-document concurrency gate.

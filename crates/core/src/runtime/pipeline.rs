@@ -432,6 +432,7 @@ impl ParseRuntime {
         let render_timings = timings.clone();
         let render_queue = self.render_queue.clone();
         let mut producer = crate::wasm_compat::spawn(async move {
+            let mut timed_out = false;
             for page_number in 1..=page_count {
                 let lease = render_queue.reserve().await.map_err(|error| {
                     PdfiumRuntimeError::Transport(error.to_string())
@@ -443,6 +444,10 @@ impl ParseRuntime {
                     .scope(executor.render_page(page_number, &render_config))
                     .await;
                 drop(timer);
+                // A native timeout can retain this slot forever; stop before reserving another one.
+                timed_out = rendered
+                    .as_ref()
+                    .is_err_and(PdfiumRuntimeError::is_operation_timeout);
                 if render_sender
                     .send((page_number, rendered, lease))
                     .await
@@ -450,14 +455,19 @@ impl ParseRuntime {
                 {
                     break;
                 }
+                if timed_out {
+                    break;
+                }
             }
             // Free PDFium immediately after final delivery, independently of remaining model work.
-            executor.close().await
+            executor.close().await?;
+            Ok::<_, PdfiumRuntimeError>(timed_out)
         });
         let mut tasks = TaskSet::new();
         let mut pages = Vec::with_capacity(page_count as usize);
         let mut receiver_open = true;
         let mut producer_finished = false;
+        let mut render_timed_out = false;
         let mut fatal_error = None;
         while receiver_open || !tasks.is_empty() || !producer_finished {
             tokio::select! {
@@ -466,10 +476,13 @@ impl ParseRuntime {
                     producer_finished = true;
                     let result = outcome.map_err(|error| ParseRuntimeError::Task(error.to_string()))
                         .and_then(|result| result.map_err(ParseRuntimeError::Pdfium));
-                    if let Err(error) = result {
-                        tracing::error!("render producer failed: {}", error);
-                        fatal_error = Some(error);
-                        break;
+                    match result {
+                        Ok(timed_out) => render_timed_out = timed_out,
+                        Err(error) => {
+                            tracing::error!("render producer failed: {}", error);
+                            fatal_error = Some(error);
+                            break;
+                        }
                     }
                 }
                 Some(timing) = timing_receiver.recv(), if observer.is_some() => {
@@ -536,6 +549,39 @@ impl ParseRuntime {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
             return Err(error);
+        }
+        if render_timed_out {
+            // Native-only recovery allocates no raster. Process remaining pages serially without
+            // render admission, while the real worker continues to own its unreleased page lease.
+            for (page_number, extracted) in
+                std::mem::take(&mut scanned.extracted_pages)
+            {
+                let config = Arc::clone(&self.config);
+                let context = Arc::clone(&scanned.context);
+                let timings = timings.for_page(page_number);
+                let page = docparse_common::run_cpu(move || {
+                    analyze_without_render(
+                        config,
+                        context,
+                        extracted,
+                        PdfiumRuntimeError::WorkerUnresponsive {
+                            operation: "render",
+                        },
+                        timings,
+                    )
+                })
+                .await
+                .map_err(|error| {
+                    ParseRuntimeError::Task(error.to_string())
+                })??;
+                pages.push(page);
+                if let Some(observer) = observer {
+                    observer.on_progress(crate::ParseProgress::Analyzing {
+                        completed: pages.len() as u32,
+                        total: page_count,
+                    });
+                }
+            }
         }
         Ok(pages)
     }
@@ -633,6 +679,133 @@ mod tests {
     use super::ParseRuntime;
     use crate::runtime::{PdfInput, PdfiumRuntimeError, PreScannedPage};
     use crate::{ExtractError, ExtractedPage};
+
+    /// Models a timed-out native call that still owns its render capacity after replying.
+    struct TimedOutSession {
+        inner: Box<dyn crate::PdfiumSession>,
+        retained: Arc<std::sync::Mutex<Option<docparse_common::PageLease>>>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl crate::PdfiumSession for TimedOutSession {
+        /// Preserves the real PDF's page count.
+        fn page_count(&self) -> u32 {
+            self.inner.page_count()
+        }
+
+        /// Extracts real native text before simulating a render deadline.
+        fn pre_scan_page(
+            &self,
+            page: u32,
+            resolver: Option<Arc<dyn crate::GlyphResolver>>,
+        ) -> crate::WasmBoxedFuture<
+            '_,
+            Result<PreScannedPage, PdfiumRuntimeError>,
+        > {
+            self.inner.pre_scan_page(page, resolver)
+        }
+
+        /// Retains the actual page lease as a wedged native worker would do.
+        fn render_page<'a>(
+            &'a self,
+            _page: u32,
+            _config: &'a docparse_config::RenderConfig,
+        ) -> crate::WasmBoxedFuture<
+            'a,
+            Result<crate::RenderedPage, PdfiumRuntimeError>,
+        > {
+            Box::pin(async {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                *self.retained.lock().expect("lease") =
+                    docparse_common::PageLease::current();
+                Err(PdfiumRuntimeError::OperationTimeout {
+                    operation: "render",
+                    seconds: 120,
+                })
+            })
+        }
+
+        /// Closes the real fixture while the external native-owner stand-in retains its lease.
+        fn close(
+            self: Box<Self>,
+        ) -> crate::WasmBoxedFuture<'static, Result<(), PdfiumRuntimeError>>
+        {
+            self.inner.close()
+        }
+    }
+
+    /// Native recovery must finish every page without reacquiring a slot held by a timed-out worker.
+    #[tokio::test]
+    async fn render_timeout_recovers_remaining_pages_without_capacity() {
+        use crate::PdfiumProvider;
+        for continue_on_error in [true, false] {
+            let mut raw = RawConfig::default();
+            raw.runtime.continue_on_error = continue_on_error;
+            raw.render.queue_size = 1;
+            raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+            let config =
+                Arc::new(ValidatedConfig::try_from(raw).expect("config"));
+            let queue = docparse_common::PageQueue::new(1);
+            let runtime = ParseRuntime::builder()
+                .render_queue(queue.clone())
+                .config(config)
+                .layout_engine(
+                    Arc::new(EmptyLayoutEngine) as Arc<dyn LayoutEngine>
+                )
+                .build();
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/pdf/multipage_layout.pdf");
+            let inner = crate::LocalPdfiumProvider
+                .open(
+                    PdfInput::Path(path),
+                    &Default::default(),
+                    Default::default(),
+                )
+                .await
+                .expect("open");
+            let expected_pages = inner.page_count() as usize;
+            let retained = Arc::new(std::sync::Mutex::new(None));
+            let calls = Arc::new(AtomicUsize::new(0));
+            let session = TimedOutSession {
+                inner,
+                retained: Arc::clone(&retained),
+                calls: Arc::clone(&calls),
+            };
+            let parsed = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                runtime.parse_document_with_options(
+                    super::DocumentSource::Session(Box::new(session)),
+                    crate::ParseOptions::default(),
+                ),
+            )
+            .await;
+            // Clean up the native-owner stand-in even when the regression times out.
+            retained.lock().expect("lease").take();
+            let parsed =
+                parsed.expect("recovery must not wait for the render slot");
+            if continue_on_error {
+                let parsed = parsed.expect("native fallback");
+                assert_eq!(parsed.pages.len(), expected_pages);
+                assert!(parsed.pages.iter().all(|page| {
+                    page.warnings
+                        .iter()
+                        .any(|warning| warning.code == "RenderUnavailable")
+                }));
+                crate::ResultValidator::validate(&parsed)
+                    .expect("valid fallback document");
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "strict parsing must fail on the first deadline"
+                );
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "the failed renderer must not receive later pages"
+            );
+        }
+    }
 
     /// Empty deterministic engine used to exercise pure-geometry fallback.
     struct EmptyLayoutEngine;

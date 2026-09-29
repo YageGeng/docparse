@@ -31,8 +31,11 @@ impl TryFrom<&LayoutDetection> for FormulaRegion {
             _ => return Err(()),
         };
         let b = detection.bbox;
-        let bbox = Bbox::try_from([b.left, b.top, b.right, b.bottom])
-            .map_err(|_error| ())?;
+        let bbox = Bbox::try_from([b.left, b.top, b.right, b.bottom]).map_err(
+            |error| {
+                tracing::debug!("formula bbox conversion failed: {error}");
+            },
+        )?;
         Ok(Self { bbox, inline })
     }
 }

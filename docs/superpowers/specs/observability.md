@@ -88,6 +88,8 @@ errors in metric labels. Every exported series has `service="docparse"`.
 | `docparse_onnx_batch_items{model,graph}` | Actual input batch at each physical call; average is sum/count |
 | `docparse_pdfium_workers_configured`, `docparse_pdfium_workers_alive`, `docparse_pdfium_documents_active` | Process pool capacity, supervised processes, and documents retained through close/cleanup |
 | `docparse_pdfium_operation_seconds{operation}`, `docparse_pdfium_restarts_total` | Open/extract/render/close IPC scopes and process replacements |
+| `docparse_pdfium_operation_timeouts_total{operation}` | Operations that exceeded the per-operation deadline; the slot is recycled and the page falls back |
+| `docparse_parse_stage_seconds{stage}` | Parser stage durations by `TimingStage`; bounded label set, independent of the TRACE-only slow-stage line |
 | `docparse_pages_parsed_total` | Canonical pages returned by successful parse scopes; includes repeated pages across retries and is not unique-document output |
 
 Histograms expose classic `_bucket`, `_sum`, and `_count` series. Duration buckets

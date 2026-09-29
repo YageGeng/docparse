@@ -6,8 +6,22 @@ use snafu::ResultExt;
 use std::{
     io::Read,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tempfile::NamedTempFile;
+use tokio::sync::Semaphore;
+
+/// Concurrent derived-artifact builds admitted per process.
+///
+/// A build decodes the whole document and can take minutes; without this bound the blocking
+/// pool fills with document-sized work and short storage tasks queue behind it.
+pub const ARTIFACT_PERMITS: usize = 3;
+
+/// Upper bound on one caller's wait for a derived artifact.
+///
+/// The build itself keeps running and keeps its permit; the caller only stops waiting.
+pub const ARTIFACT_BUILD_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(300);
 
 /// A publication retains optional timing through the final blocking filesystem operation.
 pub struct Publication {
@@ -36,6 +50,8 @@ impl From<(NamedTempFile, docparse_common::telemetry::Timer)> for Publication {
 #[derive(Clone)]
 pub struct SharedStorage {
     root: PathBuf,
+    /// Bounds concurrent derived-artifact builds across every request and endpoint.
+    pub(crate) artifact_permits: Arc<Semaphore>,
 }
 
 impl SharedStorage {
@@ -59,7 +75,10 @@ impl SharedStorage {
                 code: ApiCode::service_unavailable(5031003),
             },
         )?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            artifact_permits: Arc::new(Semaphore::new(ARTIFACT_PERMITS)),
+        })
     }
 
     /// Places temporary data on the destination filesystem so publication needs no cross-device copy.
@@ -142,7 +161,8 @@ impl SharedStorage {
         let name = name.to_owned();
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             // Coordination never locks the data inode, so mandatory SMB locks cannot disrupt result readers.
-            let _lock = storage.lock_result(&name)?;
+            let lock = storage.result_lock(&name)?;
+            lock.lock()?;
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
@@ -196,8 +216,8 @@ impl SharedStorage {
         })
     }
 
-    /// Acquires a writable, stable coordination inode from blocking filesystem tasks on every replica.
-    pub(crate) fn lock_result(
+    /// Opens a stable coordination inode; callers choose blocking or nonblocking acquisition.
+    pub(crate) fn result_lock(
         &self,
         name: &str,
     ) -> std::io::Result<std::fs::File> {
@@ -205,15 +225,14 @@ impl SharedStorage {
         self.path(name).map_err(std::io::Error::other)?;
         let directory = self.root.join(".locks");
         std::fs::create_dir_all(&directory)?;
-        let file = std::fs::OpenOptions::new()
+        // Artifact builders must be able to release admission while another replica holds the lock.
+        // ponytail: retain lock inodes after deletion to prevent split locks; reclaim only with all replicas stopped.
+        std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(directory.join(name))?;
-        // ponytail: retain lock inodes after deletion to prevent split locks; reclaim only with all replicas stopped.
-        file.lock()?;
-        Ok(file)
+            .open(directory.join(name))
     }
 
     /// Restricts database and internal object names to a flat namespace without path traversal.

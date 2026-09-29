@@ -155,6 +155,73 @@ fn file_subscriber_appends_plaintext() {
     assert!(output.contains("INFO"));
 }
 
+/// Startup must announce a clickable workbench URL instead of only the mount path.
+#[test]
+fn workbench_url_is_clickable() {
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    // Production honors RUST_LOG first; isolate the test without changing concurrent tests' environment.
+    if std::env::var_os("DOCPARSE_TEST_WORKBENCH_LOG_SUBPROCESS").is_none() {
+        let output = std::process::Command::new(
+            std::env::current_exe().expect("test executable"),
+        )
+        .args(["--exact", "workbench_url_is_clickable", "--nocapture"])
+        .env("DOCPARSE_TEST_WORKBENCH_LOG_SUBPROCESS", "1")
+        .env("RUST_LOG", "info")
+        .output()
+        .expect("isolated workbench logging test");
+        assert!(
+            output.status.success(),
+            "workbench logging subprocess failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir().expect("log directory");
+    let path = directory.path().join("workbench.log");
+    let log = docparse_config::LogConfig::builder()
+        .directives("info")
+        .file(path.clone())
+        .build();
+    let subscriber =
+        docparse_server::logging::subscriber(&log).expect("subscriber");
+    let config = docparse_config::ServerConfig::builder()
+        .webui(docparse_config::WebUi::Disk(directory.path().to_owned()))
+        .build();
+    // A wildcard bind is reported as loopback, because 0.0.0.0 is not clickable.
+    let bound = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8080));
+    tracing::subscriber::with_default(subscriber, || {
+        docparse_server::app::announce_workbench(bound, &config);
+    });
+    let output = std::fs::read_to_string(&path).expect("persisted logs");
+    assert!(
+        output
+            .contains("workbench available at http://127.0.0.1:8080/api/webui"),
+        "missing clickable URL in: {output}"
+    );
+
+    // Without a configured workbench nothing is served, so nothing is announced.
+    let silent = directory.path().join("silent.log");
+    let log = docparse_config::LogConfig::builder()
+        .directives("info")
+        .file(silent.clone())
+        .build();
+    let subscriber =
+        docparse_server::logging::subscriber(&log).expect("subscriber");
+    tracing::subscriber::with_default(subscriber, || {
+        docparse_server::app::announce_workbench(
+            bound,
+            &docparse_config::ServerConfig::builder().build(),
+        );
+    });
+    let output = std::fs::read_to_string(&silent).expect("persisted logs");
+    assert!(
+        !output.contains("workbench available"),
+        "unexpected announcement in: {output}"
+    );
+}
+
 /// Database logging must apply both configured levels and the threshold, including independent off switches.
 #[tokio::test]
 #[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
