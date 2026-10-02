@@ -199,9 +199,12 @@ impl Worker {
                         let publishing = publishing;
                         // Stream the standard API envelope around the configured canonical view, avoiding a second document-sized buffer.
                         {
-                            // Buffer small serializer writes so large documents do not issue one filesystem write per token.
+                            // Coalesce serializer writes into 256 KiB chunks to reduce shared-filesystem
+                            // calls while keeping per-attempt buffering bounded.
                             let mut writer =
-                                std::io::BufWriter::new(temporary.as_file_mut());
+                                std::io::BufWriter::with_capacity(
+                                    256 * 1024, temporary.as_file_mut(),
+                                );
                             // Borrow the configured document view and let the shared response type own the wire format.
                             ApiResponse::data(
                                 docparse_core::JsonRenderer::view_with_config(
