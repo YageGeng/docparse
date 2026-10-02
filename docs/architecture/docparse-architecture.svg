@@ -1,0 +1,1622 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="light" width="1170" height="2114" viewBox="0 0 1170 2114" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
+        <title id="archify-diagram-title">DocParse 架构总览（网格对齐）</title>
+        <desc id="archify-diagram-description">由 Archify 生成的架构图。</desc>
+        <!-- Definitions -->
+        <style>
+[data-theme="light"]{
+      --bg: #f4f5f7;
+      --grid: #e9edf2;
+      --canvas-dot: #d9dee5;
+      --text: #111827;
+      --text-muted: #5b6474;
+      --text-dim: #9aa3b2;
+      --text-faint: #6b7280;
+
+      --panel: #ffffff;
+      --panel-border: #e5e7eb;
+      --lane-fill: rgba(248, 250, 252, 0.65);
+      --lane-stroke: #cbd5e1;
+
+      --arrow: #94a3b8;
+      --arrow-emphasis: #059669;
+
+      --mask: #ffffff;
+
+      --frontend-fill: rgba(34, 211, 238, 0.15);
+      --frontend-stroke: #0891b2;
+      --backend-fill: rgba(52, 211, 153, 0.18);
+      --backend-stroke: #059669;
+      --database-fill: rgba(167, 139, 250, 0.2);
+      --database-stroke: #7c3aed;
+      --cloud-fill: rgba(251, 191, 36, 0.18);
+      --cloud-stroke: #d97706;
+      --security-fill: rgba(251, 113, 133, 0.15);
+      --security-stroke: #e11d48;
+      --messagebus-fill: rgba(251, 146, 60, 0.15);
+      --messagebus-stroke: #ea580c;
+      --external-fill: rgba(148, 163, 184, 0.18);
+      --external-stroke: #64748b;
+
+      --toolbar-bg:       rgba(255, 255, 255, 0.92);
+      --toolbar-border:   #cbd5e1;
+      --toolbar-text:     #334155;
+      --toolbar-hover:    #ffffff;
+      --toolbar-menu-bg:  #ffffff;
+    }
+/* ==========================================================
+       SIGNAL FLOW — an opt-in, motion-forward visual preset.
+       The variables also target a standalone exported SVG, whose
+       root carries data-preset and data-theme directly.
+       ========================================================== */
+    [data-preset="signal-flow"][data-theme="dark"]{
+      --bg: #030711;
+      --grid: #15233a;
+      --panel: rgba(6, 14, 28, 0.78);
+      --panel-border: #1d3350;
+      --lane-fill: rgba(9, 22, 40, 0.5);
+      --lane-stroke: #2c4564;
+      --text: #f5fbff;
+      --text-muted: #9eb0c7;
+      --text-dim: #52667f;
+      --text-faint: #7890ad;
+      --mask: #07101e;
+      --frontend-fill: rgba(6, 182, 212, 0.14);
+      --frontend-stroke: #67e8f9;
+      --backend-fill: rgba(16, 185, 129, 0.14);
+      --backend-stroke: #5eead4;
+      --database-fill: rgba(139, 92, 246, 0.16);
+      --database-stroke: #c4b5fd;
+      --cloud-fill: rgba(245, 158, 11, 0.13);
+      --cloud-stroke: #fcd34d;
+      --security-fill: rgba(244, 63, 94, 0.13);
+      --security-stroke: #fda4af;
+      --messagebus-fill: rgba(249, 115, 22, 0.13);
+      --messagebus-stroke: #fdba74;
+      --external-fill: rgba(71, 85, 105, 0.24);
+      --external-stroke: #a5b4c7;
+      --arrow: #7890ad;
+      --arrow-emphasis: #2dd4bf;
+      --toolbar-bg: rgba(7, 16, 30, 0.86);
+      --toolbar-border: #29415f;
+      --toolbar-menu-bg: #07101e;
+    }
+[data-preset="signal-flow"][data-theme="light"]{
+      --bg: #f4f9fc;
+      --grid: #d4e5ee;
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-border: #bfd5e2;
+      --lane-fill: rgba(232, 243, 248, 0.62);
+      --lane-stroke: #a9c5d5;
+      --text: #102638;
+      --text-muted: #587287;
+      --text-dim: #8aa2b4;
+      --text-faint: #668397;
+      --mask: #ffffff;
+      --frontend-fill: rgba(6, 182, 212, 0.09);
+      --frontend-stroke: #0789a1;
+      --backend-fill: rgba(5, 150, 105, 0.09);
+      --backend-stroke: #087f69;
+      --database-fill: rgba(124, 58, 237, 0.09);
+      --database-stroke: #7254c7;
+      --cloud-fill: rgba(217, 119, 6, 0.08);
+      --cloud-stroke: #b9670b;
+      --security-fill: rgba(225, 29, 72, 0.08);
+      --security-stroke: #c53a59;
+      --messagebus-fill: rgba(234, 88, 12, 0.08);
+      --messagebus-stroke: #c65f27;
+      --external-fill: rgba(100, 116, 139, 0.1);
+      --external-stroke: #607a8c;
+      --arrow: #7b97aa;
+      --arrow-emphasis: #0d9488;
+    }
+/* ==========================================================
+       BLUEPRINT — a review-first drafting preset for deployment,
+       infrastructure, and technical design documentation. It keeps
+       the same semantic palette and geometry while trading glow for
+       precise grid contrast, squared materials, and drafting marks.
+       ========================================================== */
+    [data-preset="blueprint"][data-theme="dark"]{
+      --bg: #06131f;
+      --grid: #17425a;
+      --panel: rgba(7, 27, 43, 0.9);
+      --panel-border: #27627f;
+      --lane-fill: rgba(10, 43, 66, 0.36);
+      --lane-stroke: #34799a;
+      --text: #e3f6ff;
+      --text-muted: #91b8ca;
+      --text-dim: #557e92;
+      --text-faint: #739caf;
+      --mask: #0a2031;
+      --frontend-fill: rgba(26, 157, 193, 0.14);
+      --frontend-stroke: #66d9ef;
+      --backend-fill: rgba(31, 155, 124, 0.13);
+      --backend-stroke: #69dfbd;
+      --database-fill: rgba(120, 105, 196, 0.14);
+      --database-stroke: #b4a8ff;
+      --cloud-fill: rgba(197, 145, 43, 0.13);
+      --cloud-stroke: #ffd166;
+      --security-fill: rgba(199, 76, 104, 0.13);
+      --security-stroke: #ff8da1;
+      --messagebus-fill: rgba(207, 112, 49, 0.13);
+      --messagebus-stroke: #ffad66;
+      --external-fill: rgba(84, 119, 139, 0.18);
+      --external-stroke: #a7cad9;
+      --arrow: #78a3b7;
+      --arrow-emphasis: #64dfc1;
+      --toolbar-bg: rgba(7, 28, 45, 0.92);
+      --toolbar-border: #34799a;
+      --toolbar-text: #d8f3ff;
+      --toolbar-hover: rgba(18, 58, 83, 0.95);
+      --toolbar-menu-bg: #0a2031;
+    }
+[data-preset="blueprint"][data-theme="light"]{
+      --bg: #edf7fa;
+      --grid: #b5d5e1;
+      --panel: rgba(249, 253, 255, 0.94);
+      --panel-border: #78aabd;
+      --lane-fill: rgba(210, 232, 240, 0.42);
+      --lane-stroke: #83b2c4;
+      --text: #123344;
+      --text-muted: #4e7486;
+      --text-dim: #86a6b4;
+      --text-faint: #668c9d;
+      --mask: #f9fdff;
+      --frontend-fill: rgba(8, 145, 178, 0.08);
+      --frontend-stroke: #087f9c;
+      --backend-fill: rgba(5, 128, 101, 0.08);
+      --backend-stroke: #08755f;
+      --database-fill: rgba(100, 75, 180, 0.08);
+      --database-stroke: #6757a8;
+      --cloud-fill: rgba(181, 120, 15, 0.08);
+      --cloud-stroke: #a86609;
+      --security-fill: rgba(190, 48, 80, 0.07);
+      --security-stroke: #b32f50;
+      --messagebus-fill: rgba(196, 81, 22, 0.07);
+      --messagebus-stroke: #b65120;
+      --external-fill: rgba(79, 112, 128, 0.08);
+      --external-stroke: #506f7e;
+      --arrow: #6d93a5;
+      --arrow-emphasis: #087f69;
+      --toolbar-bg: rgba(247, 252, 254, 0.94);
+      --toolbar-border: #8ab5c5;
+      --toolbar-text: #294f61;
+      --toolbar-hover: #ffffff;
+      --toolbar-menu-bg: #f9fdff;
+    }
+/* ==========================================================
+       EDITORIAL — a warm, publication-minded preset for design
+       reviews, launch notes, and documentation. The diagram keeps
+       the same semantic palette and exact geometry, but trades
+       software chrome for paper, ink, ruled structure, and one
+       restrained vermilion accent.
+       ========================================================== */
+    [data-preset="editorial"][data-theme="dark"]{
+      --bg: #181611;
+      --grid: #39342a;
+      --panel: rgba(35, 31, 24, 0.96);
+      --panel-border: #625a4a;
+      --lane-fill: rgba(52, 46, 35, 0.46);
+      --lane-stroke: #726957;
+      --text: #f4eddf;
+      --text-muted: #b9ae9b;
+      --text-dim: #776e60;
+      --text-faint: #9d917e;
+      --mask: #231f18;
+      --frontend-fill: rgba(43, 133, 142, 0.16);
+      --frontend-stroke: #7fc6c7;
+      --backend-fill: rgba(63, 132, 92, 0.16);
+      --backend-stroke: #8fc29e;
+      --database-fill: rgba(117, 91, 141, 0.17);
+      --database-stroke: #c0a4d0;
+      --cloud-fill: rgba(170, 119, 49, 0.16);
+      --cloud-stroke: #d8ad68;
+      --security-fill: rgba(157, 69, 65, 0.17);
+      --security-stroke: #df9085;
+      --messagebus-fill: rgba(174, 79, 42, 0.16);
+      --messagebus-stroke: #df946f;
+      --external-fill: rgba(126, 115, 96, 0.18);
+      --external-stroke: #b8ad99;
+      --arrow: #948978;
+      --arrow-emphasis: #dd6b3d;
+      --toolbar-bg: rgba(35, 31, 24, 0.92);
+      --toolbar-border: #625a4a;
+      --toolbar-text: #eee5d5;
+      --toolbar-hover: #302a20;
+      --toolbar-menu-bg: #231f18;
+    }
+[data-preset="editorial"][data-theme="light"]{
+      --bg: #f2eee5;
+      --grid: #d8d0c2;
+      --panel: rgba(251, 248, 241, 0.97);
+      --panel-border: #c4b9a6;
+      --lane-fill: rgba(229, 221, 207, 0.42);
+      --lane-stroke: #b8aa94;
+      --text: #242018;
+      --text-muted: #6f6658;
+      --text-dim: #a09788;
+      --text-faint: #817767;
+      --mask: #fbf8f1;
+      --frontend-fill: rgba(31, 117, 126, 0.09);
+      --frontend-stroke: #287e84;
+      --backend-fill: rgba(42, 119, 75, 0.09);
+      --backend-stroke: #397b53;
+      --database-fill: rgba(105, 75, 130, 0.09);
+      --database-stroke: #765d86;
+      --cloud-fill: rgba(157, 103, 31, 0.1);
+      --cloud-stroke: #9a671f;
+      --security-fill: rgba(153, 58, 52, 0.09);
+      --security-stroke: #9e463f;
+      --messagebus-fill: rgba(182, 70, 27, 0.09);
+      --messagebus-stroke: #ad4b25;
+      --external-fill: rgba(101, 91, 75, 0.09);
+      --external-stroke: #746b5e;
+      --arrow: #8a806f;
+      --arrow-emphasis: #bb4c23;
+      --toolbar-bg: rgba(251, 248, 241, 0.94);
+      --toolbar-border: #c4b9a6;
+      --toolbar-text: #40392f;
+      --toolbar-hover: #fffdf8;
+      --toolbar-menu-bg: #fbf8f1;
+    }
+[data-theme="dark"] .toolbar #btn-theme::before{ background: rgba(148, 163, 184, 0.16); }
+[data-theme="dark"] .toolbar #btn-theme::after{ left: calc(100% - 0.5625rem - 1.125rem); background: #3b4a63; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+[data-theme="dark"] .toolbar #theme-icon{ left: calc(100% - 0.5625rem - 1.125rem + 0.1875rem); color: #c7d2fe; }
+[data-theme="light"] #theme-icon{
+      -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='3.1'/%3E%3Cpath d='M10 2.2v1.4M10 16.4v1.4M2.2 10h1.4M16.4 10h1.4M4.5 4.5l1 1M14.5 14.5l1 1M15.5 4.5l-1 1M5.5 14.5l-1 1'/%3E%3C/g%3E%3C/svg%3E");
+      mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='3.1'/%3E%3Cpath d='M10 2.2v1.4M10 16.4v1.4M2.2 10h1.4M16.4 10h1.4M4.5 4.5l1 1M14.5 14.5l1 1M15.5 4.5l-1 1M5.5 14.5l-1 1'/%3E%3C/g%3E%3C/svg%3E");
+    }
+[data-theme="dark"] #theme-icon{
+      -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M15.2 12.7A6.3 6.3 0 017.3 4.8a6.3 6.3 0 107.9 7.9Z' fill='none' stroke='black' stroke-width='1.7' stroke-linejoin='round'/%3E%3C/svg%3E");
+      mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M15.2 12.7A6.3 6.3 0 017.3 4.8a6.3 6.3 0 107.9 7.9Z' fill='none' stroke='black' stroke-width='1.7' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+[data-theme="dark"] .toolbar .preset-menu,
+    [data-theme="dark"] .toolbar .export-menu{
+      border-color: rgba(148, 163, 184, 0.16);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 18px 44px -12px rgba(0, 0, 0, 0.6);
+    }
+/* Classic previews the canvas it will actually produce in this theme. */
+    [data-theme="light"] .preset-option-swatch.classic{
+      background:
+        radial-gradient(circle at 1px 1px, #d9dee5 0.6px, transparent 0.9px) 0 0 / 5px 5px,
+        #ffffff;
+    }
+[data-theme="light"] .preset-option-swatch.classic::before{
+      border-color: #1b87a3;
+      background: rgba(14, 116, 144, 0.08);
+      box-shadow: 0 2px 4px rgba(17, 24, 39, 0.12);
+    }
+svg{
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      width: 100%;
+      min-width: min(900px, 100%);
+      display: block;
+      transform-origin: 0 0;
+      transition: transform 0.18s ease;
+    }
+.diagram-container.is-camera-moving svg{
+      transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+.diagram-container.is-camera-transaction svg{ transition: none; }
+.diagram-container.is-panning svg{ transition: none; }
+.overview-map-surface > svg{
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      transform: none !important;
+      transition: none !important;
+      display: block;
+      overflow: visible;
+    }
+/* Picking needs one line of guidance, not a wide empty card; the panel
+       widens only when there is a traced route to show. */
+    .route-probe:not([data-state="result"]){ width: min(22rem, calc(100% - 2rem)); min-width: 0; }
+/* Hanging markers take the card's tone so wrapped lines align under text. */
+    .card li::before{
+      position: absolute;
+      top: calc(0.8em - 2px);
+      left: 0.2rem;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--card-tone, var(--text-muted)) 70%, transparent);
+      content: "";
+    }
+/* ==========================================================
+       Print stylesheet — hide interactive controls, force light,
+       drop the grid so the diagram doesn't waste ink, use landscape
+       so wide diagrams fit, pack summary cards into 2 columns to
+       avoid an orphan card on a trailing page.
+       ========================================================== */
+    @page{ size: landscape; margin: 1.5cm; }
+@media print{.diagram-container svg [data-detail]{
+        opacity: 1 !important;
+        pointer-events: auto !important;
+      }
+.diagram-container svg [data-detail-anchor]{ transform: none !important; }
+.diagram-container svg[data-lens-active] [data-node-id],
+      .diagram-container svg[data-lens-active] [data-edge-from],
+      .diagram-container svg[data-legend-preview-active] [data-node-id],
+      .diagram-container svg[data-legend-preview-active] [data-edge-from]{
+        opacity: 1 !important;
+        filter: none !important;
+      }
+.diagram-container svg[data-focus-active] [data-node-id],
+      .diagram-container svg[data-focus-active] [data-edge-from],
+      .diagram-container svg[data-focus-active] [data-graph-role="automatic-crossover-underlay"],
+      .diagram-container svg[data-reach-active] [data-node-id],
+      .diagram-container svg[data-reach-active] [data-edge-from],
+      .diagram-container svg[data-reach-active] [data-graph-role="automatic-crossover-underlay"],
+      .diagram-container svg[data-route-active] [data-node-id],
+      .diagram-container svg[data-route-active] [data-edge-from],
+      .diagram-container svg[data-route-active] [data-graph-role="automatic-crossover-underlay"]{
+        opacity: 1 !important;
+        filter: none !important;
+        animation: none !important;
+      }}
+/* ==========================================================
+       TOOLBAR (theme toggle + export menu)
+       ========================================================== */
+    /* The toolbar tracks the centered reader column and the title row, so
+       an adaptive narrow reader does not leave its controls stranded at the
+       viewport edge. */
+    .toolbar{
+      position: absolute;
+      top: var(--archify-page-top);
+      right: max(1rem, calc((100vw - min(100vw - 4rem, var(--archify-reader-width, 1440px))) / 2));
+      display: flex;
+      align-items: center;
+      gap: 0.125rem;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      z-index: 100;
+    }
+/* Name and format hint share one line, so each row stays compact. */
+    .export-item-copy{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+.toolbar .export-menu button[data-format^="svg"]::before,
+    .toolbar .export-menu button[data-format="webm"]::before{
+      -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 2.5l7 4v7l-7 4-7-4v-7zM3 6.5l7 4 7-4M10 10.5v7' fill='none' stroke='black' stroke-width='1.7'/%3E%3C/svg%3E");
+      mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 2.5l7 4v7l-7 4-7-4v-7zM3 6.5l7 4 7-4M10 10.5v7' fill='none' stroke='black' stroke-width='1.7'/%3E%3C/svg%3E");
+    }
+/* ==========================================================
+       SVG SEMANTIC CLASSES — use these instead of inline fill/stroke
+       ========================================================== */
+    .c-grid{ stroke: var(--grid); fill: none; }
+.c-mask{ fill: var(--mask); stroke: none; }
+.c-frontend{ fill: var(--frontend-fill);   stroke: var(--frontend-stroke); }
+.c-backend{ fill: var(--backend-fill);    stroke: var(--backend-stroke); }
+.c-database{ fill: var(--database-fill);   stroke: var(--database-stroke); }
+.c-messagebus{ fill: var(--messagebus-fill); stroke: var(--messagebus-stroke); }
+.c-external{ fill: var(--external-fill);   stroke: var(--external-stroke); }
+/* Text helpers */
+    .t-primary{ fill: var(--text); }
+.t-muted{ fill: var(--text-muted); }
+.t-frontend{ fill: var(--frontend-stroke); }
+.t-backend{ fill: var(--backend-stroke); }
+.t-database{ fill: var(--database-stroke); }
+.t-cloud{ fill: var(--cloud-stroke); }
+.t-security{ fill: var(--security-stroke); }
+.t-messagebus{ fill: var(--messagebus-stroke); }
+/* Relationship labels share the exact color token used by their path. */
+    .t-edge-default{ fill: var(--arrow); }
+.t-edge-emphasis{ fill: var(--arrow-emphasis); }
+.t-edge-dashed{ fill: var(--database-stroke); }
+/* Semantic Sigils are small authored role stamps, not icons from a brand
+       pack and not viewer controls. Prefix selectors with svg so the canonical
+       export's SVG-only stylesheet collector keeps them automatically. */
+    svg .semantic-sigil{
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.35;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.76;
+      pointer-events: none;
+    }
+svg .semantic-sigil > *{ vector-effect: non-scaling-stroke; }
+svg .semantic-sigil .sigil-fill{ fill: currentColor; stroke: none; }
+svg .s-frontend{ color: var(--frontend-stroke); }
+svg .s-backend{ color: var(--backend-stroke); }
+svg .s-database{ color: var(--database-stroke); }
+svg .s-cloud{ color: var(--cloud-stroke); }
+svg .s-security{ color: var(--security-stroke); }
+svg .s-messagebus{ color: var(--messagebus-stroke); }
+svg .s-external{ color: var(--external-stroke); }
+/* Brand Marks are authored identity badges. Their color is contained
+       inside one neutral plate so vendor color never replaces Archify's
+       semantic node and relationship vocabulary. */
+    svg .brand-mark{ pointer-events: none; }
+svg .brand-mark-badge{ fill: #fff; stroke: none; }
+svg .brand-mark-frame{
+      fill: none;
+      stroke: #cbd5e1;
+      stroke-width: 0.8;
+      vector-effect: non-scaling-stroke;
+    }
+svg .brand-mark-fallback{
+      fill: none;
+      stroke: #475569;
+      stroke-width: 1.15;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+svg[data-preset="blueprint"] .brand-mark-badge,
+    svg[data-preset="blueprint"] .brand-mark-frame{ rx: 1px; }
+/* Reading Depth is a viewer-only level-of-detail layer. MAP preserves the
+       authored structure and primary labels, READ restores relationship labels
+       and node context, and FULL restores tags and fine annotations. Semantic
+       intent can reveal the relevant detail without moving any geometry. */
+    svg [data-detail]{ transition: opacity 160ms ease; }
+svg [data-detail-anchor]{
+      transform-box: fill-box;
+      transform-origin: center;
+      transition: transform 160ms ease;
+    }
+.diagram-container[data-detail-level="map"] svg [data-detail="context"],
+    .diagram-container[data-detail-level="map"] svg [data-detail="fine"],
+    .diagram-container[data-detail-level="read"] svg [data-detail="fine"]{
+      opacity: 0;
+      pointer-events: none;
+    }
+.diagram-container[data-detail-level="map"] svg [data-detail-anchor]{
+      transform: translateY(8px);
+    }
+/* Focus, lens, preview, route, and story states are stronger reader intent than
+       the global zoom level. Reveal only their exact semantic matches. */
+    svg[data-focus-active] [data-focus-match][data-detail],
+    svg[data-focus-active] [data-focus-match] [data-detail],
+    svg[data-reach-active] [data-reach-match][data-detail],
+    svg[data-reach-active] [data-reach-match] [data-detail],
+    svg[data-lens-active] [data-lens-match][data-detail],
+    svg[data-lens-active] [data-lens-match] [data-detail],
+    svg[data-legend-preview-active] [data-legend-preview-match][data-detail],
+    svg[data-legend-preview-active] [data-legend-preview-match] [data-detail],
+    svg[data-intent-trace-active] [data-intent-trace-match][data-detail],
+    svg[data-intent-trace-active] [data-intent-trace-match] [data-detail],
+    svg[data-route-active] [data-route-match][data-detail],
+    svg[data-route-active] [data-route-match] [data-detail],
+    svg[data-relationship-preview-active] [data-relationship-preview][data-detail],
+    svg[data-relationship-preview-active] [data-relationship-preview] [data-detail],
+    svg [data-node-id]:hover [data-detail],
+    svg [data-node-id]:focus-visible [data-detail]{
+      opacity: 1;
+      pointer-events: auto;
+    }
+svg[data-focus-active] [data-focus-match] [data-detail-anchor],
+    svg[data-reach-active] [data-reach-match] [data-detail-anchor],
+    svg[data-lens-active] [data-lens-match] [data-detail-anchor],
+    svg[data-legend-preview-active] [data-legend-preview-match] [data-detail-anchor],
+    svg[data-intent-trace-active] [data-intent-trace-match] [data-detail-anchor],
+    svg[data-route-active] [data-route-match] [data-detail-anchor],
+    svg [data-node-id]:hover [data-detail-anchor],
+    svg [data-node-id]:focus-visible [data-detail-anchor]{ transform: none; }
+/* Arrows */
+    .a-default{ stroke: var(--arrow); fill: none; }
+.a-emphasis{ stroke: var(--arrow-emphasis); fill: none; }
+.a-dashed{ stroke: var(--database-stroke); fill: none; stroke-dasharray: 4,4; }
+/* Arrowhead markers reference these */
+    .m-default{ fill: var(--arrow); }
+.m-emphasis{ fill: var(--arrow-emphasis); }
+.m-security{ fill: var(--security-stroke); }
+.m-dashed{ fill: var(--database-stroke); }
+/* Stable semantic exploration hooks emitted by every renderer. */
+    svg [data-node-id]{
+      cursor: pointer;
+      transition: opacity 0.18s ease, fill-opacity 0.18s ease, stroke-opacity 0.18s ease, filter 0.18s ease;
+    }
+svg [data-edge-from],
+    svg [data-graph-role="automatic-crossover-underlay"]{ transition: opacity 0.18s ease, filter 0.18s ease; }
+svg [data-node-id]:hover,
+    svg [data-node-id]:focus-visible{
+      filter: drop-shadow(0 0 7px var(--frontend-stroke));
+      outline: none;
+    }
+.source-evidence-beacon rect{
+      fill: color-mix(in srgb, var(--mask) 92%, var(--backend-stroke));
+      stroke: color-mix(in srgb, var(--backend-stroke) 82%, var(--panel-border));
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+.source-evidence-beacon text{
+      fill: var(--backend-stroke);
+      font-size: 7px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-anchor: middle;
+      text-transform: uppercase;
+    }
+svg [data-node-id]:hover .source-evidence-beacon,
+    svg [data-node-id]:focus-visible .source-evidence-beacon,
+    svg [data-node-id][data-focus-selected] .source-evidence-beacon{
+      opacity: 1;
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--backend-stroke) 72%, transparent));
+    }
+svg[data-preset="signal-flow"] .source-evidence-beacon{ opacity: 0.9; }
+svg[data-preset="blueprint"] .source-evidence-beacon rect{
+      rx: 0.8px;
+      filter: none;
+    }
+svg [data-legend-kind][role="button"]{ cursor: pointer; }
+svg [data-legend-kind]:focus{ outline: none; }
+svg [data-legend-hit]{
+      fill: transparent;
+      stroke: transparent;
+      stroke-width: 1.4;
+      pointer-events: all;
+      vector-effect: non-scaling-stroke;
+      transition: stroke 150ms ease, stroke-width 150ms ease, filter 150ms ease;
+    }
+svg [data-legend-count-badge]{ pointer-events: none; }
+svg [data-legend-count-badge] rect{
+      fill: var(--mask);
+      stroke: var(--panel-border);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+svg [data-legend-count-badge] text{
+      fill: var(--text-muted);
+      font-size: 8px;
+      font-weight: 700;
+      text-anchor: middle;
+    }
+svg [data-legend-kind][role="button"]:hover [data-legend-hit]{
+      stroke: color-mix(in srgb, var(--database-stroke) 58%, transparent);
+    }
+svg [data-legend-kind][role="button"]:focus-visible [data-legend-hit]{
+      stroke: var(--frontend-stroke);
+      stroke-width: 1.8;
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg [data-legend-kind][data-legend-selected] [data-legend-hit]{
+      stroke: var(--database-stroke);
+      stroke-width: 2.2;
+      stroke-dasharray: 3 2;
+    }
+svg [data-legend-kind][data-legend-selected] [data-legend-count-badge] rect{
+      stroke: var(--database-stroke);
+      stroke-width: 1.8;
+    }
+svg [data-legend-kind][data-legend-zero]{ opacity: 0.44; }
+svg[data-preset="signal-flow"] [data-legend-kind][data-legend-selected] [data-legend-hit]{
+      filter: drop-shadow(0 0 4px var(--database-stroke));
+    }
+svg[data-preset="blueprint"] [data-legend-hit],
+    svg[data-preset="blueprint"] [data-legend-count-badge] rect{ rx: 0; filter: none; }
+svg[data-legend-preview-active] [data-node-id],
+    svg[data-legend-preview-active] [data-edge-from]{ opacity: 0.11; }
+svg[data-legend-preview-active] [data-legend-preview-match]{ opacity: 1; }
+svg[data-legend-preview-active] [data-legend-preview-peer]{ opacity: 0.62; }
+svg[data-legend-preview-active] [data-legend-preview-selected]{
+      filter: drop-shadow(0 0 8px var(--database-stroke));
+    }
+svg[data-lens-active] [data-node-id],
+    svg[data-lens-active] [data-edge-from]{ opacity: 0.11; }
+svg[data-lens-active] [data-lens-match]{ opacity: 1; }
+svg[data-lens-active] [data-lens-peer]{ opacity: 0.62; }
+svg[data-lens-active] [data-lens-selected]{
+      filter: drop-shadow(0 0 10px var(--database-stroke));
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow{
+      stroke-width: 3.7;
+      opacity: 1;
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="out"],
+    svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="forward"]{
+      filter: drop-shadow(0 0 6px var(--frontend-stroke));
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="in"],
+    svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="reverse"]{
+      filter: drop-shadow(0 0 6px var(--database-stroke));
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="within"]{
+      filter: drop-shadow(0 0 6px var(--messagebus-stroke));
+    }
+svg[data-preset="blueprint"] .semantic-lens-flow{
+      stroke-width: 2.45;
+      stroke-linecap: square;
+      filter: none;
+      opacity: 0.78;
+    }
+/* Automatic crossover masks are visual companions of their one semantic
+       edge. Keep the mask free of data-edge-* identity so graph traversal and
+       export still observe exactly one edge, then mirror reader emphasis from
+       the paired foreground path in this presentation-only wrapper. */
+    svg[data-legend-preview-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"],
+    svg[data-lens-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.11; }
+svg[data-legend-preview-active] [data-graph-role="automatic-crossover"]:has(> [data-legend-preview-match]) > [data-graph-role="automatic-crossover-underlay"],
+    svg[data-lens-active] [data-graph-role="automatic-crossover"]:has(> [data-lens-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-legend-preview-active] [data-graph-role="automatic-crossover"]:has(> [data-legend-preview-peer]) > [data-graph-role="automatic-crossover-underlay"],
+    svg[data-lens-active] [data-graph-role="automatic-crossover"]:has(> [data-lens-peer]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.62; }
+svg[data-focus-active] [data-node-id],
+    svg[data-focus-active] [data-edge-from]{ opacity: 0.13; }
+svg[data-focus-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.13; }
+svg[data-focus-active] [data-lifecycle-rail]{ opacity: 0; }
+svg[data-focus-active] [data-focus-match]{ opacity: 1; }
+svg[data-focus-active] [data-graph-role="automatic-crossover"]:has(> [data-focus-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-focus-active] [data-focus-selected]{
+      filter: drop-shadow(0 0 10px var(--frontend-stroke));
+    }
+/* Authored Reachability is a bounded graph query over the relationships
+       already present in the artifact. Upstream walks incoming edges;
+       downstream walks outgoing edges. It never claims runtime causality and
+       changes only viewer emphasis, not canonical geometry or export bytes. */
+    svg[data-reach-active] [data-node-id],
+    svg[data-reach-active] [data-edge-from]{ opacity: 0.09; }
+svg[data-reach-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.09; }
+svg[data-reach-active] [data-reach-match]{ opacity: 1; }
+svg[data-reach-active] [data-graph-role="automatic-crossover"]:has(> [data-reach-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-reach-active="upstream"] [data-reach-origin]{
+      filter: drop-shadow(0 0 11px var(--database-stroke));
+    }
+svg[data-reach-active="downstream"] [data-reach-origin]{
+      filter: drop-shadow(0 0 11px var(--backend-stroke));
+    }
+svg[data-reach-active="upstream"] [data-edge-from][data-reach-match]{
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--database-stroke) 72%, transparent));
+    }
+svg[data-reach-active="downstream"] [data-edge-from][data-reach-match]{
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--backend-stroke) 72%, transparent));
+    }
+svg[data-preset="blueprint"][data-reach-active] [data-reach-origin],
+    svg[data-preset="blueprint"][data-reach-active] [data-edge-from][data-reach-match]{
+      filter: none;
+    }
+/* Direct Relationship Explorer makes authored paths a real input surface
+       without changing their visible stroke or canonical SVG. A transparent
+       runtime rail supplies forgiving pointer geometry; the exact authored
+       path and endpoints continue to carry every visible state. */
+    .relationship-hit-overlay{ pointer-events: none; }
+svg[data-preset="blueprint"] .relationship-hit-target:focus-visible .relationship-focus-rail{
+      stroke-linecap: square;
+      filter: none;
+    }
+svg[data-relationship-direct-active] [data-node-id],
+    svg[data-relationship-direct-active] [data-edge-from]{ opacity: 0.16; }
+svg[data-relationship-direct-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.16; }
+svg[data-relationship-direct-active] [data-relationship-preview],
+    svg[data-relationship-direct-active] [data-relationship-preview-node]{ opacity: 1; }
+svg[data-relationship-direct-active] [data-graph-role="automatic-crossover"]:has(> [data-relationship-preview]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-focus-active]:not([data-relationship-pin-active]) .relationship-hit-rail,
+    svg[data-route-picking] .relationship-hit-rail,
+    svg[data-route-active] .relationship-hit-rail,
+    svg[data-lens-active] .relationship-hit-rail{ pointer-events: none; }
+/* Relationship Preview is temporary exploration state layered on top of
+       neighborhood focus. It changes emphasis only; exported geometry and the
+       relationship's original solid/dashed visual language stay untouched. */
+    svg[data-relationship-preview-active] [data-focus-match]{ opacity: 0.18; }
+svg[data-relationship-preview-active] [data-graph-role="automatic-crossover"]:has(> [data-focus-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.18; }
+svg[data-relationship-preview-active] [data-lifecycle-rail]{ opacity: 0; }
+svg[data-relationship-preview-active] [data-relationship-preview],
+    svg[data-relationship-preview-active] [data-relationship-preview-node]{ opacity: 1; }
+svg[data-relationship-preview-active] [data-graph-role="automatic-crossover"]:has(> [data-relationship-preview]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-relationship-preview-active] [data-relationship-preview]{
+      filter: drop-shadow(0 0 5px var(--arrow-emphasis));
+    }
+svg[data-relationship-preview-active] [data-relationship-preview] path,
+    svg[data-relationship-preview-active] path[data-relationship-preview],
+    svg[data-relationship-preview-active] [data-relationship-preview] line,
+    svg[data-relationship-preview-active] line[data-relationship-preview],
+    svg[data-relationship-preview-active] [data-relationship-preview] polyline,
+    svg[data-relationship-preview-active] polyline[data-relationship-preview]{
+      stroke-width: 2.75;
+    }
+svg[data-relationship-preview-active] [data-relationship-preview-source]{
+      filter: drop-shadow(0 0 7px var(--frontend-stroke));
+    }
+svg[data-relationship-preview-active] [data-relationship-preview-target]{
+      filter: drop-shadow(0 0 7px var(--database-stroke));
+    }
+svg[data-preset="signal-flow"] .relationship-flow-pulse{
+      stroke: var(--frontend-stroke);
+      stroke-width: 3.85;
+      filter: drop-shadow(0 0 7px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"] .relationship-flow-pulse{
+      stroke-width: 2.5;
+      stroke-linecap: square;
+      filter: none;
+    }
+svg[data-preset="editorial"] .relationship-flow-pulse{
+      stroke: var(--arrow-emphasis);
+      stroke-width: 2.75;
+      filter: none;
+    }
+svg[data-preset="signal-flow"] .semantic-flow-token{
+      filter: drop-shadow(0 0 5px currentColor);
+    }
+svg[data-preset="blueprint"] .semantic-flow-token{ filter: none; }
+svg[data-preset="editorial"] .semantic-flow-token{ filter: none; }
+/* Intent Trace is a temporary, pre-click exploration layer. Related
+       topology stays readable while a short viewer-only signal runs over
+       cloned edge geometry; the authored edge remains untouched underneath. */
+    /* Keep the node's opaque backing mask intact while its visible ink dims.
+       Fading the whole group also fades that mask and briefly exposes arrows
+       routed underneath the node when the pointer leaves. */
+    svg[data-intent-trace-active] [data-node-id]{ fill-opacity: 0.2; stroke-opacity: 0.2; }
+svg [data-node-id] > .c-mask{ fill-opacity: 1; }
+svg[data-intent-trace-active] [data-node-id][data-intent-trace-match]{ fill-opacity: 1; stroke-opacity: 1; }
+svg[data-intent-trace-active] [data-edge-from]{ opacity: 0.2; }
+svg[data-intent-trace-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.2; }
+svg[data-intent-trace-active] [data-lifecycle-rail]{ opacity: 0; }
+svg[data-intent-trace-active] [data-intent-trace-match]{ opacity: 1; }
+svg[data-intent-trace-active] [data-graph-role="automatic-crossover"]:has(> [data-intent-trace-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-intent-trace-active] [data-intent-trace-selected]{
+      filter: drop-shadow(0 0 10px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"] [data-intent-trace-selected],
+    svg[data-preset="blueprint"] .intent-trace-flow{
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="editorial"] [data-intent-trace-selected],
+    svg[data-preset="editorial"] .intent-trace-flow{ filter: none; }
+/* Route Probe separates a durable two-point query from selection and
+       one-hop hover. Only the chosen shortest directed path stays prominent;
+       the traveling signal is cloned viewer geometry and never authored SVG. */
+    svg[data-route-picking="target"] [data-node-id]{ opacity: 0.24; }
+svg[data-route-picking="target"] [data-route-candidate],
+    svg[data-route-picking="target"] [data-route-start]{ opacity: 1; }
+svg[data-route-picking] [data-node-id]{ cursor: crosshair; }
+svg[data-route-picking] [data-route-start]{
+      filter: drop-shadow(0 0 10px var(--frontend-stroke));
+    }
+svg[data-route-active] [data-node-id],
+    svg[data-route-active] [data-edge-from]{ opacity: 0.11; }
+svg[data-route-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.11; }
+svg[data-route-active] [data-route-match]{ opacity: 1; }
+svg[data-route-active] [data-graph-role="automatic-crossover"]:has(> [data-route-match]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-route-active] [data-route-start]{
+      filter: drop-shadow(0 0 11px var(--frontend-stroke));
+    }
+svg[data-route-active] [data-route-end]{
+      filter: drop-shadow(0 0 11px var(--security-stroke));
+    }
+svg[data-route-active] [data-route-step]:not([data-route-start]):not([data-route-end]){
+      filter: drop-shadow(0 0 7px var(--backend-stroke));
+    }
+svg[data-route-journey] [data-route-match][data-route-journey-state="past"]{ opacity: 0.62; }
+svg[data-route-journey] [data-route-match][data-route-journey-state="future"]{ opacity: 0.34; }
+svg[data-route-journey] [data-route-match][data-route-journey-state="current"]{ opacity: 1; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(> [data-route-match][data-route-journey-state="past"]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.62; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(> [data-route-match][data-route-journey-state="future"]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 0.34; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(> [data-route-match][data-route-journey-state="current"]) > [data-graph-role="automatic-crossover-underlay"]{ opacity: 1; }
+svg[data-route-journey] [data-node-id][data-route-journey-current]{
+      filter: drop-shadow(0 0 10px var(--backend-stroke));
+    }
+svg[data-route-journey] [data-edge-from][data-route-journey-current]{
+      opacity: 1;
+      filter: drop-shadow(0 0 6px var(--backend-stroke));
+    }
+svg[data-preset="blueprint"] [data-route-start],
+    svg[data-preset="blueprint"] [data-route-end],
+    svg[data-preset="blueprint"] [data-route-step],
+    svg[data-preset="blueprint"] .route-probe-flow{
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="blueprint"] .route-journey-flow{
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="editorial"] [data-route-start],
+    svg[data-preset="editorial"] [data-route-end],
+    svg[data-preset="editorial"] [data-route-step],
+    svg[data-preset="editorial"] .route-probe-flow,
+    svg[data-preset="editorial"] .route-journey-flow{ filter: none; }
+svg[data-preset="editorial"] .c-grid{
+      stroke-dasharray: 1 4;
+      opacity: 0.48;
+    }
+svg[data-preset="editorial"] .c-region{
+      fill: color-mix(in srgb, var(--cloud-fill) 48%, transparent);
+      stroke-dasharray: 9 4;
+    }
+svg[data-preset="editorial"] [data-node-id]:hover,
+    svg[data-preset="editorial"] [data-node-id]:focus-visible,
+    svg[data-preset="editorial"][data-focus-active] [data-focus-selected]{
+      filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--text) 18%, transparent));
+    }
+svg[data-preset="blueprint"] .c-grid{
+      stroke-dasharray: 1 3;
+      opacity: 0.78;
+    }
+svg[data-preset="blueprint"] .c-region{
+      fill: color-mix(in srgb, var(--cloud-fill) 58%, transparent);
+      stroke-dasharray: 12 4 2 4;
+    }
+svg[data-preset="blueprint"] .c-security-group,
+    svg[data-preset="blueprint"] .c-lane{ stroke-dasharray: 7 3; }
+svg[data-preset="blueprint"] [data-node-id]:hover,
+    svg[data-preset="blueprint"] [data-node-id]:focus-visible{
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"][data-focus-active] [data-focus-selected]{
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"][data-focus-active][data-reach-active] [data-focus-selected][data-reach-origin]{
+      filter: none;
+    }
+svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview],
+    svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-source],
+    svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-target]{
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+/* Dashed boundary variants */
+    .c-security-group{ fill: transparent; stroke: var(--security-stroke); stroke-dasharray: 4,4; }
+.c-region{ fill: rgba(251, 191, 36, 0.05); stroke: var(--cloud-stroke); stroke-dasharray: 8,4; }
+svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="edge"]{
+      stroke-linecap: round;
+      filter: drop-shadow(0 0 3px var(--arrow-emphasis));
+      animation-duration: 1.75s;
+    }
+svg[data-preset="signal-flow"][data-animation="trace"] [data-graph-role="automatic-crossover"]:has(> [data-animate="edge"]) > [data-graph-role="automatic-crossover-underlay"]{ animation-duration: 1.75s; }
+svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="node"]{
+      animation-duration: 3.1s;
+    }
+svg[data-preset="blueprint"][data-animation="trace"] [data-animate="edge"]{
+      stroke-linecap: square;
+      filter: none;
+      animation-duration: 2.15s;
+    }
+svg[data-preset="blueprint"][data-animation="trace"] [data-graph-role="automatic-crossover"]:has(> [data-animate="edge"]) > [data-graph-role="automatic-crossover-underlay"]{ animation-duration: 2.15s; }
+svg[data-preset="blueprint"][data-animation="trace"] [data-animate="node"]{
+      animation-name: archify-blueprint-node-pulse;
+      animation-duration: 3.8s;
+    }
+svg[data-preset="editorial"][data-animation="trace"] [data-animate="edge"]{
+      filter: none;
+      animation-duration: 2.2s;
+    }
+svg[data-preset="editorial"][data-animation="trace"] [data-graph-role="automatic-crossover"]:has(> [data-animate="edge"]) > [data-graph-role="automatic-crossover-underlay"]{ animation-duration: 2.2s; }
+svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"]{
+      animation-name: archify-editorial-node-pulse;
+      animation-duration: 3.5s;
+    }
+@media (prefers-reduced-motion: reduce){svg[data-animation="trace"] [data-animate]{
+        animation: none !important;
+        stroke-dashoffset: 0;
+      }
+svg[data-animation="trace"] [data-graph-role="automatic-crossover"]:has(> [data-animate="edge"]) > [data-graph-role="automatic-crossover-underlay"]{
+        animation: none !important;
+        stroke-dashoffset: 0;
+      }
+.source-evidence-beacon,
+      svg [data-node-id], svg [data-edge-from], svg [data-detail], svg [data-detail-anchor], svg [data-legend-hit], svg{ transition: none !important; }}
+
+  :root {
+      --bg: #f4f5f7;
+      --grid: #e9edf2;
+      --canvas-dot: #d9dee5;
+      --text: #111827;
+      --text-muted: #5b6474;
+      --text-dim: #9aa3b2;
+      --text-faint: #6b7280;
+
+      --panel: #ffffff;
+      --panel-border: #e5e7eb;
+      --lane-fill: rgba(248, 250, 252, 0.65);
+      --lane-stroke: #cbd5e1;
+
+      --arrow: #94a3b8;
+      --arrow-emphasis: #059669;
+
+      --mask: #ffffff;
+
+      --frontend-fill: rgba(34, 211, 238, 0.15);
+      --frontend-stroke: #0891b2;
+      --backend-fill: rgba(52, 211, 153, 0.18);
+      --backend-stroke: #059669;
+      --database-fill: rgba(167, 139, 250, 0.2);
+      --database-stroke: #7c3aed;
+      --cloud-fill: rgba(251, 191, 36, 0.18);
+      --cloud-stroke: #d97706;
+      --security-fill: rgba(251, 113, 133, 0.15);
+      --security-stroke: #e11d48;
+      --messagebus-fill: rgba(251, 146, 60, 0.15);
+      --messagebus-stroke: #ea580c;
+      --external-fill: rgba(148, 163, 184, 0.18);
+      --external-stroke: #64748b;
+
+      --toolbar-bg:       rgba(255, 255, 255, 0.92);
+      --toolbar-border:   #cbd5e1;
+      --toolbar-text:     #334155;
+      --toolbar-hover:    #ffffff;
+      --toolbar-menu-bg:  #ffffff;
+    }
+</style>
+<defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Boundaries (behind everything) -->
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" x="320" y="60" width="810" height="610" rx="12" class="c-region" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="可信入口：认证 / CORS 由 ingress 承担" x="320" y="220" width="260" height="130" rx="8" class="c-security-group" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="2" data-composition-frame-label="CLI 进程（本地 PDFium 线程）" x="0" y="870" width="250" height="116" rx="12" class="c-region" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="3" data-composition-frame-label="WASM Worker（浏览器本地推理）" x="0" y="1070" width="250" height="116" rx="12" class="c-region" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="4" data-composition-frame-label="PDFium 子进程（独立进程组）" x="390" y="790" width="260" height="130" rx="12" class="c-region" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="5" data-composition-frame-label="Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）" x="734.1870799741936" y="1650" width="271.6258400516129" height="296" rx="12" class="c-region" stroke-width="1"/>
+
+        <!-- Connection paths (before components for correct z-order) -->
+        <g data-graph-role="automatic-crossover" style="--step:0">
+          <path data-graph-role="automatic-crossover-underlay" d="M 660 130 L 442.95 130 Q 434.95 130 434.95 138 L 434.95 250" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="workbench" data-edge-to="http-api" data-edge-label="上传 PDF" data-edge-key="0" data-edge-id="upload-pdf" data-composition-points="660,130;434.95,130;434.95,250" data-composition-crossover="halo" data-composition-independent="true" d="M 660 130 L 442.95 130 Q 434.95 130 434.95 138 L 434.95 250" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:1">
+          <path data-graph-role="automatic-crossover-underlay" d="M 450 250 L 450 234 Q 450 226 458 226 L 752 226 Q 760 226 760 218 L 760 170" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="http-api" data-edge-to="workbench" data-edge-label="结果 / SSE" data-edge-key="1" data-edge-id="result-stream" data-composition-points="450,250;450,226;760,226;760,170" data-composition-crossover="halo" data-composition-independent="true" d="M 450 250 L 450 234 Q 450 226 458 226 L 752 226 Q 760 226 760 218 L 760 170" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:2">
+          <path data-graph-role="automatic-crossover-underlay" d="M 450 330 L 450 440" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="http-api" data-edge-to="postgres" data-edge-label="作业行读写（提交 / 查询）" data-edge-key="2" data-edge-id="job-row" data-composition-points="450,330;450,440" data-composition-crossover="halo" data-composition-independent="true" d="M 450 330 L 450 440" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:3">
+          <path data-graph-role="automatic-crossover-underlay" d="M 660 473 L 550 473" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="jobs-worker" data-edge-to="postgres" data-edge-label="领取租约 / 心跳" data-edge-key="3" data-edge-id="claim-lease" data-composition-points="660,473;550,473" data-composition-crossover="halo" data-composition-independent="true" d="M 660 473 L 550 473" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:4">
+          <path data-graph-role="automatic-crossover-underlay" d="M 753 440 L 753 330" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="jobs-worker" data-edge-to="shared-storage" data-edge-label="发布结果 JSON" data-edge-key="4" data-edge-id="publish-result" data-composition-points="753,440;753,330" data-composition-crossover="halo" data-composition-independent="true" d="M 753 440 L 753 330" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <path data-edge-from="shared-storage" data-edge-to="http-api" data-edge-label="结果 / 原文" data-edge-key="5" data-edge-id="read-result" data-composition-points="660,290;605,290;550,290" d="M 660 290 L 613 290 Q 605 290 597 290 L 550 290" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <g data-graph-role="automatic-crossover" style="--step:6">
+          <path data-graph-role="automatic-crossover-underlay" d="M 450 570 L 450 520" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="migrations" data-edge-to="postgres" data-edge-label="自动迁移" data-edge-key="6" data-edge-id="auto-migrate" data-composition-points="450,570;450,520" data-composition-crossover="halo" data-composition-independent="true" d="M 450 570 L 450 520" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:7">
+          <path data-graph-role="automatic-crossover-underlay" d="M 660 487 L 648 487 Q 640 487 640 495 L 640 732 Q 640 740 632 740 L 620 740" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="jobs-worker" data-edge-to="pdfium-pool" data-edge-label="reserve()" data-edge-key="7" data-edge-id="reserve-worker" data-composition-points="660,487;640,487;640,740;620,740" data-composition-crossover="halo" data-composition-independent="true" d="M 660 487 L 648 487 Q 640 487 640 495 L 640 732 Q 640 740 632 740 L 620 740" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:8">
+          <path data-graph-role="automatic-crossover-underlay" d="M 520 780 L 520 820" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pdfium-pool" data-edge-to="pdfium-worker" data-edge-label="IPC v6" data-edge-key="8" data-edge-id="pool-ipc" data-composition-points="520,780;520,820" data-composition-crossover="halo" data-composition-independent="true" d="M 520 780 L 520 820" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:9">
+          <path data-graph-role="automatic-crossover-underlay" d="M 513 900 L 513 940" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pdfium-worker" data-edge-to="core-parser" data-edge-label="原生文本事实" data-edge-key="9" data-edge-id="native-text" data-composition-points="513,900;513,940" data-composition-crossover="halo" data-composition-independent="true" d="M 513 900 L 513 940" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:10">
+          <path data-graph-role="automatic-crossover-underlay" d="M 620 860 L 692 860 Q 700 860 700 868 L 700 965 Q 700 973 708 973 L 780 973" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pdfium-worker" data-edge-to="render-queue" data-edge-label="页面栅格" data-edge-key="10" data-edge-id="page-raster" data-composition-points="620,860;700,860;700,973;780,973" data-composition-crossover="halo" data-composition-independent="true" d="M 620 860 L 692 860 Q 700 860 700 868 L 700 965 Q 700 973 708 973 L 780 973" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:11">
+          <path data-graph-role="automatic-crossover-underlay" d="M 780 987 L 718 987 Q 710 987 710 995 L 710 1004 Q 710 1012 702 1012 L 640 1012" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="render-queue" data-edge-to="core-parser" data-edge-label="页任务 + PageLease" data-edge-key="11" data-edge-id="page-task" data-composition-points="780,987;710,987;710,1012;640,1012" data-composition-crossover="halo" data-composition-independent="true" d="M 780 987 L 718 987 Q 710 987 710 995 L 710 1004 Q 710 1012 702 1012 L 640 1012" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:12">
+          <path data-graph-role="automatic-crossover-underlay" d="M 753 520 L 753 908 Q 753 916 745 916 L 535 916 Q 527 916 527 924 L 527 940" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="jobs-worker" data-edge-to="core-parser" data-edge-label="parse_session_with_options" data-edge-key="12" data-edge-id="parse-session" data-composition-points="753,520;753,916;527,916;527,940" data-composition-crossover="halo" data-composition-independent="true" d="M 753 520 L 753 908 Q 753 916 745 916 L 535 916 Q 527 916 527 924 L 527 940" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:13">
+          <path data-graph-role="automatic-crossover-underlay" d="M 220 933 L 302 933 Q 310 933 310 941 L 310 1032 Q 310 1040 318 1040 L 400 1040" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="cli" data-edge-to="core-parser" data-edge-label="parse_path" data-edge-key="13" data-edge-id="cli-parse" data-composition-points="220,933;310,933;310,1040;400,1040" data-composition-crossover="halo" data-composition-independent="true" d="M 220 933 L 302 933 Q 310 933 310 941 L 310 1032 Q 310 1040 318 1040 L 400 1040" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:14">
+          <path data-graph-role="automatic-crossover-underlay" d="M 220 1133 L 302 1133 Q 310 1133 310 1125 L 310 1062 Q 310 1054 318 1054 L 400 1054" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="wasm-sdk" data-edge-to="core-parser" data-edge-label="parse_with_options" data-edge-key="14" data-edge-id="wasm-parse" data-composition-points="220,1133;310,1133;310,1054;400,1054" data-composition-crossover="halo" data-composition-independent="true" d="M 220 1133 L 302 1133 Q 310 1133 310 1125 L 310 1062 Q 310 1054 318 1054 L 400 1054" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:15">
+          <path data-graph-role="automatic-crossover-underlay" d="M 520 1140 L 520 1200" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="core-parser" data-edge-to="layout-queue" data-edge-label="① 页图像" data-edge-key="15" data-edge-id="layout-batch" data-composition-points="520,1140;520,1200" data-composition-crossover="halo" data-composition-independent="true" d="M 520 1140 L 520 1200" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:16">
+          <path data-graph-role="automatic-crossover-underlay" d="M 520 1266 L 520 1320" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="layout-queue" data-edge-to="layout-model" data-edge-label="布局推理" data-edge-key="16" data-edge-id="layout-infer" data-composition-points="520,1266;520,1320" data-composition-crossover="halo" data-composition-independent="true" d="M 520 1266 L 520 1320" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:17">
+          <path data-graph-role="automatic-crossover-underlay" d="M 620 1480 L 780 1480" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ocr-queue" data-edge-to="ocr-model" data-edge-key="17" data-edge-id="ocr-batch" data-composition-points="620,1480;780,1480" data-composition-crossover="halo" data-composition-independent="true" d="M 620 1480 L 780 1480" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:18">
+          <path data-graph-role="automatic-crossover-underlay" d="M 620 1600 L 780 1600" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="tsr-queue" data-edge-to="tsr-model" data-edge-key="18" data-edge-id="tsr-batch" data-composition-points="620,1600;780,1600" data-composition-crossover="halo" data-composition-independent="true" d="M 620 1600 L 780 1600" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:19">
+          <path data-graph-role="automatic-crossover-underlay" d="M 620 1699 L 780 1699" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-queue" data-edge-to="formula-pp" data-edge-label="PP 消费组" data-edge-key="19" data-edge-id="formula-batch" data-composition-points="620,1699;780,1699" data-composition-crossover="halo" data-composition-independent="true" d="M 620 1699 L 780 1699" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:20">
+          <path data-graph-role="automatic-crossover-underlay" d="M 520 1746 L 520 1885 Q 520 1893 528 1893 L 780 1893" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-queue" data-edge-to="formula-http" data-edge-label="HTTP 消费组" data-edge-key="20" data-edge-id="formula-http-consume" data-composition-points="520,1746;520,1893;780,1893" data-composition-crossover="halo" data-composition-independent="true" d="M 520 1746 L 520 1885 Q 520 1893 528 1893 L 780 1893" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <path data-edge-from="formula-http" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="21" data-edge-id="formula-http-return" data-composition-points="960,1893;1060,1893;1060,1040;640,1040" d="M 960 1893 L 1052 1893 Q 1060 1893 1060 1885 L 1060 1048 Q 1060 1040 1052 1040 L 640 1040" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <g data-graph-role="automatic-crossover" style="--step:22">
+          <path data-graph-role="automatic-crossover-underlay" d="M 870 1926 L 870 1980" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-http" data-edge-to="formula-service" data-edge-label="HTTP 识别" data-edge-key="22" data-edge-id="formula-http-call" data-composition-points="870,1926;870,1980" data-composition-crossover="halo" data-composition-independent="true" d="M 870 1926 L 870 1980" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:23">
+          <path data-graph-role="automatic-crossover-underlay" d="M 780 1466 L 718 1466 Q 710 1466 710 1458 L 710 1034 Q 710 1026 702 1026 L 640 1026" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ocr-model" data-edge-to="core-parser" data-edge-label="OCR 文本回填" data-edge-key="23" data-edge-id="ocr-return" data-composition-points="780,1466;710,1466;710,1026;640,1026" data-composition-crossover="halo" data-composition-independent="true" d="M 780 1466 L 718 1466 Q 710 1466 710 1458 L 710 1034 Q 710 1026 702 1026 L 640 1026" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:24">
+          <path data-graph-role="automatic-crossover-underlay" d="M 780 1586 L 764 1586 Q 756 1586 756 1578 L 756 1048 Q 756 1040 748 1040 L 640 1040" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="tsr-model" data-edge-to="core-parser" data-edge-label="表格结构回填" data-edge-key="24" data-edge-id="tsr-return" data-composition-points="780,1586;756,1586;756,1040;640,1040" data-composition-crossover="halo" data-composition-independent="true" d="M 780 1586 L 764 1586 Q 756 1586 756 1578 L 756 1048 Q 756 1040 748 1040 L 640 1040" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:25">
+          <path data-graph-role="automatic-crossover-underlay" d="M 960 1713 L 976 1713 Q 984 1713 984 1705 L 984 1062 Q 984 1054 976 1054 L 640 1054" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-pp" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="25" data-edge-id="formula-return" data-composition-points="960,1713;984,1713;984,1054;640,1054" data-composition-crossover="halo" data-composition-independent="true" d="M 960 1713 L 976 1713 Q 984 1713 984 1705 L 984 1062 Q 984 1054 976 1054 L 640 1054" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:26">
+          <path data-graph-role="automatic-crossover-underlay" d="M 125 700 L 125 362 Q 125 354 133 354 L 428 354 Q 436 354 436 346 L 436 330" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="config" data-edge-to="http-api" data-edge-label="监听 / 前缀" data-edge-key="26" data-edge-id="listener-config" data-composition-points="125,700;125,354;436,354;436,330" data-composition-crossover="halo" data-composition-independent="true" d="M 125 700 L 125 362 Q 125 354 133 354 L 428 354 Q 436 354 436 346 L 436 330" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:27">
+          <path data-graph-role="automatic-crossover-underlay" d="M 220 738 L 368 738 Q 376 738 376 746 L 376 1018 Q 376 1026 384 1026 L 400 1026" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="config" data-edge-to="core-parser" data-edge-label="模型与队列策略" data-edge-key="27" data-edge-id="parser-config" data-composition-points="220,738;376,738;376,1026;400,1026" data-composition-crossover="halo" data-composition-independent="true" d="M 220 738 L 368 738 Q 376 738 376 746 L 376 1018 Q 376 1026 384 1026 L 400 1026" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:28">
+          <path data-graph-role="automatic-crossover-underlay" d="M 620 1713 L 692 1713 Q 700 1713 700 1721 L 700 1795 Q 700 1803 708 1803 L 780 1803" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-queue" data-edge-to="formula-texo" data-edge-label="Texo 消费组" data-edge-key="28" data-edge-id="formula-texo-consume" data-composition-points="620,1713;700,1713;700,1803;780,1803" data-composition-crossover="halo" data-composition-independent="true" d="M 620 1713 L 692 1713 Q 700 1713 700 1721 L 700 1795 Q 700 1803 708 1803 L 780 1803" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:29">
+          <path data-graph-role="automatic-crossover-underlay" d="M 960 1803 L 1036 1803 Q 1044 1803 1044 1795 L 1044 1076 Q 1044 1068 1036 1068 L 640 1068" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="formula-texo" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="29" data-edge-id="formula-texo-return" data-composition-points="960,1803;1044,1803;1044,1068;640,1068" data-composition-crossover="halo" data-composition-independent="true" d="M 960 1803 L 1036 1803 Q 1044 1803 1044 1795 L 1044 1076 Q 1044 1068 1036 1068 L 640 1068" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:30">
+          <path data-graph-role="automatic-crossover-underlay" d="M 464 330 L 464 346 Q 464 354 472 354 L 731 354 Q 739 354 739 346 L 739 330" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="http-api" data-edge-to="shared-storage" data-edge-label="上传落盘" data-edge-key="30" data-edge-id="upload-publish" data-composition-points="464,330;464,354;739,354;739,330" data-composition-crossover="halo" data-composition-independent="true" d="M 464 330 L 464 346 Q 464 354 472 354 L 731 354 Q 739 354 739 346 L 739 330" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:31">
+          <path data-graph-role="automatic-crossover-underlay" d="M 550 487 L 566 487 Q 574 487 574 495 L 574 602 Q 574 610 582 610 L 900 610" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="postgres" data-edge-to="cleanup" data-edge-label="扫描删除标记" data-edge-key="31" data-edge-id="cleanup-scan" data-composition-points="550,487;574,487;574,610;900,610" data-composition-crossover="halo" data-composition-independent="true" d="M 550 487 L 566 487 Q 574 487 574 495 L 574 602 Q 574 610 582 610 L 900 610" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:32">
+          <path data-graph-role="automatic-crossover-underlay" d="M 1000 570 L 1000 362 Q 1000 354 992 354 L 775 354 Q 767 354 767 346 L 767 330" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="cleanup" data-edge-to="shared-storage" data-edge-label="删除结果对象" data-edge-key="32" data-edge-id="cleanup-remove" data-composition-points="1000,570;1000,354;767,354;767,330" data-composition-crossover="halo" data-composition-independent="true" d="M 1000 570 L 1000 362 Q 1000 354 992 354 L 775 354 Q 767 354 767 346 L 767 330" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:33">
+          <path data-graph-role="automatic-crossover-underlay" d="M 520 1386 L 520 1440" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="layout-model" data-edge-to="ocr-queue" data-edge-label="② OCR 裁剪" data-edge-key="33" data-edge-id="dispatch-ocr" data-composition-points="520,1386;520,1440" data-composition-crossover="halo" data-composition-independent="true" d="M 520 1386 L 520 1440" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:34">
+          <path data-graph-role="automatic-crossover-underlay" d="M 420 1360 L 317 1360 Q 309 1360 309 1368 L 309 1705 Q 309 1713 317 1713 L 420 1713" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="layout-model" data-edge-to="formula-queue" data-edge-label="④ 公式裁剪" data-edge-key="34" data-edge-id="dispatch-formula" data-composition-points="420,1360;309,1360;309,1713;420,1713" data-composition-crossover="halo" data-composition-independent="true" d="M 420 1360 L 317 1360 Q 309 1360 309 1368 L 309 1705 Q 309 1713 317 1713 L 420 1713" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:35">
+          <path data-graph-role="automatic-crossover-underlay" d="M 420 1346 L 404 1346 Q 396 1346 396 1354 L 396 1585 Q 396 1593 404 1593 L 420 1593" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="layout-model" data-edge-to="tsr-queue" data-edge-label="③ 表格裁剪" data-edge-key="35" data-edge-id="dispatch-table" data-composition-points="420,1346;396,1346;396,1593;420,1593" data-composition-crossover="halo" data-composition-independent="true" d="M 420 1346 L 404 1346 Q 396 1346 396 1354 L 396 1585 Q 396 1593 404 1593 L 420 1593" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+
+        <!-- Components -->
+        <g id="node-cli" data-node-id="cli" data-node-label="docparse CLI" tabindex="0" role="button" aria-label="聚焦docparse CLI，parse / inspect-model, CLI 进程（本地 PDFium 线程）" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="parse / inspect-model" data-node-tag="本地线程" data-node-context="CLI 进程（本地 PDFium 线程）">
+          <title>docparse CLI · parse / inspect-model · CLI 进程（本地 PDFium 线程） · 本地线程</title>
+          <rect x="30" y="900" width="190" height="66" rx="6" class="c-mask"/>
+          <rect x="30" y="900" width="190" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(36 906) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="125" y="931" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse CLI</text>
+        <text data-detail="context" x="125" y="947" class="t-muted" font-size="9" text-anchor="middle">parse / inspect-model</text>
+        <text data-detail="fine" x="125" y="958" class="t-frontend" font-size="7" text-anchor="middle">本地线程</text>
+        </g>
+
+        <g id="node-wasm-sdk" data-node-id="wasm-sdk" data-node-label="WASM Web SDK" tabindex="0" role="button" aria-label="聚焦WASM Web SDK，@docparse/wasm-web, WASM Worker（浏览器本地推理）" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="@docparse/wasm-web" data-node-tag="wasm32" data-node-context="WASM Worker（浏览器本地推理）">
+          <title>WASM Web SDK · @docparse/wasm-web · WASM Worker（浏览器本地推理） · wasm32</title>
+          <rect x="30" y="1100" width="190" height="66" rx="6" class="c-mask"/>
+          <rect x="30" y="1100" width="190" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(36 1106) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="125" y="1131" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">WASM Web SDK</text>
+        <text data-detail="context" x="125" y="1147" class="t-muted" font-size="9" text-anchor="middle">@docparse/wasm-web</text>
+        <text data-detail="fine" x="125" y="1158" class="t-frontend" font-size="7" text-anchor="middle">wasm32</text>
+        </g>
+
+        <g id="node-config" data-node-id="config" data-node-label="docparse-config" tabindex="0" role="button" aria-label="聚焦docparse-config，figment 加载 · 校验, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="figment 加载 · 校验" data-node-context="架构组件">
+          <title>docparse-config · figment 加载 · 校验 · 架构组件</title>
+          <rect x="30" y="700" width="190" height="76" rx="6" class="c-mask"/>
+          <rect x="30" y="700" width="190" height="76" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(36 706) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="125" y="736" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-config</text>
+        <text data-detail="context" x="125" y="752" class="t-muted" font-size="9" text-anchor="middle">figment 加载 · 校验</text>
+        </g>
+
+        <g id="node-workbench" data-node-id="workbench" data-node-label="HTTP Workbench" tabindex="0" role="button" aria-label="聚焦HTTP Workbench，React + TypeScript 控制台, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="React + TypeScript 控制台" data-node-tag="server 托管" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>HTTP Workbench · React + TypeScript 控制台 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） · server 托管</title>
+          <rect x="660" y="90" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="660" y="90" width="200" height="80" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(666 96) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="760" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">HTTP Workbench</text>
+        <text data-detail="context" x="760" y="144" class="t-muted" font-size="9" text-anchor="middle">React + TypeScript 控制台</text>
+        <text data-detail="fine" x="760" y="162" class="t-frontend" font-size="7" text-anchor="middle">server 托管</text>
+        </g>
+
+        <g id="node-http-api" data-node-id="http-api" data-node-label="Axum HTTP API" tabindex="0" role="button" aria-label="聚焦Axum HTTP API，routers / SSE / OpenAPI, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） › 可信入口：认证 / CORS 由 ingress 承担" aria-pressed="false" data-node-kind="backend" data-node-sublabel="routers / SSE / OpenAPI" data-node-tag="OpenAPI 3.1" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） › 可信入口：认证 / CORS 由 ingress 承担">
+          <title>Axum HTTP API · routers / SSE / OpenAPI · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） › 可信入口：认证 / CORS 由 ingress 承担 · OpenAPI 3.1</title>
+          <rect x="350" y="250" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="350" y="250" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(356 256) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="450" y="288" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Axum HTTP API</text>
+        <text data-detail="context" x="450" y="304" class="t-muted" font-size="9" text-anchor="middle">routers / SSE / OpenAPI</text>
+        <text data-detail="fine" x="450" y="322" class="t-backend" font-size="7" text-anchor="middle">OpenAPI 3.1</text>
+        </g>
+
+        <g id="node-shared-storage" data-node-id="shared-storage" data-node-label="Shared Storage" tabindex="0" role="button" aria-label="聚焦Shared Storage，PDF / 结果 JSON / 图像, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="database" data-node-sublabel="PDF / 结果 JSON / 图像" data-node-tag="原子发布" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>Shared Storage · PDF / 结果 JSON / 图像 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） · 原子发布</title>
+          <rect x="660" y="250" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="660" y="250" width="200" height="80" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(666 256) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="760" y="288" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Shared Storage</text>
+        <text data-detail="context" x="760" y="304" class="t-muted" font-size="9" text-anchor="middle">PDF / 结果 JSON / 图像</text>
+        <text data-detail="fine" x="760" y="322" class="t-database" font-size="7" text-anchor="middle">原子发布</text>
+        </g>
+
+        <g id="node-postgres" data-node-id="postgres" data-node-label="PostgreSQL" tabindex="0" role="button" aria-label="聚焦PostgreSQL，parse_jobs · SeaORM 2.0, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="database" data-node-sublabel="parse_jobs · SeaORM 2.0" data-node-tag="共享状态" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>PostgreSQL · parse_jobs · SeaORM 2.0 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） · 共享状态</title>
+          <rect x="350" y="440" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="350" y="440" width="200" height="80" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(356 446) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="450" y="478" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">PostgreSQL</text>
+        <text data-detail="context" x="450" y="494" class="t-muted" font-size="9" text-anchor="middle">parse_jobs · SeaORM 2.0</text>
+        <text data-detail="fine" x="450" y="512" class="t-database" font-size="7" text-anchor="middle">共享状态</text>
+        </g>
+
+        <g id="node-jobs-worker" data-node-id="jobs-worker" data-node-label="Job Worker" tabindex="0" role="button" aria-label="聚焦Job Worker，租约 + 心跳 + 发布, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="租约 + 心跳 + 发布" data-node-tag="lease 60s" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>Job Worker · 租约 + 心跳 + 发布 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化） · lease 60s</title>
+          <rect x="660" y="440" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="660" y="440" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(666 446) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="760" y="478" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Job Worker</text>
+        <text data-detail="context" x="760" y="494" class="t-muted" font-size="9" text-anchor="middle">租约 + 心跳 + 发布</text>
+        <text data-detail="fine" x="760" y="512" class="t-backend" font-size="7" text-anchor="middle">lease 60s</text>
+        </g>
+
+        <g id="node-migrations" data-node-id="migrations" data-node-label="docparse-migration" tabindex="0" role="button" aria-label="聚焦docparse-migration，Migrator · CLI 生成, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Migrator · CLI 生成" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>docparse-migration · Migrator · CLI 生成 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）</title>
+          <rect x="350" y="570" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="350" y="570" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(356 576) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="450" y="608" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-migration</text>
+        <text data-detail="context" x="450" y="624" class="t-muted" font-size="9" text-anchor="middle">Migrator · CLI 生成</text>
+        </g>
+
+        <g id="node-pdfium-pool" data-node-id="pdfium-pool" data-node-label="PDFium Pool" tabindex="0" role="button" aria-label="聚焦PDFium Pool，reserve() · render.workers, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="reserve() · render.workers" data-node-tag="进程池" data-node-context="架构组件">
+          <title>PDFium Pool · reserve() · render.workers · 架构组件 · 进程池</title>
+          <rect x="420" y="700" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="420" y="700" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(426 706) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="738" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">PDFium Pool</text>
+        <text data-detail="context" x="520" y="754" class="t-muted" font-size="9" text-anchor="middle">reserve() · render.workers</text>
+        <text data-detail="fine" x="520" y="772" class="t-backend" font-size="7" text-anchor="middle">进程池</text>
+        </g>
+
+        <g id="node-pdfium-worker" data-node-id="pdfium-worker" data-node-label="docparse-pdfium-worker" tabindex="0" role="button" aria-label="聚焦docparse-pdfium-worker，独立子进程 · IPC v6, PDFium 子进程（独立进程组）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="独立子进程 · IPC v6" data-node-context="PDFium 子进程（独立进程组）">
+          <title>docparse-pdfium-worker · 独立子进程 · IPC v6 · PDFium 子进程（独立进程组）</title>
+          <rect x="420" y="820" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="420" y="820" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(426 826) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="858" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-pdfium-worker</text>
+        <text data-detail="context" x="520" y="874" class="t-muted" font-size="9" text-anchor="middle">独立子进程 · IPC v6</text>
+        </g>
+
+        <g id="node-render-queue" data-node-id="render-queue" data-node-label="Render Queue" tabindex="0" role="button" aria-label="聚焦Render Queue，render.queue_size · 未完成页面, 架构组件" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="render.queue_size · 未完成页面" data-node-tag="先 reserve 后渲染" data-node-context="架构组件">
+          <title>Render Queue · render.queue_size · 未完成页面 · 架构组件 · 先 reserve 后渲染</title>
+          <rect x="780" y="940" width="180" height="80" rx="6" class="c-mask"/>
+          <rect x="780" y="940" width="180" height="80" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(786 946) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="978" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Render Queue</text>
+        <text data-detail="context" x="870" y="994" class="t-muted" font-size="9" text-anchor="middle">render.queue_size · 未完成页面</text>
+        <text data-detail="fine" x="870" y="1012" class="t-messagebus" font-size="7" text-anchor="middle">先 reserve 后渲染</text>
+        </g>
+
+        <g id="node-core-parser" data-node-id="core-parser" data-node-label="docparse-core DocParser" tabindex="0" role="button" aria-label="聚焦docparse-core DocParser，页装配 · 融合 · 阅读顺序 · 校验, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="页装配 · 融合 · 阅读顺序 · 校验" data-node-tag="唯一文本所有权" data-node-context="架构组件">
+          <title>docparse-core DocParser · 页装配 · 融合 · 阅读顺序 · 校验 · 架构组件 · 唯一文本所有权</title>
+          <rect x="400" y="940" width="240" height="200" rx="6" class="c-mask"/>
+          <rect x="400" y="940" width="240" height="200" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(406 946) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1038" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-core DocParser</text>
+        <text data-detail="context" x="520" y="1054" class="t-muted" font-size="9" text-anchor="middle">页装配 · 融合 · 阅读顺序 · 校验</text>
+        <text data-detail="fine" x="520" y="1132" class="t-backend" font-size="7" text-anchor="middle">唯一文本所有权</text>
+        </g>
+
+        <g id="node-layout-queue" data-node-id="layout-queue" data-node-label="Layout Queue" tabindex="0" role="button" aria-label="聚焦Layout Queue，layout.queue_size · session_size, 架构组件" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="layout.queue_size · session_size" data-node-tag="batch_size" data-node-context="架构组件">
+          <title>Layout Queue · layout.queue_size · session_size · 架构组件 · batch_size</title>
+          <rect x="420" y="1200" width="200" height="66" rx="6" class="c-mask"/>
+          <rect x="420" y="1200" width="200" height="66" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(426 1206) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1231" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Layout Queue</text>
+        <text data-detail="context" x="520" y="1247" class="t-muted" font-size="9" text-anchor="middle">layout.queue_size · session_size</text>
+        <text data-detail="fine" x="520" y="1258" class="t-messagebus" font-size="7" text-anchor="middle">batch_size</text>
+        </g>
+
+        <g id="node-layout-model" data-node-id="layout-model" data-node-label="docparse-layout" tabindex="0" role="button" aria-label="聚焦docparse-layout，PP-DocLayoutV3 · 区域候选, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PP-DocLayoutV3 · 区域候选" data-node-tag="最先执行" data-node-context="架构组件">
+          <title>docparse-layout · PP-DocLayoutV3 · 区域候选 · 架构组件 · 最先执行</title>
+          <rect x="420" y="1320" width="200" height="66" rx="6" class="c-mask"/>
+          <rect x="420" y="1320" width="200" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(426 1326) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1351" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-layout</text>
+        <text data-detail="context" x="520" y="1367" class="t-muted" font-size="9" text-anchor="middle">PP-DocLayoutV3 · 区域候选</text>
+        <text data-detail="fine" x="520" y="1378" class="t-backend" font-size="7" text-anchor="middle">最先执行</text>
+        </g>
+
+        <g id="node-ocr-queue" data-node-id="ocr-queue" data-node-label="OCR Queues" tabindex="0" role="button" aria-label="聚焦OCR Queues，detection · recognition · orientation, 架构组件" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="detection · recognition · orientation" data-node-tag="3 条有界队列" data-node-context="架构组件">
+          <title>OCR Queues · detection · recognition · orientation · 架构组件 · 3 条有界队列</title>
+          <rect x="420" y="1440" width="200" height="66" rx="6" class="c-mask"/>
+          <rect x="420" y="1440" width="200" height="66" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(426 1446) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1471" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">OCR Queues</text>
+        <text data-detail="context" x="520" y="1487" class="t-muted" font-size="8.6" text-anchor="middle">detection · recognition · orientation</text>
+        <text data-detail="fine" x="520" y="1498" class="t-messagebus" font-size="7" text-anchor="middle">3 条有界队列</text>
+        </g>
+
+        <g id="node-ocr-model" data-node-id="ocr-model" data-node-label="docparse-ocr" tabindex="0" role="button" aria-label="聚焦docparse-ocr，PP-OCRv6 检测 / 识别 / 方向, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PP-OCRv6 检测 / 识别 / 方向" data-node-context="架构组件">
+          <title>docparse-ocr · PP-OCRv6 检测 / 识别 / 方向 · 架构组件</title>
+          <rect x="780" y="1440" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1440" width="180" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 1446) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="1471" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-ocr</text>
+        <text data-detail="context" x="870" y="1487" class="t-muted" font-size="9" text-anchor="middle">PP-OCRv6 检测 / 识别 / 方向</text>
+        </g>
+
+        <g id="node-tsr-queue" data-node-id="tsr-queue" data-node-label="TSR Queues" tabindex="0" role="button" aria-label="聚焦TSR Queues，tsr · tsr.cell_detection, 架构组件" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="tsr · tsr.cell_detection" data-node-tag="2 条有界队列" data-node-context="架构组件">
+          <title>TSR Queues · tsr · tsr.cell_detection · 架构组件 · 2 条有界队列</title>
+          <rect x="420" y="1560" width="200" height="66" rx="6" class="c-mask"/>
+          <rect x="420" y="1560" width="200" height="66" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(426 1566) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1591" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">TSR Queues</text>
+        <text data-detail="context" x="520" y="1607" class="t-muted" font-size="9" text-anchor="middle">tsr · tsr.cell_detection</text>
+        <text data-detail="fine" x="520" y="1618" class="t-messagebus" font-size="7" text-anchor="middle">2 条有界队列</text>
+        </g>
+
+        <g id="node-tsr-model" data-node-id="tsr-model" data-node-label="docparse-tsr" tabindex="0" role="button" aria-label="聚焦docparse-tsr，SLANet+ 结构 / TATR 单元格, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="SLANet+ 结构 / TATR 单元格" data-node-context="架构组件">
+          <title>docparse-tsr · SLANet+ 结构 / TATR 单元格 · 架构组件</title>
+          <rect x="780" y="1560" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1560" width="180" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 1566) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="1591" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-tsr</text>
+        <text data-detail="context" x="870" y="1607" class="t-muted" font-size="9" text-anchor="middle">SLANet+ 结构 / TATR 单元格</text>
+        </g>
+
+        <g id="node-formula-queue" data-node-id="formula-queue" data-node-label="Formula Queue" tabindex="0" role="button" aria-label="聚焦Formula Queue，formula.queue_size · 跨引擎组共享, 架构组件" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="formula.queue_size · 跨引擎组共享" data-node-tag="worker_size · 水位背压" data-node-context="架构组件">
+          <title>Formula Queue · formula.queue_size · 跨引擎组共享 · 架构组件 · worker_size · 水位背压</title>
+          <rect x="420" y="1680" width="200" height="66" rx="6" class="c-mask"/>
+          <rect x="420" y="1680" width="200" height="66" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(426 1686) scale(0.6875)">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+            <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
+            <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
+            <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="520" y="1711" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Formula Queue</text>
+        <text data-detail="context" x="520" y="1727" class="t-muted" font-size="9" text-anchor="middle">formula.queue_size · 跨引擎组共享</text>
+        <text data-detail="fine" x="520" y="1738" class="t-messagebus" font-size="7" text-anchor="middle">worker_size · 水位背压</text>
+        </g>
+
+        <g id="node-formula-service" data-node-id="formula-service" data-node-label="Formula HTTP 服务" tabindex="0" role="button" aria-label="聚焦Formula HTTP 服务，optimum-texo (Python), 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="optimum-texo (Python)" data-node-context="架构组件">
+          <title>Formula HTTP 服务 · optimum-texo (Python) · 架构组件</title>
+          <rect x="780" y="1980" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1980" width="180" height="66" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(786 1986) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="2011" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Formula HTTP 服务</text>
+        <text data-detail="context" x="870" y="2027" class="t-muted" font-size="9" text-anchor="middle">optimum-texo (Python)</text>
+        </g>
+
+        <g id="node-formula-http" data-node-id="formula-http" data-node-label="docparse-formula-http" tabindex="0" role="button" aria-label="聚焦docparse-formula-http，外部 HTTP 服务调用, Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="外部 HTTP 服务调用" data-node-tag="一次一个裁剪" data-node-context="Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）">
+          <title>docparse-formula-http · 外部 HTTP 服务调用 · Formula 引擎实现（同一 FormulaEngine，可混用并同时消费） · 一次一个裁剪</title>
+          <rect x="780" y="1860" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1860" width="180" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 1866) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="1891" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">docparse-formula-http</text>
+        <text data-detail="context" x="870" y="1907" class="t-muted" font-size="9" text-anchor="middle">外部 HTTP 服务调用</text>
+        <text data-detail="fine" x="870" y="1918" class="t-backend" font-size="7" text-anchor="middle">一次一个裁剪</text>
+        </g>
+
+        <g id="node-formula-pp" data-node-id="formula-pp" data-node-label="PpFormulaNetEngine" tabindex="0" role="button" aria-label="聚焦PpFormulaNetEngine，PP-FormulaNet · 本地 ONNX 会话, Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PP-FormulaNet · 本地 ONNX 会话" data-node-context="Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）">
+          <title>PpFormulaNetEngine · PP-FormulaNet · 本地 ONNX 会话 · Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）</title>
+          <rect x="780" y="1680" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1680" width="180" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 1686) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="1711" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">PpFormulaNetEngine</text>
+        <text data-detail="context" x="870" y="1727" class="t-muted" font-size="9" text-anchor="middle">PP-FormulaNet · 本地 ONNX 会话</text>
+        </g>
+
+        <g id="node-formula-texo" data-node-id="formula-texo" data-node-label="TexoEngine" tabindex="0" role="button" aria-label="聚焦TexoEngine，Texo · ONNX + KV cache, Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Texo · ONNX + KV cache" data-node-context="Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）">
+          <title>TexoEngine · Texo · ONNX + KV cache · Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）</title>
+          <rect x="780" y="1770" width="180" height="66" rx="6" class="c-mask"/>
+          <rect x="780" y="1770" width="180" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(786 1776) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="870" y="1801" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">TexoEngine</text>
+        <text data-detail="context" x="870" y="1817" class="t-muted" font-size="9" text-anchor="middle">Texo · ONNX + KV cache</text>
+        </g>
+
+        <g id="node-cleanup" data-node-id="cleanup" data-node-label="DeletedResults 清理" tabindex="0" role="button" aria-label="聚焦DeletedResults 清理，删除标记 → 对象删除, DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="删除标记 → 对象删除" data-node-context="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <title>DeletedResults 清理 · 删除标记 → 对象删除 · DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）</title>
+          <rect x="900" y="570" width="200" height="80" rx="6" class="c-mask"/>
+          <rect x="900" y="570" width="200" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(906 576) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1000" y="608" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DeletedResults 清理</text>
+        <text data-detail="context" x="1000" y="624" class="t-muted" font-size="9" text-anchor="middle">删除标记 → 对象删除</text>
+        </g>
+
+        <!-- Connection labels -->
+        <g data-detail="context" data-edge-from="workbench" data-edge-to="http-api" data-edge-label="上传 PDF" data-edge-key="0" data-edge-id="upload-pdf">
+          <rect x="410.75" y="170" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="434.95" y="180" class="t-edge-emphasis" font-size="8" text-anchor="middle">上传 PDF</text>
+        </g>
+        <g data-detail="context" data-edge-from="http-api" data-edge-to="workbench" data-edge-label="结果 / SSE" data-edge-key="1" data-edge-id="result-stream">
+          <rect x="576" y="206" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="605" y="216" class="t-edge-dashed" font-size="8" text-anchor="middle">结果 / SSE</text>
+        </g>
+        <g data-detail="context" data-edge-from="http-api" data-edge-to="postgres" data-edge-label="作业行读写（提交 / 查询）" data-edge-key="2" data-edge-id="job-row">
+          <rect x="314" y="378" width="130" height="14" rx="3" class="c-mask"/>
+          <text x="379" y="388" class="t-edge-default" font-size="8" text-anchor="middle">作业行读写（提交 / 查询）</text>
+        </g>
+        <g data-detail="context" data-edge-from="jobs-worker" data-edge-to="postgres" data-edge-label="领取租约 / 心跳" data-edge-key="3" data-edge-id="claim-lease">
+          <rect x="564" y="453" width="82" height="14" rx="3" class="c-mask"/>
+          <text x="605" y="463" class="t-edge-default" font-size="8" text-anchor="middle">领取租约 / 心跳</text>
+        </g>
+        <g data-detail="context" data-edge-from="jobs-worker" data-edge-to="shared-storage" data-edge-label="发布结果 JSON" data-edge-key="4" data-edge-id="publish-result">
+          <rect x="716.8" y="420" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="753" y="430" class="t-edge-default" font-size="8" text-anchor="middle">发布结果 JSON</text>
+        </g>
+        <g data-detail="context" data-edge-from="shared-storage" data-edge-to="http-api" data-edge-label="结果 / 原文" data-edge-key="5" data-edge-id="read-result">
+          <rect x="573.6" y="270" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="605" y="280" class="t-edge-default" font-size="8" text-anchor="middle">结果 / 原文</text>
+        </g>
+        <g data-detail="context" data-edge-from="migrations" data-edge-to="postgres" data-edge-label="自动迁移" data-edge-key="6" data-edge-id="auto-migrate">
+          <rect x="425.8" y="550" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="450" y="560" class="t-edge-default" font-size="8" text-anchor="middle">自动迁移</text>
+        </g>
+        <g data-detail="context" data-edge-from="jobs-worker" data-edge-to="pdfium-pool" data-edge-label="reserve()" data-edge-key="7" data-edge-id="reserve-worker">
+          <rect x="646" y="543.25" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="672.6" y="553.25" class="t-edge-default" font-size="8" text-anchor="middle">reserve()</text>
+        </g>
+        <g data-detail="context" data-edge-from="pdfium-pool" data-edge-to="pdfium-worker" data-edge-label="IPC v6" data-edge-key="8" data-edge-id="pool-ipc">
+          <rect x="475.20000000000005" y="783" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="494.6" y="793" class="t-edge-default" font-size="8" text-anchor="middle">IPC v6</text>
+        </g>
+        <g data-detail="context" data-edge-from="pdfium-worker" data-edge-to="core-parser" data-edge-label="原生文本事实" data-edge-key="9" data-edge-id="native-text">
+          <rect x="439.4" y="913" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="473.2" y="923" class="t-edge-default" font-size="8" text-anchor="middle">原生文本事实</text>
+        </g>
+        <g data-detail="context" data-edge-from="pdfium-worker" data-edge-to="render-queue" data-edge-label="页面栅格" data-edge-key="10" data-edge-id="page-raster">
+          <rect x="635.8" y="840" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="660" y="850" class="t-edge-default" font-size="8" text-anchor="middle">页面栅格</text>
+        </g>
+        <g data-detail="context" data-edge-from="render-queue" data-edge-to="core-parser" data-edge-label="页任务 + PageLease" data-edge-key="11" data-edge-id="page-task">
+          <rect x="661.8" y="979.5" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="710" y="989.5" class="t-edge-default" font-size="8" text-anchor="middle">页任务 + PageLease</text>
+        </g>
+        <g data-detail="context" data-edge-from="jobs-worker" data-edge-to="core-parser" data-edge-label="parse_session_with_options" data-edge-key="12" data-edge-id="parse-session">
+          <rect x="759" y="711" width="134.8" height="14" rx="3" class="c-mask"/>
+          <text x="826.4" y="721" class="t-edge-default" font-size="8" text-anchor="middle">parse_session_with_options</text>
+        </g>
+        <g data-detail="context" data-edge-from="cli" data-edge-to="core-parser" data-edge-label="parse_path" data-edge-key="13" data-edge-id="cli-parse">
+          <rect x="281" y="966.5" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="310" y="976.5" class="t-edge-default" font-size="8" text-anchor="middle">parse_path</text>
+        </g>
+        <g data-detail="context" data-edge-from="wasm-sdk" data-edge-to="core-parser" data-edge-label="parse_with_options" data-edge-key="14" data-edge-id="wasm-parse">
+          <rect x="261.8" y="1073.5" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="310" y="1083.5" class="t-edge-default" font-size="8" text-anchor="middle">parse_with_options</text>
+        </g>
+        <g data-detail="context" data-edge-from="core-parser" data-edge-to="layout-queue" data-edge-label="① 页图像" data-edge-key="15" data-edge-id="layout-batch">
+          <rect x="465.6" y="1163" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="489.8" y="1173" class="t-edge-default" font-size="8" text-anchor="middle">① 页图像</text>
+        </g>
+        <g data-detail="context" data-edge-from="layout-queue" data-edge-to="layout-model" data-edge-label="布局推理" data-edge-key="16" data-edge-id="layout-infer">
+          <rect x="465.6" y="1286" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="489.8" y="1296" class="t-edge-default" font-size="8" text-anchor="middle">布局推理</text>
+        </g>
+
+
+        <g data-detail="context" data-edge-from="formula-queue" data-edge-to="formula-pp" data-edge-label="PP 消费组" data-edge-key="19" data-edge-id="formula-batch">
+          <rect x="673.4" y="1679" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="700" y="1689" class="t-edge-default" font-size="8" text-anchor="middle">PP 消费组</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-queue" data-edge-to="formula-http" data-edge-label="HTTP 消费组" data-edge-key="20" data-edge-id="formula-http-consume">
+          <rect x="618.6" y="1873" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="650" y="1883" class="t-edge-default" font-size="8" text-anchor="middle">HTTP 消费组</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-http" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="21" data-edge-id="formula-http-return">
+          <rect x="981" y="1873" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="1010" y="1883" class="t-edge-default" font-size="8" text-anchor="middle">LaTeX 回填</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-http" data-edge-to="formula-service" data-edge-label="HTTP 识别" data-edge-key="22" data-edge-id="formula-http-call">
+          <rect x="810.8" y="1946" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="837.4" y="1956" class="t-edge-default" font-size="8" text-anchor="middle">HTTP 识别</text>
+        </g>
+        <g data-detail="context" data-edge-from="ocr-model" data-edge-to="core-parser" data-edge-label="OCR 文本回填" data-edge-key="23" data-edge-id="ocr-return">
+          <rect x="676.2" y="1226" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="710" y="1236" class="t-edge-default" font-size="8" text-anchor="middle">OCR 文本回填</text>
+        </g>
+        <g data-detail="context" data-edge-from="tsr-model" data-edge-to="core-parser" data-edge-label="表格结构回填" data-edge-key="24" data-edge-id="tsr-return">
+          <rect x="722.2" y="1293" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="756" y="1303" class="t-edge-default" font-size="8" text-anchor="middle">表格结构回填</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-pp" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="25" data-edge-id="formula-return">
+          <rect x="955" y="1363.5" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="984" y="1373.5" class="t-edge-default" font-size="8" text-anchor="middle">LaTeX 回填</text>
+        </g>
+        <g data-detail="context" data-edge-from="config" data-edge-to="http-api" data-edge-label="监听 / 前缀" data-edge-key="26" data-edge-id="listener-config">
+          <rect x="249.1" y="334" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="280.5" y="344" class="t-edge-default" font-size="8" text-anchor="middle">监听 / 前缀</text>
+        </g>
+        <g data-detail="context" data-edge-from="config" data-edge-to="core-parser" data-edge-label="模型与队列策略" data-edge-key="27" data-edge-id="parser-config">
+          <rect x="337.4" y="862" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="376" y="872" class="t-edge-default" font-size="8" text-anchor="middle">模型与队列策略</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-queue" data-edge-to="formula-texo" data-edge-label="Texo 消费组" data-edge-key="28" data-edge-id="formula-texo-consume">
+          <rect x="668.6" y="1738" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="700" y="1748" class="t-edge-default" font-size="8" text-anchor="middle">Texo 消费组</text>
+        </g>
+        <g data-detail="context" data-edge-from="formula-texo" data-edge-to="core-parser" data-edge-label="LaTeX 回填" data-edge-key="29" data-edge-id="formula-texo-return">
+          <rect x="973" y="1783" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="1002" y="1793" class="t-edge-default" font-size="8" text-anchor="middle">LaTeX 回填</text>
+        </g>
+        <g data-detail="context" data-edge-from="http-api" data-edge-to="shared-storage" data-edge-label="上传落盘" data-edge-key="30" data-edge-id="upload-publish">
+          <rect x="577.3" y="334" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="601.5" y="344" class="t-edge-default" font-size="8" text-anchor="middle">上传落盘</text>
+        </g>
+        <g data-detail="context" data-edge-from="postgres" data-edge-to="cleanup" data-edge-label="扫描删除标记" data-edge-key="31" data-edge-id="cleanup-scan">
+          <rect x="540.2" y="528.5" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="574" y="538.5" class="t-edge-default" font-size="8" text-anchor="middle">扫描删除标记</text>
+        </g>
+        <g data-detail="context" data-edge-from="cleanup" data-edge-to="shared-storage" data-edge-label="删除结果对象" data-edge-key="32" data-edge-id="cleanup-remove">
+          <rect x="849.7" y="334" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="883.5" y="344" class="t-edge-default" font-size="8" text-anchor="middle">删除结果对象</text>
+        </g>
+        <g data-detail="context" data-edge-from="layout-model" data-edge-to="ocr-queue" data-edge-label="② OCR 裁剪" data-edge-key="33" data-edge-id="dispatch-ocr">
+          <rect x="456" y="1406" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="485" y="1416" class="t-edge-default" font-size="8" text-anchor="middle">② OCR 裁剪</text>
+        </g>
+        <g data-detail="context" data-edge-from="layout-model" data-edge-to="formula-queue" data-edge-label="④ 公式裁剪" data-edge-key="34" data-edge-id="dispatch-formula">
+          <rect x="280" y="1516.5" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="309" y="1526.5" class="t-edge-default" font-size="8" text-anchor="middle">④ 公式裁剪</text>
+        </g>
+        <g data-detail="context" data-edge-from="layout-model" data-edge-to="tsr-queue" data-edge-label="③ 表格裁剪" data-edge-key="35" data-edge-id="dispatch-table">
+          <rect x="332" y="1462.5" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="361" y="1472.5" class="t-edge-default" font-size="8" text-anchor="middle">③ 表格裁剪</text>
+        </g>
+
+        <!-- Boundary labels (foreground masks keep routes out of titles) -->
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）">
+          <rect data-graph-role="structural-frame-label-mask" x="324" y="70" width="398.8" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="328" y="83" class="t-cloud" font-size="9" font-weight="600">DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="可信入口：认证 / CORS 由 ingress 承担">
+          <rect data-graph-role="structural-frame-label-mask" x="324" y="230" width="209.79999999999998" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="328" y="243" class="t-security" font-size="9" font-weight="600">可信入口：认证 / CORS 由 ingress 承担</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="region" data-composition-frame-label="CLI 进程（本地 PDFium 线程）">
+          <rect data-graph-role="structural-frame-label-mask" x="4" y="880" width="161.2" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="8" y="893" class="t-cloud" font-size="9" font-weight="600">CLI 进程（本地 PDFium 线程）</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="3" data-composition-frame-kind="region" data-composition-frame-label="WASM Worker（浏览器本地推理）">
+          <rect data-graph-role="structural-frame-label-mask" x="4" y="1080" width="166.6" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="8" y="1093" class="t-cloud" font-size="9" font-weight="600">WASM Worker（浏览器本地推理）</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="4" data-composition-frame-kind="region" data-composition-frame-label="PDFium 子进程（独立进程组）">
+          <rect data-graph-role="structural-frame-label-mask" x="394" y="800" width="155.79999999999998" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="398" y="813" class="t-cloud" font-size="9" font-weight="600">PDFium 子进程（独立进程组）</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="5" data-composition-frame-kind="region" data-composition-frame-label="Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）">
+          <rect data-graph-role="structural-frame-label-mask" x="738.1870799741936" y="1660" width="263.6258400516129" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="742.1870799741936" y="1671.5483880967743" class="t-cloud" font-size="7.548388096774194" font-weight="600">Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）</text>
+        </g>
+
+        <!-- Legend -->
+        <g data-legend="" data-legend-bridge="">
+          <text x="40" y="2078" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="2098" data-legend-width="63">
+            <rect x="40" y="2089" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="2098" class="t-muted" font-size="10" font-weight="500">前端</text>
+          </g>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="2098" data-legend-width="63">
+            <rect x="125" y="2089" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="147" y="2098" class="t-muted" font-size="10" font-weight="500">后端</text>
+          </g>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="210" data-legend-baseline="2098" data-legend-width="73">
+            <rect x="210" y="2089" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="232" y="2098" class="t-muted" font-size="10" font-weight="500">数据库</text>
+          </g>
+          <g data-legend-semantic-kind="messagebus" data-legend-kind="messagebus" data-legend-label="消息总线" data-legend-x="305" data-legend-baseline="2098" data-legend-width="83">
+            <rect x="305" y="2089" width="16" height="10" rx="2.5" class="c-messagebus" stroke-width="1"/>
+            <text x="327" y="2098" class="t-muted" font-size="10" font-weight="500">消息总线</text>
+          </g>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="410" data-legend-baseline="2098" data-legend-width="83">
+            <rect x="410" y="2089" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="432" y="2098" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          </g>
+        </g>
+      </svg>

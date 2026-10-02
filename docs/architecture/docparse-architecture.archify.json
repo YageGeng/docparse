@@ -1,0 +1,1190 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "DocParse 架构总览（网格对齐）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/architecture-docparse-20260930-222409/docparse-grid.html",
+    "repository": {
+      "url": "https://github.com/YageGeng/docparse.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "f68616165a0dd0827aa3d16f71d5621c81a9f505"
+    }
+  },
+  "components": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "docparse CLI",
+      "sublabel": "parse / inspect-model",
+      "tag": "本地线程",
+      "pos": [
+        30,
+        900
+      ],
+      "size": [
+        190,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/cli/src/main.rs",
+          "line": 5,
+          "end_line": 17
+        },
+        {
+          "path": "crates/cli/src/lib.rs",
+          "line": 86,
+          "end_line": 114,
+          "label": "parse 命令"
+        },
+        {
+          "path": "crates/cli/src/lib.rs",
+          "line": 50,
+          "end_line": 62,
+          "label": "默认解析器"
+        }
+      ]
+    },
+    {
+      "id": "wasm-sdk",
+      "type": "frontend",
+      "label": "WASM Web SDK",
+      "sublabel": "@docparse/wasm-web",
+      "tag": "wasm32",
+      "pos": [
+        30,
+        1100
+      ],
+      "size": [
+        190,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/wasm-web/src/index.ts",
+          "line": 20,
+          "end_line": 32,
+          "label": "单 Worker"
+        },
+        {
+          "path": "packages/wasm-web/src/worker.ts",
+          "line": 147,
+          "end_line": 196,
+          "label": "init"
+        },
+        {
+          "path": "crates/web/src/lib.rs",
+          "line": 149,
+          "end_line": 215,
+          "label": "WebParser::create"
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "type": "backend",
+      "label": "docparse-config",
+      "sublabel": "figment 加载 · 校验",
+      "pos": [
+        30,
+        700
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "sources": [
+        {
+          "path": "crates/config/src/wasm_compat.rs",
+          "line": 25,
+          "end_line": 50,
+          "label": "ConfigLoader"
+        },
+        {
+          "path": "crates/config/src/validate.rs",
+          "line": 13,
+          "end_line": 20,
+          "label": "ValidatedConfig"
+        },
+        {
+          "path": "crates/server/src/main.rs",
+          "line": 187,
+          "end_line": 196,
+          "label": "注入解析器"
+        }
+      ]
+    },
+    {
+      "id": "workbench",
+      "type": "frontend",
+      "label": "HTTP Workbench",
+      "sublabel": "React + TypeScript 控制台",
+      "tag": "server 托管",
+      "pos": [
+        660,
+        90
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "packages/web/src/main.tsx",
+          "line": 21,
+          "end_line": 30
+        },
+        {
+          "path": "packages/web/src/api/client.ts",
+          "line": 51,
+          "end_line": 59
+        },
+        {
+          "path": "crates/server/src/app.rs",
+          "line": 117,
+          "end_line": 152,
+          "label": "server 挂载 webui"
+        }
+      ]
+    },
+    {
+      "id": "http-api",
+      "type": "backend",
+      "label": "Axum HTTP API",
+      "sublabel": "routers / SSE / OpenAPI",
+      "tag": "OpenAPI 3.1",
+      "pos": [
+        350,
+        250
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/server/src/app.rs",
+          "line": 77,
+          "end_line": 113,
+          "label": "路由与前缀"
+        },
+        {
+          "path": "crates/server/src/routers/jobs/mod.rs",
+          "line": 17,
+          "end_line": 27
+        },
+        {
+          "path": "crates/server/src/routers/jobs/upload.rs",
+          "line": 203,
+          "end_line": 214,
+          "label": "落盘 + 入库"
+        }
+      ]
+    },
+    {
+      "id": "shared-storage",
+      "type": "database",
+      "label": "Shared Storage",
+      "sublabel": "PDF / 结果 JSON / 图像",
+      "tag": "原子发布",
+      "pos": [
+        660,
+        250
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/server/src/storage.rs",
+          "line": 49,
+          "end_line": 58
+        },
+        {
+          "path": "crates/server/src/storage.rs",
+          "line": 109,
+          "end_line": 158,
+          "label": "publish"
+        },
+        {
+          "path": "crates/server/src/routers/jobs/result.rs",
+          "line": 93,
+          "end_line": 107,
+          "label": "读取结果"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "parse_jobs · SeaORM 2.0",
+      "tag": "共享状态",
+      "pos": [
+        350,
+        440
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/database/src/entities/parse_jobs.rs",
+          "line": 19,
+          "end_line": 50,
+          "label": "作业模型"
+        },
+        {
+          "path": "crates/database/src/query/parse_job.rs",
+          "line": 302,
+          "end_line": 320,
+          "label": "claim"
+        },
+        {
+          "path": "crates/database/src/connection.rs",
+          "line": 12,
+          "end_line": 44,
+          "label": "连接即迁移"
+        }
+      ]
+    },
+    {
+      "id": "jobs-worker",
+      "type": "backend",
+      "label": "Job Worker",
+      "sublabel": "租约 + 心跳 + 发布",
+      "tag": "lease 60s",
+      "pos": [
+        660,
+        440
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/server/src/worker.rs",
+          "line": 95,
+          "end_line": 137,
+          "label": "reserve + claim"
+        },
+        {
+          "path": "crates/server/src/worker.rs",
+          "line": 176,
+          "end_line": 186,
+          "label": "打开会话并解析"
+        },
+        {
+          "path": "crates/server/src/worker.rs",
+          "line": 189,
+          "end_line": 230,
+          "label": "发布结果"
+        }
+      ]
+    },
+    {
+      "id": "migrations",
+      "type": "backend",
+      "label": "docparse-migration",
+      "sublabel": "Migrator · CLI 生成",
+      "pos": [
+        350,
+        570
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/migration/src/lib.rs",
+          "line": 9,
+          "end_line": 22
+        },
+        {
+          "path": "crates/migration/src/main.rs",
+          "line": 1,
+          "end_line": 7,
+          "label": "独立迁移 CLI"
+        }
+      ]
+    },
+    {
+      "id": "pdfium-pool",
+      "type": "backend",
+      "label": "PDFium Pool",
+      "sublabel": "reserve() · render.workers",
+      "tag": "进程池",
+      "pos": [
+        420,
+        700
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/server/src/pdfium_pool/mod.rs",
+          "line": 106,
+          "end_line": 123
+        },
+        {
+          "path": "crates/server/src/pdfium_pool/mod.rs",
+          "line": 250,
+          "end_line": 291,
+          "label": "reserve / shutdown"
+        },
+        {
+          "path": "crates/server/src/pdfium_pool/mod.rs",
+          "line": 520,
+          "end_line": 593,
+          "label": "PdfiumProvider"
+        }
+      ]
+    },
+    {
+      "id": "pdfium-worker",
+      "type": "backend",
+      "label": "docparse-pdfium-worker",
+      "sublabel": "独立子进程 · IPC v6",
+      "pos": [
+        420,
+        820
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/core/src/bin/pdfium_worker.rs",
+          "line": 1,
+          "end_line": 11
+        },
+        {
+          "path": "crates/core/src/pdfium/ipc.rs",
+          "line": 21,
+          "end_line": 25,
+          "label": "协议版本"
+        },
+        {
+          "path": "crates/core/src/pdfium/worker.rs",
+          "line": 20,
+          "end_line": 50,
+          "label": "文档线程"
+        }
+      ]
+    },
+    {
+      "id": "render-queue",
+      "type": "messagebus",
+      "label": "Render Queue",
+      "sublabel": "render.queue_size · 未完成页面",
+      "tag": "先 reserve 后渲染",
+      "pos": [
+        780,
+        940
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/common/src/queue/page.rs",
+          "line": 14,
+          "end_line": 56,
+          "label": "PageQueue::reserve"
+        },
+        {
+          "path": "crates/core/src/runtime/pipeline.rs",
+          "line": 439,
+          "end_line": 446,
+          "label": "渲染前取槽位"
+        },
+        {
+          "path": "crates/core/src/parser.rs",
+          "line": 530,
+          "end_line": 532,
+          "label": "容量来自配置"
+        }
+      ]
+    },
+    {
+      "id": "core-parser",
+      "type": "backend",
+      "label": "docparse-core DocParser",
+      "sublabel": "页装配 · 融合 · 阅读顺序 · 校验",
+      "tag": "唯一文本所有权",
+      "pos": [
+        400,
+        940
+      ],
+      "size": [
+        240,
+        200
+      ],
+      "sources": [
+        {
+          "path": "crates/core/src/runtime/pipeline.rs",
+          "line": 199,
+          "end_line": 240,
+          "label": "解析入口"
+        },
+        {
+          "path": "crates/core/src/runtime/pipeline.rs",
+          "line": 297,
+          "end_line": 300,
+          "label": "预扫描"
+        },
+        {
+          "path": "crates/core/src/runtime/stages.rs",
+          "line": 35,
+          "end_line": 70,
+          "label": "布局先行"
+        }
+      ]
+    },
+    {
+      "id": "layout-queue",
+      "type": "messagebus",
+      "label": "Layout Queue",
+      "sublabel": "layout.queue_size · session_size",
+      "tag": "batch_size",
+      "pos": [
+        420,
+        1200
+      ],
+      "size": [
+        200,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/layout/src/wasm_compat/session_pool.rs",
+          "line": 151,
+          "end_line": 155,
+          "label": "队列 + 会话容量"
+        },
+        {
+          "path": "crates/common/src/session/manager.rs",
+          "line": 120,
+          "end_line": 126,
+          "label": "每模型一条队列"
+        },
+        {
+          "path": "crates/config/src/validate.rs",
+          "line": 144,
+          "end_line": 146,
+          "label": "容量必须显式配置"
+        }
+      ]
+    },
+    {
+      "id": "layout-model",
+      "type": "backend",
+      "label": "docparse-layout",
+      "sublabel": "PP-DocLayoutV3 · 区域候选",
+      "tag": "最先执行",
+      "pos": [
+        420,
+        1320
+      ],
+      "size": [
+        200,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/layout/src/lib.rs",
+          "line": 1,
+          "end_line": 32
+        },
+        {
+          "path": "crates/layout/src/pp_doclayout_v3/mod.rs",
+          "line": 51,
+          "end_line": 88,
+          "label": "引擎与 trait"
+        }
+      ]
+    },
+    {
+      "id": "ocr-queue",
+      "type": "messagebus",
+      "label": "OCR Queues",
+      "sublabel": "detection · recognition · orientation",
+      "tag": "3 条有界队列",
+      "pos": [
+        420,
+        1440
+      ],
+      "size": [
+        200,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/ocr/src/engine.rs",
+          "line": 110,
+          "end_line": 145,
+          "label": "三条队列的会话"
+        },
+        {
+          "path": "crates/common/src/session/manager.rs",
+          "line": 120,
+          "end_line": 126,
+          "label": "每模型一条队列"
+        }
+      ]
+    },
+    {
+      "id": "ocr-model",
+      "type": "backend",
+      "label": "docparse-ocr",
+      "sublabel": "PP-OCRv6 检测 / 识别 / 方向",
+      "pos": [
+        780,
+        1440
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/ocr/src/lib.rs",
+          "line": 1,
+          "end_line": 9
+        },
+        {
+          "path": "crates/ocr/src/engine.rs",
+          "line": 47,
+          "end_line": 60,
+          "label": "PaddleOcrEngine"
+        }
+      ]
+    },
+    {
+      "id": "tsr-queue",
+      "type": "messagebus",
+      "label": "TSR Queues",
+      "sublabel": "tsr · tsr.cell_detection",
+      "tag": "2 条有界队列",
+      "pos": [
+        420,
+        1560
+      ],
+      "size": [
+        200,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/tsr/src/model.rs",
+          "line": 454,
+          "end_line": 461,
+          "label": "结构模型队列"
+        },
+        {
+          "path": "crates/tsr/src/model.rs",
+          "line": 506,
+          "end_line": 514,
+          "label": "单元格检测队列"
+        }
+      ]
+    },
+    {
+      "id": "tsr-model",
+      "type": "backend",
+      "label": "docparse-tsr",
+      "sublabel": "SLANet+ 结构 / TATR 单元格",
+      "pos": [
+        780,
+        1560
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/tsr/src/lib.rs",
+          "line": 1,
+          "end_line": 15
+        },
+        {
+          "path": "crates/tsr/src/model.rs",
+          "line": 374,
+          "end_line": 386,
+          "label": "结构引擎"
+        }
+      ]
+    },
+    {
+      "id": "formula-queue",
+      "type": "messagebus",
+      "label": "Formula Queue",
+      "sublabel": "formula.queue_size · 跨引擎组共享",
+      "tag": "worker_size · 水位背压",
+      "pos": [
+        420,
+        1680
+      ],
+      "size": [
+        200,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/formula/src/queue.rs",
+          "line": 42,
+          "end_line": 47,
+          "label": "FormulaQueue::new"
+        },
+        {
+          "path": "crates/formula/src/queue.rs",
+          "line": 287,
+          "end_line": 295,
+          "label": "共享队列 + 背压"
+        },
+        {
+          "path": "crates/common/src/queue/pressure.rs",
+          "line": 31,
+          "end_line": 46,
+          "label": "队列压力"
+        }
+      ]
+    },
+    {
+      "id": "formula-service",
+      "type": "external",
+      "label": "Formula HTTP 服务",
+      "sublabel": "optimum-texo (Python)",
+      "pos": [
+        780,
+        1980
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "optimum-texo/service.py",
+          "line": 44,
+          "end_line": 65,
+          "label": "识别端点"
+        },
+        {
+          "path": "optimum-texo/README.md",
+          "line": 1,
+          "end_line": 10
+        }
+      ]
+    },
+    {
+      "id": "formula-http",
+      "type": "backend",
+      "label": "docparse-formula-http",
+      "sublabel": "外部 HTTP 服务调用",
+      "tag": "一次一个裁剪",
+      "pos": [
+        780,
+        1860
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/formula-http/src/lib.rs",
+          "line": 303,
+          "end_line": 307,
+          "label": "impl FormulaEngine"
+        },
+        {
+          "path": "crates/formula-http/src/lib.rs",
+          "line": 51,
+          "end_line": 60,
+          "label": "HttpEngine"
+        }
+      ]
+    },
+    {
+      "id": "formula-pp",
+      "type": "backend",
+      "label": "PpFormulaNetEngine",
+      "sublabel": "PP-FormulaNet · 本地 ONNX 会话",
+      "pos": [
+        780,
+        1680
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/formula/src/model.rs",
+          "line": 146,
+          "end_line": 150,
+          "label": "impl FormulaEngine"
+        },
+        {
+          "path": "crates/formula/src/lib.rs",
+          "line": 1,
+          "end_line": 12
+        }
+      ]
+    },
+    {
+      "id": "formula-texo",
+      "type": "backend",
+      "label": "TexoEngine",
+      "sublabel": "Texo · ONNX + KV cache",
+      "pos": [
+        780,
+        1770
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "crates/formula-texo/src/model.rs",
+          "line": 117,
+          "end_line": 121,
+          "label": "impl FormulaEngine"
+        },
+        {
+          "path": "crates/formula-texo/src/lib.rs",
+          "line": 1,
+          "end_line": 11
+        }
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "backend",
+      "label": "DeletedResults 清理",
+      "sublabel": "删除标记 → 对象删除",
+      "pos": [
+        900,
+        570
+      ],
+      "size": [
+        200,
+        80
+      ],
+      "sources": [
+        {
+          "path": "crates/server/src/main.rs",
+          "line": 299,
+          "end_line": 303,
+          "label": "每个角色都运行"
+        },
+        {
+          "path": "crates/server/src/cleanup.rs",
+          "line": 29,
+          "end_line": 48,
+          "label": "删除对象 + 回写"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "DocParse 服务端部署单元（server 进程 + 其托管的 Workbench + 共享持久化）",
+      "wraps": [
+        "workbench",
+        "http-api",
+        "shared-storage",
+        "postgres",
+        "jobs-worker",
+        "migrations",
+        "cleanup"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "可信入口：认证 / CORS 由 ingress 承担",
+      "wraps": [
+        "http-api"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "CLI 进程（本地 PDFium 线程）",
+      "wraps": [
+        "cli"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "WASM Worker（浏览器本地推理）",
+      "wraps": [
+        "wasm-sdk"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "PDFium 子进程（独立进程组）",
+      "wraps": [
+        "pdfium-worker"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Formula 引擎实现（同一 FormulaEngine，可混用并同时消费）",
+      "wraps": [
+        "formula-pp",
+        "formula-texo",
+        "formula-http"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "upload-pdf",
+      "from": "workbench",
+      "to": "http-api",
+      "label": "上传 PDF",
+      "variant": "emphasis"
+    },
+    {
+      "id": "result-stream",
+      "from": "http-api",
+      "to": "workbench",
+      "label": "结果 / SSE",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "job-row",
+      "from": "http-api",
+      "to": "postgres",
+      "label": "作业行读写（提交 / 查询）",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "claim-lease",
+      "from": "jobs-worker",
+      "to": "postgres",
+      "label": "领取租约 / 心跳"
+    },
+    {
+      "id": "publish-result",
+      "from": "jobs-worker",
+      "to": "shared-storage",
+      "label": "发布结果 JSON",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "read-result",
+      "from": "shared-storage",
+      "to": "http-api",
+      "label": "结果 / 原文",
+      "fromSide": "left",
+      "toSide": "right",
+      "via": [
+        [
+          605,
+          290
+        ]
+      ]
+    },
+    {
+      "id": "auto-migrate",
+      "from": "migrations",
+      "to": "postgres",
+      "label": "自动迁移",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "reserve-worker",
+      "from": "jobs-worker",
+      "to": "pdfium-pool",
+      "label": "reserve()"
+    },
+    {
+      "id": "pool-ipc",
+      "from": "pdfium-pool",
+      "to": "pdfium-worker",
+      "label": "IPC v6",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "native-text",
+      "from": "pdfium-worker",
+      "to": "core-parser",
+      "label": "原生文本事实",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "page-raster",
+      "from": "pdfium-worker",
+      "to": "render-queue",
+      "label": "页面栅格",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "page-task",
+      "from": "render-queue",
+      "to": "core-parser",
+      "label": "页任务 + PageLease"
+    },
+    {
+      "id": "parse-session",
+      "from": "jobs-worker",
+      "to": "core-parser",
+      "label": "parse_session_with_options"
+    },
+    {
+      "id": "cli-parse",
+      "from": "cli",
+      "to": "core-parser",
+      "label": "parse_path"
+    },
+    {
+      "id": "wasm-parse",
+      "from": "wasm-sdk",
+      "to": "core-parser",
+      "label": "parse_with_options"
+    },
+    {
+      "id": "layout-batch",
+      "from": "core-parser",
+      "to": "layout-queue",
+      "label": "① 页图像",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "layout-infer",
+      "from": "layout-queue",
+      "to": "layout-model",
+      "label": "布局推理",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ocr-batch",
+      "from": "ocr-queue",
+      "to": "ocr-model",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "tsr-batch",
+      "from": "tsr-queue",
+      "to": "tsr-model",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "formula-batch",
+      "from": "formula-queue",
+      "to": "formula-pp",
+      "label": "PP 消费组",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "formula-http-consume",
+      "from": "formula-queue",
+      "to": "formula-http",
+      "label": "HTTP 消费组"
+    },
+    {
+      "id": "formula-http-return",
+      "from": "formula-http",
+      "to": "core-parser",
+      "label": "LaTeX 回填",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1060,
+          1893
+        ],
+        [
+          1060,
+          1040
+        ]
+      ]
+    },
+    {
+      "id": "formula-http-call",
+      "from": "formula-http",
+      "to": "formula-service",
+      "label": "HTTP 识别",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ocr-return",
+      "from": "ocr-model",
+      "to": "core-parser",
+      "label": "OCR 文本回填",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "tsr-return",
+      "from": "tsr-model",
+      "to": "core-parser",
+      "label": "表格结构回填",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "formula-return",
+      "from": "formula-pp",
+      "to": "core-parser",
+      "label": "LaTeX 回填",
+      "fromSide": "right",
+      "toSide": "right"
+    },
+    {
+      "id": "listener-config",
+      "from": "config",
+      "to": "http-api",
+      "label": "监听 / 前缀"
+    },
+    {
+      "id": "parser-config",
+      "from": "config",
+      "to": "core-parser",
+      "label": "模型与队列策略"
+    },
+    {
+      "id": "formula-texo-consume",
+      "from": "formula-queue",
+      "to": "formula-texo",
+      "label": "Texo 消费组"
+    },
+    {
+      "id": "formula-texo-return",
+      "from": "formula-texo",
+      "to": "core-parser",
+      "label": "LaTeX 回填",
+      "fromSide": "right",
+      "toSide": "right"
+    },
+    {
+      "id": "upload-publish",
+      "from": "http-api",
+      "to": "shared-storage",
+      "label": "上传落盘",
+      "fromSide": "bottom"
+    },
+    {
+      "id": "cleanup-scan",
+      "from": "postgres",
+      "to": "cleanup",
+      "label": "扫描删除标记"
+    },
+    {
+      "id": "cleanup-remove",
+      "from": "cleanup",
+      "to": "shared-storage",
+      "label": "删除结果对象"
+    },
+    {
+      "id": "dispatch-ocr",
+      "from": "layout-model",
+      "to": "ocr-queue",
+      "label": "② OCR 裁剪"
+    },
+    {
+      "id": "dispatch-formula",
+      "from": "layout-model",
+      "to": "formula-queue",
+      "label": "④ 公式裁剪",
+      "fromSide": "left",
+      "toSide": "left"
+    },
+    {
+      "id": "dispatch-table",
+      "from": "layout-model",
+      "to": "tsr-queue",
+      "label": "③ 表格裁剪",
+      "fromSide": "left",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "三个入口，两种归属",
+      "items": [
+        "Workbench 属于服务端部署单元：webui 由 server 编译内嵌或从磁盘目录提供，实际渲染仍在用户浏览器",
+        "CLI 是独立原生进程，本地 PDFium 线程直接调用同一个 DocParser，不经过 HTTP 与数据库",
+        "WASM SDK 在浏览器专用 Worker 内推理，模型以字节注入，不使用文件系统与数据库"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "服务端部署单元",
+      "items": [
+        "HTTP API 只与共享状态交互：上传先落盘共享存储再写作业行，结果与原文也由 API 流式返回",
+        "worker 主动轮询 PostgreSQL 领取租约（不是数据库推送），并回写心跳、进度与终态",
+        "连接数据库时自动应用待执行迁移，迁移失败在加载模型前终止启动",
+        "DeletedResults 清理器在每个角色都运行：扫描删除标记 → 删除存储对象 → 回写清理完成",
+        "role=api 不加载模型，role=worker 不提供业务路由，两者共享同一数据库与目录"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "队列与分发",
+      "items": [
+        "每页四阶段严格串行：① 布局 → ② OCR → ③ 表格 → ④ 公式；裁剪范围全部由布局候选决定，所以分发画在布局之后",
+        "归属说明：构建裁剪并调用引擎接口的是 docparse-core（page.rs / table.rs / formula.rs），队列本身在模型模块内部（SessionManager / FormulaPool）",
+        "Render Queue 计未完成页面：渲染前 reserve 槽位，结果收集与清理结束后才释放",
+        "Formula Queue 由 [[formula.engine]] 列表里的多个引擎实现同时消费：PpFormulaNetEngine / TexoEngine / HttpEngine 各是一组，worker_size 决定每组消费者数",
+        "容量不含活跃批次与等待生产者；batch_size ≤ 32 时只取已就绪输入",
+        "7 条模型队列容量与 render.workers、render.queue_size 必须显式配置",
+        "队列按需启用：OCR 默认关闭（policy=missing_regions/always 才跑）、TSR 仅对表格块且 mode≠rules_only、公式仅在 inline/display 开启时",
+        "水位背压是可选策略（formula.backpressure.enabled），且只暂停内联公式识别"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "解析与回填",
+      "items": [
+        "PDFium 先给出原生文本事实，之后才渲染页面栅格",
+        "布局最先执行，其候选区域决定 OCR 缺失区域、表格与公式的裁剪范围",
+        "原生文本优先；OCR 只补缺失区域或替换强无效映射",
+        "三路模型结果回填 docparse-core，由它统一融合、排序与校验",
+        "超时降级：原生渲染超时会让该页槽位永久占用并停止渲染生产者，其余页面退化为仅原生文本"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "部署边界",
+      "items": [
+        "所有副本必须共享同一数据库内容与文件目录内容",
+        "PDFium 子进程崩溃按预算替换，超限则停止接纳新文档",
+        "Idempotency-Key 即任务 UUID，丢失响应可安全重试",
+        "SSE 每连接重放最新快照，断线不会取消解析"
+      ]
+    }
+  ]
+}

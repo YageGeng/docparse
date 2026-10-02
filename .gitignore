@@ -21,6 +21,10 @@
 .codex/
 .superpowers/
 
+# Archify diagram build output and per-run evidence; the diagram source and its
+# exported PNG/SVG are versioned in docs/architecture/.
+.archify/
+
 # OS and temporary files
 .DS_Store
 *.log

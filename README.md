@@ -12,6 +12,20 @@ Model regions are candidates rather than a one-to-one final block contract. Owne
 
 `reference` is an empty visual annotation: it never owns text, obstructs XY-cut, merges with content, or enters body reading order. Bibliography text uses `reference_content`, including recovered fragments. Partial content intersections remain separate regardless of IoU and produce a `ContentLayoutOverlap` page warning with per-pair `content.overlap.*` diagnostics. Reference outlines and detached watermarks are exempt. Merged layouts retain their primary `source_region` plus all contributing `source_regions`, whose optional `label` preserves original model semantics.
 
+## Architecture
+
+![DocParse architecture: entry points, the durable job path, and the per-page model pipeline with its bounded work queues](docs/architecture/docparse-architecture.png)
+
+Three entry points (the HTTP workbench that `docparse-server` serves, the native CLI, and the browser WASM SDK), the durable job path over PostgreSQL `parse_jobs` and the shared file directory, and the per-page pipeline with its required work queues: render admission first, then the layout, OCR, table and formula stages, each submitting into its own bounded model queue and returning its result to `docparse-core` for fusion. Queue capacities, session counts and batch limits are configuration, not code constants.
+
+Diagram labels are Simplified Chinese. The [vector source](docs/architecture/docparse-architecture.svg) is exported from the same figure, and the [Archify source](docs/architecture/docparse-architecture.archify.json) regenerates it as an interactive HTML with zoom, light/dark theme and PNG/SVG export:
+
+```sh
+node <archify>/bin/archify.mjs finalize architecture \
+  docs/architecture/docparse-architecture.archify.json \
+  .archify/docparse-architecture.html --repo-root . --quality showcase
+```
+
 ## Prepare the model
 
 Models are distributed separately from the repository and crates. Download and verify the pinned revision using the dependency-locked uv script:
@@ -24,7 +38,7 @@ rtk python3 crates/formula-texo/examples/download.py models/texo
 
 The source is `PaddlePaddle/PP-DocLayoutV3_onnx` revision `46bbdf188bb0a772c08aed74882ce7e51a8f1ea6`. Validation covers ONNX/YAML SHA-256 values, model schema, and the preprocessing contract.
 
-The default command provisions layout, table models, OCR and PP-FormulaNet_plus-S/Plus-L
+The default command provisions layout, table models, OCR, Texo and PP-FormulaNet_plus-S/Plus-M/Plus-L
 with their matching tokenizer in the repository's `models/` directory. Verified local
 files are skipped; missing or corrupt files are downloaded and verified before
 publication. Use `--model slanet-plus` for one model, `--models-dir /path/to/models`
@@ -50,9 +64,11 @@ evidence; a model prediction is accepted only after topology and source validati
 reconstruction from `external_tsr` model/caller input. The Web inspector displays
 this as Rules or TSR input.
 
-For pure SLANet+, set `tsr.cell_detection.enabled = false` directly in
-`docparse.toml`. To compare SLANeXt wireless plus cell detection, replace the TSR
-settings with the [inline configuration examples](crates/tsr/README.md).
+For a pure SLANet+ comparison, replace the TSR sections in `docparse.toml` with the
+[SLANet+ example](crates/tsr/README.md): the shipped configuration selects TATR with
+wireless RT-DETR cells, and disabling only `tsr.cell_detection` would leave TATR without
+cell detection. To compare SLANeXt wireless plus cell detection, replace the TSR
+settings with the same [inline configuration examples](crates/tsr/README.md).
 
 ## Build and CUDA
 
@@ -237,7 +253,7 @@ let document = parser.parse_path("input.pdf").await?;
 # }
 ```
 
-`DocParserBuilder` accepts an `Arc<dyn LayoutEngine>`, optional `Arc<dyn OcrEngine>`, and optional `Arc<dyn TableStructureEngine>`. An injected table engine overrides built-in model loading. Per-call `ParseOptions.table` is optional and inherits the configured policy when absent. OCR is an extension interface; no OCR model is bundled. Synchronous callers can use `parse_path_blocking`; callers already inside Tokio must use the async API.
+`DocParserBuilder` accepts an `Arc<dyn LayoutEngine>`, optional `Arc<dyn OcrEngine>`, and optional `Arc<dyn TableStructureEngine>`. An injected table engine overrides built-in model loading. Per-call `ParseOptions.table` is optional and inherits the configured policy when absent. OCR is built in and runs only when `ocr.policy` is not `disabled`; an injected `Arc<dyn OcrEngine>` replaces the built-in PaddleOCR engine. Synchronous callers can use `parse_path_blocking`; callers already inside Tokio must use the async API.
 
 ## WebAssembly and browsers
 
@@ -261,7 +277,7 @@ impl LayoutEngine for MyEngine {
 
 `ValidatedConfig::try_from` checks shared parameters. ConfigLoader and native model entry points handle paths; explicit artifacts and injected engines need no placeholder absolute paths. Browser hosts inject both layout and table engines from artifacts, or select `rules_only` to omit the table model. Native async APIs require Tokio. Direct browser hosts must initialize ort-web and WASI in the same Worker; the Web SDK handles this setup.
 
-Platform conditions are restricted to `wasm_compat.rs` and explicitly listed compatibility submodules. The browser-only `docparse-web` crate exports its API directly. Run `rtk uv run --locked scripts/check_wasm_compat.py` to check the boundary.
+Platform conditions are restricted to `wasm_compat.rs`, the explicitly listed compatibility submodules, and the paths allowlisted in `scripts/check_wasm_compat.py`. The browser-only `docparse-web` crate exports its API directly. Run `rtk uv run --locked scripts/check_wasm_compat.py` to check the boundary.
 
 ## CLI
 
@@ -322,15 +338,15 @@ rtk uv run --locked --group reference scripts/reference_layout.py \
 rtk cargo test -p docparse-layout --test python_parity -- --ignored --nocapture
 ```
 
-Real-PDF E2E preflight scans regular, case-insensitive PDF files at the top level of `~/Downloads`. The discovered basenames, sizes, SHA-256 values, and page counts must exactly match `tests/e2e-corpus.toml`. Adding, removing, or replacing a PDF fails preflight until the manifest is explicitly reviewed and updated. Full acceptance prohibits `--only`; that option is for smoke runs.
+Real-PDF E2E preflight scans regular, case-insensitive PDF files at the top level of `~/Downloads`. The discovered basenames, sizes, SHA-256 values, and page counts must exactly match `tests/e2e-corpus.toml`. Adding, removing, or replacing a PDF fails preflight until the manifest is explicitly reviewed and updated. Full acceptance must not use `--only` (the script does not enforce this); reserve it for smoke runs.
 
 ```bash
 rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
-  --execution-provider cuda --stage-pages 1 --run-id serial
+  --execution-provider cuda --render-queue-size 1 --run-id serial
 rtk uv run --locked --group dev scripts/run_real_pdf_e2e.py \
   --pdf-dir ~/Downloads --model-dir models/pp-doclayout-v3 \
-  --execution-provider cuda --stage-pages 4 --run-id parallel \
+  --execution-provider cuda --render-queue-size 4 --run-id parallel \
   --write-overlays
 rtk uv run --locked scripts/compare_e2e_runs.py \
   target/docparse-e2e/serial/canonical-hashes.json \
@@ -362,7 +378,7 @@ rtk npm run build --prefix packages/wasm-web
 rtk npm run example --prefix packages/wasm-web
 ```
 
-The workbench opens at <http://127.0.0.1:5173>; the WASM example opens at
+The workbench opens at <http://127.0.0.1:5173/api/v1/docparse/webui/> (the Vite base path is `{VITE_API_PREFIX}/webui/`); the WASM example opens at
 <http://127.0.0.1:8768/example/>. The package guides list build, type-check,
 preview, and acceptance commands with the same repository-root convention.
 
@@ -398,16 +414,19 @@ timeout_ms = 120000
 model_path = "models/pp-ocrv6-medium-det/inference.onnx"
 model_config_path = "models/pp-ocrv6-medium-det/inference.yml"
 model_manifest_path = "models/pp-ocrv6-medium-det/model-manifest.json"
+queue_size = 16
 
 [ocr.recognition]
 model_path = "models/pp-ocrv6-medium-rec/inference.onnx"
 model_config_path = "models/pp-ocrv6-medium-rec/inference.yml"
 model_manifest_path = "models/pp-ocrv6-medium-rec/model-manifest.json"
+queue_size = 16
 
 [ocr.orientation]
 model_path = "models/pp-lcnet-textline-ori/inference.onnx"
 model_config_path = "models/pp-lcnet-textline-ori/inference.yml"
 model_manifest_path = "models/pp-lcnet-textline-ori/model-manifest.json"
+queue_size = 8
 ```
 
 Core, CLI and server expose `cuda`, `coreml`, `metal`, and `openvino`
