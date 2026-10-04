@@ -373,6 +373,9 @@ struct PostprocessConfig {
 #[derive(typed_builder::TypedBuilder)]
 pub struct SlanetPlusEngine {
     runner: Arc<SessionRunner>,
+    admission: docparse_common::ResourceBudget,
+    // Each prediction owns tensor capacity even when callers share an already-admitted crop.
+    inference: docparse_common::ResourceBudget,
     dictionary: Vec<String>,
     provider: docparse_layout::ExecutionProvider,
     model: docparse_config::TsrModel,
@@ -521,6 +524,12 @@ impl SlanetPlusEngine {
         };
         Ok(Self::builder()
             .runner(runner)
+            .admission(docparse_common::ResourceBudget::new(
+                config.tsr().admission_capacity(),
+            ))
+            .inference(docparse_common::ResourceBudget::new(
+                config.tsr().admission_capacity(),
+            ))
             .dictionary(dictionary)
             .provider(provider)
             .model(model)
@@ -544,19 +553,32 @@ impl SlanetPlusEngine {
         &self.name
     }
 
+    /// Shares the pre-crop budget with parser adapters before they allocate table pixels.
+    pub fn admission(&self) -> docparse_common::ResourceBudget {
+        self.admission.clone()
+    }
+
     /// Runs independent models concurrently and combines their crop-relative predictions.
     pub async fn predict(
         &self,
         image: Arc<PageImage>,
         timings: Timings,
     ) -> Result<TsrPrediction, TsrError> {
-        // Keep orchestration separate from model-specific retries and detection filtering.
-        let (mut prediction, detected_cell_bboxes) = tokio::try_join!(
-            self.predict_structure(Arc::clone(&image), &timings),
-            self.detect_cells(image, &timings),
-        )?;
-        prediction.detected_cell_bboxes = detected_cell_bboxes;
-        Ok(prediction)
+        // Crop leases protect shared pixels; every call must separately budget its newly prepared tensors.
+        let queued = timings.start(TimingStage::TsrQueue);
+        let resources = self.inference.reserve().await?;
+        drop(queued);
+        resources
+            .scope(async {
+                // Keep orchestration separate from model-specific retries and detection filtering.
+                let (mut prediction, detected_cell_bboxes) = tokio::try_join!(
+                    self.predict_structure(Arc::clone(&image), &timings),
+                    self.detect_cells(image, &timings),
+                )?;
+                prediction.detected_cell_bboxes = detected_cell_bboxes;
+                Ok(prediction)
+            })
+            .await
     }
 
     /// Retries incomplete structure predictions on image segments and restores original crop coordinates.

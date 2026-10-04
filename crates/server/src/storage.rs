@@ -1,6 +1,6 @@
 use crate::{
     code::ApiCode,
-    error::{ApiResult, RequestSnafu, StorageSnafu, TaskSnafu},
+    error::{ApiResult, CpuTaskSnafu, RequestSnafu, StorageSnafu, TaskSnafu},
 };
 use snafu::ResultExt;
 use std::{
@@ -87,23 +87,17 @@ impl SharedStorage {
     /// Places temporary data on the destination filesystem so publication needs no cross-device copy.
     pub async fn temporary(&self) -> ApiResult<NamedTempFile> {
         let root = self.root.clone();
-        // Storage work retains both the owning span and any caller-local subscriber across the blocking hop.
-        let span = tracing::Span::current();
-        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-        tokio::task::spawn_blocking(move || {
-            tracing::dispatcher::with_default(&dispatcher, || {
-                span.in_scope(|| NamedTempFile::new_in(root))
+        // The common boundary retains document admission through cancelled output cleanup.
+        docparse_common::run_blocking(move || NamedTempFile::new_in(root))
+            .await
+            .context(CpuTaskSnafu {
+                stage: "storage-create-temp-task",
+                code: ApiCode::COMMON_INTERNAL_ERROR,
+            })?
+            .context(StorageSnafu {
+                stage: "storage-create-temp",
+                code: ApiCode::service_unavailable(5031003),
             })
-        })
-        .await
-        .context(TaskSnafu {
-            stage: "storage-create-temp-task",
-            code: ApiCode::COMMON_INTERNAL_ERROR,
-        })?
-        .context(StorageSnafu {
-            stage: "storage-create-temp",
-            code: ApiCode::service_unavailable(5031003),
-        })
     }
 
     /// Syncs bytes and the parent directory before a database row can reference the final name.
@@ -115,9 +109,8 @@ impl SharedStorage {
         let Publication { file, timing } = file.into();
         let target = self.path(name)?;
         let root = self.root.clone();
-        let span = tracing::Span::current();
-        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-        tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || span.in_scope(|| -> std::io::Result<()> {
+        // Real fsync and rename ownership retains the same publication budget after cancellation.
+        docparse_common::run_blocking(move || -> std::io::Result<()> {
             // The real fsync/persist owner retains timing after cancellation of the async caller.
             let _timing = timing;
             file.as_file().sync_all()?;
@@ -144,9 +137,9 @@ impl SharedStorage {
                 Err(error) => return Err(error.error),
             }
             std::fs::File::open(root)?.sync_all()
-        })))
+        })
         .await
-        .context(TaskSnafu {
+        .context(CpuTaskSnafu {
             stage: "storage-publish-file-task",
             code: ApiCode::COMMON_INTERNAL_ERROR,
         })?

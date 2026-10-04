@@ -136,6 +136,11 @@ pub trait TableStructureEngine:
     /// Identifies the engine in diagnostics without exposing service credentials.
     fn name(&self) -> &str;
 
+    /// Shares the provider's fixed scheduling capacity and crop permits; other providers use the parser budget.
+    fn admission(&self) -> Option<docparse_common::ResourceBudget> {
+        None
+    }
+
     /// Declared structures remain exact; model adapters may opt into validated source-supported refinement.
     fn geometry_policy(&self) -> TsrGeometryPolicy {
         TsrGeometryPolicy::Declared

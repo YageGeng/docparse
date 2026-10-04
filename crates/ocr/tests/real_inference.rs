@@ -173,7 +173,7 @@ async fn batches_preserve_printed_document_results() {
     }
 }
 
-/// Concurrent pages reach shared model queues without a page gate and preserve real OCR results.
+/// Concurrent pages share bounded preparation while preserving complete, independent OCR results.
 #[tokio::test]
 #[ignore = "requires downloaded PaddleOCR artifacts; use --features cuda for CUDA"]
 async fn concurrent_pages_run_complete_ocr_without_page_gate() {
@@ -182,6 +182,10 @@ async fn concurrent_pages_run_complete_ocr_without_page_gate() {
         .canonicalize()
         .expect("workspace");
     let mut raw = RawConfig::default();
+    // Two global preparation slots allow overlap, while the third page must wait before allocating a tensor.
+    raw.ocr.detection.session_size = 1;
+    raw.ocr.detection.batch_size = 1;
+    raw.ocr.detection.queue_size = 1;
     // Resolve code-default files independently of the user's deployment configuration.
     for files in [
         &mut raw.ocr.detection.files,
@@ -221,18 +225,30 @@ async fn concurrent_pages_run_complete_ocr_without_page_gate() {
         assert!(futures_util::poll!(request.as_mut()).is_pending());
         requests.push(request);
     }
-    // Hold every page future pending so a hidden gate cannot recycle a completed page's permit.
+    // Keep callers unpolled after CPU submission so completed pages cannot release admission prematurely.
     let preprocessed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         let mut pages = std::collections::BTreeSet::new();
-        while pages.len() < 3 {
+        while pages.len() < 2 {
             let event = events.recv().await.expect("preprocessing event");
             if event.stage == docparse_common::timing::TimingStage::OcrDetectionPreprocess {
                 pages.insert(event.page_number.expect("page attribution"));
             }
         }
         pages
-    }).await.expect("all three pages must enter preprocessing before any page completes");
-    assert_eq!(preprocessed, std::collections::BTreeSet::from([1, 2, 3]));
+    }).await.expect("both admitted pages preprocess before either page completes");
+    assert_eq!(preprocessed, std::collections::BTreeSet::from([1, 2]));
+    tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        loop {
+            let event = events.recv().await.expect("live timing channel");
+            if event.stage
+                == docparse_common::timing::TimingStage::OcrDetectionPreprocess
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect_err("the third page must wait for global preparation capacity");
     let mut results = futures_util::future::try_join_all(requests)
         .await
         .expect("real concurrent OCR")

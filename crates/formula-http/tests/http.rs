@@ -230,8 +230,7 @@ async fn multiple_http_groups_share_one_formula_queue() {
         ),
     ];
     let config = ValidatedConfig::try_from(raw).expect("mixed configuration");
-    let mut pool =
-        docparse_formula::queue::FormulaPool::new(&config).expect("pool");
+    let mut pool = docparse_formula::queue::FormulaPool::new(&config);
     assert_eq!(
         pool.admission().expect("admission").available_permits(),
         config.formula().queue_size + 3

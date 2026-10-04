@@ -36,16 +36,22 @@ pub struct PageImageInput {
 /// A validated page image shared without copying between inference engines.
 #[derive(Debug, Clone, TypedBuilder)]
 pub struct PageImage {
-    // Image clones retain completion-counted render capacity independently of their caller future.
-    #[builder(default = docparse_common::PageLease::current())]
-    page_lease: Option<docparse_common::PageLease>,
     width: u32,
     height: u32,
     pixel_format: PixelFormat,
     data: Arc<[u8]>,
+    // Pixels must be destroyed before their page and preprocessing permits can be recycled.
+    #[builder(default = docparse_common::PageLease::current())]
+    page_lease: Option<docparse_common::PageLease>,
+    #[builder(default = docparse_common::ResourceLease::current())]
+    resources: Option<docparse_common::ResourceLease>,
 }
 
 impl PageImage {
+    /// Carries crop admission into model adapters and asynchronous encoding/decoding work.
+    pub fn resource_lease(&self) -> Option<docparse_common::ResourceLease> {
+        self.resources.clone()
+    }
     /// Attaches the admitted delivery to caller-provided or externally rendered image storage.
     pub fn retain_page(&mut self, lease: docparse_common::PageLease) {
         self.page_lease = Some(lease);

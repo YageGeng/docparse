@@ -41,10 +41,6 @@ pub trait FormulaEngine: WasmCompatSend + WasmCompatSync {
     fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
         None
     }
-    /// Custom engines may opt out when they do not expose an observable pending queue.
-    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        None
-    }
     /// Preserves the actual consumer identity for mixed formula pools.
     fn recognize_named(
         &self,
@@ -87,7 +83,7 @@ impl PpFormulaNetEngine {
         artifacts: FormulaArtifacts,
     ) -> Result<Self, FormulaError> {
         // Standalone engines own the same producer pool used by mixed configurations.
-        let mut pool = crate::queue::FormulaPool::new(&config)?;
+        let mut pool = crate::queue::FormulaPool::new(&config);
         let workers =
             Self::spawn_from_artifacts(config, artifacts, pool.receiver())
                 .await?;
@@ -144,11 +140,6 @@ impl PpFormulaNetEngine {
 }
 
 impl FormulaEngine for PpFormulaNetEngine {
-    /// Exposes the shared queue rather than estimating load from active sessions.
-    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        self.pool.pressure()
-    }
-
     /// Reports the fixed supported model family.
     fn name(&self) -> &str {
         &self.name

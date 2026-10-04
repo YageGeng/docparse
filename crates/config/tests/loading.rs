@@ -7,6 +7,57 @@ use figment::providers::Serialized;
 use figment::value::{Dict, Value};
 use serde_json::json;
 
+/// Removed shedding settings must fail consistently for files, environment overrides, and browser JSON.
+#[test]
+fn removed_formula_shedding_is_rejected() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[formula.backpressure]\nenabled = false\n",
+    );
+    ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({})))
+        .load_raw()
+        .expect_err("removed TOML policy");
+    let path = write_config(directory.path(), "docparse.toml", "");
+    ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(
+            json!({"formula":{"backpressure":{"enabled":false}}}),
+        ))
+        .load_raw()
+        .expect_err("removed environment policy");
+    let mut raw =
+        serde_json::to_value(RawConfig::default()).expect("raw configuration");
+    raw.get_mut("formula")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("formula configuration")
+        .insert("backpressure".into(), json!({"enabled": false}));
+    serde_json::from_value::<RawConfig>(raw)
+        .expect_err("removed browser policy");
+}
+
+/// Consumer counts must not overflow the preprocessing capacity before semaphore construction.
+#[test]
+fn model_admission_capacity_overflow_is_rejected() {
+    let mut raw = RawConfig::default();
+    raw.layout.session_size = usize::MAX;
+    docparse_config::ValidatedConfig::try_from(raw)
+        .expect_err("overflowing admission budget");
+    let mut raw = RawConfig::default();
+    raw.ocr.recognition.session_size = usize::MAX;
+    docparse_config::ValidatedConfig::try_from(raw)
+        .expect_err("overflowing admission budget");
+    let mut raw = RawConfig::default();
+    raw.tsr
+        .cell_detection
+        .as_mut()
+        .expect("cell detector")
+        .session_size = usize::MAX;
+    docparse_config::ValidatedConfig::try_from(raw)
+        .expect_err("overflowing admission budget");
+}
+
 /// Global session options follow file and environment precedence without per-model overrides.
 #[test]
 fn global_optimization_level_loads_from_file_and_environment() {
@@ -1093,38 +1144,4 @@ fn formula_session_configuration() {
                 .expect_err("removed CPU/GPU setting");
         }
     }
-}
-
-/// Partial policy configuration inherits defaults and invalid hysteresis cannot start an engine.
-#[test]
-fn formula_backpressure_policy_defaults_and_validation() {
-    let mut raw = docparse_config::RawConfig::default();
-    assert!(!raw.formula.backpressure.enabled);
-    assert_eq!(raw.formula.backpressure.pause_after_secs, 30);
-    raw.formula.backpressure.enabled = true;
-    docparse_config::ValidatedConfig::try_from(raw.clone())
-        .expect("valid policy");
-    for (high, low, pause, resume) in [
-        (0.5, 0.5, 30, 30),
-        (1.1, 0.5, 30, 30),
-        (0.8, -0.1, 30, 30),
-        (f64::NAN, 0.5, 30, 30),
-        (0.85, 0.5, 0, 30),
-        (0.85, 0.5, 30, 0),
-    ] {
-        let mut invalid = raw.clone();
-        invalid.formula.backpressure =
-            docparse_config::FormulaBackpressureConfig::builder()
-                .high_watermark(high)
-                .low_watermark(low)
-                .pause_after_secs(pause)
-                .resume_after_secs(resume)
-                .build();
-        docparse_config::ValidatedConfig::try_from(invalid)
-            .expect_err("invalid hysteresis");
-    }
-    let policy: docparse_config::FormulaBackpressureConfig =
-        serde_json::from_str(r#"{"enabled":true}"#).expect("partial policy");
-    assert!(policy.enabled);
-    assert!((policy.high_watermark - 0.85).abs() < f64::EPSILON);
 }

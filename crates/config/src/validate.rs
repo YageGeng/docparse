@@ -398,25 +398,64 @@ impl TryFrom<RawConfig> for ValidatedConfig {
                     .ok_or(ConfigError::InvalidValue { field: "formula.engine.worker_size", reason: "total active and pending capacity must fit semaphore permits" })?;
             }
         }
-        let pressure = &config.formula.backpressure;
-        if !pressure.high_watermark.is_finite()
-            || !pressure.low_watermark.is_finite()
-            || pressure.low_watermark < 0.0
-            || pressure.high_watermark > 1.0
-            || pressure.low_watermark >= pressure.high_watermark
-            || pressure.pause_after_secs == 0
-            || pressure.resume_after_secs == 0
-        {
-            return Err(ConfigError::InvalidValue {
-                field: "formula.backpressure",
-                reason: "requires 0 <= low_watermark < high_watermark <= 1 and positive pause/resume seconds",
-            });
-        }
         if !(1..=86_400_000).contains(&config.formula.timeout_ms) {
             return Err(ConfigError::InvalidValue {
                 field: "formula.timeout_ms",
                 reason: "must be between 1 and 86400000",
             });
+        }
+        // Preprocessing admission includes active batches; reject overflow before constructing semaphores.
+        for (sessions, batch, queued, field) in [
+            (
+                config.layout.session_size,
+                config.layout.batch_size,
+                config.layout.queue_size,
+                "layout.session_size",
+            ),
+            (
+                config.tsr.session_size,
+                config.tsr.batch_size,
+                config.tsr.queue_size,
+                "tsr.session_size",
+            ),
+            (
+                config.ocr.detection.session_size,
+                config.ocr.detection.batch_size,
+                config.ocr.detection.queue_size,
+                "ocr.detection.session_size",
+            ),
+            (
+                config.ocr.recognition.session_size,
+                config.ocr.recognition.batch_size,
+                config.ocr.recognition.queue_size,
+                "ocr.recognition.session_size",
+            ),
+            (
+                config.ocr.orientation.session_size,
+                config.ocr.orientation.batch_size,
+                config.ocr.orientation.queue_size,
+                "ocr.orientation.session_size",
+            ),
+        ]
+        .into_iter()
+        .chain(config.tsr.cell_detection.as_ref().map(|cells| {
+            (
+                cells.session_size,
+                cells.batch_size,
+                cells.queue_size,
+                "tsr.cell_detection.session_size",
+            )
+        })) {
+            if sessions
+                .checked_mul(batch)
+                .and_then(|active| active.checked_add(queued))
+                .is_none_or(|capacity| capacity > (u32::MAX >> 3) as usize)
+            {
+                return Err(ConfigError::InvalidValue {
+                    field,
+                    reason: "active and pending capacity must fit semaphore permits",
+                });
+            }
         }
         let RawConfig {
             layout,
@@ -536,6 +575,14 @@ impl RenderConfig {
                     reason: "must be between 1 and 536869887",
                 });
             }
+        }
+
+        // A server attempt retains one slot through publication in addition to page-level admission.
+        if self.workers + self.queue_size > (u32::MAX >> 3) as usize {
+            return Err(ConfigError::InvalidValue {
+                field: "render",
+                reason: "combined document capacity must fit semaphore permits",
+            });
         }
 
         if self.dpi == 0 {

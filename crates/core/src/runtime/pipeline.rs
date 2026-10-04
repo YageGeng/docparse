@@ -165,6 +165,9 @@ pub(crate) struct ParseRuntime {
     #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
     pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     config: Arc<ValidatedConfig>,
+    /// Runtime facades reuse the parser's budget; explicit assembly derives an equivalent standalone budget.
+    #[builder(default = docparse_common::ResourceBudget::new(config.tsr().admission_capacity()))]
+    table_admission: docparse_common::ResourceBudget,
     layout_engine: Arc<dyn LayoutEngine>,
     #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
@@ -213,8 +216,11 @@ impl ParseRuntime {
                 ))
             });
         let observer = options.observer;
-        let tables =
-            options.table_runtime(&self.config, self.table_engine.as_ref())?;
+        let tables = options.table_runtime(
+            &self.config,
+            self.table_engine.as_ref(),
+            &self.table_admission,
+        )?;
         let (collector, mut timing_receiver) = Timings::channel();
         let timings = if observer.is_some() {
             collector

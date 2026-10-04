@@ -4,15 +4,18 @@ use crate::{
     TaskError,
     telemetry::{Admission, QueueMetrics, Queued},
 };
-use std::sync::Arc;
 use std::{
     collections::VecDeque,
-    sync::{Condvar, Mutex},
+    future::Future,
+    sync::{Arc, Condvar, Mutex},
+    task::{Context, Poll, Wake},
+    thread::Thread,
 };
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// Queue state remains independent of session initialization and execution.
+/// Queued inputs retain FIFO admission until a consumer removes them.
 struct QueueState<R> {
-    requests: VecDeque<Queued<R>>,
+    requests: VecDeque<(Queued<R>, OwnedSemaphorePermit)>,
     closed: bool,
 }
 
@@ -21,16 +24,24 @@ struct QueueState<R> {
 pub struct BlockingQueue<R> {
     state: Mutex<QueueState<R>>,
     changed: Condvar,
-    available: tokio::sync::Notify,
+    capacity: Arc<Semaphore>,
     metrics: Arc<QueueMetrics>,
 }
 
-impl<R: SessionRequest> BlockingQueue<R> {
-    /// Shares the exact pending-item pressure state with the model owner.
-    pub fn pressure(&self) -> Arc<super::QueuePressure> {
-        Arc::clone(&self.metrics.pressure)
+/// Synchronous callers join the same FIFO semaphore without creating a runtime or polling timer.
+struct ProducerThread(Thread);
+impl Wake for ProducerThread {
+    /// A park token preserves notifications arriving between polling and parking.
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
     }
+    /// Wakes the registered producer without an additional reference-count operation.
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.unpark();
+    }
+}
 
+impl<R: SessionRequest> BlockingQueue<R> {
     /// Creates a bounded crop queue independently of consumer initialization.
     pub fn new(name: &'static str, capacity: usize) -> Self {
         assert!(capacity > 0, "queue capacity must be positive");
@@ -40,7 +51,7 @@ impl<R: SessionRequest> BlockingQueue<R> {
                 closed: false,
             }))
             .changed(Condvar::new())
-            .available(tokio::sync::Notify::new())
+            .capacity(Arc::new(Semaphore::new(capacity)))
             .metrics(QueueMetrics::new(name, capacity))
             .build()
     }
@@ -50,101 +61,149 @@ impl<R: SessionRequest> BlockingQueue<R> {
         self.push_batch(vec![request])
     }
 
-    /// Shares native ready batching while suspending asynchronous producers on full admission.
+    /// Reserves FIFO capacity without waking all competing producers after each dequeue.
     pub async fn push_async(&self, mut request: R) -> Result<(), TaskError> {
         let admission = Admission::new(
             "docparse_queue_admission_wait_seconds",
             self.metrics.name,
         );
-        let mut blocked = None;
-        loop {
-            // Register before inspecting capacity so dequeue/close cannot race the waiter to sleep.
-            let notified = self.available.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            {
-                let mut state = self.state.lock().map_err(|error| {
-                    TaskError::from_message(error.to_string())
-                })?;
-                if state.closed || request.cancelled() {
-                    let closed = state.closed;
-                    admission.finish(if closed {
-                        "closed"
-                    } else {
-                        "cancelled"
-                    });
-                    drop(state);
-                    request.end_queue();
-                    return if closed {
-                        Err(TaskError::from_message("model queue closed"))
-                    } else {
-                        Ok(())
-                    };
-                }
-                if state.requests.len() < self.metrics.capacity {
-                    admission.finish("admitted");
-                    state
-                        .requests
-                        .push_back(Queued::new(request, &self.metrics));
-                    self.changed.notify_all();
-                    return Ok(());
-                }
-                blocked.get_or_insert_with(|| self.metrics.blocked());
-            }
-            notified.await;
+        // Cancellation is terminal without needing space for an input that will never execute.
+        if request.cancelled() && !self.capacity.is_closed() {
+            admission.finish("cancelled");
+            request.end_queue();
+            return Ok(());
         }
+        let permit = match Arc::clone(&self.capacity).try_acquire_owned() {
+            Ok(permit) => Ok(permit),
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                let _blocked = self.metrics.blocked();
+                Arc::clone(&self.capacity).acquire_owned().await
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => {
+                admission.finish("closed");
+                request.end_queue();
+                return Err(TaskError::from_message("model queue closed"));
+            }
+        };
+        let permit = permit.map_err(|error| {
+            request.end_queue();
+            TaskError::from_message(error.to_string())
+        });
+        let permit = match permit {
+            Ok(permit) => permit,
+            Err(error) => {
+                admission.finish("closed");
+                return Err(error);
+            }
+        };
+        if request.cancelled() {
+            admission.finish("cancelled");
+            request.end_queue();
+            return Ok(());
+        }
+        let result = self.publish(std::iter::once(request), permit);
+        admission.finish(if result.is_ok() { "admitted" } else { "closed" });
+        result
     }
 
-    /// Admits a caller packet atomically while bounding every unconsumed crop.
+    /// Admits a packet atomically using the same fair semaphore as asynchronous callers.
     pub fn push_batch(&self, mut requests: Vec<R>) -> Result<(), TaskError> {
         if requests.is_empty() || requests.len() > self.metrics.capacity {
             return Err(TaskError::from_message("invalid queue packet size"));
         }
+        let count = u32::try_from(requests.len())
+            .map_err(|error| TaskError::from_message(error.to_string()))?;
         let admission = Admission::new(
             "docparse_queue_admission_wait_seconds",
             self.metrics.name,
         );
+        // Synchronous canceled packets must not park behind live queued work either.
+        if requests.iter().all(SessionRequest::cancelled)
+            && !self.capacity.is_closed()
+        {
+            admission.finish("cancelled");
+            for request in &mut requests {
+                request.end_queue();
+            }
+            return Ok(());
+        }
+        let permit =
+            match Arc::clone(&self.capacity).try_acquire_many_owned(count) {
+                Ok(permit) => Ok(permit),
+                Err(tokio::sync::TryAcquireError::NoPermits) => {
+                    let _blocked = self.metrics.blocked();
+                    let waker =
+                        Arc::new(ProducerThread(std::thread::current())).into();
+                    let mut context = Context::from_waker(&waker);
+                    let mut waiting = std::pin::pin!(
+                        Arc::clone(&self.capacity).acquire_many_owned(count)
+                    );
+                    loop {
+                        match waiting.as_mut().poll(&mut context) {
+                            Poll::Ready(permit) => break permit,
+                            Poll::Pending => std::thread::park(),
+                        }
+                    }
+                }
+                Err(tokio::sync::TryAcquireError::Closed) => {
+                    admission.finish("closed");
+                    for request in &mut requests {
+                        request.end_queue();
+                    }
+                    return Err(TaskError::from_message("model queue closed"));
+                }
+            };
+        let permit = match permit {
+            Ok(permit) => permit,
+            Err(error) => {
+                admission.finish("closed");
+                for request in &mut requests {
+                    request.end_queue();
+                }
+                return Err(TaskError::from_message(error.to_string()));
+            }
+        };
+        if requests.iter().all(SessionRequest::cancelled) {
+            admission.finish("cancelled");
+            for request in &mut requests {
+                request.end_queue();
+            }
+            return Ok(());
+        }
+        let result = self.publish(requests.into_iter(), permit);
+        admission.finish(if result.is_ok() { "admitted" } else { "closed" });
+        result
+    }
+
+    /// Transfers reserved permits into queue ownership; close and publication share the state lock.
+    fn publish(
+        &self,
+        requests: impl Iterator<Item = R>,
+        mut permit: OwnedSemaphorePermit,
+    ) -> Result<(), TaskError> {
         let mut state = self
             .state
             .lock()
             .map_err(|error| TaskError::from_message(error.to_string()))?;
-        let blocked = (state.requests.len() + requests.len()
-            > self.metrics.capacity)
-            .then(|| self.metrics.blocked());
-        while !state.closed
-            && state.requests.len() + requests.len() > self.metrics.capacity
-            && !requests.iter().all(SessionRequest::cancelled)
-        {
-            state = self
-                .changed
-                .wait(state)
-                .map_err(|error| TaskError::from_message(error.to_string()))?;
-        }
-        drop(blocked);
-        if state.closed || requests.iter().all(SessionRequest::cancelled) {
-            admission.finish(if state.closed { "closed" } else { "cancelled" });
-            let closed = state.closed;
+        if state.closed {
             drop(state);
-            for request in &mut requests {
+            for mut request in requests {
                 request.end_queue();
             }
-            return if closed {
-                Err(TaskError::from_message("model queue closed"))
-            } else {
-                Ok(())
-            };
+            return Err(TaskError::from_message("model queue closed"));
         }
-        admission.finish("admitted");
-        state.requests.extend(
-            requests
-                .into_iter()
-                .map(|request| Queued::new(request, &self.metrics)),
-        );
-        self.changed.notify_all();
+        for request in requests {
+            state.requests.push_back((
+                Queued::new(request, &self.metrics),
+                permit.split(1).expect("reserved packet capacity"),
+            ));
+            // Only consumers use this condition variable; producers receive individual semaphore permits.
+            self.changed.notify_one();
+        }
         Ok(())
     }
 
-    /// Waits for the first live request and drains only already-ready work up to the limit.
+    /// Waits for live work and drains already-ready inputs without waiting to fill a batch.
     pub fn pop(&self, limit: usize) -> Option<Vec<R>> {
         assert!(limit > 0, "batch limit must be positive");
         loop {
@@ -163,20 +222,26 @@ impl<R: SessionRequest> BlockingQueue<R> {
             }
             let mut requests = Vec::with_capacity(limit);
             let mut canceled = Vec::new();
+            let mut released: Option<OwnedSemaphorePermit> = None;
             while requests.len() < limit {
-                let Some(request) = state.requests.pop_front() else {
+                let Some((request, permit)) = state.requests.pop_front() else {
                     break;
                 };
                 let request = request.take("dequeued");
+                // Return one batch of capacity to avoid a semaphore lock/wakeup for every input.
+                match &mut released {
+                    Some(released) => released.merge(permit),
+                    None => released = Some(permit),
+                }
                 if request.cancelled() {
                     canceled.push(request);
                 } else {
                     requests.push(request);
                 }
             }
-            self.changed.notify_all();
-            self.available.notify_waiters();
             drop(state);
+            // Assigned waiters can publish immediately; never wake them while holding the queue lock.
+            drop(released);
             for request in requests.iter_mut().chain(&mut canceled) {
                 request.end_queue();
             }
@@ -186,18 +251,18 @@ impl<R: SessionRequest> BlockingQueue<R> {
         }
     }
 
-    /// Wakes producers and consumers and releases queued replies after failure or shutdown.
+    /// Closes admission and wakes all consumers while releasing queued inputs outside the lock.
     pub fn close(&self) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.closed = true;
+        self.capacity.close();
         let discarded = std::mem::take(&mut state.requests);
         self.changed.notify_all();
-        self.available.notify_waiters();
         drop(state);
-        for request in discarded {
+        for (request, _permit) in discarded {
             let mut request = request.take("discarded");
             request.end_queue();
         }
@@ -207,6 +272,73 @@ impl<R: SessionRequest> BlockingQueue<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Already-cancelled inputs must not wait behind a full queue or consume newly freed capacity.
+    #[tokio::test]
+    async fn cancelled_input_does_not_wait_for_capacity() {
+        let queue = BlockingQueue::new("cancel-test", 1);
+        queue.push(Request(0, false)).expect("fill queue");
+        let mut canceled = Box::pin(queue.push_async(Request(1, true)));
+        assert!(matches!(
+            futures_util::poll!(&mut canceled),
+            Poll::Ready(Ok(()))
+        ));
+        queue
+            .push_batch(vec![Request(2, true)])
+            .expect("cancelled sync packet");
+        assert_eq!(
+            queue
+                .pop(1)
+                .expect("original item")
+                .first()
+                .expect("request")
+                .0,
+            0
+        );
+    }
+
+    /// Released capacity belongs to the oldest waiter even before that producer is polled again.
+    #[tokio::test]
+    async fn admission_does_not_allow_new_producers_to_barge() {
+        let queue = BlockingQueue::new("fair-test", 1);
+        queue.push(Request(0, false)).expect("fill queue");
+        let mut first = Box::pin(queue.push_async(Request(1, false)));
+        assert!(futures_util::poll!(&mut first).is_pending());
+        assert_eq!(
+            queue
+                .pop(1)
+                .expect("first item")
+                .first()
+                .expect("request")
+                .0,
+            0
+        );
+        let mut later = Box::pin(queue.push_async(Request(2, false)));
+        assert!(
+            futures_util::poll!(&mut later).is_pending(),
+            "new producer stole the waiting producer's slot"
+        );
+        first.await.expect("oldest producer admitted");
+        assert_eq!(
+            queue
+                .pop(1)
+                .expect("oldest item")
+                .first()
+                .expect("request")
+                .0,
+            1
+        );
+        later.await.expect("later producer admitted");
+        assert_eq!(
+            queue
+                .pop(1)
+                .expect("later item")
+                .first()
+                .expect("request")
+                .0,
+            2
+        );
+    }
 
     /// Queue behavior is tested without depending on any model's image, tensor, or error types.
     struct Request(usize, bool);

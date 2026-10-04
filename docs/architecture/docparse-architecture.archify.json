@@ -1145,7 +1145,7 @@
       "title": "服务端部署单元",
       "items": [
         "HTTP API 只与共享状态交互：上传先落盘共享存储再写作业行，结果与原文也由 API 流式返回",
-        "worker 主动轮询 PostgreSQL 领取租约（不是数据库推送），并回写心跳、进度与终态",
+        "worker 在 render.workers + render.queue_size 的文档预算内轮询 PostgreSQL 领取租约，许可覆盖预扫描、完整结果、发布、终态与真实后台清理；上传独立持久化排队",
         "连接数据库时自动应用待执行迁移，迁移失败在加载模型前终止启动",
         "DeletedResults 清理器在每个角色都运行：扫描删除标记 → 删除存储对象 → 回写清理完成",
         "role=api 不加载模型，role=worker 不提供业务路由，两者共享同一数据库与目录"
@@ -1159,10 +1159,10 @@
         "归属说明：构建裁剪并调用引擎接口的是 docparse-core（page.rs / table.rs / formula.rs），队列本身在模型模块内部（SessionManager / FormulaPool）",
         "Render Queue 计未完成页面：渲染前 reserve 槽位，结果收集与清理结束后才释放",
         "Formula Queue 由 [[formula.engine]] 列表里的多个引擎实现同时消费：PpFormulaNetEngine / TexoEngine / HttpEngine 各是一组，worker_size 决定每组消费者数",
-        "容量不含活跃批次与等待生产者；batch_size ≤ 32 时只取已就绪输入",
+        "队列容量统计待消费输入；裁剪和每次 TSR 预测的张量分别申请预算，取消后真实资源释放才归还；提供者的固定容量同时决定许可与窗口，batch_size ≤ 32 时只取已就绪输入",
         "7 条模型队列容量与 render.workers、render.queue_size 必须显式配置",
         "队列按需启用：OCR 默认关闭（policy=missing_regions/always 才跑）、TSR 仅对表格块且 mode≠rules_only、公式仅在 inline/display 开启时",
-        "水位背压是可选策略（formula.backpressure.enabled），且只暂停内联公式识别"
+        "公式只受用户显式 inline/display 开关控制，过载时等待资源准入，不按水位跳过识别"
       ]
     },
     {

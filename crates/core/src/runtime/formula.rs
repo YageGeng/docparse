@@ -110,53 +110,56 @@ impl FormulaResult {
         let engine = engine.ok_or_else(|| {
             FormulaError::Invalid("formula recognizer unavailable".into())
         })?;
-        let _admission = if let Some(admission) = engine.admission() {
+        let resources = if let Some(admission) = engine.admission() {
             let queued = timings.start(TimingStage::FormulaQueue);
-            let permit = admission.acquire_owned().await.map_err(|error| {
-                FormulaError::Invalid(format!(
-                    "formula admission closed: {error}"
-                ))
-            })?;
+            let resources =
+                docparse_common::ResourceLease::acquire(admission).await?;
             drop(queued);
-            Some(permit)
+            Some(resources)
         } else {
             None
         };
-        let initial = self.crop_bbox.unwrap_or(self.bbox);
-        let formula = self.clone();
-        let page = Arc::clone(page);
-        let rendered = Arc::clone(rendered);
-        // Cropping owns admission through completion even when its async waiter times out.
-        let (image, bbox, _admission) = docparse_common::run_cpu(move || {
-            let mut crop = FormulaCrop {
-                bbox: initial,
-                rendered: &rendered,
-                expansion: formula.background_limits(&page),
-            };
-            let image =
-                PageImage::try_from(&mut crop).inspect_err(|error| {
-                    tracing::warn!(
-                        "formula {} crop failed: {}",
-                        formula.id.as_str(),
-                        error
-                    );
-                })?;
-            Ok::<_, FormulaError>((image, crop.bbox, _admission))
-        })
-        .await
-        .map_err(|error| FormulaError::Invalid(error.to_string()))??;
-        if bbox != initial {
-            tracing::debug!(
-                "aligned inline formula {} crop from {:?} to background boundaries {:?}",
-                self.id.as_str(),
-                initial,
-                bbox
-            );
-        }
-        self.crop_bbox = (bbox != self.bbox).then_some(bbox);
-        engine
-            .recognize_named(vec![Arc::new(image)], timings.clone())
+        // CPU-created pixels and queued requests inherit the permit; cancelling this waiter cannot recycle it.
+        let work = async {
+            let initial = self.crop_bbox.unwrap_or(self.bbox);
+            let formula = self.clone();
+            let page = Arc::clone(page);
+            let rendered = Arc::clone(rendered);
+            let (image, bbox) = docparse_common::run_cpu(move || {
+                let mut crop = FormulaCrop {
+                    bbox: initial,
+                    rendered: &rendered,
+                    expansion: formula.background_limits(&page),
+                };
+                let image =
+                    PageImage::try_from(&mut crop).inspect_err(|error| {
+                        tracing::warn!(
+                            "formula {} crop failed: {}",
+                            formula.id.as_str(),
+                            error
+                        );
+                    })?;
+                Ok::<_, FormulaError>((image, crop.bbox))
+            })
             .await
+            .map_err(|error| FormulaError::Invalid(error.to_string()))??;
+            if bbox != initial {
+                tracing::debug!(
+                    "aligned inline formula {} crop from {:?} to background boundaries {:?}",
+                    self.id.as_str(),
+                    initial,
+                    bbox
+                );
+            }
+            self.crop_bbox = (bbox != self.bbox).then_some(bbox);
+            engine
+                .recognize_named(vec![Arc::new(image)], timings.clone())
+                .await
+        };
+        match resources {
+            Some(resources) => resources.scope(work).await,
+            None => work.await,
+        }
     }
 
     /// Stops raster expansion before unrelated text rows, including rows already grazing the detector edge.
@@ -678,36 +681,18 @@ impl FormulaResult {
 }
 
 impl PageResult {
-    /// Applies user switches and queue-pressure shedding once, before allocating any crop pixels.
+    /// Applies explicit user switches before allocating crop pixels.
     fn filter_formula_detections(
         &mut self,
         detections: &mut Vec<LayoutDetection>,
-        engine: Option<&dyn FormulaEngine>,
         config: &FormulaConfig,
     ) {
-        // Decide once per page before admission or crop allocation; existing queued work is never canceled.
-        let pressure = engine.and_then(FormulaEngine::pressure);
-        let paused = config.inline_enabled
-            && config.backpressure.enabled
-            && pressure.as_ref().is_some_and(|pressure| pressure.paused());
-        if paused {
-            let skipped = detections
-                .iter()
-                .filter(|d| d.label == LayoutLabel::InlineFormula)
-                .count();
-            if skipped > 0 {
-                if let Some(pressure) = &pressure {
-                    pressure.record_skipped(skipped);
-                }
-                self.warnings.push(PageWarning { code: "InlineFormulaBackpressure".into(), stage: "formula".into(),
-                    message: format!("Skipped {skipped} inline formula regions due to sustained queue pressure; source text is retained") });
-            }
-        }
-        if paused || !config.inline_enabled || !config.display_enabled {
+        // Only explicit user switches omit recognition; overload is handled by bounded admission.
+        if !config.inline_enabled || !config.display_enabled {
             let count = detections.len();
             // Keep native formula geometry for text assembly, but skip disabled crops and model calls entirely.
             detections.retain(|detection| match detection.label {
-                LayoutLabel::InlineFormula => config.inline_enabled && !paused,
+                LayoutLabel::InlineFormula => config.inline_enabled,
                 LayoutLabel::DisplayFormula => config.display_enabled,
                 _ => false,
             });
@@ -734,7 +719,6 @@ impl PageResult {
         let (page, mut formulas) = docparse_common::run_cpu(move || {
             self.filter_formula_detections(
                 &mut detections,
-                preparing_engine.as_deref(),
                 preparing_config.formula(),
             );
             let formulas: Vec<_> = detections

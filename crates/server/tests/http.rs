@@ -86,6 +86,171 @@ fn get(path: &str) -> Request<Body> {
     Request::get(path).body(Body::empty()).expect("GET")
 }
 
+/// Completed parsing must retain document capacity through publication while uploads remain independent.
+#[tokio::test]
+#[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+async fn pending_completion_bounds_claims_without_blocking_uploads() {
+    use docparse_database::{
+        entities::parse_jobs,
+        seaorm::{EntityTrait, QuerySelect, TransactionTrait},
+    };
+    let db = connection::connect(
+        &DatabaseConfig::builder()
+            .url(
+                std::env::var("DOCPARSE_TEST_DATABASE_URL")
+                    .expect("database URL"),
+            )
+            .build(),
+    )
+    .await
+    .expect("database");
+    let directory = tempfile::tempdir().expect("storage");
+    let storage = SharedStorage::new(directory.path()).await.expect("storage");
+    let shutdown = CancellationToken::new();
+    let app = router(
+        AppState::new(
+            db.clone(),
+            storage.clone(),
+            HttpOptions::builder().build(),
+            shutdown.clone(),
+        )
+        .expect("state"),
+        &docparse_config::ServerConfig::default(),
+    )
+    .expect("router");
+    let gate = Arc::new(Semaphore::new(0));
+    let (entered, mut events) = mpsc::unbounded_channel();
+    let mut raw = RawConfig::default();
+    raw.render.workers = 1;
+    raw.render.queue_size = 1;
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::RulesOnly;
+    let config = Arc::new(ValidatedConfig::try_from(raw).expect("config"));
+    let parser = DocParser::builder()
+        .config(Arc::clone(&config))
+        .layout_engine(Arc::new(GatedLayout {
+            gate: Arc::clone(&gate),
+            entered,
+        }))
+        .build()
+        .await
+        .expect("parser");
+    let worker = Worker::builder()
+        .db(db.clone())
+        .storage(storage.clone())
+        .parser(Arc::new(parser))
+        .output(config.output().clone())
+        .options(WorkerOptions::builder().build())
+        .build();
+    let pool = docparse_server::pdfium_pool::PdfiumPool::start(
+        1,
+        std::path::Path::new(env!("CARGO_BIN_EXE_docparse-server")),
+    )
+    .await
+    .expect("pool");
+    let pdf =
+        include_bytes!("../../core/tests/fixtures/pdf/extraction_metadata.pdf");
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let third = Uuid::new_v4();
+    assert_eq!(
+        json(app.clone(), upload(first, pdf)).await.0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        json(app.clone(), upload(second, pdf)).await.0,
+        StatusCode::ACCEPTED
+    );
+    let task = tokio::spawn(worker.run(Arc::clone(&pool), shutdown.clone()));
+    tokio::time::timeout(Duration::from_secs(10), events.recv())
+        .await
+        .expect("layout entered")
+        .expect("event");
+    let second_job = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let job = Jobs::find_by_id(&db, second)
+                .await
+                .expect("second job")
+                .expect("job");
+            if job.status == docparse_database::JobStatus::Running {
+                break job;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("overlapping second document");
+    let first_job = Jobs::find_by_id(&db, first)
+        .await
+        .expect("first job")
+        .expect("job");
+    let transaction = db.begin().await.expect("completion lock");
+    // Hold only completion rows; claiming unrelated queued rows and upload insertion remain available.
+    for id in [first, second] {
+        parse_jobs::Entity::find_by_id(id)
+            .lock_exclusive()
+            .one(&transaction)
+            .await
+            .expect("lock job")
+            .expect("job");
+    }
+    assert_eq!(
+        json(app.clone(), upload(third, pdf)).await.0,
+        StatusCode::ACCEPTED
+    );
+    gate.add_permits(100);
+    let published = tokio::time::timeout(Duration::from_secs(5), async {
+        for job in [first_job, second_job] {
+            let path = storage
+                .path(&format!(
+                    "{}-{}.json",
+                    job.id,
+                    job.lease_token.expect("attempt token")
+                ))
+                .expect("result path");
+            while !path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    })
+    .await;
+    let overclaimed = tokio::time::timeout(Duration::from_millis(200), async {
+        loop {
+            if Jobs::find_by_id(&db, third)
+                .await
+                .expect("third job")
+                .expect("job")
+                .status
+                != docparse_database::JobStatus::Queued
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    let upload_status = json(app, upload(Uuid::new_v4(), pdf)).await.0;
+    shutdown.cancel();
+    transaction.rollback().await.expect("release completion");
+    let drained = tokio::time::timeout(Duration::from_secs(10), task).await;
+    pool.shutdown().await.expect("pool cleanup");
+    published.expect("both results published before completion");
+    drained
+        .expect("worker drain")
+        .expect("worker join")
+        .expect("worker");
+    assert!(
+        overclaimed.is_err(),
+        "publication backlog did not stop new claims"
+    );
+    assert_eq!(
+        upload_status,
+        StatusCode::ACCEPTED,
+        "document capacity must not gate uploads"
+    );
+}
+
 /// Database claims follow idle PDFium processes, even while an earlier document occupies the full render queue.
 #[tokio::test]
 #[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]

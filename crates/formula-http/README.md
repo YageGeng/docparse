@@ -72,12 +72,12 @@ how concurrent uploads form GPU batches.
 Backpressure propagates through pending HTTP responses: when the remote Texo queue
 is full, the upload waits for a free slot while retaining its HTTP worker. Once
 all workers are occupied, the shared formula queue fills and its bounded sender
-awaits capacity. The parser's pre-crop permits remain held until recognition ends,
-so further crops wait before allocating pixels. This uses asynchronous suspension;
+awaits capacity. The parser's pre-crop permits remain held until the last real crop
+owner exits, including canceled native/encoding work, so further crops wait before
+allocating pixels. This uses asynchronous suspension;
 no retry loop or extra client-side request queue is needed. Existing request
-deadlines and cancellation still terminate waiting work. The optional
-`formula.backpressure` policy separately controls inline-formula shedding and is
-disabled by default; bounded queue waiting works independently of that policy.
+deadlines and cancellation still terminate waiting work. Enabled inline and display
+formulas use the same bounded admission without load-dependent shedding.
 
 Results preserve caller order. Deadlines include queue admission, PNG encoding,
 and the HTTP round trip. Cancellation releases HTTP slots; an already-running

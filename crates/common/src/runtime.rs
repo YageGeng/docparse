@@ -94,6 +94,7 @@ mod platform {
                 value: Some((
                     operation,
                     crate::PageLease::current(),
+                    crate::ResourceLease::current(),
                     self.tasks.token(),
                 )),
                 pool: self,
@@ -106,11 +107,19 @@ mod platform {
                 .expect("CPU admission stays open");
             self.runtime
                 .spawn_blocking(move || {
-                    let (operation, lease, token) = pending.into_inner();
+                    let (operation, lease, resources, token) =
+                        pending.into_inner();
                     let _caller =
                         caller.as_ref().map(tokio::runtime::Handle::enter);
                     let output =
                         tracing::dispatcher::with_default(&dispatcher, || {
+                            // Restore model/document admission before constructors capture resource ownership.
+                            let operation = || match &resources {
+                                Some(resources) => {
+                                    resources.scope_sync(operation)
+                                }
+                                None => operation(),
+                            };
                             if let Some(lease) = &lease {
                                 return lease
                                     .scope_sync(|| span.in_scope(operation));
@@ -119,14 +128,15 @@ mod platform {
                         });
                     CpuOwned {
                         // Tuple fields drop in order, retaining admission and drain ownership through cleanup.
-                        value: Some((output, lease, permit, token)),
+                        value: Some((output, lease, resources, permit, token)),
                         pool: self,
                         caller: caller.clone(),
                     }
                 })
                 .await
                 .map(|output| {
-                    let (output, _lease, _permit, _token) = output.into_inner();
+                    let (output, _lease, _resources, _permit, _token) =
+                        output.into_inner();
                     output
                 })
                 .map_err(TaskError::from)
@@ -217,7 +227,7 @@ mod platform {
         pool.run(operation).await
     }
 
-    /// Keeps finite blocking initialization attached to the caller's shutdown boundary.
+    /// Keeps finite blocking work and abandoned outputs attached to the caller's resource lifetime.
     pub async fn run_blocking<F, T>(operation: F) -> Result<T, TaskError>
     where
         F: FnOnce() -> T + Send + 'static,
@@ -225,12 +235,20 @@ mod platform {
     {
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+        let resources = crate::ResourceLease::current();
         tokio::task::spawn_blocking(move || {
-            tracing::dispatcher::with_default(&dispatcher, || {
-                span.in_scope(operation)
-            })
+            let output = tracing::dispatcher::with_default(&dispatcher, || {
+                // Publication cleanup keeps its document admission even if supervision is cancelled.
+                span.in_scope(|| match &resources {
+                    Some(resources) => resources.scope_sync(operation),
+                    None => operation(),
+                })
+            });
+            // Uncollected outputs must be destroyed before their resource permits are returned.
+            (output, resources)
         })
         .await
+        .map(|(output, _resources)| output)
         .map_err(TaskError::from)
     }
 

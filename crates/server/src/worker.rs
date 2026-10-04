@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, instrument::WithSubscriber};
 use typed_builder::TypedBuilder;
 
-/// Durable attempt supervision remains independent of PDFium-owned document admission.
+/// Durable attempt supervision covers parsing, result publication, and cancellation cleanup.
 #[derive(Clone, TypedBuilder)]
 pub struct WorkerOptions {
     #[builder(default = 60)]
@@ -55,6 +55,9 @@ pub struct Worker {
     pub db: DatabaseConnection,
     pub storage: SharedStorage,
     pub parser: Arc<DocParser>,
+    // Reserve before claiming so parsed results and publication never become an unbounded second queue.
+    #[builder(default = Arc::new(tokio::sync::Semaphore::new(parser.document_capacity())))]
+    admission: Arc<tokio::sync::Semaphore>,
     pub output: OutputConfig,
     pub options: WorkerOptions,
 }
@@ -108,10 +111,16 @@ impl Worker {
                 result = tasks.join_next(), if !tasks.is_empty() => {
                     if let Some(Err(_)) = result { tracing::error!("worker task panicked or was cancelled; its lease will expire"); }
                 }
-                reservation = async { tokio::time::sleep_until(next_poll).await; pool.reserve().await }, if !shutdown.is_cancelled() => {
-                    let reservation = reservation.map_err(|error| docparse_core::DocParseError::Runtime { source: Box::new(error) })
+                reservation = async {
+                    tokio::time::sleep_until(next_poll).await;
+                    let resources = docparse_common::ResourceLease::acquire(Arc::clone(&self.admission)).await
+                        .context(CpuTaskSnafu { stage: "worker-admit-document", code: ApiCode::COMMON_INTERNAL_ERROR })?;
+                    let reservation = pool.reserve().await.map_err(|error| docparse_core::DocParseError::Runtime { source: Box::new(error) })
                         .context(ParseSnafu { stage: "worker-reserve-pdfium", code: ApiCode::service_unavailable(5031003) })?;
-                    // Only idle PDFium ownership permits a claim; unfinished post-render tasks never gate this branch.
+                    Ok::<_, crate::error::ApiError>((resources, reservation))
+                }, if !shutdown.is_cancelled() => {
+                    let (resources, reservation) = reservation?;
+                    // Both the complete document lifetime and an idle renderer must have capacity before claiming.
                     let claimed = tokio::select! {
                         _ = shutdown.cancelled() => { drop(reservation); continue; }
                         result = Jobs::claim(&self.db, self.options.lease_seconds, self.options.max_attempts) => result,
@@ -119,7 +128,7 @@ impl Worker {
                     match claimed {
                         Ok(Some(lease)) => {
                             let worker = self.clone();
-                            tasks.spawn(async move { worker.process_with_reservation(lease, Some(reservation)).await }.with_current_subscriber());
+                            tasks.spawn(async move { worker.process_with_reservation(lease, Some(reservation), Some(resources)).await }.with_current_subscriber());
                             next_poll = tokio::time::Instant::now();
                         }
                         outcome => {
@@ -138,7 +147,8 @@ impl Worker {
 
     /// Parses one fenced attempt while renewing its lease through PDF, inference, and result publication.
     pub async fn process(&self, lease: Lease) -> ApiResult<()> {
-        self.process_with_reservation(lease, None).await
+        // Explicitly claimed attempts must renew their lease even while waiting for document admission.
+        self.process_with_reservation(lease, None, None).await
     }
 
     /// Supervises a claimed job using its reserved process, while retaining the direct attempt API for callers.
@@ -146,6 +156,7 @@ impl Worker {
         &self,
         lease: Lease,
         reservation: Option<crate::pdfium_pool::PdfiumReservation>,
+        mut resources: Option<docparse_common::ResourceLease>,
     ) -> ApiResult<()> {
         // Recreate a local span from durable fields for every attempt; no process-local Span ID is persisted.
         let span = tracing::info_span!(target: crate::logging::CONTEXT_TARGET, parent: None, "pdf_parse",
@@ -161,76 +172,27 @@ impl Worker {
             let observer = ProgressObserver(sender);
             // Own the parse in a separate task: synchronous document work must not stop the lease watchdog.
             // JoinSet aborts this owned task if supervision is cancelled or loses its database lease.
-            let parser = Arc::clone(&self.parser);
-            let storage = self.storage.clone();
-            let output = self.output.clone();
+            let worker = self.clone();
             let input_hash = lease.job.input_hash.clone();
             let token = lease.token;
             let name = format!("{id}-{token}.json");
             // The attempt prefix ties assets to deletion/recovery without trusting paths from stored JSON.
-            let figure_assets = parser.figure_assets(storage.root().to_path_buf(), format!("{name}.figures-"));
+            let figure_assets = self.parser.figure_assets(self.storage.root().to_path_buf(), format!("{name}.figures-"));
             let assets = Arc::clone(&figure_assets);
             let mut operation = JoinSet::new();
+            let operation_resources = resources.clone();
+            let admission = Arc::clone(&self.admission);
             operation.spawn(async move {
-                let input = storage.path(&format!("{input_hash}.pdf"))?;
-                let options = ParseOptions::builder().observer(Some(&observer)).figure_assets(Some(Arc::clone(&assets))).build();
-                let parsing = docparse_common::telemetry::Timer::new("docparse_job_parse_seconds", "scope", "local");
-                let result = if let Some(reservation) = reservation {
-                    observer.on_progress(ParseProgress::Opening);
-                    let session = reservation.open(docparse_core::PdfInput::Path(input), docparse_common::timing::Timings::default()).await
-                        .map_err(|error| docparse_core::DocParseError::Runtime { source: Box::new(error) })
-                        .context(ParseSnafu { stage: "document-open-pdf", code: ApiCode::unprocessable_entity(4221001) })?;
-                    parser.parse_session_with_options(session, options).await
-                } else {
-                    parser.parse_path_with_options(input, options).await
-                }.context(ParseSnafu { stage: "document-parse-pdf", code: ApiCode::unprocessable_entity(4221001) })?;
-                drop(parsing);
-                metrics::counter!("docparse_pages_parsed_total").increment(result.pages.len() as u64);
-                let mut temporary = storage.temporary().await?;
-                let publishing = docparse_common::telemetry::Timer::new("docparse_job_publish_seconds", "scope", "local");
-                let writer_assets = Arc::clone(&assets);
-                let writer_span = tracing::Span::current();
-                let writer_dispatcher = tracing::dispatcher::get_default(Clone::clone);
-                let (temporary, publishing) =
-                    docparse_common::run_cpu(move || tracing::dispatcher::with_default(&writer_dispatcher, || writer_span.in_scope(|| -> ApiResult<_> {
-                        // Cancelled waiters cannot remove files while their real writer is still publishing.
-                        let _assets = writer_assets;
-                        // Move timing ownership into the real writer; cancelling its async waiter cannot stop it.
-                        let publishing = publishing;
-                        // Stream the standard API envelope around the configured canonical view, avoiding a second document-sized buffer.
-                        {
-                            // Coalesce serializer writes into 256 KiB chunks to reduce shared-filesystem
-                            // calls while keeping per-attempt buffering bounded.
-                            let mut writer =
-                                std::io::BufWriter::with_capacity(
-                                    256 * 1024, temporary.as_file_mut(),
-                                );
-                            // Borrow the configured document view and let the shared response type own the wire format.
-                            ApiResponse::data(
-                                docparse_core::JsonRenderer::view_with_config(
-                                    &result, &output,
-                                ),
-                            )
-                            .write(&mut writer)
-                            .context(SerializeSnafu {
-                                stage: "result-serialize-json",
-                                code: ApiCode::COMMON_INTERNAL_ERROR,
-                            })?;
-                            writer.flush().context(StorageSnafu {
-                                stage: "result-flush-file",
-                                code: ApiCode::service_unavailable(5031003),
-                            })?;
-                        }
-                        Ok((temporary, publishing))
-                    })))
-                    .await
-                    .context(CpuTaskSnafu {
-                        stage: "result-write-task",
-                        code: ApiCode::COMMON_INTERNAL_ERROR,
-                    })??;
-                // Each attempt gets a different object: a stale blocking writer cannot replace its successor's result.
-                storage.publish((temporary, publishing), &name).await?;
-                Ok::<_, crate::error::ApiError>(name)
+                let operation_resources = match operation_resources {
+                    Some(resources) => resources,
+                    None => docparse_common::ResourceLease::acquire(admission).await
+                        .context(CpuTaskSnafu { stage: "worker-admit-document", code: ApiCode::COMMON_INTERNAL_ERROR })?,
+                };
+                let outcome = operation_resources.scope(worker.parse_and_publish(
+                    &input_hash, &name, reservation, assets, &observer,
+                )).await.map(|()| name);
+                // Transfer ownership back to supervision before the durable completion acknowledgement.
+                Ok::<_, crate::error::ApiError>((outcome, operation_resources))
             }.in_current_span().with_current_subscriber());
             let deadline = tokio::time::sleep(self.options.job_timeout);
             tokio::pin!(deadline);
@@ -248,7 +210,8 @@ impl Worker {
                                 stage: "document-parse-task",
                                 code: ApiCode::COMMON_INTERNAL_ERROR,
                             })
-                            .and_then(|result| result),
+                            .and_then(|result| result)
+                            .and_then(|(outcome, owner)| { resources = Some(owner); outcome }),
                         None => RequestSnafu {
                             stage: "document-join-task",
                             code: ApiCode::COMMON_INTERNAL_ERROR,
@@ -290,57 +253,13 @@ impl Worker {
             };
             // Abort waiting parser tasks before publishing timeout/failure; already-running native calls retain their buffers safely.
             operation.abort_all();
-            // Keep success and failure disjoint through the database completion boundary.
-            let outcome = outcome.map_err(|error| {
-                tracing::warn!(
-                    "job {} attempt {} failed: {}",
-                    id,
-                    lease.job.attempts,
-                    error
-                );
-                error.message()
-            });
-            // Read the final callback even when parsing finishes before the next periodic progress flush.
-            let final_progress = progress
-                .borrow_and_update()
-                .clone()
-                .map(serde_json::to_value)
-                .transpose()
-                .context(SerializeSnafu {
-                    stage: "task-serialize-final-progress",
-                    code: ApiCode::COMMON_INTERNAL_ERROR,
-                })?;
-            // Capture one monotonic measurement for both persistence and logs, before the atomic completion update.
-            let duration = started.elapsed();
-            // Cancellation while awaiting the database can hide a successful commit; recovery owns that uncertainty.
-            if outcome.is_ok() { figure_assets.keep(false); }
-            let completion = Jobs::finish(
-                &self.db,
-                &lease,
-                outcome.as_deref().map_err(String::as_str),
-                final_progress,
-                duration,
-            )
-            .await;
-            // Preserve ambiguous acknowledgements for recovery; never remove possibly committed assets.
-            if outcome.is_ok() && matches!(&completion, Ok(true)) {
-                let assets = Arc::clone(&figure_assets);
-                docparse_common::run_blocking(move || assets.keep(true)).await
-                    .context(CpuTaskSnafu { stage: "result-keep-figures", code: ApiCode::COMMON_INTERNAL_ERROR })?;
+            let final_progress = progress.borrow_and_update().clone();
+            let completion = self.finish_attempt(&lease, outcome, final_progress, started.elapsed(), figure_assets);
+            match resources {
+                Some(owner) => owner.scope(completion).await,
+                None => completion.await,
             }
-            let accepted = completion.with_context(|source| DatabaseSnafu {
-                stage: "task-finish-attempt",
-                code: ApiCode::from(&*source),
-            })?;
-            tracing::info!(
-                "finished job {} attempt {} in {} ms; accepted={}, succeeded={}",
-                id,
-                lease.job.attempts,
-                duration.as_millis(),
-                accepted,
-                outcome.is_ok()
-            );
-            Ok(())
+
         }
         .inspect_err(|error| {
             tracing::warn!("worker attempt stopped; lease recovery remains available: {}", error);
@@ -348,6 +267,165 @@ impl Worker {
         .instrument(span)
         .with_current_subscriber()
         .await
+    }
+
+    /// Parses one admitted attempt and publishes its canonical result before durable completion is acknowledged.
+    async fn parse_and_publish(
+        &self,
+        input_hash: &str,
+        name: &str,
+        reservation: Option<crate::pdfium_pool::PdfiumReservation>,
+        assets: Arc<docparse_core::FigureAssets>,
+        observer: &ProgressObserver,
+    ) -> ApiResult<()> {
+        let input = self.storage.path(&format!("{input_hash}.pdf"))?;
+        let options = ParseOptions::builder()
+            .observer(Some(observer))
+            .figure_assets(Some(Arc::clone(&assets)))
+            .build();
+        let parsing = docparse_common::telemetry::Timer::new(
+            "docparse_job_parse_seconds",
+            "scope",
+            "local",
+        );
+        let result = if let Some(reservation) = reservation {
+            observer.on_progress(ParseProgress::Opening);
+            let session = reservation
+                .open(
+                    docparse_core::PdfInput::Path(input),
+                    docparse_common::timing::Timings::default(),
+                )
+                .await
+                .map_err(|error| docparse_core::DocParseError::Runtime {
+                    source: Box::new(error),
+                })
+                .context(ParseSnafu {
+                    stage: "document-open-pdf",
+                    code: ApiCode::unprocessable_entity(4221001),
+                })?;
+            self.parser
+                .parse_session_with_options(session, options)
+                .await
+        } else {
+            self.parser.parse_path_with_options(input, options).await
+        }
+        .context(ParseSnafu {
+            stage: "document-parse-pdf",
+            code: ApiCode::unprocessable_entity(4221001),
+        })?;
+        drop(parsing);
+        metrics::counter!("docparse_pages_parsed_total")
+            .increment(result.pages.len() as u64);
+        self.publish_result(result, name, assets).await
+    }
+
+    /// Streams serialization on the CPU pool and retains publication ownership through atomic storage writes.
+    async fn publish_result(
+        &self,
+        result: docparse_core::DocumentResult,
+        name: &str,
+        assets: Arc<docparse_core::FigureAssets>,
+    ) -> ApiResult<()> {
+        let mut temporary = self.storage.temporary().await?;
+        let publishing = docparse_common::telemetry::Timer::new(
+            "docparse_job_publish_seconds",
+            "scope",
+            "local",
+        );
+        let output = self.output.clone();
+        // run_cpu restores tracing and admission once; the writer only owns serialization and its resources.
+        let publication = docparse_common::run_cpu(move || -> ApiResult<_> {
+            let _assets = assets;
+            let mut writer = std::io::BufWriter::with_capacity(
+                256 * 1024,
+                temporary.as_file_mut(),
+            );
+            ApiResponse::data(docparse_core::JsonRenderer::view_with_config(
+                &result, &output,
+            ))
+            .write(&mut writer)
+            .context(SerializeSnafu {
+                stage: "result-serialize-json",
+                code: ApiCode::COMMON_INTERNAL_ERROR,
+            })?;
+            writer.flush().context(StorageSnafu {
+                stage: "result-flush-file",
+                code: ApiCode::service_unavailable(5031003),
+            })?;
+            drop(writer);
+            Ok((temporary, publishing))
+        })
+        .await
+        .context(CpuTaskSnafu {
+            stage: "result-write-task",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        })??;
+        // Attempt-specific names keep abandoned writers from replacing a successor's result.
+        self.storage.publish(publication, name).await
+    }
+
+    /// Fences final state in PostgreSQL and commits figure ownership only after the result is accepted.
+    async fn finish_attempt(
+        &self,
+        lease: &Lease,
+        outcome: ApiResult<String>,
+        progress: Option<ParseProgress>,
+        duration: Duration,
+        figure_assets: Arc<docparse_core::FigureAssets>,
+    ) -> ApiResult<()> {
+        let id = lease.job.id;
+        // Keep success and failure disjoint through the database completion boundary.
+        let outcome = outcome.map_err(|error| {
+            tracing::warn!(
+                "job {} attempt {} failed: {}",
+                id,
+                lease.job.attempts,
+                error
+            );
+            error.message()
+        });
+        let final_progress = progress
+            .map(serde_json::to_value)
+            .transpose()
+            .context(SerializeSnafu {
+                stage: "task-serialize-final-progress",
+                code: ApiCode::COMMON_INTERNAL_ERROR,
+            })?;
+        // Cancellation while awaiting the database can hide a successful commit; recovery owns that uncertainty.
+        if outcome.is_ok() {
+            figure_assets.keep(false);
+        }
+        let completion = Jobs::finish(
+            &self.db,
+            lease,
+            outcome.as_deref().map_err(String::as_str),
+            final_progress,
+            duration,
+        )
+        .await;
+        // Preserve ambiguous acknowledgements for recovery; never remove possibly committed assets.
+        if outcome.is_ok() && matches!(&completion, Ok(true)) {
+            let assets = Arc::clone(&figure_assets);
+            docparse_common::run_blocking(move || assets.keep(true))
+                .await
+                .context(CpuTaskSnafu {
+                    stage: "result-keep-figures",
+                    code: ApiCode::COMMON_INTERNAL_ERROR,
+                })?;
+        }
+        let accepted = completion.with_context(|source| DatabaseSnafu {
+            stage: "task-finish-attempt",
+            code: ApiCode::from(&*source),
+        })?;
+        tracing::info!(
+            "finished job {} attempt {} in {} ms; accepted={}, succeeded={}",
+            id,
+            lease.job.attempts,
+            duration.as_millis(),
+            accepted,
+            outcome.is_ok()
+        );
+        Ok(())
     }
 }
 

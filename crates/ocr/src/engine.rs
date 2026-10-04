@@ -46,6 +46,11 @@ struct RecognitionPostprocess {
 #[builder(builder_method(vis = "pub(crate)"))]
 pub struct PaddleOcrEngine {
     config: OcrConfig,
+    // Shared preparation budgets bound allocations across every page using this engine.
+    #[builder(default = Arc::new(tokio::sync::Semaphore::new(config.detection.session_size * config.detection.batch_size + config.detection.queue_size)))]
+    detection_admission: Arc<tokio::sync::Semaphore>,
+    #[builder(default = Arc::new(tokio::sync::Semaphore::new(config.line_capacity())))]
+    line_admission: Arc<tokio::sync::Semaphore>,
     detector: Arc<SessionRunner>,
     recognizer: Arc<SessionRunner>,
     #[builder(default)]
@@ -167,31 +172,47 @@ impl PaddleOcrEngine {
         regions: Vec<Bbox>,
         timings: Timings,
     ) -> Result<Vec<RecognizedText>, OcrError> {
-        // Pages submit independently; each model queue applies backpressure and its sessions own inference concurrency.
-        let source = Arc::clone(&image);
-        let limit = self.config.detection_max_side;
-        let timer = timings.clone();
-        let input = docparse_common::run_cpu(move || {
-            let _timer = timer.start(TimingStage::OcrDetectionPreprocess);
-            ImageTensor::detection(&source, limit)
-        })
-        .await??;
-        let ModelOutput::Detection(map) = Arc::clone(&self.detector)
-            .run(input, timings.clone())
-            .await?
-        else {
-            return Err(OcrError::InvalidData(
-                "unexpected detector output".into(),
-            ));
+        let quads = {
+            let queued = timings.start(TimingStage::OcrQueue);
+            let resources = docparse_common::ResourceLease::acquire(
+                Arc::clone(&self.detection_admission),
+            )
+            .await?;
+            drop(queued);
+            resources
+                .scope(async {
+                    // Pages submit independently; each model queue applies backpressure and its sessions own inference concurrency.
+                    let source = Arc::clone(&image);
+                    let limit = self.config.detection_max_side;
+                    let timer = timings.clone();
+                    let input = docparse_common::run_cpu(move || {
+                        let _timer =
+                            timer.start(TimingStage::OcrDetectionPreprocess);
+                        ImageTensor::detection(&source, limit)
+                    })
+                    .await??;
+                    let ModelOutput::Detection(map) =
+                        Arc::clone(&self.detector)
+                            .run(input, timings.clone())
+                            .await?
+                    else {
+                        return Err(OcrError::InvalidData(
+                            "unexpected detector output".into(),
+                        ));
+                    };
+                    let options = self.config.clone();
+                    let timer = timings.clone();
+                    let (width, height) = (image.width(), image.height());
+                    let quads = docparse_common::run_cpu(move || {
+                        let _timer =
+                            timer.start(TimingStage::OcrDetectionPostprocess);
+                        map.decode(width, height, &options)
+                    })
+                    .await??;
+                    Ok::<_, OcrError>(quads)
+                })
+                .await?
         };
-        let options = self.config.clone();
-        let timer = timings.clone();
-        let (width, height) = (image.width(), image.height());
-        let quads = docparse_common::run_cpu(move || {
-            let _timer = timer.start(TimingStage::OcrDetectionPostprocess);
-            map.decode(width, height, &options)
-        })
-        .await??;
         let detected = quads.len();
         let recognized =
             self.recognize_lines(image, quads, regions, timings).await?;
@@ -212,17 +233,8 @@ impl PaddleOcrEngine {
         timings: Timings,
     ) -> Result<Vec<RecognizedText>, OcrError> {
         let max_width = self.config.recognition_max_width;
-        // Only active models contribute to admission; disabled orientation must not retain extra crops or tensors.
-        let window = (self.config.recognition.session_size
-            * self.config.recognition.batch_size
-            + self.config.recognition.queue_size)
-            .max(if self.classifier.is_some() {
-                self.config.orientation.session_size
-                    * self.config.orientation.batch_size
-                    + self.config.orientation.queue_size
-            } else {
-                0
-            });
+        // The per-page future window and global crop budget use the same enabled-model capacity.
+        let window = self.config.line_capacity();
         let mut selected = Vec::new();
         for (index, quad) in quads.into_iter().enumerate() {
             let bbox = Polygon::from(quad.clone()).bbox();
@@ -248,97 +260,113 @@ impl PaddleOcrEngine {
                 let source = Arc::clone(&image);
                 let timings = timings.clone();
                 async move {
-                    let timer = timings.clone();
-                    let classify = self.classifier.is_some();
-                    let (mut crop, orientation) =
-                        docparse_common::run_cpu(move || {
-                            let _timer = timer
-                                .start(TimingStage::OcrRecognitionPreprocess);
-                            let crop = TextCrop::try_from((&*source, &quad))?;
-                            let input = classify
-                                .then(|| {
-                                    ImageTensor::orientation(&[&crop.image])
-                                })
-                                .transpose()?;
-                            Ok::<_, OcrError>((crop, input))
-                        })
-                        .await??;
-                    let mut rotated = false;
-                    if let (Some(classifier), Some(input)) =
-                        (&self.classifier, orientation)
-                    {
-                        let ModelOutput::Orientation(mut results) =
-                            Arc::clone(classifier)
-                                .run(input, timings.clone())
-                                .await?
-                        else {
-                            return Err(OcrError::InvalidData(
-                                "unexpected classifier output".into(),
-                            ));
-                        };
-                        let result = results.pop().ok_or_else(|| {
-                            OcrError::InvalidData(
-                                "missing orientation result".into(),
-                            )
-                        })?;
-                        rotated = result.rotated
-                            && result.confidence
-                                >= self.config.orientation_threshold;
-                    }
-                    let timer = timings.clone();
-                    let (quad, input) = docparse_common::run_cpu(move || {
-                        let _timer =
-                            timer.start(TimingStage::OcrRecognitionPreprocess);
-                        if rotated {
-                            crop.rotate_half_turn()?;
-                        }
-                        let input = ImageTensor::recognition(
-                            &[&crop.image],
-                            max_width,
-                        )?;
-                        Ok::<_, OcrError>((crop.quad, input))
-                    })
-                    .await??;
-                    let ModelOutput::Recognition(mut results) =
-                        Arc::clone(&self.recognizer)
-                            .run(input, timings.clone())
-                            .await?
-                    else {
-                        return Err(OcrError::InvalidData(
-                            "unexpected recognizer output".into(),
-                        ));
-                    };
-                    let steps = results.pop().ok_or_else(|| {
-                        OcrError::InvalidData(
-                            "missing recognition result".into(),
-                        )
-                    })?;
-                    let _timer = timings.start(TimingStage::OcrDecode);
-                    let (text, confidence) = self.dictionary.decode(steps)?;
-                    let text = text.trim().to_owned();
-                    Ok::<_, OcrError>(
-                        (!text.is_empty()
-                            && confidence >= self.config.recognition_threshold)
-                            .then_some((
-                                index,
-                                RecognizedText {
-                                    text,
-                                    confidence,
-                                    quad,
-                                },
-                            )),
-                    )
+                    Ok::<_, OcrError>((
+                        index,
+                        self.recognize_line(source, quad, timings).await?,
+                    ))
                 }
             }))
             .buffer_unordered(window);
         tokio::pin!(requests);
         let mut recognized = Vec::new();
         while let Some(result) = requests.next().await {
-            if let Some(line) = result? {
-                recognized.push(line);
+            let (index, line) = result?;
+            if let Some(line) = line {
+                recognized.push((index, line));
             }
         }
         recognized.sort_unstable_by_key(|(index, _)| *index);
         Ok(recognized.into_iter().map(|(_, line)| line).collect())
+    }
+
+    /// Owns one line's admission through crop, optional orientation, recognition, and decoding.
+    async fn recognize_line(
+        &self,
+        source: Arc<PageImage>,
+        quad: Quad,
+        timings: Timings,
+    ) -> Result<Option<RecognizedText>, OcrError> {
+        let max_width = self.config.recognition_max_width;
+        let queued = timings.start(TimingStage::OcrQueue);
+        let resources = docparse_common::ResourceLease::acquire(Arc::clone(
+            &self.line_admission,
+        ))
+        .await?;
+        drop(queued);
+        resources
+            .scope(async move {
+                let timer = timings.clone();
+                let classify = self.classifier.is_some();
+                let (mut crop, orientation) =
+                    docparse_common::run_cpu(move || {
+                        let _timer =
+                            timer.start(TimingStage::OcrRecognitionPreprocess);
+                        let crop = TextCrop::try_from((&*source, &quad))?;
+                        let input = classify
+                            .then(|| ImageTensor::orientation(&[&crop.image]))
+                            .transpose()?;
+                        Ok::<_, OcrError>((crop, input))
+                    })
+                    .await??;
+                let mut rotated = false;
+                if let (Some(classifier), Some(input)) =
+                    (&self.classifier, orientation)
+                {
+                    let ModelOutput::Orientation(mut results) =
+                        Arc::clone(classifier)
+                            .run(input, timings.clone())
+                            .await?
+                    else {
+                        return Err(OcrError::InvalidData(
+                            "unexpected classifier output".into(),
+                        ));
+                    };
+                    let result = results.pop().ok_or_else(|| {
+                        OcrError::InvalidData(
+                            "missing orientation result".into(),
+                        )
+                    })?;
+                    rotated = result.rotated
+                        && result.confidence
+                            >= self.config.orientation_threshold;
+                }
+                let timer = timings.clone();
+                let (quad, input) = docparse_common::run_cpu(move || {
+                    let _timer =
+                        timer.start(TimingStage::OcrRecognitionPreprocess);
+                    if rotated {
+                        crop.rotate_half_turn()?;
+                    }
+                    let input =
+                        ImageTensor::recognition(&[&crop.image], max_width)?;
+                    Ok::<_, OcrError>((crop.quad, input))
+                })
+                .await??;
+                let ModelOutput::Recognition(mut results) =
+                    Arc::clone(&self.recognizer)
+                        .run(input, timings.clone())
+                        .await?
+                else {
+                    return Err(OcrError::InvalidData(
+                        "unexpected recognizer output".into(),
+                    ));
+                };
+                let steps = results.pop().ok_or_else(|| {
+                    OcrError::InvalidData("missing recognition result".into())
+                })?;
+                let _timer = timings.start(TimingStage::OcrDecode);
+                let (text, confidence) = self.dictionary.decode(steps)?;
+                let text = text.trim().to_owned();
+                Ok::<_, OcrError>(
+                    (!text.is_empty()
+                        && confidence >= self.config.recognition_threshold)
+                        .then_some(RecognizedText {
+                            text,
+                            confidence,
+                            quad,
+                        }),
+                )
+            })
+            .await
     }
 }

@@ -4,6 +4,10 @@ use super::{
 };
 
 impl TableStructureEngine for docparse_tsr::SlanetPlusEngine {
+    /// Shares the pixel budget and scheduling capacity; predictions separately reserve tensor capacity.
+    fn admission(&self) -> Option<docparse_common::ResourceBudget> {
+        Some(docparse_tsr::SlanetPlusEngine::admission(self))
+    }
     /// Identifies the pinned model and selected backend in table evidence and logs.
     fn name(&self) -> &str {
         docparse_tsr::PaddleTsrEngine::name(self)

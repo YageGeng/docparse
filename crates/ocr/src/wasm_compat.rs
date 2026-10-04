@@ -14,14 +14,17 @@ use tokio::sync::oneshot;
 /// One input remains owned until execution/readback ends, even after its original caller cancels.
 #[derive(typed_builder::TypedBuilder)]
 struct Request {
-    // Keep the render delivery occupied until actual inference and input cleanup finish.
-    #[builder(default = docparse_common::PageLease::current())]
-    _page_lease: Option<docparse_common::PageLease>,
     input: ImageTensor,
     response: oneshot::Sender<Result<ModelOutput, OcrError>>,
     context: TimingContext,
     #[builder(default)]
     queued: Option<StageTimer>,
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
+    // Actual model requests retain resource admission after their async caller is cancelled.
+    #[builder(default = docparse_common::ResourceLease::current())]
+    _resources: Option<docparse_common::ResourceLease>,
 }
 
 impl Request {

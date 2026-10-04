@@ -388,21 +388,38 @@ async fn tatr_recognizes_table_with_shared_cell_detection() {
     let raster = image::open(root.join("crates/tsr/tests/fixtures/table.png"))
         .expect("fixture")
         .into_rgb8();
-    let crop = Arc::new(
-        PageImage::try_from(
-            PageImageInput::builder()
-                .width(raster.width())
-                .height(raster.height())
-                .pixel_format(PixelFormat::Rgb8)
-                .data(Arc::from(raster.into_raw()))
-                .build(),
+    // Fill the crop budget: prediction must use independent tensor admission rather than reacquiring pixels.
+    let admission = engine.admission();
+    let mut retained = Vec::new();
+    for _ in 1..admission.capacity() {
+        retained.push(admission.reserve().await.expect("retained crop"));
+    }
+    let resources = admission.reserve().await.expect("crop admission");
+    let crop = resources.scope_sync(|| {
+        Arc::new(
+            PageImage::try_from(
+                PageImageInput::builder()
+                    .width(raster.width())
+                    .height(raster.height())
+                    .pixel_format(PixelFormat::Rgb8)
+                    .data(Arc::from(raster.into_raw()))
+                    .build(),
+            )
+            .expect("crop"),
         )
-        .expect("crop"),
-    );
-    let (first, second) = tokio::join!(
-        engine.predict(Arc::clone(&crop), Timings::default()),
-        engine.predict(crop, Timings::default())
-    );
+    });
+    // Pin both real pipelines once rather than moving a large future into the deadline wrapper.
+    let (first, second) = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        Box::pin(async {
+            tokio::join!(
+                engine.predict(Arc::clone(&crop), Timings::default()),
+                engine.predict(crop, Timings::default())
+            )
+        }),
+    )
+    .await
+    .expect("pre-admitted tables must use independent tensor capacity");
     for prediction in [first, second] {
         let prediction = prediction.expect("TATR prediction");
         assert_eq!(
@@ -458,4 +475,79 @@ async fn tatr_recognizes_table_with_shared_cell_detection() {
             body_tokens(expected)
         );
     }
+}
+
+/// Reusing one admitted image cannot authorize additional independent tensor allocations.
+#[tokio::test]
+#[ignore = "requires exported TATR artifacts"]
+async fn shared_image_keeps_preprocessing_bounded() {
+    use docparse_common::timing::TimingStage;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut raw =
+        docparse_config::ConfigLoader::new(root.join("docparse.toml"))
+            .load_raw()
+            .expect("config");
+    raw.tsr.model = docparse_config::TsrModel::Tatr;
+    raw.tsr.model_path = root.join("models/tatr-v1.1-all/inference.onnx");
+    raw.tsr.model_config_path = root.join("models/tatr-v1.1-all/inference.yml");
+    raw.tsr.model_manifest_path =
+        root.join("models/tatr-v1.1-all/model-manifest.json");
+    raw.tsr.session_size = 1;
+    raw.tsr.batch_size = 1;
+    raw.tsr.queue_size = 1;
+    raw.tsr.cell_detection = None;
+    let engine = Arc::new(
+        SlanetPlusEngine::from_config(Arc::new(
+            docparse_config::ValidatedConfig::try_from(raw).expect("config"),
+        ))
+        .await
+        .expect("model"),
+    );
+    let admission = engine.admission();
+    let lease = admission.reserve().await.expect("one crop");
+    let raster = image::open(root.join("crates/tsr/tests/fixtures/table.png"))
+        .expect("fixture")
+        .into_rgb8();
+    let crop = Arc::new(lease.scope_sync(|| {
+        PageImage::try_from(
+            PageImageInput::builder()
+                .width(raster.width())
+                .height(raster.height())
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(raster.into_raw()))
+                .build(),
+        )
+        .expect("crop")
+    }));
+    let (timings, mut events) = Timings::channel();
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let engine = Arc::clone(&engine);
+        let crop = Arc::clone(&crop);
+        let timings = timings.clone();
+        tasks.spawn(async move { engine.predict(crop, timings).await });
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Some(result) = tasks.join_next().await {
+            result.expect("join").expect("prediction");
+        }
+    })
+    .await
+    .expect("predictions complete");
+    let mut prepared = 0;
+    let mut observed_inference = false;
+    while let Ok(timing) = events.try_recv() {
+        if timing.stage == TimingStage::TsrPreprocess {
+            prepared += 1;
+        }
+        if timing.stage == TimingStage::TsrInference {
+            observed_inference = true;
+            break;
+        }
+    }
+    assert!(observed_inference, "real inference must be observed");
+    assert!(
+        (1..=2).contains(&prepared),
+        "shared image bypassed capacity 2: {prepared} tensors before first inference"
+    );
 }

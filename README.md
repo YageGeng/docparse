@@ -91,11 +91,13 @@ CoreML and Metal sessions request `FastPrediction` specialization for their reus
 
 ### Render backpressure
 
-`render.workers` is the PDFium process-pool size and the sole admission boundary
-for loading PDFs. An idle worker claims a new PDF even while earlier documents
-are still inferring or publishing results. No separate full-document job limit
-remains. `render.queue_size` is required and counts unfinished pages across all
-documents sharing a parser, including rendering, model work and cleanup.
+`render.workers` is the PDFium process-pool size. Server workers reserve a shared
+document slot before claiming a PDF and retain it through parsing, result publication,
+durable completion, and actual background cleanup. The document budget is
+`render.workers + render.queue_size`, allowing rendering and inference to overlap
+while bounding results waiting for publication. Uploads still persist and queue
+independently of this budget. `render.queue_size` is required and counts unfinished
+pages across all documents sharing a parser, including rendering, model work and cleanup.
 
 Capacity is reserved before rendering and returned only after result collection
 and the last actual resource owner releases it. Receiving a raster does not free
@@ -144,15 +146,27 @@ OCR drains individual requests across pages, then merges equal tensor shapes to
 preserve existing padding and output semantics. Detection defaults to batch 1;
 recognition and orientation default to 16. Layout and table model batches default
 to 1. OCR has no separate page concurrency gate; each model uses its session
-count and queue backpressure. Table requests
-have no separate `table_jobs` limit and use provider-owned queue backpressure.
+count and queue backpressure. Expensive preprocessing is admitted before allocation:
+layout and OCR detection use `session_size * batch_size + queue_size`; OCR line
+crops share the maximum capacity of recognition and enabled orientation. Table
+crops share the maximum capacity of structure and enabled cell detection, with a
+bounded per-page future window. Custom table providers expose a `ResourceBudget`
+whose fixed capacity controls that window and whose permits govern allocation;
+otherwise all parser clones share the configured table budget. TSR reserves a
+separate tensor slot on every prediction, including repeated use of one crop.
+The retired `table_jobs` setting remains unsupported.
 Replace old `sessions` keys with `session_size`, and replace `ocr.batch_size` with
 the three model-specific settings above. HTTP formula recognition remains an external service
 configured with `formula.engine[].worker_size` and the same required `formula.queue_size`.
 All seven model queue capacities, plus render.workers and render.queue_size, must be supplied by configuration files or overrides;
 missing values and zero are rejected, including for disabled model sections.
 Rust callers can explicitly choose `RawConfig::default()` as a complete preset.
-Queue capacity excludes active batches and payloads retained by waiting producers.
+Queue capacity counts pending inputs, separately from active batches. Preparation
+budgets cover allocated inputs, including blocked senders and canceled work still
+owned by a CPU worker or model. Native producers reserve FIFO capacity without
+broadcast wakeups; partial ready batches still run immediately. Whole-document
+results remain proportional to document size; the server budget bounds their
+concurrency, not an arbitrary PDF's total byte size.
 
 Native engines survive their construction Tokio runtime. Browser consumers share
 the same queues but retain the global ORT inference/readback guard, so extra
@@ -449,42 +463,3 @@ All consumers use the selected execution backend and share the bounded
 ceiling. CUDA builds run formula consumers on CUDA; CPU-only builds use CPU.
 Each list entry owns its worker and batch settings. Separate CPU/GPU consumer counts
 and per-CPU-consumer thread settings are no longer accepted.
-
-### Adaptive inline formula admission
-
-```toml
-[formula.backpressure]
-enabled = false
-high_watermark = 0.85
-low_watermark = 0.50
-pause_after_secs = 30
-resume_after_secs = 30
-```
-
-This opt-in policy pauses new inline formula recognition after queue occupancy
-stays strictly above the high watermark for the configured duration. Recovery
-requires occupancy strictly below the low watermark for its own duration. A
-broken condition resets its timer; equality does not satisfy either condition.
-Watermarks must satisfy `0 <= low < high <= 1`, and durations must be positive.
-A high watermark of 1 never triggers and a low watermark of 0 never recovers.
-
-Each engine's real pending queue tracks transitions on enqueue/dequeue/discard.
-A cancellable deadline updates state and telemetry even without new traffic;
-page admission also checks monotonic time in case scheduling delayed the timer.
-Only enabled policies create a timer owner. Native timer ownership survives the
-constructing Tokio runtime; browser timers stay Worker-local. Interval changes
-cancel/rearm the wait, and queue destruction cancels it before clearing state.
-No telemetry recorder or periodic polling is required. One decision covers the page's formula
-stage before crop allocation; existing queued work and display formulas continue.
-Skipped regions retain their existing PDF/OCR source content. Missing source text
-cannot be reconstructed by this policy. Pages carry an `InlineFormulaBackpressure`
-warning with the skipped count, even when diagnostics are disabled. The policy
-never changes `inline_enabled`; explicitly disabled inline recognition stays off.
-
-The metrics endpoint exposes `docparse_formula_inline_paused` (number of paused
-engine instances per queue), `docparse_formula_inline_transitions_total` (action
-`pause`/`resume`), and `docparse_formula_inline_skipped_total`. This is a temporary
-quality reduction, not deferred recognition: restoring load does not revisit
-skipped pages. PP, Texo, and HTTP share the same queue-backed policy;
-custom recognizers without a pressure handle opt out. Browser configuration uses
-`config.formula.backpressure` with the same fields and defaults.

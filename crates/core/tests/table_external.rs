@@ -622,6 +622,8 @@ impl TableStructureEngine for RefillingTableEngine {
 #[tokio::test]
 async fn slow_first_table_does_not_block_ready_work() {
     let mut raw = RawConfig::default();
+    // This overlap regression requires three admitted tables: one active plus two queued.
+    raw.tsr.queue_size = 2;
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
@@ -699,6 +701,8 @@ impl TableStructureEngine for ConcurrentEngine {
 #[tokio::test]
 async fn same_page_tables_reach_provider_together() {
     let mut raw = RawConfig::default();
+    // This overlap regression requires three admitted tables: one active plus two queued.
+    raw.tsr.queue_size = 2;
     raw.formula.inline_enabled = false;
     raw.formula.display_enabled = false;
     raw.tsr.mode = TableMode::RulesOnly;
@@ -771,6 +775,107 @@ async fn external_requests_complete_across_pages() {
             .all(|block| block.table.as_ref().is_some_and(|table| table
                 .source
                 == TableStructureSource::ExternalTsr))
+    );
+}
+
+/// All pages share crop admission, and retained provider inputs continue consuming it after cancellation.
+#[tokio::test]
+async fn table_crop_budget_is_shared_across_pages() {
+    let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::TsrOnly;
+    raw.tsr.session_size = 1;
+    raw.tsr.batch_size = 1;
+    raw.tsr.queue_size = 1;
+    raw.tsr.cell_detection = None;
+    let engine = Arc::new(Engine::new(Reply::Pending(Arc::new(
+        AtomicBool::new(false),
+    ))));
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(WholeTable))
+        .table_engine(Arc::clone(&engine) as Arc<dyn TableStructureEngine>)
+        .build()
+        .await
+        .expect("parser");
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..3 {
+        let parser = parser.clone();
+        tasks
+            .spawn(async move { parser.parse_page(Fixture::page(true)).await });
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while engine.calls.load(Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("two admitted tables");
+    let excess =
+        tokio::time::timeout(std::time::Duration::from_millis(50), async {
+            while engine.calls.load(Ordering::SeqCst) < 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    docparse_common::drain_cpu().await.expect("CPU cleanup");
+    let retained = engine.requests.lock().expect("requests").len();
+    engine.requests.lock().expect("requests").clear();
+    assert!(
+        excess.is_err(),
+        "a third crop bypassed the shared two-table budget"
+    );
+    assert_eq!(retained, 2);
+}
+
+/// Waiting for pre-crop capacity consumes the table deadline and preserves source text on timeout.
+#[tokio::test]
+async fn table_admission_wait_respects_the_request_deadline() {
+    let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::TsrOnly;
+    raw.tsr.session_size = 1;
+    raw.tsr.batch_size = 1;
+    raw.tsr.queue_size = 1;
+    raw.tsr.cell_detection = None;
+    raw.tsr.timeout_ms = 20;
+    let engine = Arc::new(Engine::new(Reply::Grid(1, 1)));
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(WholeTable))
+        .table_engine(Arc::clone(&engine) as Arc<dyn TableStructureEngine>)
+        .build()
+        .await
+        .expect("parser");
+    // The test provider retains both completed inputs, as a native owner could during cleanup.
+    for _ in 0..2 {
+        parser
+            .parse_page(Fixture::page(true))
+            .await
+            .expect("admitted page");
+    }
+    let waiting = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        parser.parse_page(Fixture::page(true)),
+    )
+    .await;
+    engine.requests.lock().expect("requests").clear();
+    let page = waiting
+        .expect("admission deadline must finish the page")
+        .expect("source fallback");
+    assert!(
+        page.warnings
+            .iter()
+            .any(|warning| warning.code == "TableExternalTimeout")
+    );
+    assert_eq!(
+        engine.calls.load(Ordering::SeqCst),
+        2,
+        "timed-out crops must never reach inference"
     );
 }
 
@@ -1041,4 +1146,66 @@ async fn parser_table_defaults_and_explicit_rule_override_select_the_provider()
                 .all(|t| t.source != TableStructureSource::ExternalTsr)
         );
     }
+}
+
+/// Exposes a provider-owned limit independently of the parser's unused built-in model settings.
+struct ProviderBudget {
+    inner: ConcurrentEngine,
+    capacity: docparse_common::ResourceBudget,
+}
+impl TableStructureEngine for ProviderBudget {
+    /// Identifies the provider-specific scheduling probe.
+    fn name(&self) -> &str {
+        "provider-budget"
+    }
+    /// Shares the actual three-slot provider budget with the parser.
+    fn admission(&self) -> Option<docparse_common::ResourceBudget> {
+        Some(self.capacity.clone())
+    }
+    /// Records real parser concurrency over the provider's admitted crops.
+    fn recognize(
+        &self,
+        request: TsrTableRequest,
+    ) -> docparse_core::WasmBoxedFuture<
+        '_,
+        Result<TsrTableInput, TableStructureError>,
+    > {
+        self.inner.recognize(request)
+    }
+}
+
+/// A custom provider's capacity is authoritative for both crop admission and its ready window.
+#[tokio::test]
+async fn provider_capacity_controls_the_ready_window() {
+    let mut raw = RawConfig::default();
+    raw.formula.inline_enabled = false;
+    raw.formula.display_enabled = false;
+    raw.tsr.mode = TableMode::RulesOnly;
+    let parser = DocParser::builder()
+        .config(Arc::new(ValidatedConfig::try_from(raw).expect("config")))
+        .layout_engine(Arc::new(RefillTables))
+        .build()
+        .await
+        .expect("parser");
+    let engine = Arc::new(ProviderBudget {
+        inner: ConcurrentEngine::default(),
+        capacity: docparse_common::ResourceBudget::new(3),
+    });
+    parser
+        .parse_page_with_options(
+            Fixture::page(true),
+            ParseOptions::builder()
+                .table(TableOptions::builder().mode(TableMode::TsrOnly).build())
+                .table_engine(Some(
+                    Arc::clone(&engine) as Arc<dyn TableStructureEngine>
+                ))
+                .build(),
+        )
+        .await
+        .expect("page");
+    assert_eq!(
+        engine.inner.maximum.load(Ordering::SeqCst),
+        3,
+        "unused built-in settings capped the provider"
+    );
 }

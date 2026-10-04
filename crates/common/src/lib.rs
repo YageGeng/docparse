@@ -1,5 +1,7 @@
 //! Shared scheduling and platform mechanics, independent of model and document types.
+mod lease;
 pub mod queue;
+pub use lease::{ResourceBudget, ResourceLease};
 mod runtime;
 mod task_set;
 pub use task_set::{TaskSet, spawn};

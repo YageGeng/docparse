@@ -4,7 +4,8 @@ extern crate self as wasm_bindgen_futures;
 use std::{future::Future, time::Duration};
 use tokio::{sync::oneshot, task::LocalSet};
 
-pub use docparse_common::{PageLease, TaskError};
+// Included browser scheduling code captures the same public resource context as the native crate.
+pub use docparse_common::{PageLease, ResourceLease, TaskError};
 /// Mirrors the browser's non-Send boxed future while exercising its production scheduler on LocalSet.
 pub type WasmBoxedFuture<'a, T> =
     std::pin::Pin<Box<dyn Future<Output = T> + 'a>>;

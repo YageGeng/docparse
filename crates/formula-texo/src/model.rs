@@ -67,7 +67,7 @@ impl TexoEngine {
         artifacts: TexoArtifacts,
     ) -> Result<Self, FormulaError> {
         // Standalone engines own the same producer pool used by mixed configurations.
-        let mut pool = docparse_formula::queue::FormulaPool::new(&config)?;
+        let mut pool = docparse_formula::queue::FormulaPool::new(&config);
         let workers =
             Self::spawn_from_artifacts(config, artifacts, pool.receiver())
                 .await?;
@@ -115,11 +115,6 @@ impl TexoEngine {
 }
 
 impl FormulaEngine for TexoEngine {
-    /// Shares adaptive admission across all documents using this engine.
-    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        self.pool.pressure()
-    }
-
     /// Reports the selected model and registered execution provider.
     fn name(&self) -> &str {
         &self.name

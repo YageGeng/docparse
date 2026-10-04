@@ -97,8 +97,6 @@ export interface WebParseConfig {
     engine?: FormulaEngineOptions[];
     /** Defaults to true; false skips inline recognition while retaining display formulas and native text. */
     inline_enabled?: boolean;
-    /** Optional adaptive inline shedding; display formulas continue normally. */
-    backpressure?: { enabled?: boolean; high_watermark?: number; low_watermark?: number; pause_after_secs?: number; resume_after_secs?: number };
     /** Defaults to true; false skips display recognition independently of inline formulas. */
     display_enabled?: boolean;
     timeout_ms?: number;
@@ -167,7 +165,7 @@ export interface PageImageResult { pageNumber: number; width: number; height: nu
 /** Structural recovery is scoped to regions already labeled table by layout. */
 export type TableMode = "rules_only" | "fallback" | "tsr_only";
 /** Per-parse table overrides; omitted options inherit the parser's configured TSR policy. */
-/** Table requests use provider-owned queue backpressure and a deadline that includes queue waiting. */
+/** Table crops share bounded admission before allocation; the deadline includes admission and queue waiting. */
 export interface TableOptions { mode?: TableMode; timeout_ms?: number }
 /** An affine map from crop pixels to canonical viewport points. */
 export interface AffineTransform { a: number; b: number; c: number; d: number; e: number; f: number }

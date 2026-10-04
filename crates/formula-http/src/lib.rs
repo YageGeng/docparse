@@ -68,7 +68,7 @@ impl TryFrom<&ValidatedConfig> for HttpEngine {
     /// Creates a standalone HTTP consumer group using its configured worker limit.
     fn try_from(config: &ValidatedConfig) -> Result<Self, Self::Error> {
         // Standalone callers retain a real producer; shared initialization returns workers only.
-        let mut pool = FormulaPool::new(config)?;
+        let mut pool = FormulaPool::new(config);
         let workers = Self::spawn(config, pool.receiver())?;
         pool.add(workers);
         Ok(Self { pool })
@@ -127,11 +127,20 @@ impl HttpEngine {
                                 let _batch = metrics.batch();
                                 let image = Arc::clone(&request.image);
                                 let timings = request.context.timings.clone();
+                                let resources = request.resource_lease();
+                                // Encoding/decoding can outlive this HTTP waiter; their real CPU owners retain admission.
+                                let work = async {
+                                    let work = transport
+                                        .recognize_image(image, timings);
+                                    match resources {
+                                        Some(resources) => {
+                                            resources.scope(work).await
+                                        }
+                                        None => work.await,
+                                    }
+                                };
                                 let result = match select(
-                                    Box::pin(
-                                        transport
-                                            .recognize_image(image, timings),
-                                    ),
+                                    Box::pin(work),
                                     Box::pin(request.closed()),
                                 )
                                 .await
@@ -301,11 +310,6 @@ impl HttpService {
 }
 
 impl FormulaEngine for HttpEngine {
-    /// Applies the same pending-queue policy to HTTP formula consumers.
-    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        self.pool.pressure()
-    }
-
     /// Identifies the external model independently of the local ONNX provider.
     fn name(&self) -> &str {
         "formula-http"

@@ -51,6 +51,7 @@ enum PreprocessStep {
 pub struct PpDocLayoutV3Engine {
     pool: Arc<LayoutSessionPool>,
     score_threshold: f64,
+    admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl PpDocLayoutV3Engine {
@@ -81,6 +82,10 @@ impl PpDocLayoutV3Engine {
         Ok(Self {
             pool,
             score_threshold: config.layout().score_threshold,
+            admission: Arc::new(tokio::sync::Semaphore::new(
+                config.layout().session_size * config.layout().batch_size
+                    + config.layout().queue_size,
+            )),
         })
     }
 }
@@ -105,13 +110,24 @@ impl LayoutEngine for PpDocLayoutV3Engine {
         Result<Vec<LayoutDetection>, LayoutError>,
     > {
         Box::pin(async move {
+            // Reserve before building tensors; native requests retain this permit after caller cancellation.
+            let queued = request
+                .timings
+                .for_page(request.page_number)
+                .start(TimingStage::LayoutQueue);
+            let resources = docparse_common::ResourceLease::acquire(
+                Arc::clone(&self.admission),
+            )
+            .await
+            .map_err(|source| LayoutError::TaskJoin { source })?;
+            drop(queued);
+            resources.scope(async move {
             let page_number = request.page_number;
             let timings = request.timings.for_page(page_number);
             let image = Arc::clone(&request.image);
             let transform = request.transform;
             let threshold = self.score_threshold;
-            // CPU preprocessing happens before queue admission so later pages can prepare
-            // tensors while the current page is using the GPU.
+            // The active-plus-pending budget preserves CPU/GPU overlap without unaccounted waiting tensors.
             let preprocess_transform = transform.clone();
             let preprocessing = timings.clone();
             let inputs = crate::wasm_compat::run_cpu(move || {
@@ -145,6 +161,7 @@ impl LayoutEngine for PpDocLayoutV3Engine {
                 detections.len()
             );
             Ok(detections)
+            }).await
         })
     }
 }

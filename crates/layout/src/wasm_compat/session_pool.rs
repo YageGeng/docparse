@@ -12,14 +12,17 @@ use tokio::sync::oneshot;
 /// A page retains its result channel and original attribution across shared physical batches.
 #[derive(typed_builder::TypedBuilder)]
 struct Request {
-    // Keep the render delivery occupied until actual inference and input cleanup finish.
-    #[builder(default = docparse_common::PageLease::current())]
-    _page_lease: Option<docparse_common::PageLease>,
     inputs: ModelInputs,
     response: oneshot::Sender<Result<ModelOutputs, LayoutError>>,
     context: TimingContext,
     #[builder(default)]
     queued: Option<StageTimer>,
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
+    // Actual model requests retain resource admission after their async caller is cancelled.
+    #[builder(default = docparse_common::ResourceLease::current())]
+    _resources: Option<docparse_common::ResourceLease>,
 }
 
 impl Request {

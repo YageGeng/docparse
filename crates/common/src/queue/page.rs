@@ -23,11 +23,14 @@ struct PageCapacity {
 }
 
 /// Derived crops share one occupied slot and one final completion observation.
-#[derive(Debug)]
+#[derive(Debug, typed_builder::TypedBuilder)]
 struct PagePermit {
     _permit: OwnedSemaphorePermit,
     _owner: Arc<PageCapacity>,
     started: Instant,
+    // An unfinished page also retains its enclosing document admission after cancellation.
+    #[builder(default = crate::ResourceLease::current())]
+    _resources: Option<crate::ResourceLease>,
 }
 impl Drop for PagePermit {
     /// Records the complete resource lifetime rather than only rendering or receiving the page.
@@ -74,11 +77,13 @@ impl PageQueue {
         };
         admission.finish("admitted");
         metrics::gauge!("docparse_page_slots_used").increment(1.0);
-        Ok(PageLease(Arc::new(PagePermit {
-            _permit: permit,
-            _owner: Arc::clone(&self.0),
-            started: Instant::now(),
-        })))
+        Ok(PageLease(Arc::new(
+            PagePermit::builder()
+                ._permit(permit)
+                ._owner(Arc::clone(&self.0))
+                .started(Instant::now())
+                .build(),
+        )))
     }
 }
 

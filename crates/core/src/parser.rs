@@ -122,6 +122,7 @@ impl ParseOptions<'_> {
         &self,
         config: &ValidatedConfig,
         default_engine: Option<&Arc<dyn crate::TableStructureEngine>>,
+        admission: &docparse_common::ResourceBudget,
     ) -> Result<Arc<crate::runtime::TableRuntime>, crate::TableStructureError>
     {
         let options = self
@@ -133,7 +134,7 @@ impl ParseOptions<'_> {
             .as_ref()
             .or(default_engine)
             .map(Arc::clone);
-        crate::runtime::TableRuntime::shared(options, engine)
+        crate::runtime::TableRuntime::shared(options, engine, admission.clone())
     }
 }
 
@@ -146,6 +147,9 @@ pub struct DocParser {
     #[builder(default = Arc::new(crate::LocalPdfiumProvider))]
     pdfium_provider: Arc<dyn crate::PdfiumProvider>,
     config: Arc<ValidatedConfig>,
+    /// Custom table providers share one pre-crop budget across parser clones and per-call overrides.
+    #[builder(default = docparse_common::ResourceBudget::new(config.tsr().admission_capacity()))]
+    table_admission: docparse_common::ResourceBudget,
     layout_engine: Arc<dyn LayoutEngine>,
     #[builder(default)]
     ocr_engine: Option<Arc<dyn OcrEngine>>,
@@ -365,7 +369,7 @@ impl DocParserBuilder {
         {
             return Ok(None);
         }
-        let mut pool = docparse_formula::queue::FormulaPool::new(config)?;
+        let mut pool = docparse_formula::queue::FormulaPool::new(config);
         let mut artifacts = artifacts.into_iter();
         for (index, selection) in config.formula().engine.iter().enumerate() {
             let selected = Arc::new(
@@ -557,6 +561,12 @@ impl DocParser {
         Arc::new(crate::FigureAssets::new(config, prefix))
     }
 
+    /// Allows render workers and unfinished pages to overlap while bounding whole-document publication.
+    pub fn document_capacity(&self) -> usize {
+        // ponytail: bounds document count; use byte-weighted admission if document-size variance requires it.
+        self.config.render().workers + self.config.render().queue_size
+    }
+
     /// Creates an empty dependency-injection builder.
     pub fn builder() -> DocParserBuilder {
         DocParserBuilder::default()
@@ -668,8 +678,11 @@ impl DocParser {
         } else {
             docparse_common::timing::Timings::default()
         };
-        let tables =
-            options.table_runtime(&self.config, self.table_engine.as_ref())?;
+        let tables = options.table_runtime(
+            &self.config,
+            self.table_engine.as_ref(),
+            &self.table_admission,
+        )?;
         let config = Arc::clone(&self.config);
         let model_revision = self.layout_engine.model_revision().to_owned();
         // Standalone pages need the same CPU isolation as document-wide context construction.
@@ -793,6 +806,7 @@ impl DocParser {
             .render_queue(self.render_queue.clone())
             .pdfium_provider(Arc::clone(&self.pdfium_provider))
             .config(Arc::clone(&self.config))
+            .table_admission(self.table_admission.clone())
             .layout_engine(Arc::clone(&self.layout_engine))
             .ocr_engine(self.ocr_engine.as_ref().map(Arc::clone))
             .table_engine(self.table_engine.as_ref().map(Arc::clone))

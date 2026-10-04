@@ -176,7 +176,6 @@ impl Drop for Inference {
 pub(crate) struct QueueMetrics {
     pub name: &'static str,
     pub capacity: usize,
-    pub pressure: Arc<crate::queue::QueuePressure>,
     _capacity: Activity,
 }
 impl QueueMetrics {
@@ -189,9 +188,6 @@ impl QueueMetrics {
             Self::builder()
                 .name(name)
                 .capacity(capacity)
-                .pressure(Arc::new(crate::queue::QueuePressure::new(
-                    name, capacity,
-                )))
                 ._capacity(Activity::new(
                     "docparse_queue_capacity_items",
                     ("queue", name),
@@ -219,7 +215,6 @@ pub(crate) struct Queued<R> {
 impl<R> Queued<R> {
     /// Records admission at the point where the queue actually takes ownership.
     pub fn new(value: R, metrics: &Arc<QueueMetrics>) -> Self {
-        metrics.pressure.change(true);
         metrics::gauge!("docparse_queue_items", "queue" => metrics.name)
             .increment(1.0);
         metrics::counter!("docparse_queue_enqueued_items_total", "queue" => metrics.name).increment(1);
@@ -237,7 +232,6 @@ impl<R> Queued<R> {
     /// Shares one release path for dequeued and dropped channel entries.
     fn removed(&self, outcome: &'static str) {
         let name = self.metrics.name;
-        self.metrics.pressure.change(false);
         metrics::gauge!("docparse_queue_items", "queue" => name).decrement(1.0);
         metrics::counter!("docparse_queue_removed_items_total", "queue" => name, "outcome" => outcome).increment(1);
         metrics::histogram!("docparse_queue_residence_seconds", "queue" => name, "outcome" => outcome).record(self.queued.elapsed().as_secs_f64());

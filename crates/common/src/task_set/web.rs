@@ -56,9 +56,17 @@ where
 {
     let (mut sender, receiver) = oneshot::channel();
     let lease = crate::PageLease::current();
+    let resources = crate::ResourceLease::current();
     let future = async move {
-        match lease {
-            Some(lease) => lease.scope(future).await,
+        let future = async move {
+            match lease {
+                Some(lease) => lease.scope(future).await,
+                None => future.await,
+            }
+        };
+        // Browser task hops preserve the same resource budgets as native tasks.
+        match resources {
+            Some(resources) => resources.scope(future).await,
             None => future.await,
         }
     };

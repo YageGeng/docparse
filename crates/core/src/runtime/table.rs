@@ -1,4 +1,4 @@
-//! Concurrent table requests over already-owned layout blocks; providers own queue backpressure.
+//! Bounded table preparation and model submission share resource admission across pages.
 use std::time::Duration;
 use std::{
     collections::BTreeMap,
@@ -14,7 +14,7 @@ use docparse_layout::{
     AffineTransform, Bbox, LayoutLabel, PageImage, PageImageInput,
     PageTransform, Point,
 };
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::{StreamExt, stream};
 use typed_builder::TypedBuilder;
 
 use super::ParseRuntimeError;
@@ -46,13 +46,16 @@ struct TableContext {
 }
 
 /// Shares table policy and the provider across all pages of a parse.
+#[derive(TypedBuilder)]
 pub(crate) struct TableRuntime {
     options: TableOptions,
+    #[builder(default)]
     engine: Option<Arc<dyn TableStructureEngine>>,
+    admission: docparse_common::ResourceBudget,
 }
 
 impl TableRuntime {
-    /// Shares validated policy without imposing a document-level gate ahead of provider queues.
+    /// Shares validated policy and global pre-crop admission across every page using a parser.
     #[allow(
         clippy::arc_with_non_send_sync,
         reason = "browser trait objects stay in one Worker; native bounds require Send and Sync"
@@ -60,12 +63,24 @@ impl TableRuntime {
     pub(crate) fn shared(
         options: TableOptions,
         engine: Option<Arc<dyn TableStructureEngine>>,
+        admission: docparse_common::ResourceBudget,
     ) -> Result<Arc<Self>, TableStructureError> {
         options.validate(engine.is_some())?;
-        Ok(Arc::new(Self { options, engine }))
+        // Built-in engines share their own budget with direct model callers; overrides use the parser budget.
+        let admission = engine
+            .as_ref()
+            .and_then(|engine| engine.admission())
+            .unwrap_or(admission);
+        Ok(Arc::new(
+            Self::builder()
+                .options(options)
+                .engine(engine)
+                .admission(admission)
+                .build(),
+        ))
     }
 
-    /// Submits all ready same-page tables concurrently and preserves result ownership and failures.
+    /// Replenishes a bounded window of same-page tables while preserving result ownership and failures.
     ///
     /// The draft is taken and returned by value so this page can own its evidence across the
     /// blocking hops below: every synchronous section runs on the blocking pool, which keeps
@@ -113,11 +128,11 @@ impl TableRuntime {
         })
         .await
         .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
-        // Model queues own admission. Move each block through its CPU stages without cloning its text graph.
+        // Bound scheduled futures as well as cropped inputs while retaining model-sized overlap.
         let count = draft.blocks.len();
         let mut completed: Vec<Option<Block>> =
             (0..count).map(|_| None).collect();
-        let mut requests: FuturesUnordered<_> =
+        let requests = stream::iter(
             std::mem::take(&mut draft.blocks)
                 .into_iter()
                 .enumerate()
@@ -132,8 +147,10 @@ impl TableRuntime {
                             Ok((index, block, Vec::new()))
                         }
                     }
-                })
-                .collect();
+                }),
+        )
+        .buffer_unordered(self.admission.capacity());
+        tokio::pin!(requests);
         while let Some(result) = requests.next().await {
             let (index, block, warnings) = result?;
             *completed.get_mut(index).expect("original block index") =
@@ -155,9 +172,9 @@ impl TableRuntime {
         Ok(draft)
     }
 
-    /// Resolves one table block, which owns itself across every blocking hop.
+    /// Resolves one block while preserving native text across timed external recognition.
     ///
-    /// Owned blocks move through CPU hops while page evidence remains shared.
+    /// Rules and successful filling move the block onto CPU workers; cropping captures only geometry.
     async fn resolve_block(
         &self,
         mut staged: Block,
@@ -199,112 +216,29 @@ impl TableRuntime {
         } else {
             TsrRequestReason::TsrOnly
         };
-        let (restored, request) = docparse_common::run_cpu({
-            let context = context.clone();
-            let reason = reason.clone();
-            move || {
-                let request = TsrTableRequest::try_from(
-                    TableCrop::builder()
-                        .page(context.page)
-                        .block(&staged)
-                        .image(&context.image)
-                        .transform(&context.transform)
-                        .reason(reason)
-                        .build(),
-                );
-                (staged, request)
+        // One deadline covers admission, CPU preparation, and model work; the source block stays local.
+        let external = context
+            .timings
+            .for_page(context.page)
+            .start(TimingStage::TableExternal);
+        let recognized = crate::wasm_compat::timeout(
+            Duration::from_millis(self.options.timeout_ms),
+            context.recognize(&staged, reason, &self.admission),
+        )
+        .await;
+        drop(external);
+        let (staged, result) = match recognized {
+            Ok(Ok((request, input))) => {
+                context.fill(staged, request, input).await?
             }
-        })
-        .await
-        .map_err(|error| ParseRuntimeError::Task(error.to_string()))?;
-        staged = restored;
-        let result = match request {
-            Ok(mut request) => {
-                request.timings = context.timings.for_page(context.page);
-                tracing::info!(
-                    "requesting table structure {} from {} for page {} block {}",
-                    request.request_id,
-                    context.engine.name(),
-                    context.page,
-                    staged.id.as_str()
-                );
-                let result = self
-                    .recognize(
-                        Arc::clone(&context.engine),
-                        request.clone(),
-                        &context.timings,
-                    )
-                    .await;
-                match result {
-                    Ok(input) => {
-                        let (restored, outcome) =
-                            docparse_common::run_cpu({
-                                let context = context.clone();
-                                move || {
-                                    let _fill = context
-                                        .timings
-                                        .for_page(context.page)
-                                        .start(TimingStage::TableFill);
-                                    let assembler = TableAssembler::new(
-                                        context.config.as_ref(),
-                                        context.evidence.as_ref(),
-                                        context.formulas.as_ref(),
-                                    );
-                                    let outcome = assembler
-                                        .reconstruct_external(
-                                            &mut staged,
-                                            &request,
-                                            input,
-                                            context.engine.geometry_policy(),
-                                        )
-                                        .map(|()| {
-                                            let details = BTreeMap::from([
-                                                (
-                                                    "request_id".to_owned(),
-                                                    request.request_id.clone(),
-                                                ),
-                                                (
-                                                    "engine".to_owned(),
-                                                    context
-                                                        .engine
-                                                        .name()
-                                                        .to_owned(),
-                                                ),
-                                                (
-                                                    "reason".to_owned(),
-                                                    match reason {
-                                                        TsrRequestReason::RulesFailed { message } => message,
-                                                        TsrRequestReason::TsrOnly => "tsr_only".to_owned(),
-                                                    },
-                                                ),
-                                            ]);
-                                            staged.evidence.push(
-                                                Evidence::builder()
-                                                    .kind("external_table_structure".to_owned())
-                                                    .details(details)
-                                                    .build(),
-                                            );
-                                            tracing::info!(
-                                                "completed table structure {} for page {} block {}",
-                                                request.request_id,
-                                                context.page,
-                                                staged.id.as_str()
-                                            );
-                                        });
-                                    (staged, outcome)
-                                }
-                            })
-                            .await
-                            .map_err(|error| {
-                                ParseRuntimeError::Task(error.to_string())
-                            })?;
-                        staged = restored;
-                        outcome
-                    }
-                    Err(error) => Err(error),
-                }
-            }
-            Err(error) => Err(error),
+            Ok(Err(ParseRuntimeError::Table(error))) => (staged, Err(error)),
+            Ok(Err(error)) => return Err(error),
+            Err(_elapsed) => (
+                staged,
+                Err(TableStructureError::Timeout {
+                    timeout_ms: self.options.timeout_ms,
+                }),
+            ),
         };
         let warnings = if let Err(error) = result {
             tracing::warn!(
@@ -335,39 +269,137 @@ impl TableRuntime {
         };
         Ok((staged, warnings))
     }
+}
 
-    /// Includes model-queue waits in the deadline and drops the provider future on cancellation.
+impl TableContext {
+    /// Prepares an owned crop and obtains topology while leaving source text available for immediate timeout recovery.
     async fn recognize(
         &self,
-        engine: Arc<dyn TableStructureEngine>,
+        block: &Block,
+        reason: TsrRequestReason,
+        admission: &docparse_common::ResourceBudget,
+    ) -> Result<(TsrTableRequest, TsrTableInput), ParseRuntimeError> {
+        let queued = self
+            .timings
+            .for_page(self.page)
+            .start(TimingStage::TsrQueue);
+        let resources = admission.reserve().await.map_err(|error| {
+            TableStructureError::Engine {
+                message: error.to_string(),
+            }
+        })?;
+        drop(queued);
+        resources.scope(async {
+            let crop = TableCrop::from((block, self, reason));
+            let mut request = docparse_common::run_cpu(move || TsrTableRequest::try_from(crop))
+                .await.map_err(|error| ParseRuntimeError::Task(error.to_string()))??;
+            request.timings = self.timings.for_page(self.page);
+            tracing::info!("requesting table structure {} from {} for page {} block {}", request.request_id, self.engine.name(), self.page, block.id.as_str());
+            let input = self.engine.recognize(request.clone()).await?;
+            Ok((request, input))
+        }).await
+    }
+
+    /// Applies successful topology on the CPU pool and preserves the original block if validation fails.
+    async fn fill(
+        &self,
+        mut block: Block,
         request: TsrTableRequest,
-        timings: &Timings,
-    ) -> Result<TsrTableInput, TableStructureError> {
-        let _timer = timings
-            .for_page(request.page_number)
-            .start(TimingStage::TableExternal);
-        crate::wasm_compat::timeout(
-            Duration::from_millis(self.options.timeout_ms),
-            async { engine.recognize(request).await },
-        )
+        input: TsrTableInput,
+    ) -> Result<(Block, Result<(), TableStructureError>), ParseRuntimeError>
+    {
+        let context = self.clone();
+        docparse_common::run_cpu(move || {
+            let _fill = context
+                .timings
+                .for_page(context.page)
+                .start(TimingStage::TableFill);
+            let assembler = TableAssembler::new(
+                &context.config,
+                &context.evidence,
+                &context.formulas,
+            );
+            let outcome = assembler.reconstruct_external(
+                &mut block,
+                &request,
+                input,
+                context.engine.geometry_policy(),
+            );
+            if outcome.is_ok() {
+                let details = BTreeMap::from([
+                    ("request_id".to_owned(), request.request_id.clone()),
+                    ("engine".to_owned(), context.engine.name().to_owned()),
+                    (
+                        "reason".to_owned(),
+                        match request.reason {
+                            TsrRequestReason::RulesFailed { message } => {
+                                message
+                            }
+                            TsrRequestReason::TsrOnly => "tsr_only".to_owned(),
+                        },
+                    ),
+                ]);
+                block.evidence.push(
+                    Evidence::builder()
+                        .kind("external_table_structure".to_owned())
+                        .details(details)
+                        .build(),
+                );
+                tracing::info!(
+                    "completed table structure {} for page {} block {}",
+                    request.request_id,
+                    context.page,
+                    block.id.as_str()
+                );
+            }
+            (block, outcome)
+        })
         .await
-        .map_err(|_elapsed| TableStructureError::Timeout {
-            timeout_ms: self.options.timeout_ms,
-        })?
+        .map_err(|error| ParseRuntimeError::Task(error.to_string()))
     }
 }
 
-/// Borrowed, already-validated page facts used to create one independently owned crop.
+/// Small owned crop metadata crosses CPU boundaries without moving or copying the block's text graph.
 #[derive(TypedBuilder)]
-struct TableCrop<'a> {
+struct TableCrop {
     page: u32,
-    block: &'a Block,
-    image: &'a PageImage,
-    transform: &'a PageTransform,
+    block_id: crate::BlockId,
+    regions: Vec<Bbox>,
+    image: PageImage,
+    transform: PageTransform,
     reason: TsrRequestReason,
 }
 
-impl TryFrom<TableCrop<'_>> for TsrTableRequest {
+impl From<(&Block, &TableContext, TsrRequestReason)> for TableCrop {
+    /// Copies only geometry and cheap shared handles so cancellation can return the caller's original block.
+    fn from(
+        (block, context, reason): (&Block, &TableContext, TsrRequestReason),
+    ) -> Self {
+        Self::builder()
+            .page(context.page)
+            .block_id(block.id.clone())
+            .regions(
+                std::iter::once(block.bbox)
+                    .chain(
+                        block
+                            .source_regions()
+                            .filter(|region| {
+                                region.label.as_ref().is_none_or(|label| {
+                                    *label == LayoutLabel::Table
+                                })
+                            })
+                            .map(|region| region.bbox),
+                    )
+                    .collect(),
+            )
+            .image(context.image.clone())
+            .transform(context.transform.clone())
+            .reason(reason)
+            .build()
+    }
+}
+
+impl TryFrom<TableCrop> for TsrTableRequest {
     type Error = TableStructureError;
 
     /// Rounds in pixel space and derives an exact transform for the resulting owned crop.
@@ -375,7 +407,7 @@ impl TryFrom<TableCrop<'_>> for TsrTableRequest {
         clippy::cast_sign_loss,
         reason = "pixel coordinates are clamped to nonnegative image dimensions before conversion"
     )]
-    fn try_from(input: TableCrop<'_>) -> Result<Self, Self::Error> {
+    fn try_from(input: TableCrop) -> Result<Self, Self::Error> {
         let invalid = |reason: &str| TableStructureError::InvalidInput {
             reason: reason.to_owned(),
         };
@@ -384,15 +416,16 @@ impl TryFrom<TableCrop<'_>> for TsrTableRequest {
         {
             return Err(invalid("table image and transform sizes disagree"));
         }
-        let mut region = input.block.bbox;
-        for original in input.block.source_regions().filter(|r| {
-            r.label.as_ref().is_none_or(|l| *l == LayoutLabel::Table)
-        }) {
+        let mut regions = input.regions.into_iter();
+        let mut region = regions
+            .next()
+            .ok_or_else(|| invalid("missing table region"))?;
+        for original in regions {
             region = Bbox::try_from([
-                region.left.min(original.bbox.left),
-                region.top.min(original.bbox.top),
-                region.right.max(original.bbox.right),
-                region.bottom.max(original.bbox.bottom),
+                region.left.min(original.left),
+                region.top.min(original.top),
+                region.right.max(original.right),
+                region.bottom.max(original.bottom),
             ])
             .map_err(|error| {
                 invalid(&format!("invalid source table region: {error}"))
@@ -484,7 +517,7 @@ impl TryFrom<TableCrop<'_>> for TsrTableRequest {
                 NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
             ))
             .page_number(input.page)
-            .block_id(input.block.id.clone())
+            .block_id(input.block_id)
             .crop_bbox(crop_bbox)
             .image(Arc::new(image))
             .crop_to_viewport(
@@ -509,6 +542,149 @@ mod tests {
     use docparse_layout::{
         GeometrySource, PageRotation, PageTransformInput, PixelFormat,
     };
+
+    /// Provides an external endpoint that must never be reached after crop preparation expires.
+    struct DeadlineEngine;
+    impl TableStructureEngine for DeadlineEngine {
+        /// Identifies the isolated deadline regression.
+        fn name(&self) -> &str {
+            "deadline-test"
+        }
+        /// Returning an ordinary provider error distinguishes accidental inference from a preparation timeout.
+        fn recognize(
+            &self,
+            _request: TsrTableRequest,
+        ) -> crate::WasmBoxedFuture<
+            '_,
+            Result<TsrTableInput, TableStructureError>,
+        > {
+            Box::pin(async {
+                Err(TableStructureError::Engine {
+                    message: "unexpected inference".into(),
+                })
+            })
+        }
+    }
+
+    /// CPU preparation shares the external deadline, while canceled cleanup continues retaining its slot.
+    #[tokio::test]
+    #[ignore = "saturates the process-wide CPU pool; run this regression in isolation"]
+    async fn cpu_wait_is_within_table_deadline() {
+        let budget = docparse_common::ResourceBudget::new(1);
+        let engine = Arc::new(DeadlineEngine) as Arc<dyn TableStructureEngine>;
+        let runtime = TableRuntime::shared(
+            TableOptions::builder()
+                .mode(TableMode::TsrOnly)
+                .timeout_ms(30)
+                .build(),
+            Some(Arc::clone(&engine)),
+            budget.clone(),
+        )
+        .expect("runtime");
+        let image = PageImage::try_from(
+            PageImageInput::builder()
+                .width(10)
+                .height(10)
+                .pixel_format(PixelFormat::Rgb8)
+                .data(Arc::from(vec![255; 300]))
+                .build(),
+        )
+        .expect("image");
+        let transform = PageTransform::try_from(
+            PageTransformInput::builder()
+                .page_to_viewport(AffineTransform::identity())
+                .viewport_width(10.0)
+                .viewport_height(10.0)
+                .render_width(10)
+                .render_height(10)
+                .model_width(800)
+                .model_height(800)
+                .rotation(PageRotation::Degrees0)
+                .build(),
+        )
+        .expect("transform");
+        let context = TableContext::builder()
+            .config(Arc::new(FusionConfig::default()))
+            .evidence(Arc::new(TableEvidence::default()))
+            .formulas(Arc::from([]))
+            .image(image)
+            .transform(transform)
+            .timings(Timings::default())
+            .page(1)
+            .engine(engine)
+            .build();
+        let block = Block::builder()
+            .id(BlockId::model(1, 0, 0))
+            .label(LayoutLabel::Table)
+            .label_source(LabelSource::Model)
+            .text("source text".into())
+            .bbox(Bbox::try_from([0.0, 0.0, 10.0, 10.0]).expect("bbox"))
+            .final_order(0)
+            .lines(Vec::new())
+            .build();
+        let gate =
+            Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let (entered, mut started) = tokio::sync::mpsc::unbounded_channel();
+        let mut blockers = tokio::task::JoinSet::new();
+        let count = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .saturating_sub(1)
+            .max(1);
+        for _ in 0..count {
+            let gate = Arc::clone(&gate);
+            let entered = entered.clone();
+            blockers.spawn(docparse_common::run_cpu(move || {
+                entered.send(()).expect("CPU entered");
+                let mut released = gate.0.lock().expect("gate");
+                while !*released {
+                    released = gate.1.wait(released).expect("release");
+                }
+            }));
+        }
+        let occupied = tokio::time::timeout(Duration::from_secs(5), async {
+            for _ in 0..count {
+                started.recv().await.expect("CPU occupied");
+            }
+        })
+        .await;
+        if occupied.is_err() {
+            // Setup failures must also release workers before reporting a changed pool size or startup failure.
+            *gate.0.lock().expect("gate") = true;
+            gate.1.notify_all();
+            while blockers.join_next().await.is_some() {}
+        }
+        occupied.expect("CPU pool fully occupied");
+        let result = tokio::time::timeout(
+            Duration::from_millis(300),
+            runtime.resolve_block(block, &context),
+        )
+        .await;
+        let held =
+            tokio::time::timeout(Duration::from_millis(5), budget.reserve())
+                .await
+                .is_err();
+        // Always release real workers before checking the result, including on the failing baseline.
+        *gate.0.lock().expect("gate") = true;
+        gate.1.notify_all();
+        while let Some(result) = blockers.join_next().await {
+            result.expect("join").expect("CPU operation");
+        }
+        let _released =
+            tokio::time::timeout(Duration::from_secs(1), budget.reserve())
+                .await
+                .expect("cleanup finishes")
+                .expect("open budget");
+        let (block, warnings) = result
+            .expect("table deadline must cover CPU admission")
+            .expect("source fallback");
+        assert_eq!(block.text, "source text");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.code == "TableExternalTimeout")
+        );
+        assert!(held, "real cleanup returned its resource slot too early");
+    }
 
     /// Cropping uses canonical coordinates once, independent of the PDF page's rotation or origin.
     #[test]
@@ -583,9 +759,10 @@ mod tests {
             let request = TsrTableRequest::try_from(
                 TableCrop::builder()
                     .page(7)
-                    .block(&block)
-                    .image(&image)
-                    .transform(&transform)
+                    .block_id(block.id.clone())
+                    .regions(vec![block.bbox, region])
+                    .image(image.clone())
+                    .transform(transform.clone())
                     .reason(TsrRequestReason::TsrOnly)
                     .build(),
             )

@@ -14,14 +14,17 @@ use tokio::sync::oneshot;
 /// Each crop retains its own response and tracing context when batches span pages or documents.
 #[derive(typed_builder::TypedBuilder)]
 struct Request {
-    // Keep the render delivery occupied until actual inference and input cleanup finish.
-    #[builder(default = docparse_common::PageLease::current())]
-    _page_lease: Option<docparse_common::PageLease>,
     input: ModelInput,
     response: oneshot::Sender<Result<ModelResult, TsrError>>,
     context: TimingContext,
     #[builder(default)]
     queued: Option<docparse_common::timing::StageTimer>,
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
+    // Actual model requests retain resource admission after their async caller is cancelled.
+    #[builder(default = docparse_common::ResourceLease::current())]
+    _resources: Option<docparse_common::ResourceLease>,
 }
 
 impl Request {

@@ -353,8 +353,9 @@ Set `config.tsr.batch_size` and `config.tsr.cell_detection.batch_size` independe
 to cap structure and detector crops per ONNX invocation (1–32, default 1).
 Ready requests can share a batch; partial batches run immediately and canceled
 requests do not occupy batch slots. Results are processed in completion order
-so a slow earlier table cannot hold up unrelated work. The parser submits all
-ready table requests and model queues apply backpressure;
+so a slow earlier table cannot hold up unrelated work. The parser replenishes a
+bounded table window and acquires shared capacity before allocating crop pixels.
+Crop/model ownership retains capacity through cancellation;
 `table_jobs` is no longer accepted. The browser inference guard still serializes
 different model runs through output readback.
 

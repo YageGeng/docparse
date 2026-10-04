@@ -176,36 +176,10 @@ impl Default for RawConfig {
     }
 }
 
-/// Optional inline-formula shedding with separate overload and recovery windows.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
-#[serde(default, deny_unknown_fields)]
-pub struct FormulaBackpressureConfig {
-    #[builder(default = false)]
-    pub enabled: bool,
-    #[builder(default = 0.85)]
-    pub high_watermark: f64,
-    #[builder(default = 0.50)]
-    pub low_watermark: f64,
-    #[builder(default = 30)]
-    pub pause_after_secs: u64,
-    #[builder(default = 30)]
-    pub resume_after_secs: u64,
-}
-impl Default for FormulaBackpressureConfig {
-    /// Keeps adaptive quality changes opt-in and uses conservative hysteresis defaults.
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Formula engine selection and shared bounded inference policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaConfig {
-    /// Runtime shedding is separate from the user's recognition switches.
-    #[serde(default)]
-    #[builder(default)]
-    pub backpressure: FormulaBackpressureConfig,
     /// Required pending-crop capacity, independent of model sessions and batch size.
     pub queue_size: usize,
     /// Recognize detected inline formulas; false preserves their native text and layout.
@@ -863,6 +837,19 @@ pub struct TsrConfig {
 }
 
 impl TsrConfig {
+    /// Keeps structure and enabled cell consumers supplied within one shared pre-crop budget.
+    pub fn admission_capacity(&self) -> usize {
+        let structure = self.session_size * self.batch_size + self.queue_size;
+        structure.max(
+            self.cell_detection
+                .as_ref()
+                .filter(|cells| cells.enabled)
+                .map_or(0, |cells| {
+                    cells.session_size * cells.batch_size + cells.queue_size
+                }),
+        )
+    }
+
     /// Keeps old configurations at singleton inference until batching is explicitly selected.
     const fn default_batch_size() -> usize {
         1
@@ -889,5 +876,20 @@ impl Default for TsrConfig {
             .mode(TableMode::default())
             .timeout_ms(60_000)
             .build()
+    }
+}
+
+impl OcrConfig {
+    /// Bounds live line crops globally while allowing either enabled model to fill its ready queue.
+    pub fn line_capacity(&self) -> usize {
+        let recognition = self.recognition.session_size
+            * self.recognition.batch_size
+            + self.recognition.queue_size;
+        recognition.max(if self.classify_orientation {
+            self.orientation.session_size * self.orientation.batch_size
+                + self.orientation.queue_size
+        } else {
+            0
+        })
     }
 }

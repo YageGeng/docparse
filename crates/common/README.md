@@ -13,6 +13,15 @@ native packet admission. `TaskSet` and `spawn` own cancelable native/browser tas
 
 Session managers accept explicit queue capacity independently of consumer count
 and batch size. Full queues backpressure producers, and short batches run immediately.
+Native producers use one FIFO semaphore for synchronous and asynchronous admission;
+only the assigned waiters wake when consumers release slots.
+
+`ResourceLease` carries pre-allocation and document permits through task scopes,
+CPU work, image ownership, and model requests. Nested leases retain their parent
+budget, so canceling a waiter does not recycle still-live resources. `ResourceBudget`
+keeps immutable configured capacity together with its shared semaphore, so a busy
+provider's scheduling window remains stable. TSR crop pixels and prediction tensors
+have independent budgets; every prediction reserves fresh tensor capacity.
 
 `PageQueue` counts reserved deliveries until the last `PageLease` is released.
 Its task-local ownership scope is independent of logging. CPU submissions retain

@@ -93,6 +93,7 @@ impl<S: 'static> SessionWorker<S> {
     {
         let (response, result) = tokio::sync::oneshot::channel();
         let lease = crate::PageLease::current();
+        let resources = crate::ResourceLease::current();
         // Capture each invocation separately because the same session thread serves different PDFs.
         let span = tracing::Span::current();
         let dispatcher = tracing::dispatcher::get_default(Clone::clone);
@@ -110,9 +111,15 @@ impl<S: 'static> SessionWorker<S> {
                             drop(operation);
                             return;
                         }
-                        let value = operation(session);
+                        // Native execution and uncollected replies retain preprocessing/document admission.
+                        let value = match &resources {
+                            Some(resources) => {
+                                resources.scope_sync(|| operation(session))
+                            }
+                            None => operation(session),
+                        };
                         // Retain ambient delivery ownership through native execution and uncollected replies.
-                        let _ = response.send((value, lease));
+                        let _ = response.send((value, lease, resources));
                     })
                 })
             }))
@@ -124,12 +131,15 @@ impl<S: 'static> SessionWorker<S> {
                 ))
             })?;
         // The session thread owns the operation and its inputs until completion; waiting needs no OS thread.
-        result.await.map(|(value, _lease)| value).map_err(|closed| {
-            TaskError::from_message(format!(
-                "{}: {closed}",
-                "model execution response lost"
-            ))
-        })
+        result
+            .await
+            .map(|(value, _lease, _resources)| value)
+            .map_err(|closed| {
+                TaskError::from_message(format!(
+                    "{}: {closed}",
+                    "model execution response lost"
+                ))
+            })
     }
 }
 

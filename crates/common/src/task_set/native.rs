@@ -37,10 +37,18 @@ impl<T: WasmCompatSend + 'static> TaskSet<T> {
     ) {
         // Span identity and the caller's dispatcher must both survive a scheduler hop.
         let lease = crate::PageLease::current();
+        let resources = crate::ResourceLease::current();
         self.tasks.spawn(
             async move {
-                match lease {
-                    Some(lease) => lease.scope(future).await,
+                let future = async move {
+                    match lease {
+                        Some(lease) => lease.scope(future).await,
+                        None => future.await,
+                    }
+                };
+                // Detached page/render tasks still belong to their admitted document.
+                match resources {
+                    Some(resources) => resources.scope(future).await,
                     None => future.await,
                 }
             }

@@ -220,11 +220,17 @@ are rejected. Explicit external header flags are preserved. Cell text always
 comes from the block's existing Native/OCR facts; external generated text is not
 accepted as native content.
 
-Ready table requests are submitted concurrently. The parser does not impose a
-separate `table_jobs` limit; built-in models apply bounded-queue backpressure,
-and custom providers own their admission policy.
-`timeout_ms` (default 60000) includes queue wait; there is no automatic retry.
-Dropping the provider future must release the adapter's outstanding resources.
+Ready table requests replenish a bounded window. A shared permit is acquired before
+cropping and follows the actual image and model request through cancellation.
+The budget is the maximum active-plus-pending capacity of structure and enabled
+cell detection. Custom providers can expose `admission()` returning a `ResourceBudget`;
+its capacity sets the window as well as crop admission. Other providers use the
+parser's shared configured budget. `table_jobs` remains unsupported.
+`timeout_ms` (default 60000) covers crop admission, CPU preparation, and model work
+under one deadline. Source blocks stay outside the timed future for immediate
+fallback; local rules and successful topology filling remain page CPU stages.
+There is no automatic retry. A canceled native operation keeps its capacity until
+its real input resources are released.
 An external success uses `source: "external_tsr"`; consumers enabling this mode
 must accept the additional enum value. Failed input, provider failures, timeouts,
 and source-assignment failures have distinct warning codes, while the original

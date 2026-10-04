@@ -15,29 +15,7 @@ pub struct FormulaQueue {
     sender: docparse_common::queue::QueueSender<FormulaRequest>,
 }
 
-/// Connects the formula policy to the actual queue before producer access begins.
-pub fn configure_backpressure(
-    pressure: &docparse_common::queue::QueuePressure,
-    config: &docparse_config::FormulaConfig,
-) -> Result<(), docparse_common::TaskError> {
-    let policy = &config.backpressure;
-    if policy.enabled && config.inline_enabled {
-        pressure.configure(
-            policy.high_watermark,
-            policy.low_watermark,
-            std::time::Duration::from_secs(policy.pause_after_secs),
-            std::time::Duration::from_secs(policy.resume_after_secs),
-        )?;
-    }
-    Ok(())
-}
-
 impl FormulaQueue {
-    /// Shares pressure tracking across every caller of this engine.
-    pub fn pressure(&self) -> Arc<docparse_common::queue::QueuePressure> {
-        self.sender.pressure()
-    }
-
     /// Creates a bounded crop queue; capacity must be positive, as with Tokio channels.
     pub fn new(
         name: &'static str,
@@ -104,9 +82,6 @@ impl FormulaQueue {
 /// Owned input, reply, and timing context for a single independently cancelable crop.
 #[derive(TypedBuilder)]
 pub struct FormulaRequest {
-    // Keep the render delivery occupied until actual inference and input cleanup finish.
-    #[builder(default = docparse_common::PageLease::current())]
-    _page_lease: Option<docparse_common::PageLease>,
     pub image: Arc<PageImage>,
     pub context: TimingContext,
     response: oneshot::Sender<Result<FormulaOutput, FormulaError>>,
@@ -115,9 +90,19 @@ pub struct FormulaRequest {
     pub engine: String,
     #[builder(default)]
     queued: Option<StageTimer>,
+    // Keep the render delivery occupied until actual inference and input cleanup finish.
+    #[builder(default = docparse_common::PageLease::current())]
+    _page_lease: Option<docparse_common::PageLease>,
+    // Actual model requests retain resource admission after their async caller is cancelled.
+    #[builder(default = image.resource_lease().or_else(docparse_common::ResourceLease::current))]
+    _resources: Option<docparse_common::ResourceLease>,
 }
 
 impl FormulaRequest {
+    /// Restores crop/document ownership when a consumer starts independently cancelable CPU work.
+    pub fn resource_lease(&self) -> Option<docparse_common::ResourceLease> {
+        self._resources.clone()
+    }
     /// Reports whether the original caller has canceled or timed out.
     pub fn cancelled(&self) -> bool {
         self.response.is_closed()
@@ -285,14 +270,11 @@ pub struct FormulaPool {
 }
 
 impl FormulaPool {
-    /// Allocates shared admission once, independently of consumer-specific batch limits.
-    pub fn new(
-        config: &docparse_config::ValidatedConfig,
-    ) -> Result<Self, FormulaError> {
+    /// Builds infallible shared admission from validated active and pending capacities.
+    pub fn new(config: &docparse_config::ValidatedConfig) -> Self {
         let config = config.formula();
         let (queue, receiver) = FormulaQueue::new("formula", config.queue_size);
-        configure_backpressure(&queue.pressure(), config)?;
-        Ok(Self::builder()
+        Self::builder()
             .queue(queue)
             .admission(Arc::new(tokio::sync::Semaphore::new(
                 config.active_capacity() + config.queue_size,
@@ -300,7 +282,7 @@ impl FormulaPool {
             .receiver(receiver)
             .workers(Vec::new())
             .timeout(std::time::Duration::from_millis(config.timeout_ms))
-            .build())
+            .build()
     }
 
     /// Gives execution groups receiving access without granting request submission.
@@ -318,10 +300,6 @@ impl crate::FormulaEngine for FormulaPool {
     /// Names the dispatcher; individual outputs retain their actual consumer identity.
     fn name(&self) -> &str {
         "formula-pool"
-    }
-    /// Shares the only pending queue pressure state across all consumers.
-    fn pressure(&self) -> Option<Arc<docparse_common::queue::QueuePressure>> {
-        Some(self.queue.pressure())
     }
     /// Bounds cropped pixels across every group and document using this pool.
     fn admission(&self) -> Option<Arc<tokio::sync::Semaphore>> {
