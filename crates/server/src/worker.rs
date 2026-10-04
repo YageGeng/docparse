@@ -15,7 +15,14 @@ use docparse_database::{
 };
 use futures_util::TryFutureExt;
 use snafu::ResultExt;
-use std::{io::Write, sync::Arc, time::Duration};
+use std::{
+    io::Write,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{sync::watch, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, instrument::WithSubscriber};
@@ -63,12 +70,74 @@ pub struct Worker {
 }
 
 /// A watch channel replaces obsolete progress snapshots instead of blocking inference on slow clients.
-struct ProgressObserver(watch::Sender<Option<ParseProgress>>);
+struct ProgressObserver {
+    sender: watch::Sender<Option<ParseProgress>>,
+    completed: AtomicU32,
+}
+
+/// One validated document's output counts travel with publication until its terminal lease is accepted.
+struct OutputPages {
+    full: u64,
+    degraded: u64,
+    missing: u64,
+}
+
+impl From<&docparse_core::DocumentResult> for OutputPages {
+    /// Counts each page once and treats only explicit unavailable/failed content as degradation.
+    fn from(result: &docparse_core::DocumentResult) -> Self {
+        let present = result.pages.len() as u64;
+        // Geometry diagnostics and other advisory warnings do not imply a failed content provider.
+        let degraded = result
+            .pages
+            .iter()
+            .filter(|page| {
+                page.warnings.iter().any(|warning| {
+                    matches!(
+                        warning.code.as_str(),
+                        "NativeExtractionUnavailable"
+                            | "RenderUnavailable"
+                            | "LayoutUnavailable"
+                            | "OcrUnavailable"
+                            | "OcrFailed"
+                            | "InvalidOcrResult"
+                            | "FormulaRecognitionFailed"
+                            | "TableStructureUnavailable"
+                            | "VisualAssetUnavailable"
+                    )
+                })
+            })
+            .count() as u64;
+        Self {
+            full: present - degraded,
+            degraded,
+            missing: u64::from(result.context.page_count)
+                .saturating_sub(present),
+        }
+    }
+}
+
+impl From<watch::Sender<Option<ParseProgress>>> for ProgressObserver {
+    /// Starts a fresh per-attempt high-water mark independently of coalesced database progress.
+    fn from(sender: watch::Sender<Option<ParseProgress>>) -> Self {
+        Self {
+            sender,
+            completed: AtomicU32::new(0),
+        }
+    }
+}
 
 impl ParseObserver for ProgressObserver {
     /// Sends progress synchronously into one replaceable slot, independent of database and SSE latency.
     fn on_progress(&self, progress: ParseProgress) {
-        self.0.send_replace(Some(progress));
+        // Count analysis completions immediately, including partial failed attempts, without
+        // counting scan progress or duplicate/backward callbacks as additional processed pages.
+        if let ParseProgress::Analyzing { completed, .. } = &progress {
+            let previous =
+                self.completed.fetch_max(*completed, Ordering::Relaxed);
+            metrics::counter!("docparse_pages_processed_total")
+                .increment(u64::from(completed.saturating_sub(previous)));
+        }
+        self.sender.send_replace(Some(progress));
     }
 
     /// Records every completed stage as a metric and slow ones at TRACE.
@@ -109,7 +178,11 @@ impl Worker {
             }
             tokio::select! {
                 result = tasks.join_next(), if !tasks.is_empty() => {
-                    if let Some(Err(_)) = result { tracing::error!("worker task panicked or was cancelled; its lease will expire"); }
+                    if let Some(Err(error)) = result {
+                        // A lost supervisor is not a fenced attempt completion; recovery owns its durable outcome.
+                        metrics::counter!("docparse_job_supervision_exits_total", "reason" => if error.is_panic() { "panic" } else { "cancelled" }).increment(1);
+                        tracing::error!("worker task panicked or was cancelled; its lease will expire");
+                    }
                 }
                 reservation = async {
                     tokio::time::sleep_until(next_poll).await;
@@ -169,7 +242,7 @@ impl Worker {
             let _active = docparse_common::telemetry::Activity::new("docparse_job_attempts_active", ("scope", "local"), 1.0);
             let started = tokio::time::Instant::now();
             let (sender, mut progress) = watch::channel(None);
-            let observer = ProgressObserver(sender);
+            let observer = ProgressObserver::from(sender);
             // Own the parse in a separate task: synchronous document work must not stop the lease watchdog.
             // JoinSet aborts this owned task if supervision is cancelled or loses its database lease.
             let worker = self.clone();
@@ -190,7 +263,7 @@ impl Worker {
                 };
                 let outcome = operation_resources.scope(worker.parse_and_publish(
                     &input_hash, &name, reservation, assets, &observer,
-                )).await.map(|()| name);
+                )).await.map(|pages| (name, pages));
                 // Transfer ownership back to supervision before the durable completion acknowledgement.
                 Ok::<_, crate::error::ApiError>((outcome, operation_resources))
             }.in_current_span().with_current_subscriber());
@@ -243,6 +316,8 @@ impl Worker {
                                     code: ApiCode::from(&*source),
                                 })?;
                             if !renewed_lease {
+                                // Lease loss is an observed exit, not a failed completion accepted by the database.
+                                metrics::counter!("docparse_job_supervision_exits_total", "reason" => "lease-lost").increment(1);
                                 tracing::warn!("job {} attempt {} lost its lease; discarding this attempt", id, lease.job.attempts);
                                 return Ok(());
                             }
@@ -262,6 +337,8 @@ impl Worker {
 
         }
         .inspect_err(|error| {
+            // Include renewal and finalization errors while keeping them separate from parser failures.
+            metrics::counter!("docparse_job_supervision_exits_total", "reason" => error.metric_reason()).increment(1);
             tracing::warn!("worker attempt stopped; lease recovery remains available: {}", error);
         })
         .instrument(span)
@@ -277,7 +354,7 @@ impl Worker {
         reservation: Option<crate::pdfium_pool::PdfiumReservation>,
         assets: Arc<docparse_core::FigureAssets>,
         observer: &ProgressObserver,
-    ) -> ApiResult<()> {
+    ) -> ApiResult<OutputPages> {
         let input = self.storage.path(&format!("{input_hash}.pdf"))?;
         let options = ParseOptions::builder()
             .observer(Some(observer))
@@ -316,7 +393,11 @@ impl Worker {
         drop(parsing);
         metrics::counter!("docparse_pages_parsed_total")
             .increment(result.pages.len() as u64);
-        self.publish_result(result, name, assets).await
+        // Preserve the legacy parse counter, but keep delivery statistics unreported until
+        // both durable publication and the fenced terminal update have succeeded.
+        let output = OutputPages::from(&result);
+        self.publish_result(result, name, assets).await?;
+        Ok(output)
     }
 
     /// Streams serialization on the CPU pool and retains publication ownership through atomic storage writes.
@@ -368,7 +449,7 @@ impl Worker {
     async fn finish_attempt(
         &self,
         lease: &Lease,
-        outcome: ApiResult<String>,
+        outcome: ApiResult<(String, OutputPages)>,
         progress: Option<ParseProgress>,
         duration: Duration,
         figure_assets: Arc<docparse_core::FigureAssets>,
@@ -376,6 +457,8 @@ impl Worker {
         let id = lease.job.id;
         // Keep success and failure disjoint through the database completion boundary.
         let outcome = outcome.map_err(|error| {
+            // This observes local parse/publication failures even if a later fenced completion is rejected.
+            metrics::counter!("docparse_job_attempt_errors_total", "reason" => error.metric_reason()).increment(1);
             tracing::warn!(
                 "job {} attempt {} failed: {}",
                 id,
@@ -398,13 +481,27 @@ impl Worker {
         let completion = Jobs::finish(
             &self.db,
             lease,
-            outcome.as_deref().map_err(String::as_str),
+            outcome
+                .as_ref()
+                .map(|(name, _)| name.as_str())
+                .map_err(String::as_str),
             final_progress,
             duration,
         )
         .await;
         // Preserve ambiguous acknowledgements for recovery; never remove possibly committed assets.
-        if outcome.is_ok() && matches!(&completion, Ok(true)) {
+        if let Ok((_, pages)) = &outcome
+            && matches!(&completion, Ok(true))
+        {
+            // A rejected/stale completion or failed publication must never announce delivered pages.
+            // Record immediately after acceptance; optional asset cleanup may itself fail afterwards.
+            for (status, count) in [
+                ("full", pages.full),
+                ("degraded", pages.degraded),
+                ("missing", pages.missing),
+            ] {
+                metrics::counter!("docparse_output_pages_total", "status" => status).increment(count);
+            }
             let assets = Arc::clone(&figure_assets);
             docparse_common::run_blocking(move || assets.keep(true))
                 .await
@@ -435,6 +532,170 @@ mod tests {
     use docparse_common::timing::TimingStage;
     use docparse_core::Timing;
 
+    /// Partial attempts expose completed pages immediately without counting repeated progress twice.
+    #[test]
+    #[allow(clippy::float_cmp)] // Integer counter increments are exactly represented by the exporter.
+    fn processing_counts_monotonic_page_progress() {
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&recorder, || {
+            let (sender, _) = watch::channel(None);
+            let observer = ProgressObserver::from(sender);
+            observer.on_progress(ParseProgress::Scanning {
+                completed: 10,
+                total: 10,
+            });
+            for completed in [0, 1, 1, 0, 3] {
+                observer.on_progress(ParseProgress::Analyzing {
+                    completed,
+                    total: 10,
+                });
+            }
+            // No Complete event is sent: these three pages must remain visible if the attempt fails.
+            let scrape = prometheus_parse::Scrape::parse(
+                handle.render().lines().map(|line| Ok(line.to_owned())),
+            )
+            .expect("scrape");
+            let count = scrape.samples.iter().find(|sample| {
+                sample.metric == "docparse_pages_processed_total"
+            });
+            assert!(
+                matches!(count.map(|sample| &sample.value), Some(prometheus_parse::Value::Counter(value)) if *value == 3.0)
+            );
+        });
+    }
+
+    /// Ordinary warnings preserve full output while multiple degradation warnings count one page.
+    #[test]
+    fn output_pages_classify_degradation_and_missing_pages() {
+        let pages = [
+            vec!["ContentLayoutOverlap"],
+            vec!["LayoutUnavailable", "FormulaRecognitionFailed"],
+            vec!["VisualAssetUnavailable"],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, codes)| {
+            docparse_core::PageResult::builder()
+                .page_number(index as u32 + 1)
+                .width(100.0)
+                .height(100.0)
+                .rotation(0)
+                .blocks(Vec::new())
+                .warnings(
+                    codes
+                        .into_iter()
+                        .map(|code| docparse_core::PageWarning {
+                            code: code.into(),
+                            stage: "test".into(),
+                            message: "not a metric label".into(),
+                        })
+                        .collect(),
+                )
+                .build()
+        })
+        .collect();
+        let result = docparse_core::DocumentResult::builder()
+            .schema_version(docparse_core::SchemaVersion::V2_0)
+            .context(
+                docparse_core::DocumentContext::builder()
+                    .page_count(5)
+                    .build(),
+            )
+            .pages(pages)
+            .build();
+        let output = OutputPages::from(&result);
+        assert_eq!((output.full, output.degraded, output.missing), (1, 2, 2));
+        let empty = docparse_core::DocumentResult::builder()
+            .schema_version(docparse_core::SchemaVersion::V2_0)
+            .context(
+                docparse_core::DocumentContext::builder()
+                    .page_count(2)
+                    .build(),
+            )
+            .pages(Vec::new())
+            .build();
+        let output = OutputPages::from(&empty);
+        assert_eq!((output.full, output.degraded, output.missing), (0, 0, 2));
+    }
+
+    /// Rejected acknowledgements and failed publication must not increase accepted output counts.
+    #[test]
+    #[allow(clippy::float_cmp)] // Exact integer totals detect duplicate acknowledgements.
+    #[ignore = "requires DOCPARSE_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+    fn output_metrics_follow_accepted_terminal_updates() {
+        struct UnusedLayout;
+        impl docparse_layout::LayoutEngine for UnusedLayout {
+            /// Supplies model identity without loading inference for a completion-boundary test.
+            fn name(&self) -> &str {
+                "completion-test"
+            }
+            /// Keeps this injected model revision deterministic.
+            fn model_revision(&self) -> &str {
+                "completion-test"
+            }
+            /// This test only acknowledges precomputed results, so no inference is required.
+            fn detect(
+                &self,
+                _request: docparse_layout::LayoutRequest,
+            ) -> docparse_layout::wasm_compat::WasmBoxedFuture<
+                '_,
+                Result<
+                    Vec<docparse_layout::LayoutDetection>,
+                    docparse_layout::LayoutError,
+                >,
+            > {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+        }
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&recorder, || {
+            tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime").block_on(async {
+                let db = docparse_database::connection::connect(&docparse_config::DatabaseConfig::builder()
+                    .url(std::env::var("DOCPARSE_TEST_DATABASE_URL").expect("test database")).build()).await.expect("database");
+                let directory = tempfile::tempdir().expect("storage");
+                let mut raw = docparse_config::RawConfig::default();
+                raw.formula.inline_enabled = false;
+                raw.formula.display_enabled = false;
+                raw.ocr.policy = docparse_config::OcrPolicy::Disabled;
+                raw.tsr.mode = docparse_config::TableMode::RulesOnly;
+                let config = Arc::new(docparse_config::ValidatedConfig::try_from(raw).expect("config"));
+                let parser = Arc::new(DocParser::builder().config(Arc::clone(&config)).layout_engine(Arc::new(UnusedLayout)).build().await.expect("parser"));
+                let worker = Worker::builder().db(db.clone())
+                    .storage(SharedStorage::new(directory.path()).await.expect("storage"))
+                    .parser(parser).output(config.output().clone()).options(WorkerOptions::builder().build()).build();
+                let id = uuid::Uuid::new_v4();
+                Jobs::submit(&db, id, &"a".repeat(64), None, None).await.expect("submit");
+                let lease = Jobs::claim(&db, 60, 3).await.expect("claim").expect("lease");
+                let assets = worker.parser.figure_assets(directory.path().to_owned(), format!("{id}-figures"));
+                // Publication failed before the acknowledgement boundary, despite completed parsing.
+                let failed_publication = crate::error::ApiError::Storage {
+                    source: std::io::Error::other("publication failed"),
+                    stage: "result-publish",
+                    code: ApiCode::COMMON_INTERNAL_ERROR,
+                };
+                worker.finish_attempt(&lease, Err(failed_publication), None, Duration::from_secs(1), Arc::clone(&assets)).await.expect("failed publication");
+                assert!(!handle.render().contains("docparse_output_pages_total"));
+                let retry = Jobs::claim(&db, 60, 3).await.expect("claim retry").expect("retry");
+                // The old lease has valid output but no longer owns a terminal transition.
+                for owner in [&lease, &retry, &retry] {
+                    worker.finish_attempt(owner, Ok(("result.json".into(), OutputPages { full: 2, degraded: 1, missing: 1 })), None, Duration::from_secs(1), Arc::clone(&assets)).await.expect("completion acknowledgement");
+                }
+                use docparse_database::seaorm::EntityTrait;
+                docparse_database::entities::parse_jobs::Entity::delete_by_id(id).exec(&db).await.expect("cleanup row");
+                let scrape = prometheus_parse::Scrape::parse(handle.render().lines().map(|line| Ok(line.to_owned()))).expect("scrape");
+                for (status, expected) in [("full", 2.0), ("degraded", 1.0), ("missing", 1.0)] {
+                    let sample = scrape.samples.iter().find(|sample| sample.metric == "docparse_output_pages_total" && sample.labels.get("status") == Some(status));
+                    assert!(matches!(sample.map(|sample| &sample.value), Some(prometheus_parse::Value::Counter(value)) if *value == expected), "{status}");
+                }
+                assert!(scrape.samples.iter().any(|sample| sample.metric == "docparse_job_attempt_errors_total" && sample.labels.get("reason") == Some("storage")));
+            });
+        });
+    }
+
     /// Slow model queues remain observable at TRACE without recording short stages.
     #[test]
     fn progress_observer_logs_slow_stages() {
@@ -447,7 +708,7 @@ mod tests {
             .with_writer(log.reopen().expect("writer"))
             .finish();
         let (sender, _) = watch::channel(None);
-        let observer = ProgressObserver(sender);
+        let observer = ProgressObserver::from(sender);
         tracing::subscriber::with_default(subscriber, || {
             for (stage, duration_ms) in [
                 (TimingStage::FormulaQueue, 1500.0),

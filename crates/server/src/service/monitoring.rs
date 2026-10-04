@@ -59,17 +59,44 @@ impl Monitoring {
         for name in [
             "docparse_jobs_submitted_total",
             "docparse_pages_parsed_total",
+            "docparse_pages_processed_total",
         ] {
             metrics::counter!(name).increment(0);
         }
         for outcome in ["succeeded", "failed"] {
             metrics::counter!("docparse_jobs_completed_total", "outcome" => outcome).increment(0);
         }
+        // Known delivery and claim dimensions exist before first work so snapshot deltas start at zero.
+        for status in ["full", "degraded", "missing"] {
+            metrics::counter!("docparse_output_pages_total", "status" => status).increment(0);
+        }
+        for kind in ["initial", "retry", "recovery"] {
+            metrics::counter!("docparse_job_attempts_started_total", "kind" => kind).increment(0);
+        }
+        // Seed bounded error series so the first observed failure has a pre-event rate baseline.
+        for reason in [
+            "timeout",
+            "database-timeout",
+            "database",
+            "storage",
+            "serialization",
+            "parse",
+            "task",
+            "request",
+        ] {
+            metrics::counter!("docparse_job_attempt_errors_total", "reason" => reason).increment(0);
+            metrics::counter!("docparse_job_supervision_exits_total", "reason" => reason).increment(0);
+        }
+        for reason in ["lease-lost", "panic", "cancelled"] {
+            metrics::counter!("docparse_job_supervision_exits_total", "reason" => reason).increment(0);
+        }
         for name in [
             "docparse_page_slots_used",
+            "docparse_page_blocked_producers",
             "docparse_pdfium_documents_active",
         ] {
-            metrics::gauge!(name).set(0.0);
+            // Match live owners so a label-free startup zero cannot shadow their occupancy.
+            metrics::gauge!(name, "pool" => "render").set(0.0);
         }
         metrics::gauge!("docparse_build_info", "version" => env!("CARGO_PKG_VERSION")).set(1.0);
         let client = reqwest::Client::builder()
@@ -211,14 +238,15 @@ impl Monitoring {
                 url.path().trim_end_matches('/')
             ));
             let end = chrono::Utc::now().timestamp();
+            let step = (query.seconds / 600).max(5);
             let mut response = self
                 .client
                 .get(url)
                 .query(&[
-                    ("query", query.chart.query().to_owned()),
+                    ("query", query.chart.query(step)),
                     ("start", (end - i64::from(query.seconds)).to_string()),
                     ("end", end.to_string()),
-                    ("step", (query.seconds / 600).max(5).to_string()),
+                    ("step", step.to_string()),
                     ("timeout", "5s".to_owned()),
                 ])
                 .send()
@@ -255,8 +283,8 @@ impl Monitoring {
 }
 impl Chart {
     /// Uses a fixed service selector and avoids summing replicated database backlog snapshots.
-    fn query(self) -> &'static str {
-        match self {
+    fn query(self, step: u32) -> String {
+        let expression = match self {
             Self::QueueWait => {
                 "histogram_quantile(0.95, sum by(le, queue) (rate(docparse_queue_residence_seconds_bucket{service=\"docparse\",outcome=\"dequeued\"}[5m])))"
             }
@@ -297,15 +325,141 @@ impl Chart {
                 "sum by(model) (docparse_model_workers_busy{service=\"docparse\"}) / sum by(model) (docparse_model_workers_configured{service=\"docparse\"})"
             }
             Self::Pages => {
-                "sum(rate(docparse_pages_parsed_total{service=\"docparse\"}[1m])) * 60"
+                // Completed page analysis is visible before the enclosing document finishes.
+                "sum(rate(docparse_pages_processed_total{service=\"docparse\"}[1m])) * 60"
             }
-        }
+            Self::OutputPages => {
+                "sum by(status) (rate(docparse_output_pages_total{service=\"docparse\"}[1m])) * 60"
+            }
+            Self::Attempts => {
+                "sum by(kind) (rate(docparse_job_attempts_started_total{service=\"docparse\",kind=~\"initial|retry|recovery\"}[1m])) * 60"
+            }
+            Self::AttemptErrors => {
+                "sum by(reason) (rate(docparse_job_attempt_errors_total{service=\"docparse\"}[1m])) * 60"
+            }
+            Self::SupervisionExits => {
+                "sum by(reason) (rate(docparse_job_supervision_exits_total{service=\"docparse\"}[1m])) * 60"
+            }
+        };
+        // Overlapping windows cover bursts between distant evaluation points while retaining
+        // the existing short-range smoothing and ample samples at the documented 5s scrape interval.
+        expression
+            .replace("[1m]", &format!("[{}s]", step.saturating_mul(2).max(60)))
+            .replace("[5m]", &format!("[{}s]", step.saturating_mul(2).max(300)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The outgoing range query must cover the gaps between long-range evaluation points.
+    #[tokio::test]
+    async fn history_windows_cover_evaluation_steps() {
+        use axum::{Json, Router, extract::Query, routing::get};
+        use std::collections::HashMap;
+        let (sender, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        let router = Router::new().route("/api/v1/query_range", get(move |Query(query): Query<HashMap<String, String>>| {
+            let sender = sender.clone();
+            async move {
+                sender.send(query).expect("capture query");
+                Json(serde_json::json!({"status":"success","data":{"resultType":"matrix","result":[]}}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.expect("serve")
+        });
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let monitor = Monitoring::builder()
+            .handle(recorder.handle())
+            .client(reqwest::Client::new())
+            .upstream(Some(format!("http://{address}").parse().expect("URL")))
+            .process(Process {
+                id: "test".into(),
+                role: "all",
+            })
+            .build();
+        for (seconds, step, rate_window, p95_window) in [
+            (3600, 6, 60, 300),
+            (86400, 144, 288, 300),
+            (604800, 1008, 2016, 2016),
+        ] {
+            for (chart, window) in [
+                (Chart::Throughput, rate_window),
+                (Chart::Inference, p95_window),
+            ] {
+                monitor
+                    .history(HistoryQuery { chart, seconds })
+                    .await
+                    .expect("history");
+                let query = requests.recv().await.expect("upstream query");
+                assert_eq!(query.get("step"), Some(&step.to_string()));
+                let expression = query.get("query").expect("query expression");
+                assert!(
+                    expression.contains(&format!("[{window}s]")),
+                    "{expression}"
+                );
+            }
+        }
+        server.abort();
+    }
+
+    /// Real PromQL must retain a burst that falls outside the former fixed one/five-minute windows.
+    #[test]
+    #[ignore = "requires PROMTOOL pointing to a Prometheus promtool executable"]
+    fn long_history_retains_bursts_between_evaluation_points() {
+        let mut input = String::new();
+        for series in [
+            "docparse_jobs_completed_total{service=\"docparse\",outcome=\"succeeded\"}",
+            "docparse_pages_processed_total{service=\"docparse\"}",
+            "docparse_output_pages_total{service=\"docparse\",status=\"full\"}",
+            "docparse_job_attempts_started_total{service=\"docparse\",kind=\"initial\"}",
+            "docparse_job_attempt_errors_total{service=\"docparse\",reason=\"parse\"}",
+            "docparse_job_supervision_exits_total{service=\"docparse\",reason=\"lease-lost\"}",
+            "docparse_onnx_run_seconds_bucket{service=\"docparse\",model=\"test\",graph=\"model\",outcome=\"success\",le=\"0.1\"}",
+            "docparse_onnx_run_seconds_bucket{service=\"docparse\",model=\"test\",graph=\"model\",outcome=\"success\",le=\"+Inf\"}",
+        ] {
+            input.push_str(&format!(
+                "    - series: '{series}'\n      values: '0+0x100 1+0x303'\n"
+            ));
+        }
+        let mut cases = String::new();
+        for (chart, labels) in [
+            (Chart::Throughput, "{outcome=\"succeeded\"}"),
+            (Chart::Pages, "{}"),
+            (Chart::OutputPages, "{status=\"full\"}"),
+            (Chart::Attempts, "{kind=\"initial\"}"),
+            (Chart::AttemptErrors, "{reason=\"parse\"}"),
+            (Chart::SupervisionExits, "{reason=\"lease-lost\"}"),
+            (Chart::Inference, "{model=\"test\",graph=\"model\"}"),
+        ] {
+            let query = serde_json::to_string(&format!(
+                "({}) > bool 0",
+                chart.query(1008)
+            ))
+            .expect("query");
+            cases.push_str(&format!("    - expr: {query}\n      eval_time: 1008s\n      exp_samples:\n        - labels: '{labels}'\n          value: 1\n"));
+        }
+        let file = tempfile::NamedTempFile::new().expect("test file");
+        std::fs::write(file.path(), format!("evaluation_interval: 5s\ntests:\n  - interval: 5s\n    input_series:\n{input}    promql_expr_test:\n{cases}")).expect("test rules");
+        let output = std::process::Command::new(
+            std::env::var("PROMTOOL").expect("PROMTOOL"),
+        )
+        .args(["test", "rules"])
+        .arg(file.path())
+        .output()
+        .expect("promtool");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     /// Executes the actual history expressions against fresh, failed, and stalled replica samples.
     #[test]
@@ -340,7 +494,7 @@ mod tests {
         }
         let mut cases = String::new();
         for (chart, value) in [(Chart::Backlog, 3), (Chart::Oldest, 11)] {
-            let query = serde_json::to_string(chart.query()).expect("query");
+            let query = serde_json::to_string(&chart.query(5)).expect("query");
             cases.push_str(&format!("    - expr: {query}\n      eval_time: 30s\n      exp_samples:\n        - labels: '{{state=\"queued\"}}'\n          value: {value}\n    - expr: {query}\n      eval_time: 120s\n      exp_samples: []\n"));
         }
         let file = tempfile::NamedTempFile::new().expect("test file");

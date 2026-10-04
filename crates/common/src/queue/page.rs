@@ -35,7 +35,9 @@ struct PagePermit {
 impl Drop for PagePermit {
     /// Records the complete resource lifetime rather than only rendering or receiving the page.
     fn drop(&mut self) {
-        metrics::gauge!("docparse_page_slots_used").decrement(1.0);
+        // Occupancy uses the same pool identity as capacity and blocked producers.
+        metrics::gauge!("docparse_page_slots_used", "pool" => "render")
+            .decrement(1.0);
         metrics::histogram!("docparse_page_hold_seconds")
             .record(self.started.elapsed().as_secs_f64());
     }
@@ -76,7 +78,9 @@ impl PageQueue {
             }
         };
         admission.finish("admitted");
-        metrics::gauge!("docparse_page_slots_used").increment(1.0);
+        // Keep acquisition and final-owner release on one pool-labelled series.
+        metrics::gauge!("docparse_page_slots_used", "pool" => "render")
+            .increment(1.0);
         Ok(PageLease(Arc::new(
             PagePermit::builder()
                 ._permit(permit)

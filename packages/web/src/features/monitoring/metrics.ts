@@ -21,7 +21,12 @@ export const charts = {
   parse: ["解析耗时 P95", "秒"],
   inference: ["实际 ONNX 调用 P95", "秒"],
   workers: ["模型消费者忙碌率", "比例"],
-  pages: ["页面吞吐", "页/分钟"],
+  // Processing includes retries; output counts only accepted terminal documents.
+  pages: ["页面处理速度", "页/分钟"],
+  output_pages: ["交付页面与缺页", "页/分钟"],
+  attempts: ["任务尝试类型", "次/分钟"],
+  attempt_errors: ["解析与发布错误", "次/分钟"],
+  supervision_exits: ["任务监督异常退出", "次/分钟"],
 } as const satisfies Record<Chart, readonly [string, string]>;
 /** Keeps unknown values visibly distinct from valid zero measurements. */
 export function formatMetric(value: number | undefined) {
@@ -69,6 +74,15 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
     (sample) => sample.name === "docparse_jobs_completed_total",
   );
   const parsedCount = value(deltas, "docparse_job_parse_seconds_count");
+  // Missing/reset baselines remain unknown; missing pages never contribute to delivery speed.
+  const processed = value(deltas, "docparse_pages_processed_total");
+  const deliveredFull = value(deltas, "docparse_output_pages_total", {
+    status: "full",
+  });
+  const deliveredDegraded = value(deltas, "docparse_output_pages_total", {
+    status: "degraded",
+  });
+  const queued = value(samples, "docparse_jobs", { state: "queued" });
   return {
     process,
     hasWorker,
@@ -92,6 +106,24 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
         unit: "任务/分钟 · 最近采样间隔",
       },
       {
+        label: "页面处理速度",
+        value:
+          hasWorker && processed !== undefined
+            ? (processed / interval) * 60
+            : undefined,
+        unit: "页/分钟 · 页面完成即计数，包含重试",
+      },
+      {
+        label: "页面交付速度",
+        value:
+          hasWorker &&
+          deliveredFull !== undefined &&
+          deliveredDegraded !== undefined
+            ? ((deliveredFull + deliveredDegraded) / interval) * 60
+            : undefined,
+        unit: "页/分钟 · 已接受终态，包含降级页",
+      },
+      {
         label: "平均解析耗时",
         value:
           hasWorker && parsedCount
@@ -103,13 +135,15 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
       {
         label: "页面背压",
         value: hasWorker
-          ? value(samples, "docparse_page_blocked_producers")
+          ? value(samples, "docparse_page_blocked_producers", {
+              pool: "render",
+            })
           : undefined,
         unit: "提交者 · 正在等待页面空位",
       },
       {
         label: "等待处理",
-        value: value(samples, "docparse_jobs", { state: "queued" }),
+        value: queued,
         unit: "任务 · 数据库全局",
       },
       {
@@ -127,23 +161,61 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
         value: value(samples, "docparse_job_oldest_age_seconds", {
           state: "queued",
         }),
-        unit: "秒 · 当前仍在等待",
+        unit: queued === 0 ? "秒 · 当前无排队任务" : "秒 · 当前仍在等待",
       },
       {
         label: "页面占用",
         value: hasWorker
-          ? value(samples, "docparse_page_slots_used")
+          ? value(samples, "docparse_page_slots_used", { pool: "render" })
           : undefined,
         unit: `页 / ${formatMetric(value(samples, "docparse_page_slots_capacity"))} 个容量`,
       },
       {
         label: "PDFium 文档",
         value: hasWorker
-          ? value(samples, "docparse_pdfium_documents_active")
+          ? value(samples, "docparse_pdfium_documents_active", {
+              pool: "render",
+            })
           : undefined,
         unit: `活动 / ${formatMetric(value(samples, "docparse_pdfium_workers_configured"))} 个 worker`,
       },
     ],
+    output: [
+      ["full", "无已知降级"],
+      ["degraded", "存在降级"],
+      ["missing", "缺失页面"],
+    ].map(([status, label]) => ({
+      status,
+      label,
+      count: value(samples, "docparse_output_pages_total", { status }),
+    })),
+    attempts: [
+      ["initial", "首次尝试"],
+      ["retry", "失败后重试"],
+      ["recovery", "过期租约恢复"],
+    ].map(([kind, label]) => ({
+      kind,
+      label,
+      count: value(samples, "docparse_job_attempts_started_total", { kind }),
+    })),
+    // Only observed errors need rows; initialized zero categories should not obscure actionable counts.
+    errors: samples
+      .filter(
+        (sample) =>
+          sample.value > 0 &&
+          (sample.name === "docparse_job_attempt_errors_total" ||
+            sample.name === "docparse_job_supervision_exits_total"),
+      )
+      .map((sample) => ({
+        key: `${sample.name}/${sample.labels.reason}`,
+        scope:
+          sample.name === "docparse_job_attempt_errors_total"
+            ? "解析与发布"
+            : "监督退出",
+        reason: sample.labels.reason,
+        count: sample.value,
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key, "en")),
     queues: samples
       .filter((sample) => sample.name === "docparse_queue_capacity_items")
       .map((sample) => {
@@ -213,6 +285,12 @@ export function projectSnapshot(current?: Snapshot, before?: Snapshot) {
             value(samples, "docparse_onnx_run_seconds_count", {
               ...identity,
               outcome: "error",
+            }) ?? 0,
+          // This guard outcome is distinct from business-level cancellation or an SSE disconnect.
+          cancelled:
+            value(samples, "docparse_onnx_run_seconds_count", {
+              ...identity,
+              outcome: "cancelled",
             }) ?? 0,
         };
       })

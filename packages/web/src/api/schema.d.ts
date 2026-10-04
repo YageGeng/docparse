@@ -404,7 +404,7 @@ export interface components {
          * @description Allowlisting bounds both query cost and metric exposure; arbitrary PromQL is never forwarded.
          * @enum {string}
          */
-        Chart: "queue_wait" | "admission_wait" | "page_pressure" | "oldest" | "turnaround" | "backlog" | "queue" | "blocked" | "throughput" | "wait" | "parse" | "inference" | "workers" | "pages";
+        Chart: "queue_wait" | "admission_wait" | "page_pressure" | "oldest" | "turnaround" | "backlog" | "queue" | "blocked" | "throughput" | "wait" | "parse" | "inference" | "workers" | "pages" | "output_pages" | "attempts" | "attempt_errors" | "supervision_exits";
         /** @description Immutable document-level facts shared by page analysis. */
         DocumentContext: {
             /** Format: double */

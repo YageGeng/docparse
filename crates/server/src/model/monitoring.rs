@@ -45,6 +45,11 @@ pub enum Chart {
     Inference,
     Workers,
     Pages,
+    // Separate physical progress, accepted output, retries and unfenced operational failures.
+    OutputPages,
+    Attempts,
+    AttemptErrors,
+    SupervisionExits,
 }
 /// Historical requests have a fixed point budget and a maximum seven-day window.
 #[derive(Deserialize, utoipa::IntoParams)]

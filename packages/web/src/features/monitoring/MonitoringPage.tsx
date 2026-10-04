@@ -54,10 +54,14 @@ export function MonitoringPage() {
             刷新间隔
             <select
               value={refreshSeconds}
-              onChange={(event) => setRefreshSeconds(Number(event.target.value))}
+              onChange={(event) =>
+                setRefreshSeconds(Number(event.target.value))
+              }
             >
               {[1, 3, 5].map((seconds) => (
-                <option key={seconds} value={seconds}>{seconds}s</option>
+                <option key={seconds} value={seconds}>
+                  {seconds}s
+                </option>
               ))}
             </select>
           </label>
@@ -105,6 +109,77 @@ export function MonitoringPage() {
           </section>
           {hasWorker && (
             <>
+              {/* Delivery and attempt counters use distinct lifecycles, so present their scopes explicitly. */}
+              <section className="monitoring-panel">
+                <h2>交付完整性与任务尝试</h2>
+                <p>
+                  当前进程启动以来累计。交付统计只包含已接受成功终态的文档；无已知降级不代表内容识别准确率。重试和恢复会重新消耗处理资源。
+                </p>
+                <div className="monitoring-table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>交付页面状态</th>
+                        <th>页数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.output.map((row) => (
+                        <tr key={row.status}>
+                          <th scope="row">{row.label}</th>
+                          <td>{number(row.count)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>任务尝试类型</th>
+                        <th>次数</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.attempts.map((row) => (
+                        <tr key={row.kind}>
+                          <th scope="row">{row.label}</th>
+                          <td>{number(row.count)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <section className="monitoring-panel">
+                <h2>任务错误与监督退出</h2>
+                <p>
+                  当前进程观察到的异常累计。解析或发布错误可能随后重试成功；监督退出不等于数据库已接受的失败终态。
+                </p>
+                {view.errors.length ? (
+                  <div className="monitoring-table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>范围</th>
+                          <th>原因</th>
+                          <th>次数</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {view.errors.map((row) => (
+                          <tr key={row.key}>
+                            <th scope="row">{row.scope}</th>
+                            <td>{row.reason}</td>
+                            <td>{number(row.count)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p>尚无已记录的任务错误或监督异常退出。</p>
+                )}
+              </section>
               <section className="monitoring-panel">
                 <h2>模型队列与背压</h2>
                 <p>
@@ -188,6 +263,7 @@ export function MonitoringPage() {
                         <th>平均耗时（毫秒）</th>
                         <th>平均批次</th>
                         <th>失败调用</th>
+                        <th>中断调用</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -200,11 +276,20 @@ export function MonitoringPage() {
                           <td>{number(row.averageMs)}</td>
                           <td>{number(row.averageBatch)}</td>
                           <td>{number(row.failures)}</td>
+                          <td>{number(row.cancelled)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {!view.inference.length && (
+                  <p>
+                    尚无实际推理记录。已加载消费者见上表；模型或图会在首次调用后出现。
+                  </p>
+                )}
+                <p>
+                  中断调用表示推理计时范围未正常结束，不代表任务取消总数；客户端断开不会取消后台解析。
+                </p>
               </section>
             </>
           )}
@@ -258,7 +343,8 @@ export function MonitoringPage() {
             </Button>
           </div>
           <p>
-            Prometheus 历史 · 每 30 秒刷新 · 无采样和无请求的分位数显示为空缺。
+            Prometheus 历史 · 每 30 秒刷新 ·
+            统计窗口随查询跨度调整；无采样和无请求的分位数显示为空缺。交付图中的缺页为成功终态文档缺失的源页面，不计入交付速度。
           </p>
           {history.isError && (
             <p className="monitoring-alert" role="alert">

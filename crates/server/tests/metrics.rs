@@ -4,6 +4,62 @@
 use docparse_common::{PageQueue, Queue, SessionRequest, queue::BlockingQueue};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
+/// Startup zeros and real resource owners must share one label set in API snapshots.
+#[test]
+fn startup_resource_series_match_live_owners() {
+    let monitor =
+        docparse_server::service::monitoring::Monitoring::install(None, "all")
+            .expect("monitor");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let pages = PageQueue::new(2);
+        let page = pages.reserve().await.expect("page");
+        let document = docparse_common::telemetry::Activity::new(
+            "docparse_pdfium_documents_active",
+            ("pool", "render"),
+            1.0,
+        );
+        for name in [
+            "docparse_pdfium_documents_active",
+            "docparse_page_slots_used",
+        ] {
+            let snapshot = monitor.snapshot().expect("snapshot");
+            let samples: Vec<_> = snapshot
+                .samples
+                .iter()
+                .filter(|sample| sample.name == name)
+                .collect();
+            assert_eq!(
+                samples.len(),
+                1,
+                "{name} must not have a shadow zero series"
+            );
+            let sample = samples.first().expect("registered resource");
+            assert_eq!(
+                sample.labels.get("pool").map(String::as_str),
+                Some("render")
+            );
+            assert_eq!(sample.value, 1.0);
+        }
+        drop((page, document));
+        assert!(
+            monitor
+                .snapshot()
+                .expect("released snapshot")
+                .samples
+                .iter()
+                .filter(|sample| matches!(
+                    sample.name.as_str(),
+                    "docparse_pdfium_documents_active"
+                        | "docparse_page_slots_used"
+                ))
+                .all(|sample| sample.value == 0.0)
+        );
+    });
+}
+
 struct Request;
 impl SessionRequest for Request {
     /// Keeps the test focused on queue ownership rather than reply cancellation.

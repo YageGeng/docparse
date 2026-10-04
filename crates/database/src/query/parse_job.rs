@@ -358,6 +358,14 @@ impl ParseJobQuery {
             }
             return Ok(None);
         };
+        // Classify the previous durable state before replacing it with the new running lease.
+        let kind = if job.status == JobStatus::Running {
+            "recovery"
+        } else if job.attempts == 0 {
+            "initial"
+        } else {
+            "retry"
+        };
         let queue_origin = if job.status == JobStatus::Running {
             job.lease_until
         } else {
@@ -408,7 +416,7 @@ impl ParseJobQuery {
                     / 1000.0,
             );
         }
-        metrics::counter!("docparse_job_attempts_started_total").increment(1);
+        metrics::counter!("docparse_job_attempts_started_total", "kind" => kind).increment(1);
         Ok(Some(Lease { job, token }))
     }
 

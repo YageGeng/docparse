@@ -1,5 +1,7 @@
 # Observability
 
+> 2026-10-04 补充：资源标签、历史统计窗口、页面处理与交付、重试分类及 WebUI 的最新口径参见[可观测性口径修复](2026-10-04-observability-corrections.md)。原有 `docparse_pages_parsed_total` 保留兼容；内置页面处理曲线已改用逐页完成计数。
+
 The server exposes `/metrics` independently of `server.api_prefix`. Model code
 records through `docparse-common`; only the server installs a recorder. CLI and
 WASM consumers do not start listeners or contact Prometheus. Worker-only processes

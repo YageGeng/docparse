@@ -67,6 +67,27 @@ pub enum ApiError {
 }
 
 impl ApiError {
+    /// Returns a bounded operational category, never the source message or a dynamic identifier.
+    pub(crate) fn metric_reason(&self) -> &'static str {
+        // Timeout requests share HTTP codes with other failures, so preserve their operation semantics.
+        match self {
+            Self::Request {
+                stage: "document-parse-timeout",
+                ..
+            } => "timeout",
+            Self::Request {
+                stage: "task-renew-timeout",
+                ..
+            } => "database-timeout",
+            Self::Database { .. } => "database",
+            Self::Storage { .. } => "storage",
+            Self::Serialize { .. } => "serialization",
+            Self::Parse { .. } => "parse",
+            Self::Task { .. } | Self::CpuTask { .. } => "task",
+            Self::Request { .. } | Self::Multipart { .. } => "request",
+        }
+    }
+
     /// Returns the stored code without reclassifying the error at the response boundary.
     pub fn code(&self) -> ApiCode {
         match self {
@@ -164,5 +185,35 @@ impl tower_http::catch_panic::ResponseForPanic for PanicHandler {
             code: ApiCode::COMMON_INTERNAL_ERROR,
         }
         .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Failure labels must classify operations without incorporating their diagnostic messages.
+    #[test]
+    fn metric_reasons_preserve_timeout_and_storage_categories() {
+        let timeout = RequestSnafu {
+            stage: "document-parse-timeout",
+            code: ApiCode::COMMON_INTERNAL_ERROR,
+        }
+        .build();
+        assert_eq!(timeout.metric_reason(), "timeout");
+        let renewal = RequestSnafu {
+            stage: "task-renew-timeout",
+            code: ApiCode::COMMON_DATABASE_ERROR,
+        }
+        .build();
+        assert_eq!(renewal.metric_reason(), "database-timeout");
+        for message in ["disk full", "private/path/not/a/label"] {
+            let storage = ApiError::Storage {
+                source: std::io::Error::other(message),
+                stage: "result-publish",
+                code: ApiCode::COMMON_INTERNAL_ERROR,
+            };
+            assert_eq!(storage.metric_reason(), "storage");
+        }
     }
 }
