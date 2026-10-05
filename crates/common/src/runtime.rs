@@ -50,6 +50,8 @@ mod platform {
     /// CPU work has its own finite pool so file I/O never queues behind inference preparation.
     struct CpuPool {
         runtime: tokio::runtime::Runtime,
+        // Cancelled-work destruction gets separate threads so admitted work never queues behind it.
+        cleanup: tokio::runtime::Runtime,
         permits: tokio::sync::Semaphore,
         tasks: tokio_util::task::TaskTracker,
     }
@@ -65,6 +67,11 @@ mod platform {
                 .max_blocking_threads(threads)
                 .thread_name(name)
                 .build()?;
+            // Cleanup bypasses admission, so it must not consume the admitted pool's blocking threads.
+            let cleanup = tokio::runtime::Builder::new_current_thread()
+                .max_blocking_threads(threads)
+                .thread_name(format!("{name}-cleanup"))
+                .build()?;
             let tasks = tokio_util::task::TaskTracker::new();
             // Closed trackers still accept tokens; wait() becomes a reusable emptiness barrier.
             tasks.close();
@@ -75,6 +82,7 @@ mod platform {
             );
             Ok(Self {
                 runtime,
+                cleanup,
                 permits: tokio::sync::Semaphore::new(threads),
                 tasks,
             })
@@ -162,7 +170,7 @@ mod platform {
         fn drop(&mut self) {
             if let Some(value) = self.value.take() {
                 let caller = self.caller.take();
-                drop(self.pool.runtime.spawn_blocking(move || {
+                drop(self.pool.cleanup.spawn_blocking(move || {
                     // Native owners may schedule further joins; retain the originating shutdown boundary.
                     let _caller =
                         caller.as_ref().map(tokio::runtime::Handle::enter);
@@ -262,6 +270,48 @@ mod platform {
             pool.tasks.wait().await;
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::time::Duration;
+
+        /// Blocks its destructor until released, modelling slow cleanup of a cancelled input.
+        struct SlowDrop(std::sync::mpsc::Receiver<()>);
+        impl Drop for SlowDrop {
+            /// Holds the cleanup thread until the test releases it.
+            fn drop(&mut self) {
+                let _ = self.0.recv_timeout(Duration::from_secs(5));
+            }
+        }
+
+        /// Slow cancelled-input cleanup must not occupy the only admitted CPU thread.
+        #[tokio::test]
+        async fn admitted_work_does_not_queue_behind_cleanup() {
+            let pool: &'static CpuPool = Box::leak(Box::new(
+                CpuPool::new("cleanup-test", 1).expect("pool"),
+            ));
+            // Hold the only permit so the next submission is cancelled before admission.
+            let held = pool.permits.acquire().await.expect("permit");
+            let (release, blocked) = std::sync::mpsc::channel();
+            let guard = SlowDrop(blocked);
+            let mut cancelled = Box::pin(pool.run(move || drop(guard)));
+            assert!(futures_util::poll!(&mut cancelled).is_pending());
+            // Dropping the waiting caller schedules the slow destructor as background cleanup.
+            drop(cancelled);
+            drop(held);
+            let admitted =
+                tokio::time::timeout(Duration::from_secs(2), pool.run(|| 7))
+                    .await;
+            release.send(()).expect("release cleanup");
+            assert_eq!(
+                admitted
+                    .expect("admitted work waited behind cleanup")
+                    .expect("result"),
+                7
+            );
+        }
     }
 }
 #[cfg(target_arch = "wasm32")]

@@ -121,7 +121,7 @@ fn final_page_owner_and_queue_closure_release_gauges() {
             );
         });
         let queue = BlockingQueue::new("test", 2);
-        queue.push(Request).expect("admit");
+        runtime.block_on(queue.push_async(Request)).expect("admit");
         assert_eq!(sample(&handle, "docparse_queue_items"), 1.0);
         queue.close();
         assert_eq!(sample(&handle, "docparse_queue_items"), 0.0);

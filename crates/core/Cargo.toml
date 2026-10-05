@@ -55,6 +55,9 @@ tracing.workspace = true
 web-time.workspace = true
 
 [dev-dependencies]
+# async
+tokio = { workspace = true, features = ["test-util"] }
+
 # config and serialization
 figment.workspace = true
 

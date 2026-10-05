@@ -559,30 +559,43 @@ impl ParseRuntime {
             return Err(error);
         }
         if render_timed_out {
-            // Native-only recovery allocates no raster. Process remaining pages serially without
-            // render admission, while the real worker continues to own its unreleased page lease.
+            // Native-only recovery allocates no raster and needs no render admission; the extracted
+            // pages are already resident, so all of them can wait on the bounded CPU pool at once.
+            let mut recovery = TaskSet::new();
             for (page_number, extracted) in
                 std::mem::take(&mut scanned.extracted_pages)
             {
                 let config = Arc::clone(&self.config);
                 let context = Arc::clone(&scanned.context);
                 let timings = timings.for_page(page_number);
-                let page = docparse_common::run_cpu(move || {
-                    analyze_without_render(
-                        config,
-                        context,
-                        extracted,
-                        PdfiumRuntimeError::WorkerUnresponsive {
-                            operation: "render",
-                        },
-                        timings,
-                    )
-                })
-                .await
-                .map_err(|error| {
-                    ParseRuntimeError::Task(error.to_string())
-                })??;
-                pages.push(page);
+                recovery.spawn(async move {
+                    docparse_common::run_cpu(move || {
+                        analyze_without_render(
+                            config,
+                            context,
+                            extracted,
+                            PdfiumRuntimeError::WorkerUnresponsive {
+                                operation: "render",
+                            },
+                            timings,
+                        )
+                    })
+                    .await
+                    .map_err(|error| {
+                        ParseRuntimeError::Task(error.to_string())
+                    })?
+                });
+            }
+            while let Some(result) = recovery.join_next().await {
+                match Self::collect_task(result) {
+                    Ok(page) => pages.push(page),
+                    Err(error) => {
+                        // Remaining recovery tasks are cancelled; their CPU work cleans up in the pool.
+                        recovery.abort_all();
+                        while recovery.join_next().await.is_some() {}
+                        return Err(error);
+                    }
+                }
                 if let Some(observer) = observer {
                     observer.on_progress(crate::ParseProgress::Analyzing {
                         completed: pages.len() as u32,

@@ -6,10 +6,7 @@ use crate::{
 };
 use std::{
     collections::VecDeque,
-    future::Future,
     sync::{Arc, Condvar, Mutex},
-    task::{Context, Poll, Wake},
-    thread::Thread,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -28,19 +25,6 @@ pub struct BlockingQueue<R> {
     metrics: Arc<QueueMetrics>,
 }
 
-/// Synchronous callers join the same FIFO semaphore without creating a runtime or polling timer.
-struct ProducerThread(Thread);
-impl Wake for ProducerThread {
-    /// A park token preserves notifications arriving between polling and parking.
-    fn wake(self: Arc<Self>) {
-        self.0.unpark();
-    }
-    /// Wakes the registered producer without an additional reference-count operation.
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.0.unpark();
-    }
-}
-
 impl<R: SessionRequest> BlockingQueue<R> {
     /// Creates a bounded crop queue independently of consumer initialization.
     pub fn new(name: &'static str, capacity: usize) -> Self {
@@ -56,11 +40,6 @@ impl<R: SessionRequest> BlockingQueue<R> {
             .build()
     }
 
-    /// Publishes one request through the same admission path as atomic caller packets.
-    pub fn push(&self, request: R) -> Result<(), TaskError> {
-        self.push_batch(vec![request])
-    }
-
     /// Reserves FIFO capacity without waking all competing producers after each dequeue.
     pub async fn push_async(&self, mut request: R) -> Result<(), TaskError> {
         let admission = Admission::new(
@@ -73,113 +52,34 @@ impl<R: SessionRequest> BlockingQueue<R> {
             request.end_queue();
             return Ok(());
         }
+        // Only blocked producers are counted; both close paths share one rejection.
         let permit = match Arc::clone(&self.capacity).try_acquire_owned() {
-            Ok(permit) => Ok(permit),
             Err(tokio::sync::TryAcquireError::NoPermits) => {
                 let _blocked = self.metrics.blocked();
-                Arc::clone(&self.capacity).acquire_owned().await
+                Arc::clone(&self.capacity).acquire_owned().await.ok()
             }
-            Err(tokio::sync::TryAcquireError::Closed) => {
-                admission.finish("closed");
-                request.end_queue();
-                return Err(TaskError::from_message("model queue closed"));
-            }
+            acquired => acquired.ok(),
         };
-        let permit = permit.map_err(|error| {
+        let Some(permit) = permit else {
+            admission.finish("closed");
             request.end_queue();
-            TaskError::from_message(error.to_string())
-        });
-        let permit = match permit {
-            Ok(permit) => permit,
-            Err(error) => {
-                admission.finish("closed");
-                return Err(error);
-            }
+            return Err(TaskError::from_message("model queue closed"));
         };
         if request.cancelled() {
             admission.finish("cancelled");
             request.end_queue();
             return Ok(());
         }
-        let result = self.publish(std::iter::once(request), permit);
+        let result = self.publish(request, permit);
         admission.finish(if result.is_ok() { "admitted" } else { "closed" });
         result
     }
 
-    /// Admits a packet atomically using the same fair semaphore as asynchronous callers.
-    pub fn push_batch(&self, mut requests: Vec<R>) -> Result<(), TaskError> {
-        if requests.is_empty() || requests.len() > self.metrics.capacity {
-            return Err(TaskError::from_message("invalid queue packet size"));
-        }
-        let count = u32::try_from(requests.len())
-            .map_err(|error| TaskError::from_message(error.to_string()))?;
-        let admission = Admission::new(
-            "docparse_queue_admission_wait_seconds",
-            self.metrics.name,
-        );
-        // Synchronous canceled packets must not park behind live queued work either.
-        if requests.iter().all(SessionRequest::cancelled)
-            && !self.capacity.is_closed()
-        {
-            admission.finish("cancelled");
-            for request in &mut requests {
-                request.end_queue();
-            }
-            return Ok(());
-        }
-        let permit =
-            match Arc::clone(&self.capacity).try_acquire_many_owned(count) {
-                Ok(permit) => Ok(permit),
-                Err(tokio::sync::TryAcquireError::NoPermits) => {
-                    let _blocked = self.metrics.blocked();
-                    let waker =
-                        Arc::new(ProducerThread(std::thread::current())).into();
-                    let mut context = Context::from_waker(&waker);
-                    let mut waiting = std::pin::pin!(
-                        Arc::clone(&self.capacity).acquire_many_owned(count)
-                    );
-                    loop {
-                        match waiting.as_mut().poll(&mut context) {
-                            Poll::Ready(permit) => break permit,
-                            Poll::Pending => std::thread::park(),
-                        }
-                    }
-                }
-                Err(tokio::sync::TryAcquireError::Closed) => {
-                    admission.finish("closed");
-                    for request in &mut requests {
-                        request.end_queue();
-                    }
-                    return Err(TaskError::from_message("model queue closed"));
-                }
-            };
-        let permit = match permit {
-            Ok(permit) => permit,
-            Err(error) => {
-                admission.finish("closed");
-                for request in &mut requests {
-                    request.end_queue();
-                }
-                return Err(TaskError::from_message(error.to_string()));
-            }
-        };
-        if requests.iter().all(SessionRequest::cancelled) {
-            admission.finish("cancelled");
-            for request in &mut requests {
-                request.end_queue();
-            }
-            return Ok(());
-        }
-        let result = self.publish(requests.into_iter(), permit);
-        admission.finish(if result.is_ok() { "admitted" } else { "closed" });
-        result
-    }
-
-    /// Transfers reserved permits into queue ownership; close and publication share the state lock.
+    /// Transfers the reserved permit into queue ownership; close and publication share the state lock.
     fn publish(
         &self,
-        requests: impl Iterator<Item = R>,
-        mut permit: OwnedSemaphorePermit,
+        mut request: R,
+        permit: OwnedSemaphorePermit,
     ) -> Result<(), TaskError> {
         let mut state = self
             .state
@@ -187,19 +87,14 @@ impl<R: SessionRequest> BlockingQueue<R> {
             .map_err(|error| TaskError::from_message(error.to_string()))?;
         if state.closed {
             drop(state);
-            for mut request in requests {
-                request.end_queue();
-            }
+            request.end_queue();
             return Err(TaskError::from_message("model queue closed"));
         }
-        for request in requests {
-            state.requests.push_back((
-                Queued::new(request, &self.metrics),
-                permit.split(1).expect("reserved packet capacity"),
-            ));
-            // Only consumers use this condition variable; producers receive individual semaphore permits.
-            self.changed.notify_one();
-        }
+        state
+            .requests
+            .push_back((Queued::new(request, &self.metrics), permit));
+        // Only consumers use this condition variable; producers wait on individual semaphore permits.
+        self.changed.notify_one();
         Ok(())
     }
 
@@ -277,15 +172,15 @@ mod tests {
     #[tokio::test]
     async fn cancelled_input_does_not_wait_for_capacity() {
         let queue = BlockingQueue::new("cancel-test", 1);
-        queue.push(Request(0, false)).expect("fill queue");
+        queue
+            .push_async(Request(0, false))
+            .await
+            .expect("fill queue");
         let mut canceled = Box::pin(queue.push_async(Request(1, true)));
         assert!(matches!(
             futures_util::poll!(&mut canceled),
-            Poll::Ready(Ok(()))
+            std::task::Poll::Ready(Ok(()))
         ));
-        queue
-            .push_batch(vec![Request(2, true)])
-            .expect("cancelled sync packet");
         assert_eq!(
             queue
                 .pop(1)
@@ -301,7 +196,10 @@ mod tests {
     #[tokio::test]
     async fn admission_does_not_allow_new_producers_to_barge() {
         let queue = BlockingQueue::new("fair-test", 1);
-        queue.push(Request(0, false)).expect("fill queue");
+        queue
+            .push_async(Request(0, false))
+            .await
+            .expect("fill queue");
         let mut first = Box::pin(queue.push_async(Request(1, false)));
         assert!(futures_util::poll!(&mut first).is_pending());
         assert_eq!(
@@ -355,7 +253,10 @@ mod tests {
     #[tokio::test]
     async fn async_admission_observes_capacity_and_closure() {
         let queue = BlockingQueue::new("test", 1);
-        queue.push(Request(0, false)).expect("first packet");
+        queue
+            .push_async(Request(0, false))
+            .await
+            .expect("first request");
         let waiting = queue.push_async(Request(1, false));
         tokio::pin!(waiting);
         assert!(futures_util::poll!(waiting.as_mut()).is_pending());
@@ -374,20 +275,15 @@ mod tests {
             .expect_err("closed queue rejects waiting producers");
     }
 
-    /// Caller packet boundaries cannot leave ready capacity unused or lose an unconsumed tail.
-    #[test]
-    fn ready_packets_fill_batches_and_preserve_capacity() {
+    /// Ready inputs fill batches across producer boundaries without losing an unconsumed tail.
+    #[tokio::test]
+    async fn ready_inputs_fill_batches_and_preserve_capacity() {
         let queue = BlockingQueue::new("test", 19);
-        let mut next = 0;
-        for size in [2, 8, 3, 6] {
+        for value in 0..19 {
             queue
-                .push_batch(
-                    (next..next + size)
-                        .map(|value| Request(value, false))
-                        .collect(),
-                )
-                .expect("packet");
-            next += size;
+                .push_async(Request(value, false))
+                .await
+                .expect("request");
         }
         let mut received = Vec::new();
         for (size, remaining) in [(8, 11), (8, 3), (3, 0)] {
@@ -401,11 +297,12 @@ mod tests {
         }
         assert_eq!(received, (0..19).collect::<Vec<_>>());
         queue
-            .push_batch(vec![Request(19, true), Request(20, false)])
-            .expect("canceled peer");
+            .push_async(Request(19, false))
+            .await
+            .expect("live request");
         assert_eq!(queue.pop(8).expect("short live batch").len(), 1);
         queue.close();
         assert!(queue.pop(8).is_none());
-        assert!(queue.push(Request(21, false)).is_err());
+        assert!(queue.push_async(Request(20, false)).await.is_err());
     }
 }

@@ -234,6 +234,31 @@ impl From<oneshot::error::RecvError> for PdfiumRuntimeError {
     }
 }
 
+/// Render delivery the caller can take back after a deadline, so a wedged worker cannot pin it.
+#[derive(Clone)]
+pub(crate) struct RevocableLease(
+    Arc<std::sync::Mutex<Option<docparse_common::PageLease>>>,
+);
+
+impl RevocableLease {
+    /// Shares the ambient page delivery between the caller and the worker.
+    fn current() -> Self {
+        Self(Arc::new(std::sync::Mutex::new(
+            docparse_common::PageLease::current(),
+        )))
+    }
+
+    /// Releases the delivery now; whichever side revokes first frees the slot.
+    fn revoke(&self) {
+        drop(
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+    }
+}
+
 /// Commands whose payloads contain only owned values and never PDFium handles.
 pub(crate) enum PdfiumCommand {
     PreScan {
@@ -242,7 +267,7 @@ pub(crate) enum PdfiumCommand {
         response: oneshot::Sender<Result<PreScannedPage, PdfiumRuntimeError>>,
     },
     Render {
-        page_lease: Option<docparse_common::PageLease>,
+        page_lease: RevocableLease,
         page_number: u32,
         config: RenderConfig,
         response: oneshot::Sender<Result<RenderedPage, PdfiumRuntimeError>>,
@@ -324,18 +349,28 @@ impl PdfiumExecutor {
     ) -> Result<RenderedPage, PdfiumRuntimeError> {
         self.validate_page(page_number)?;
         let (response, receiver) = oneshot::channel();
-        self.request(
-            PdfiumCommand::Render {
-                page_lease: docparse_common::PageLease::current(),
-                page_number,
-                config: config.clone(),
-                response,
-            },
-            receiver,
-            "render",
-            OPERATION_TIMEOUT,
-        )
-        .await?
+        let page_lease = RevocableLease::current();
+        let outcome = self
+            .request(
+                PdfiumCommand::Render {
+                    page_lease: page_lease.clone(),
+                    page_number,
+                    config: config.clone(),
+                    response,
+                },
+                receiver,
+                "render",
+                OPERATION_TIMEOUT,
+            )
+            .await;
+        // A detached worker may never finish; its unknown memory no longer justifies holding shared capacity.
+        if outcome
+            .as_ref()
+            .is_err_and(PdfiumRuntimeError::is_operation_timeout)
+        {
+            page_lease.revoke();
+        }
+        outcome?
     }
 
     /// Requests orderly document shutdown and waits for worker cleanup without blocking the runtime.
@@ -489,14 +524,12 @@ pub(crate) async fn worker_main(
                 config,
                 response,
             } => {
-                // The real PDFium worker, including an uncollected reply, retains the delivery after caller cancellation.
-                let render =
-                    || render_document_page(&document, page_number, &config);
-                let result = match &page_lease {
-                    Some(lease) => lease.scope_sync(render),
-                    None => render(),
-                };
+                // The worker holds the delivery through rendering and reply, unless the caller revoked it after a
+                // deadline; pixels are not scoped to the lease, the receiving pipeline attaches its own owner.
+                let result =
+                    render_document_page(&document, page_number, &config);
                 let _ = response.send(result);
+                page_lease.revoke();
             }
             PdfiumCommand::Shutdown { response } => {
                 let _ = response.send(());
@@ -744,6 +777,37 @@ fn page_rotation(rotation: i32) -> PageRotation {
 
 #[cfg(test)]
 mod tests {
+    /// A wedged in-process worker must not permanently pin the shared render slot.
+    #[tokio::test(start_paused = true)]
+    async fn render_timeout_releases_page_slot() {
+        let queue = docparse_common::PageQueue::new(1);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let executor = PdfiumExecutor::builder()
+            .sender(sender)
+            .page_count(1)
+            .unresponsive(std::sync::atomic::AtomicBool::new(false))
+            .build();
+        let lease = queue.reserve().await.expect("slot");
+        let config = RenderConfig::default();
+        // The stand-in worker accepts the command and never replies.
+        let (outcome, command) = tokio::join!(
+            lease.scope(executor.render_page(1, &config)),
+            receiver.recv()
+        );
+        drop(lease);
+        assert!(outcome.expect_err("deadline").is_operation_timeout());
+        let reserved = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            queue.reserve(),
+        )
+        .await;
+        // The wedged command is still alive here, exactly as a hung native call would keep it.
+        drop(command);
+        reserved
+            .expect("timed-out render still pins the slot")
+            .expect("slot");
+    }
+
     /// An unusable worker must reject every operation without filling its abandoned queue.
     #[tokio::test]
     async fn unresponsive_worker_rejects_commands_before_enqueueing() {

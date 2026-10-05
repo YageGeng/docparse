@@ -179,19 +179,9 @@ impl<R: SessionRequest> SessionManager<R> {
         Ok::<_, E>(Arc::new(manager))
     }
 
-    /// Admits one crop from synchronous native callers; async callers use send_async instead.
-    pub fn send(&self, request: R) -> Result<(), TaskError> {
-        self.queue.push(request)
-    }
-
     /// Waits for native queue capacity without occupying an executor or blocking thread.
     pub async fn send_async(&self, request: R) -> Result<(), TaskError> {
         self.queue.push_async(request).await
-    }
-
-    /// Publishes an atomic caller packet without preserving its boundary during consumer batching.
-    pub fn send_batch(&self, requests: Vec<R>) -> Result<(), TaskError> {
-        self.queue.push_batch(requests)
     }
 
     /// Stops admission and wakes all producers and consumers before owner cleanup.
@@ -253,18 +243,20 @@ mod tests {
         )
         .expect("indexed owners");
         let (reply, response) = std::sync::mpsc::channel();
-        manager
-            .send_batch(vec![
-                Request {
-                    canceled: false,
-                    reply: reply.clone(),
-                },
-                Request {
-                    canceled: false,
-                    reply,
-                },
-            ])
-            .expect("packet");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            for reply in [reply.clone(), reply] {
+                manager
+                    .send_async(Request {
+                        canceled: false,
+                        reply,
+                    })
+                    .await
+                    .expect("request");
+            }
+        });
         let mut indices = vec![
             response
                 .recv_timeout(Duration::from_secs(3))
@@ -294,11 +286,13 @@ mod tests {
             .expect("sixteen consumers");
         assert_eq!(count.load(Ordering::SeqCst), 16);
         let (reply, response) = std::sync::mpsc::channel();
-        manager
-            .send(Request {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(manager.send_async(Request {
                 canceled: false,
                 reply,
-            })
+            }))
             .expect("enqueue");
         assert_eq!(
             response
@@ -339,20 +333,28 @@ mod tests {
             .expect("sessions");
         drop(runtime);
         let (reply, results) = std::sync::mpsc::channel();
-        manager
-            .send(Request {
-                canceled: true,
-                reply: reply.clone(),
-            })
-            .expect("canceled");
-        for _ in 0..2 {
-            manager
-                .send(Request {
-                    canceled: false,
-                    reply: reply.clone(),
-                })
-                .expect("send");
-        }
+        // A fresh producer runtime proves consumers do not depend on the construction runtime.
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("producer runtime")
+            .block_on(async {
+                manager
+                    .send_async(Request {
+                        canceled: true,
+                        reply: reply.clone(),
+                    })
+                    .await
+                    .expect("canceled");
+                for _ in 0..2 {
+                    manager
+                        .send_async(Request {
+                            canceled: false,
+                            reply: reply.clone(),
+                        })
+                        .await
+                        .expect("send");
+                }
+            });
         let first = results.recv_timeout(Duration::from_secs(2));
         let second = results.recv_timeout(Duration::from_secs(2));
         release.store(true, Ordering::SeqCst);
