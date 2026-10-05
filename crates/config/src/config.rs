@@ -478,6 +478,19 @@ pub enum OptimizationLevel {
     All,
 }
 
+/// Ownership of ONNX Runtime CPU compute threads across all native sessions.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum OnnxThreadPool {
+    /// Every session shares one process-wide intra-op pool.
+    #[default]
+    Global,
+    /// Every session owns its own intra-op pool (the ONNX Runtime default).
+    Session,
+}
+
 /// Shared inference and page failure policies; render capacity is configured under RenderConfig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
@@ -492,6 +505,29 @@ pub struct RuntimeConfig {
     pub memory_pattern: bool,
     /// The shorter key retains continuation after recoverable page failures, not fatal document errors.
     pub continue_on_error: bool,
+    /// Whether ONNX sessions share one CPU thread pool or own one each.
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx_thread_pool: OnnxThreadPool,
+    /// Intra-op threads; 0 means automatic (global: available parallelism, session: ONNX Runtime default).
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx_intra_threads: usize,
+    /// Lets idle intra-op threads busy-wait for work instead of sleeping.
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx_spinning: bool,
+    /// Returns idle CUDA arena memory after each variable-shape run so one model cannot starve others.
+    #[serde(default = "RuntimeConfig::default_arena_shrinkage")]
+    #[builder(default = true)]
+    pub onnx_arena_shrinkage: bool,
+}
+
+impl RuntimeConfig {
+    /// Shrinkage is on unless a deployment explicitly trades GPU sharing for allocation speed.
+    const fn default_arena_shrinkage() -> bool {
+        true
+    }
 }
 
 impl Default for RuntimeConfig {

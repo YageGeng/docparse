@@ -89,6 +89,35 @@ fn global_optimization_level_loads_from_file_and_environment() {
     }
 }
 
+/// Omitted ONNX runtime keys use the shared non-spinning pool and CUDA arena shrinkage.
+#[test]
+fn onnx_runtime_keys_default_and_override() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[runtime]\noptimization_level = \"all\"\n",
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({})))
+        .load_raw()
+        .expect("defaults");
+    assert!(raw.runtime.onnx_arena_shrinkage);
+    assert!(!raw.runtime.onnx_spinning);
+    assert_eq!(raw.runtime.onnx_intra_threads, 0);
+    assert_eq!(
+        raw.runtime.onnx_thread_pool,
+        docparse_config::OnnxThreadPool::Global
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(
+            json!({"runtime": {"onnx_arena_shrinkage": false}}),
+        ))
+        .load_raw()
+        .expect("override");
+    assert!(!raw.runtime.onnx_arena_shrinkage);
+}
+
 /// Structure and cell batch sizes load independently and reject unbounded tensor batches.
 #[test]
 fn table_batch_sizes_are_independent_and_bounded() {

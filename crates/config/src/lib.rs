@@ -9,9 +9,9 @@ pub use config::{
     DatabaseConfig, FigureConfig, FigureDelivery, FormulaConfig,
     FormulaEngineConfig, FusionConfig, HttpFormulaConfig, LayoutConfig,
     LogConfig, ModelFiles, OcrConfig, OcrModelConfig, OcrPolicy,
-    OptimizationLevel, OutputConfig, PpFormulaConfig, RawConfig, RenderConfig,
-    RuntimeConfig, ServerConfig, TableCellConfig, TableCellModel, TableMode,
-    TexoFormulaConfig, TsrConfig, TsrModel, WebUi,
+    OnnxThreadPool, OptimizationLevel, OutputConfig, PpFormulaConfig,
+    RawConfig, RenderConfig, RuntimeConfig, ServerConfig, TableCellConfig,
+    TableCellModel, TableMode, TexoFormulaConfig, TsrConfig, TsrModel, WebUi,
 };
 pub use error::ConfigError;
 

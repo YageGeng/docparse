@@ -145,6 +145,8 @@ mod platform {
                 let mut session = SessionBuilder::try_from(backend)?
                     .commit_from_memory(&bytes)?;
                 kind.validate_session(&session)?;
+                // Page-sized detector inputs vary per page; shrinking keeps their peak from starving other models.
+                let options = backend.run_options()?;
                 Ok::<_, OcrError>(move |requests: Vec<Request>| {
                     for requests in Request::groups(requests) {
                             let timings: docparse_common::timing::BatchTimings = requests.iter().map(|request| &request.context).collect();
@@ -152,7 +154,7 @@ mod platform {
                             let input = ImageTensor::try_from(requests.iter().map(|request| &request.input).collect::<Vec<_>>().as_slice())?;
                             let timers = timings.start_unique(kind.timing());
                             let physical = docparse_common::telemetry::Inference::new(kind.metric_name(), "model", requests.len());
-                            let outputs = session.run(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? });
+                            let outputs = session.run_with_options(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? }, &options);
                             physical.finish(outputs.is_ok());
                             drop(timers);
                             let outputs = outputs?;

@@ -33,6 +33,16 @@ optimization_level = "all"
 # below the configured size keeps its own plan instead.
 memory_pattern = true
 continue_on_error = true
+# ONNX Runtime CPU compute threads: "global" shares one process-wide pool across every session,
+# "session" gives each session its own pool (the ONNX Runtime default).
+onnx_thread_pool = "global"
+# 0 is automatic: global uses the cgroup-aware available parallelism, session keeps the ONNX Runtime default.
+onnx_intra_threads = 0
+# Busy-wait idle compute threads; faster only when sessions run back to back.
+onnx_spinning = false
+# CUDA only: OCR and table models return idle arena memory after each run, so their
+# page-sized peaks cannot starve formula and other models into allocation failures.
+onnx_arena_shrinkage = true
 
 [render]
 workers = 5

@@ -258,6 +258,8 @@ mod platform {
                     }
                     let mut session =
                         builder.commit_from_memory(&artifacts.model)?;
+                    // Table crops vary in size; shrinking keeps their peak from starving other models.
+                    let options = backend.run_options()?;
                     Ok::<_, TsrError>(move |mut requests: Vec<Request>| {
                         let timers = requests
                             .iter_mut()
@@ -277,7 +279,8 @@ mod platform {
                                     "model",
                                     requests.len(),
                                 );
-                            let outputs = session.run(values);
+                            let outputs =
+                                session.run_with_options(values, &options);
                             physical.finish(outputs.is_ok());
                             let outputs = outputs?;
                             ModelResult::from_batch(
