@@ -92,3 +92,81 @@ async fn shared_queue_flushes_ready_work_and_routes_results() {
     );
     assert_eq!(live.await.expect("result"), ["a", "b"]);
 }
+
+/// A batch-wide failure is retried in halves so only crops that fail alone lose their formula.
+#[tokio::test]
+async fn failed_batches_retry_in_halves_until_crops_fail_alone() {
+    let (queue, receiver) = FormulaQueue::new("test", 4);
+    let callers = (0..4)
+        .map(|_| Box::pin(queue.run(vec![image()], Timings::default())))
+        .collect::<Vec<_>>();
+    let mut callers = callers;
+    for caller in &mut callers {
+        assert!(futures_util::poll!(caller).is_pending());
+    }
+    let batch = receiver.recv().await.expect("batch").take_ready(4);
+    let poisoned = Arc::as_ptr(&batch.get(2).expect("third crop").image);
+    let mut calls = 0;
+    // Any multi-crop batch fails like a device allocation failure; one crop also fails on its own.
+    FormulaRequest::complete_with_retry(batch, &mut |requests| {
+        calls += 1;
+        if requests.len() > 1 {
+            return Err(FormulaError::Onnx(ort::Error::new(
+                "allocation failed",
+            )));
+        }
+        if Arc::as_ptr(&requests.first().expect("crop").image) == poisoned {
+            return Ok(vec![Err(FormulaError::Invalid("bad crop".into()))]);
+        }
+        Ok(vec![Ok("latex".into())])
+    });
+    let mut outcomes = Vec::new();
+    for caller in callers {
+        outcomes.push(caller.await);
+    }
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 3);
+    assert!(matches!(
+        outcomes.get(2),
+        Some(Err(FormulaError::Invalid(message))) if message == "bad crop"
+    ));
+    // 4 → 2 + 2 → 1 + 1 + 1 + 1 physical attempts.
+    assert_eq!(calls, 7);
+}
+
+/// Deterministic failures such as result-count mismatches are reported once, never bisected.
+#[tokio::test]
+async fn deterministic_batch_errors_are_not_retried() {
+    let (queue, receiver) = FormulaQueue::new("test", 2);
+    let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
+    let mut second = Box::pin(queue.run(vec![image()], Timings::default()));
+    assert!(futures_util::poll!(&mut first).is_pending());
+    assert!(futures_util::poll!(&mut second).is_pending());
+    let batch = receiver.recv().await.expect("batch").take_ready(2);
+    let mut calls = 0;
+    FormulaRequest::complete_with_retry(batch, &mut |_requests| {
+        calls += 1;
+        Err(FormulaError::Invalid("result count mismatch".into()))
+    });
+    assert_eq!(calls, 1);
+    first.await.expect_err("first caller shares the failure");
+    second.await.expect_err("second caller shares the failure");
+}
+
+/// A batch whose callers all canceled is reported once instead of being retried.
+#[tokio::test]
+async fn canceled_batches_are_not_retried() {
+    let (queue, receiver) = FormulaQueue::new("test", 2);
+    let mut first = Box::pin(queue.run(vec![image()], Timings::default()));
+    let mut second = Box::pin(queue.run(vec![image()], Timings::default()));
+    assert!(futures_util::poll!(&mut first).is_pending());
+    assert!(futures_util::poll!(&mut second).is_pending());
+    let batch = receiver.recv().await.expect("batch").take_ready(2);
+    drop(first);
+    drop(second);
+    let mut calls = 0;
+    FormulaRequest::complete_with_retry(batch, &mut |_requests| {
+        calls += 1;
+        Err(FormulaError::Onnx(ort::Error::new("batch canceled")))
+    });
+    assert_eq!(calls, 1);
+}

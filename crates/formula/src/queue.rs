@@ -79,6 +79,9 @@ impl FormulaQueue {
     }
 }
 
+/// One result per crop in batch order, or a failure shared by the whole physical batch.
+pub type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
+
 /// Owned input, reply, and timing context for a single independently cancelable crop.
 #[derive(TypedBuilder)]
 pub struct FormulaRequest {
@@ -147,11 +150,33 @@ impl FormulaRequest {
         operation()
     }
 
-    /// Routes model results individually and retains a shared source for model-wide failures.
-    pub fn complete_batch(
-        requests: Vec<Self>,
-        result: Result<Vec<Result<String, FormulaError>>, FormulaError>,
+    /// Runs a physical batch and, after a batch-wide runtime failure, retries each half so one
+    /// transient device failure (such as a GPU allocation) cannot discard every peer crop.
+    pub fn complete_with_retry(
+        mut requests: Vec<Self>,
+        run: &mut impl FnMut(&mut Vec<Self>) -> BatchResult,
     ) {
+        match run(&mut requests) {
+            // Only ONNX Runtime failures can be transient; canceled callers gain nothing from a retry.
+            Err(error @ FormulaError::Onnx(_))
+                if requests.len() > 1
+                    && !requests.iter().all(Self::cancelled) =>
+            {
+                tracing::warn!(
+                    "formula batch of {} crops failed; retrying in halves: {}",
+                    requests.len(),
+                    error
+                );
+                let tail = requests.split_off(requests.len() / 2);
+                Self::complete_with_retry(requests, run);
+                Self::complete_with_retry(tail, run);
+            }
+            result => Self::complete_batch(requests, result),
+        }
+    }
+
+    /// Routes model results individually and retains a shared source for model-wide failures.
+    pub fn complete_batch(requests: Vec<Self>, result: BatchResult) {
         let result = result.and_then(|outputs| {
             if outputs.len() != requests.len() {
                 return Err(FormulaError::Invalid(

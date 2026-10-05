@@ -4,13 +4,11 @@ use crate::TexoArtifacts;
 use docparse_common::timing::TimingStage;
 use docparse_formula::{
     FormulaError,
-    queue::{FormulaRequest as Request, FormulaWorkers},
+    queue::{BatchResult, FormulaRequest as Request, FormulaWorkers},
 };
 use docparse_layout::wasm_compat::{OnnxBackend, SessionWorker};
 use ort::{session::builder::SessionBuilder, value::Tensor};
 use std::sync::Arc;
-
-type BatchResult = Result<Vec<Result<String, FormulaError>>, FormulaError>;
 
 /// Queue ownership is separate from native session ownership so heterogeneous groups can compete directly.
 pub(crate) struct SessionManager;
@@ -92,8 +90,8 @@ impl SessionManager {
                         // The native owner retains requests and observes their original response cancellation through every decoder step.
                         if let Err(error) = session
                             .run(move |model| {
-                                let result = model(&mut requests);
-                                Request::complete_batch(requests, result);
+                                // A device allocation failure retries smaller halves on the same owner.
+                                Request::complete_with_retry(requests, model);
                             })
                             .await
                         {
