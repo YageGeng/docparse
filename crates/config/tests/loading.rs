@@ -118,6 +118,65 @@ fn onnx_runtime_keys_default_and_override() {
     assert!(!raw.runtime.onnx_arena_shrinkage);
 }
 
+/// Omitted per-model tuning keeps ONNX Runtime's CUDA default, which enables TF32; an explicit
+/// `tf32 = false` loads per model so that model can force full FP32 math.
+#[test]
+fn onnx_tuning_defaults_preserve_current_behavior() {
+    use docparse_config::OnnxTuning;
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[layout.onnx]\ntf32 = false\n",
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({})))
+        .load_raw()
+        .expect("tuning");
+    assert!(OnnxTuning::default().tf32);
+    assert!(!raw.layout.onnx.tf32);
+    assert_eq!(raw.tsr.onnx, OnnxTuning::default());
+}
+
+/// Misspelled keys and the measured-useless conv search / NHWC knobs fail loading instead of
+/// silently keeping defaults.
+#[test]
+fn onnx_tuning_rejects_unknown_keys() {
+    for key in [
+        "tf_32 = true",
+        "conv_algorithm = \"exhaustive\"",
+        "prefer_nhwc = true",
+    ] {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = write_config(
+            directory.path(),
+            "docparse.toml",
+            &format!("[layout.onnx]\n{key}\n"),
+        );
+        ConfigLoader::new(&path)
+            .with_env_provider(environment_provider(json!({})))
+            .load_raw()
+            .expect_err(key);
+    }
+}
+
+/// Flattened model sections still reject misspelled keys, such as a mistyped tuning table,
+/// instead of silently keeping defaults.
+#[test]
+fn flattened_model_sections_reject_unknown_keys() {
+    for section in [
+        "[tsr.cell_detection]\nonxx = 1\n",
+        "[ocr.detection]\nonxx = 1\n",
+    ] {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = write_config(directory.path(), "docparse.toml", section);
+        ConfigLoader::new(&path)
+            .with_env_provider(environment_provider(json!({})))
+            .load_raw()
+            .expect_err(section);
+    }
+}
+
 /// Structure and cell batch sizes load independently and reject unbounded tensor batches.
 #[test]
 fn table_batch_sizes_are_independent_and_bounded() {
@@ -1173,4 +1232,23 @@ fn formula_session_configuration() {
                 .expect_err("removed CPU/GPU setting");
         }
     }
+}
+
+/// The TensorRT cache resolves beside the configuration file.
+#[test]
+fn tensorrt_cache_dir_resolves_beside_config() {
+    let directory = tempfile::tempdir().expect("directory");
+    let path = write_config(
+        directory.path(),
+        "docparse.toml",
+        "[runtime]\ntensorrt_cache_dir = \"trt\"\n",
+    );
+    let raw = ConfigLoader::new(&path)
+        .with_env_provider(environment_provider(json!({})))
+        .load_raw()
+        .expect("tensorrt");
+    assert_eq!(
+        raw.runtime.tensorrt_cache_dir.as_deref(),
+        Some(directory.path().join("trt").as_path())
+    );
 }

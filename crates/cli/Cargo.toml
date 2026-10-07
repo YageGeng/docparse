@@ -12,6 +12,7 @@ default = []
 # Forward the unified parser provider without model-specific overrides.
 coreml = ["docparse-core/coreml"]
 cuda = ["docparse-core/cuda"]
+tensorrt = ["docparse-core/tensorrt"]
 metal = ["docparse-core/metal"]
 openvino = ["docparse-core/openvino"]
 

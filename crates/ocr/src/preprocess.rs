@@ -13,6 +13,17 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 /// Owned model input remains live until the runtime has finished reading it.
 pub(crate) struct ImageTensor(pub Array4<f32>);
 
+/// Detector input sides are positive multiples of this alignment.
+pub(crate) const DETECTION_ALIGN: u32 = 32;
+/// Fixed recognizer line height; widths grow from the minimum up to the configured maximum.
+pub(crate) const RECOGNITION_HEIGHT: u32 = 48;
+/// Narrowest recognizer batch tensor, padded even when every crop is shorter.
+pub(crate) const RECOGNITION_MIN_WIDTH: u32 = 320;
+/// Fixed orientation-classifier input width.
+pub(crate) const ORIENTATION_WIDTH: u32 = 160;
+/// Fixed orientation-classifier input height.
+pub(crate) const ORIENTATION_HEIGHT: u32 = 80;
+
 impl TryFrom<&[&ImageTensor]> for ImageTensor {
     type Error = OcrError;
 
@@ -52,8 +63,9 @@ impl ImageTensor {
             / f64::from(image.width().max(image.height())))
         .min(1.0);
         let aligned = |size: u32| {
-            ((f64::from(size) * scale / 32.0).round_ties_even().max(1.0) * 32.0)
-                as u32
+            let align = f64::from(DETECTION_ALIGN);
+            ((f64::from(size) * scale / align).round_ties_even().max(1.0)
+                * align) as u32
         };
         let (width, height) = (aligned(image.width()), aligned(image.height()));
         let view = ImageBuffer::<Rgb<u8>, _>::from_raw(
@@ -73,7 +85,7 @@ impl ImageTensor {
         max_width: u32,
     ) -> Result<Self, OcrError> {
         let mut resized = Vec::with_capacity(images.len());
-        let mut tensor_width = 320;
+        let mut tensor_width = RECOGNITION_MIN_WIDTH;
         for image in images {
             let width = Self::recognition_width(
                 image.width(),
@@ -84,7 +96,7 @@ impl ImageTensor {
             resized.push(imageops::resize(
                 *image,
                 width,
-                48,
+                RECOGNITION_HEIGHT,
                 FilterType::Triangle,
             ));
         }
@@ -101,14 +113,18 @@ impl ImageTensor {
         height: u32,
         max_width: u32,
     ) -> Result<u32, OcrError> {
-        if width == 0 || height == 0 || !(320..=4096).contains(&max_width) {
+        if width == 0
+            || height == 0
+            || !(RECOGNITION_MIN_WIDTH..=4096).contains(&max_width)
+        {
             return Err(OcrError::InvalidData(
                 "invalid recognizer image dimensions".into(),
             ));
         }
-        Ok((48.0 * f64::from(width) / f64::from(height))
-            .ceil()
-            .clamp(1.0, f64::from(max_width)) as u32)
+        Ok((f64::from(RECOGNITION_HEIGHT) * f64::from(width)
+            / f64::from(height))
+        .ceil()
+        .clamp(1.0, f64::from(max_width)) as u32)
     }
 
     /// Batches the orientation classifier's fixed 160x80 RGB inputs.
@@ -122,12 +138,12 @@ impl ImageTensor {
             }
             resized.push(imageops::resize(
                 *image,
-                160,
-                80,
+                ORIENTATION_WIDTH,
+                ORIENTATION_HEIGHT,
                 FilterType::Triangle,
             ));
         }
-        Self::normalized(&resized, 160, MEAN, STD, true)
+        Self::normalized(&resized, ORIENTATION_WIDTH, MEAN, STD, true)
     }
 
     /// Writes every image directly into its final NCHW slice without intermediate float tensors.
@@ -226,7 +242,8 @@ impl TextCrop {
         if f64::from(height) / f64::from(width) >= 1.5 {
             std::mem::swap(&mut width, &mut height);
         }
-        Ok(ImageTensor::recognition_width(width, height, max_width)?.max(320))
+        Ok(ImageTensor::recognition_width(width, height, max_width)?
+            .max(RECOGNITION_MIN_WIDTH))
     }
 
     /// Corrects upside-down text while keeping the reading axis attached to the source quadrilateral.

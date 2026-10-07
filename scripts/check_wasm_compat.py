@@ -31,6 +31,8 @@ ALLOWED.update({
     "crates/server/tests/workbench.rs",
     "crates/layout/src/wasm_compat/session_pool.rs",
     "crates/layout/src/wasm_compat/backend.rs",
+    # TensorRT provider construction is native-only and gated on the `tensorrt` feature.
+    "crates/layout/src/wasm_compat/tensorrt.rs",
 })
 # uv's environment contains third-party packages rather than workspace Rust sources.
 EXCLUDED = {".git", ".venv", "target", "node_modules"}

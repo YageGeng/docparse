@@ -114,7 +114,9 @@ impl PaddleOcrEngine {
         );
         let detector = SessionRunner::load(
             artifacts.detection.model,
-            backend,
+            backend.with_tensorrt_profile(
+                ModelKind::Detection.tensorrt_profile(&options),
+            ),
             ModelKind::Detection,
             options.detection.session_size,
             options.detection.batch_size,
@@ -123,7 +125,9 @@ impl PaddleOcrEngine {
         .await?;
         let recognizer = SessionRunner::load(
             artifacts.recognition.model,
-            backend,
+            backend.with_tensorrt_profile(
+                ModelKind::Recognition.tensorrt_profile(&options),
+            ),
             ModelKind::Recognition,
             options.recognition.session_size,
             options.recognition.batch_size,
@@ -137,7 +141,9 @@ impl PaddleOcrEngine {
             Some(
                 SessionRunner::load(
                     model.model,
-                    backend,
+                    backend.with_tensorrt_profile(
+                        ModelKind::Orientation.tensorrt_profile(&options),
+                    ),
                     ModelKind::Orientation,
                     options.orientation.session_size,
                     options.orientation.batch_size,

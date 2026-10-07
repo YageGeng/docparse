@@ -13,6 +13,7 @@ wasm = ["docparse-config/wasm"]
 metal = ["coreml"]
 coreml = ["ort/coreml"]
 cuda = ["ort/cuda"]
+tensorrt = ["cuda", "ort/tensorrt"]
 openvino = ["ort/openvino"]
 
 [dependencies]

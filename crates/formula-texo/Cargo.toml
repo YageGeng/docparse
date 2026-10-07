@@ -12,6 +12,7 @@ default = []
 metal = ["docparse-layout/metal"]
 coreml = ["docparse-layout/coreml"]
 cuda = ["docparse-layout/cuda"]
+tensorrt = ["cuda", "docparse-layout/tensorrt"]
 openvino = ["docparse-layout/openvino"]
 wasm = ["docparse-config/wasm", "docparse-layout/wasm", "docparse-formula/wasm"]
 

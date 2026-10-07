@@ -6,9 +6,19 @@ use docparse_formula::{
     FormulaError,
     queue::{BatchResult, FormulaRequest as Request, FormulaWorkers},
 };
-use docparse_layout::wasm_compat::{OnnxBackend, SessionWorker};
+use docparse_layout::wasm_compat::{OnnxBackend, ProfileDim, SessionWorker};
 use ort::{session::builder::SessionBuilder, value::Tensor};
 use std::sync::Arc;
+
+/// The encoder's batched pixel input at the fixed preprocessing resolution.
+static ENCODER_TENSORRT_INPUTS: [(&str, &[ProfileDim]); 1] = [(
+    "pixel_values",
+    &[
+        ProfileDim::Fixed(3),
+        ProfileDim::Fixed(crate::preprocess::IMAGE_SIZE),
+        ProfileDim::Fixed(crate::preprocess::IMAGE_SIZE),
+    ],
+)];
 
 /// Queue ownership is separate from native session ownership so heterogeneous groups can compete directly.
 pub(crate) struct SessionManager;
@@ -22,11 +32,32 @@ impl SessionManager {
         receiver: docparse_common::Queue<Request>,
     ) -> Result<FormulaWorkers, FormulaError> {
         let settings = config.single_engine()?;
+        let docparse_config::FormulaEngineConfig::Texo(texo) = settings else {
+            return Err(docparse_config::ConfigError::InvalidValue {
+                field: "formula.engine",
+                reason: "the Texo loader requires a texo engine",
+            }
+            .into());
+        };
+        let encoder_profile =
+            docparse_layout::wasm_compat::TensorRtProfile::builder()
+                .inputs(&ENCODER_TENSORRT_INPUTS)
+                .max_batch(settings.batch_size())
+                .model(crate::ENCODER_SHA256)
+                .build();
+        // Encoder and decoder have different shapes, so each graph carries its own provider
+        // tuning. No TensorRT profile for the decoder: TensorRT rejects the merged decoder's `If`
+        // graph, so it stays on CUDA even in `tensorrt` builds.
+        let encoder_backend = backend
+            .tuned(texo.encoder_onnx)
+            .with_tensorrt_profile(encoder_profile);
+        let decoder_backend = backend.tuned(texo.decoder_onnx);
         Self::start(
             settings.worker_size(),
             settings.batch_size(),
             receiver,
-            format!("texo-transfer-onnx-{}", backend.execution_provider()),
+            // The encoder carries the accelerated provider; the decoder is always plain CUDA.
+            format!("texo-transfer-onnx-{}", encoder_backend.provider_label()),
             move |index| {
                 tracing::info!(
                     "initializing Texo consumer {} on {}",
@@ -35,9 +66,9 @@ impl SessionManager {
                 );
                 let cuda = super::cuda::CudaIoContext::detect(&backend, index)?;
                 let mut model = ModelSessions {
-                    encoder: SessionBuilder::try_from(backend)?
+                    encoder: SessionBuilder::try_from(encoder_backend)?
                         .commit_from_memory(&artifacts.encoder)?,
-                    decoder: SessionBuilder::try_from(backend)?
+                    decoder: SessionBuilder::try_from(decoder_backend)?
                         .commit_from_memory(&artifacts.decoder)?,
                     tokenizer: ModelSessions::tokenizer(&artifacts.tokenizer)?,
                 };
@@ -271,5 +302,33 @@ mod tests {
         .await;
         assert!(matches!(result, Err(FormulaError::Invalid(_))));
         assert_eq!(destroyed.load(Ordering::SeqCst), 1);
+    }
+
+    /// A non-Texo engine reaching the Texo loader is a wiring error, not a reason to fall back
+    /// to default tuning.
+    #[tokio::test]
+    async fn load_rejects_non_texo_engine() {
+        let config = docparse_config::FormulaConfig::builder()
+            .queue_size(4)
+            .engine(vec![docparse_config::FormulaEngineConfig::Pp(
+                docparse_config::PpFormulaConfig::default(),
+            )])
+            .build();
+        let empty: Arc<[u8]> = Arc::from(Vec::new());
+        let artifacts = TexoArtifacts {
+            encoder: Arc::clone(&empty),
+            decoder: Arc::clone(&empty),
+            tokenizer: empty,
+        };
+        let (_queue, receiver) =
+            docparse_formula::queue::FormulaQueue::new("test", 4);
+        let result = SessionManager::load(
+            artifacts,
+            OnnxBackend::compiled(),
+            &config,
+            receiver,
+        )
+        .await;
+        assert!(matches!(result, Err(FormulaError::Config(_))));
     }
 }

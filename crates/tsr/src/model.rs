@@ -451,9 +451,15 @@ impl SlanetPlusEngine {
         })
         .await??;
         let backend =
-            docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref());
+            docparse_layout::wasm_compat::OnnxBackend::from(config.as_ref())
+                .tuned(config.tsr().onnx)
+                .with_tensorrt_profile(
+                    kind.tensorrt_profile(config.tsr().batch_size),
+                );
         let provider = backend.execution_provider();
-        tracing::info!("initializing TSR ONNX with provider {}", provider);
+        // Logs and the engine name show TensorRT when it runs the structure model.
+        let label = backend.provider_label();
+        tracing::info!("initializing TSR ONNX with provider {}", label);
         let runner = SessionRunner::load(
             artifacts,
             backend,
@@ -466,12 +472,12 @@ impl SlanetPlusEngine {
         .map_err(|error| {
             tracing::error!(
                 "TSR provider {} initialization failed: {}",
-                provider,
+                label,
                 error
             );
             error
         })?;
-        tracing::info!("loaded TSR ONNX with provider {}", provider);
+        tracing::info!("loaded TSR ONNX with provider {}", label);
         let model_label = match model {
             docparse_config::TsrModel::Tatr => "tatr-v1.1-all",
             docparse_config::TsrModel::SlanetPlus => "slanet-plus",
@@ -479,7 +485,7 @@ impl SlanetPlusEngine {
             docparse_config::TsrModel::SlanextWireless => "slanext-wireless",
         };
         let name = format!(
-            "{model_label}-onnx-{provider}{}",
+            "{model_label}-onnx-{label}{}",
             cell_config.as_ref().map_or(String::new(), |cells| format!(
                 "+rtdetr-{}",
                 match cells.model {
@@ -500,17 +506,20 @@ impl SlanetPlusEngine {
                 Ok::<_, TsrError>(artifacts)
             })
             .await??;
+            let backend = docparse_layout::wasm_compat::OnnxBackend::from(
+                config.as_ref(),
+            )
+            .tuned(cells.onnx)
+            .with_tensorrt_profile(kind.tensorrt_profile(cells.batch_size));
             tracing::info!(
                 "loading table cell detector {:?} with provider {}",
                 cells.model,
-                provider
+                backend.provider_label()
             );
             Some((
                 SessionRunner::load(
                     artifacts,
-                    docparse_layout::wasm_compat::OnnxBackend::from(
-                        config.as_ref(),
-                    ),
+                    backend,
                     kind,
                     cells.batch_size,
                     cells.session_size,

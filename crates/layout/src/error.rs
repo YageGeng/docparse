@@ -96,6 +96,29 @@ pub enum LayoutError {
     #[error("execution provider '{provider}' is not enabled in this build")]
     ExecutionProviderUnavailable { provider: &'static str },
 
+    /// TensorRT builds need an engine cache; without one every start rebuilds every engine.
+    #[error("tensorrt builds require [runtime] tensorrt_cache_dir")]
+    TensorRtCacheUnset,
+
+    /// A dynamic TensorRT axis lacks a configured upper bound at least as large as its minimum.
+    #[error(
+        "TensorRT profile input {input} needs an extent of at least {min}, got {extent}"
+    )]
+    TensorRtProfile {
+        input: &'static str,
+        min: usize,
+        extent: usize,
+    },
+
+    /// TensorRT engines cannot be cached (unwritable or non-UTF-8 path), so every start would
+    /// rebuild them.
+    #[error("TensorRT cache directory {path} is unusable: {source}")]
+    TensorRtCache {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     /// ONNX Runtime failed while loading, inspecting, or running a model.
     #[error("ONNX Runtime failed: {source}")]
     Ort {

@@ -3,6 +3,8 @@
 /models/
 # Uploaded PDFs and durable results from the server's default local storage path.
 /data/docparse/
+# TensorRT engines built by the example `[runtime] tensorrt_cache_dir`.
+/cache/tensorrt/
 *.tsbuildinfo
 
 # Editor settings

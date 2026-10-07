@@ -1,7 +1,9 @@
 //! Immutable structure and cell model artifacts share the existing verification contract.
 use docparse_common::timing::TimingStage;
 use docparse_config::{TableCellModel, TsrModel};
-use docparse_layout::{ModelArtifacts, ModelContract};
+use docparse_layout::{
+    ModelArtifacts, ModelContract, ProfileDim, TensorRtProfile,
+};
 
 /// Files required by the selected structure model and optional cell detector.
 #[derive(Debug, Clone)]
@@ -9,6 +11,11 @@ pub struct TsrArtifacts {
     pub structure: ModelArtifacts,
     pub cell_detection: Option<ModelArtifacts>,
 }
+
+/// Square input edge of both RT-DETR table-cell detectors.
+pub(crate) const CELL_EDGE: usize = 640;
+/// Long edge TATR scales tables to, keeping their aspect ratio.
+pub(crate) const TATR_EDGE: usize = 800;
 
 impl From<ModelArtifacts> for TsrArtifacts {
     /// Keeps the single-model artifact constructor compatible with SLANet+ callers.
@@ -91,12 +98,64 @@ impl ModelKind {
 
     /// Specializes the structure graph to its actual preprocessed dimensions.
     pub(crate) fn edge(self) -> usize {
+        // Only models with a TensorRT profile share a named constant with their preprocessing.
         match self {
             Self::Structure(TsrModel::SlanetPlus) => 488,
-            Self::Structure(TsrModel::Tatr) => 800,
+            Self::Structure(TsrModel::Tatr) => TATR_EDGE,
             Self::Structure(_) => 512,
-            Self::Cells(_) => 640,
+            Self::Cells(_) => CELL_EDGE,
         }
+    }
+
+    /// Shape profile so TensorRT builds one engine per model; TATR keeps its aspect ratio, so
+    /// both spatial axes range up to its long edge. SLANet+ and SLANeXt return `None`: their
+    /// autoregressive Paddle `Loop` fails TensorRT's recurrence-shape validation at engine build.
+    pub(crate) fn tensorrt_profile(
+        self,
+        max_batch: usize,
+    ) -> Option<TensorRtProfile> {
+        // Wide tables are the common case, so the optimization target is 600x800.
+        const TATR_SIDE: ProfileDim = ProfileDim::Range {
+            min: 1,
+            opt: TATR_EDGE,
+            max: TATR_EDGE,
+        };
+        const TATR_HEIGHT: ProfileDim = ProfileDim::Range {
+            min: 1,
+            opt: 600,
+            max: TATR_EDGE,
+        };
+        static TATR: [(&str, &[ProfileDim]); 2] = [
+            (
+                "pixel_values",
+                &[ProfileDim::Fixed(3), TATR_HEIGHT, TATR_SIDE],
+            ),
+            ("pixel_mask", &[TATR_HEIGHT, TATR_SIDE]),
+        ];
+        static CELLS: [(&str, &[ProfileDim]); 3] = [
+            ("im_shape", &[ProfileDim::Fixed(2)]),
+            (
+                "image",
+                &[
+                    ProfileDim::Fixed(3),
+                    ProfileDim::Fixed(CELL_EDGE),
+                    ProfileDim::Fixed(CELL_EDGE),
+                ],
+            ),
+            ("scale_factor", &[ProfileDim::Fixed(2)]),
+        ];
+        let inputs: &'static [(&str, &[ProfileDim])] = match self {
+            Self::Structure(TsrModel::Tatr) => &TATR,
+            Self::Structure(_) => return None,
+            Self::Cells(_) => &CELLS,
+        };
+        Some(
+            TensorRtProfile::builder()
+                .inputs(inputs)
+                .max_batch(max_batch)
+                .model(&self.contract().model_sha256)
+                .build(),
+        )
     }
 
     /// Keeps detection execution separate from structure execution in measurements.
@@ -104,6 +163,31 @@ impl ModelKind {
         match self {
             Self::Structure(_) => TimingStage::TsrInference,
             Self::Cells(_) => TimingStage::TableCellInference,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// TensorRT rejects the SLANet+/SLANeXt `Loop` decoders, so only TATR and the cell detectors
+    /// may declare a profile; a profile on a rejected graph would fail every TensorRT start.
+    #[test]
+    fn only_tensorrt_compatible_models_declare_profiles() {
+        for (kind, profiled) in [
+            (ModelKind::Structure(TsrModel::Tatr), true),
+            (ModelKind::Structure(TsrModel::SlanetPlus), false),
+            (ModelKind::Structure(TsrModel::SlanextWired), false),
+            (ModelKind::Structure(TsrModel::SlanextWireless), false),
+            (ModelKind::Cells(TableCellModel::Wired), true),
+            (ModelKind::Cells(TableCellModel::Wireless), true),
+        ] {
+            assert_eq!(
+                kind.tensorrt_profile(1).is_some(),
+                profiled,
+                "{kind:?}"
+            );
         }
     }
 }

@@ -1,5 +1,6 @@
 //! SLANet_plus BGR resize, normalization, and padding over owned PDF rasters.
 use crate::TsrError;
+use crate::artifacts::CELL_EDGE;
 use docparse_layout::PageImage;
 use ndarray::{Array2, Array4};
 
@@ -145,24 +146,27 @@ impl TryFrom<&PageImage> for CellInput {
     /// Uses the same cubic RGB resize as layout and the pinned detector normalization.
     #[allow(
         clippy::indexing_slicing,
-        reason = "the verified RGB resizer returns exactly 640 by 640 packed pixels and NCHW indices have fixed bounds"
+        reason = "the verified RGB resizer returns exactly CELL_EDGE by CELL_EDGE packed pixels and NCHW indices have fixed bounds"
     )]
     fn try_from(image: &PageImage) -> Result<Self, Self::Error> {
-        let pixels = image.resize_rgb_cubic(640, 640).map_err(|error| {
+        let edge = CELL_EDGE as u32;
+        let pixels = image.resize_rgb_cubic(edge, edge).map_err(|error| {
             TsrError::InvalidInput {
                 reason: error.to_string(),
             }
         })?;
-        let tensor =
-            Array4::from_shape_fn((1, 3, 640, 640), |(_, channel, y, x)| {
-                f32::from(pixels[(y * 640 + x) * 3 + channel]) / 255.0
-            });
+        let tensor = Array4::from_shape_fn(
+            (1, 3, CELL_EDGE, CELL_EDGE),
+            |(_, channel, y, x)| {
+                f32::from(pixels[(y * CELL_EDGE + x) * 3 + channel]) / 255.0
+            },
+        );
         Ok(Self {
             image: tensor,
-            image_shape: ndarray::arr2(&[[640.0, 640.0]]),
+            image_shape: ndarray::arr2(&[[edge as f32, edge as f32]]),
             scale_factor: ndarray::arr2(&[[
-                640.0 / image.height() as f32,
-                640.0 / image.width() as f32,
+                edge as f32 / image.height() as f32,
+                edge as f32 / image.width() as f32,
             ]]),
         })
     }

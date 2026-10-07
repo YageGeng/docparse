@@ -17,6 +17,9 @@ pub(crate) mod session;
 use docparse_common::timing::TimingStage;
 use preprocess::preprocess;
 
+/// Square input edge required by the verified model configuration.
+pub(crate) const INPUT_EDGE: usize = 800;
+
 #[derive(Debug, Deserialize)]
 struct InferenceConfig {
     #[serde(rename = "Global")]
@@ -207,7 +210,7 @@ fn verify_model_config(bytes: &[u8]) -> Result<(), LayoutError> {
     let unit_std = std.iter().all(|value| (*value - 1.0).abs() <= f32::EPSILON);
     if *interp != 2
         || *keep_ratio
-        || *target_size != [800, 800]
+        || *target_size != [INPUT_EDGE as u32; 2]
         || norm_type != "none"
         || !zero_mean
         || !unit_std

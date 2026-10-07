@@ -1,4 +1,5 @@
 //! Shared execution-provider registration for layout, OCR and table structure models.
+use super::tensorrt::{TensorRtCache, TensorRtProfile};
 use crate::LayoutError;
 use docparse_config::{OnnxThreadPool, OptimizationLevel, ValidatedConfig};
 use ort::session::{
@@ -170,12 +171,38 @@ pub struct OnnxBackend {
     // Matches the runtime configuration default so ad-hoc builders share GPU memory the same way.
     #[builder(default = true)]
     arena_shrinkage: bool,
+    // Per-model provider tuning; the shared backend keeps defaults until a model applies its own.
+    // Only CUDA reads it, so other builds record it without using it.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    #[builder(default)]
+    tuning: docparse_config::OnnxTuning,
+    // Sessions with a profile run TensorRT in `tensorrt` builds; others stay on CUDA.
+    #[builder(default)]
+    tensorrt_profile: Option<TensorRtProfile>,
+    // This configuration's engine cache; only `tensorrt` builds read it.
+    #[cfg_attr(not(feature = "tensorrt"), allow(dead_code))]
+    #[builder(default)]
+    tensorrt_cache: Option<TensorRtCache>,
 }
 
 impl OnnxBackend {
     /// Reports the selected backend without exposing a runtime mutation mechanism.
     pub const fn execution_provider(self) -> ExecutionProvider {
         self.provider
+    }
+
+    /// Names the provider that actually runs this backend's sessions for logs and output
+    /// provenance: TensorRT for a profiled CUDA session in `tensorrt` builds, otherwise the
+    /// selected provider.
+    pub fn provider_label(self) -> &'static str {
+        if cfg!(feature = "tensorrt")
+            && self.tensorrt_profile.is_some()
+            && self.provider == ExecutionProvider::Cuda
+        {
+            "tensorrt"
+        } else {
+            self.provider.as_str()
+        }
     }
 
     /// Chooses the compiled native provider with the shared configuration's default graph level.
@@ -185,6 +212,45 @@ impl OnnxBackend {
             ExecutionProvider::compiled(),
             &docparse_config::RuntimeConfig::default(),
         )
+    }
+
+    /// Returns a copy that lets TensorRT build one engine covering this model's batch range;
+    /// `None` keeps a model whose graph TensorRT rejects on the regular provider.
+    pub fn with_tensorrt_profile(
+        self,
+        profile: impl Into<Option<TensorRtProfile>>,
+    ) -> Self {
+        Self {
+            tensorrt_profile: profile.into(),
+            ..self
+        }
+    }
+
+    /// Returns a copy carrying one model's provider tuning, leaving the shared backend unchanged.
+    pub fn tuned(self, tuning: docparse_config::OnnxTuning) -> Self {
+        Self { tuning, ..self }
+    }
+
+    /// In `tensorrt` builds, every session that declares a shape profile runs TensorRT first
+    /// (CUDA remains the fallback); sessions without one, such as the merged Texo decoder whose
+    /// `If` graph TensorRT rejects, keep plain CUDA.
+    fn tensorrt_provider(
+        self,
+    ) -> Result<Option<ort::ep::ExecutionProviderDispatch>, LayoutError> {
+        #[cfg(all(not(target_arch = "wasm32"), feature = "tensorrt"))]
+        if let Some(profile) = self.tensorrt_profile {
+            if self.provider != ExecutionProvider::Cuda {
+                tracing::error!(
+                    "ONNX execution provider tensorrt is unavailable for provider {}",
+                    self.provider
+                );
+                return Err(LayoutError::ExecutionProviderUnavailable {
+                    provider: "tensorrt",
+                });
+            }
+            return profile.execution_provider(self.tensorrt_cache).map(Some);
+        }
+        Ok(None)
     }
 
     /// The single mapping from runtime keys to session policy, shared by every constructor.
@@ -198,6 +264,12 @@ impl OnnxBackend {
             .memory_pattern(runtime.memory_pattern)
             .threading(OnnxThreading::from(runtime))
             .arena_shrinkage(runtime.onnx_arena_shrinkage)
+            .tensorrt_cache(
+                runtime
+                    .tensorrt_cache_dir
+                    .as_deref()
+                    .map(TensorRtCache::new),
+            )
             .build()
     }
 
@@ -270,6 +342,8 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
 
     /// Registers requested accelerators strictly; unsupported builds never silently select CPU.
     fn try_from(backend: OnnxBackend) -> Result<Self, Self::Error> {
+        // TensorRT runs first and falls back to the regular provider for unsupported nodes.
+        let tensorrt = backend.tensorrt_provider()?;
         // Register the selected provider only after applying the shared per-parser session options.
         let builder = backend.cpu_builder()?;
         let provider = backend.provider;
@@ -280,13 +354,13 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
                 {
                     // OCR widths and partial batches keep changing after warmup; select
                     // convolution kernels heuristically instead of benchmarking every new shape.
-                    Some(
-                        ort::ep::CUDA::default()
-                            .with_conv_algorithm_search(
-                                ort::ep::cuda::ConvAlgorithmSearch::Heuristic,
-                            )
-                            .build(),
-                    )
+                    let cuda = ort::ep::CUDA::default()
+                        .with_conv_algorithm_search(
+                            ort::ep::cuda::ConvAlgorithmSearch::Heuristic,
+                        );
+                    // Always explicit: ONNX Runtime enables TF32 when the option is absent, so
+                    // only setting `true` would leave `tf32 = false` unable to disable it.
+                    Some(cuda.with_tf32(backend.tuning.tf32).build())
                 }
                 #[cfg(not(all(
                     not(target_arch = "wasm32"),
@@ -361,12 +435,19 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
                 }
             })?;
         tracing::info!("registering ONNX execution provider {}", provider);
+        let with_tensorrt = tensorrt.is_some();
         builder
-            .with_execution_providers([dispatch.error_on_failure()])
+            .with_execution_providers(
+                tensorrt
+                    .into_iter()
+                    .chain([dispatch.error_on_failure()])
+                    .collect::<Vec<_>>(),
+            )
             .map_err(|error| {
                 tracing::error!(
-                    "ONNX execution provider {} initialization failed: {}",
+                    "ONNX execution provider {} (tensorrt first: {}) initialization failed: {}",
                     provider,
+                    with_tensorrt,
                     error
                 );
                 LayoutError::from(ort::Error::from(error))
@@ -377,7 +458,10 @@ impl TryFrom<OnnxBackend> for SessionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::wasm_compat::ProfileDim;
+    /// Well-formed stand-in for a pinned model digest.
+    const DIGEST: &str =
+        "45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba";
     /// Every native model receives the compiled backend even when built from code-default configuration.
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -407,7 +491,6 @@ mod tests {
             assert_eq!(selected == provider, enabled, "{provider}");
         }
     }
-
     /// A missing accelerator feature must fail instead of silently creating a CPU session.
     #[test]
     fn unsupported_providers_are_rejected() {
@@ -429,7 +512,6 @@ mod tests {
             }
         }
     }
-
     /// Automatic global sizing follows cgroup-aware parallelism, and explicit values win.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -445,7 +527,6 @@ mod tests {
         };
         assert_eq!(explicit.global_threads(), 3);
     }
-
     /// Runtime keys map directly, and the default policy is the shared, non-spinning pool.
     #[test]
     fn threading_follows_runtime_config() {
@@ -470,7 +551,6 @@ mod tests {
             }
         );
     }
-
     /// CUDA runs return idle arena chunks only when enabled; other providers keep plain options.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -496,5 +576,142 @@ mod tests {
                 backend(provider, shrink).run_options().expect("options");
             assert_eq!(options.get(key), None);
         }
+    }
+    /// Tuning a copy leaves the shared backend, and so every other model, untouched.
+    #[test]
+    fn tuned_changes_only_this_backend() {
+        let tuning = docparse_config::OnnxTuning { tf32: false };
+        let shared = OnnxBackend::builder()
+            .provider(ExecutionProvider::Cuda)
+            .optimization_level(OptimizationLevel::default())
+            .memory_pattern(false)
+            .build();
+        let tuned = shared.tuned(tuning);
+        assert_eq!(shared.tuning, docparse_config::OnnxTuning::default());
+        assert_eq!(tuned.tuning, tuning);
+    }
+    /// A profiled session on a non-CUDA provider is refused instead of silently skipping TensorRT.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "tensorrt"))]
+    #[test]
+    fn tensorrt_requires_cuda_provider() {
+        static INPUTS: [(&str, &[ProfileDim]); 1] =
+            [("x", &[ProfileDim::Fixed(3)])];
+        let backend = OnnxBackend::builder()
+            .provider(ExecutionProvider::Cpu)
+            .optimization_level(OptimizationLevel::default())
+            .memory_pattern(false)
+            .build()
+            .with_tensorrt_profile(
+                TensorRtProfile::builder()
+                    .inputs(&INPUTS)
+                    .max_batch(1)
+                    .model(DIGEST)
+                    .build(),
+            );
+        assert!(matches!(
+            SessionBuilder::try_from(backend),
+            Err(LayoutError::ExecutionProviderUnavailable {
+                provider: "tensorrt"
+            })
+        ));
+    }
+    /// Without the feature a declared profile is inert: CPU builds still create sessions.
+    #[cfg(not(feature = "tensorrt"))]
+    #[test]
+    fn tensorrt_profile_is_inert_without_feature() {
+        static INPUTS: [(&str, &[ProfileDim]); 1] =
+            [("x", &[ProfileDim::Fixed(3)])];
+        let backend = OnnxBackend::builder()
+            .provider(ExecutionProvider::Cpu)
+            .optimization_level(OptimizationLevel::default())
+            .memory_pattern(false)
+            .build()
+            .with_tensorrt_profile(
+                TensorRtProfile::builder()
+                    .inputs(&INPUTS)
+                    .max_batch(1)
+                    .model(DIGEST)
+                    .build(),
+            );
+        SessionBuilder::try_from(backend)
+            .expect("CPU builder without tensorrt");
+    }
+    /// Without a cache directory TensorRT would rebuild every engine on each start, so profiled
+    /// sessions are refused before any provider loads, even after another configuration in the
+    /// same process registered its own directory.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "tensorrt"))]
+    #[test]
+    fn tensorrt_requires_cache_directory() {
+        static INPUTS: [(&str, &[ProfileDim]); 1] =
+            [("x", &[ProfileDim::Fixed(3)])];
+        let directory = tempfile::tempdir().expect("directory");
+        let other = docparse_config::RuntimeConfig {
+            tensorrt_cache_dir: Some(directory.path().to_path_buf()),
+            ..Default::default()
+        };
+        let _ = OnnxBackend::from_runtime(ExecutionProvider::Cuda, &other);
+        let backend = OnnxBackend::from_runtime(
+            ExecutionProvider::Cuda,
+            &docparse_config::RuntimeConfig::default(),
+        )
+        .with_tensorrt_profile(
+            TensorRtProfile::builder()
+                .inputs(&INPUTS)
+                .max_batch(1)
+                .model(DIGEST)
+                .build(),
+        );
+        assert!(matches!(
+            SessionBuilder::try_from(backend),
+            Err(LayoutError::TensorRtCacheUnset)
+        ));
+    }
+    /// Each configuration carries its own TensorRT cache: one without a directory, or with a
+    /// different one, is never served by a directory another configuration registered first.
+    #[test]
+    fn tensorrt_cache_follows_each_configuration() {
+        let first = tempfile::tempdir().expect("directory");
+        let second = tempfile::tempdir().expect("directory");
+        let cache_of = |dir: Option<&std::path::Path>| {
+            let runtime = docparse_config::RuntimeConfig {
+                tensorrt_cache_dir: dir.map(std::path::Path::to_path_buf),
+                ..Default::default()
+            };
+            OnnxBackend::from_runtime(ExecutionProvider::Cuda, &runtime)
+                .tensorrt_cache
+                .map(TensorRtCache::path)
+        };
+        assert_eq!(cache_of(Some(first.path())), Some(first.path()));
+        assert_eq!(cache_of(None), None);
+        assert_eq!(cache_of(Some(second.path())), Some(second.path()));
+        assert_eq!(cache_of(Some(first.path())), Some(first.path()));
+    }
+    /// Labels name TensorRT only for sessions it actually runs: a profiled CUDA session in a
+    /// `tensorrt` build; an unprofiled session, or any session in other builds, keeps its provider.
+    #[test]
+    fn provider_label_names_tensorrt_only_for_profiled_sessions() {
+        static INPUTS: [(&str, &[ProfileDim]); 1] =
+            [("x", &[ProfileDim::Fixed(3)])];
+        let cuda = OnnxBackend::builder()
+            .provider(ExecutionProvider::Cuda)
+            .optimization_level(OptimizationLevel::default())
+            .memory_pattern(false)
+            .build();
+        let profiled = cuda.with_tensorrt_profile(
+            TensorRtProfile::builder()
+                .inputs(&INPUTS)
+                .max_batch(1)
+                .model(DIGEST)
+                .build(),
+        );
+        assert_eq!(cuda.provider_label(), "cuda");
+        assert_eq!(
+            profiled.provider_label(),
+            if cfg!(feature = "tensorrt") {
+                "tensorrt"
+            } else {
+                "cuda"
+            }
+        );
     }
 }

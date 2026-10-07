@@ -15,6 +15,9 @@ cuda = ["docparse-formula/cuda", "docparse-formula-texo/cuda", "docparse-layout/
 metal = ["docparse-formula/metal", "docparse-formula-texo/metal", "docparse-layout/metal", "docparse-ocr/metal", "docparse-tsr/metal"]
 openvino = ["docparse-formula/openvino", "docparse-formula-texo/openvino", "docparse-layout/openvino", "docparse-ocr/openvino", "docparse-tsr/openvino"]
 pdfium-ipc = ["dep:ipc-channel", "dep:tracing-subscriber"]
+# TensorRT first with CUDA fallback for every model that declares a shape profile;
+# PP-FormulaNet declares none because TensorRT rejects its graph, so it runs plain CUDA.
+tensorrt = ["cuda", "docparse-formula-texo/tensorrt", "docparse-layout/tensorrt", "docparse-ocr/tensorrt", "docparse-tsr/tensorrt"]
 wasm = ["docparse-config/wasm", "docparse-formula/wasm", "docparse-formula-http/wasm", "docparse-formula-texo/wasm", "docparse-layout/wasm", "docparse-ocr/wasm", "docparse-tsr/wasm", "pdfium/wasm"]
 
 [dependencies]

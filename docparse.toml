@@ -43,6 +43,11 @@ onnx_spinning = false
 # CUDA only: OCR and table models return idle arena memory after each run, so their
 # page-sized peaks cannot starve formula and other models into allocation failures.
 onnx_arena_shrinkage = true
+# TensorRT engine and timing cache; required by `--features tensorrt` builds and ignored
+# otherwise. Relative paths resolve beside this file. The first start builds every engine
+# (several minutes); later starts load them from here. Clear it after upgrading TensorRT or
+# ONNX Runtime or moving to a different GPU model.
+tensorrt_cache_dir = "cache/tensorrt"
 
 [render]
 workers = 5
@@ -58,6 +63,10 @@ score_threshold = 0.5
 session_size = 2
 batch_size = 1
 queue_size = 8
+# Per-model execution tuning; omitted keys keep today's CUDA behavior. The same table exists
+# as [tsr.onnx], [tsr.cell_detection.onnx] and, for Texo, encoder_onnx / decoder_onnx.
+# [layout.onnx]
+# tf32 = true  # ONNX Runtime's default; false forces full FP32 math for this model
 
 [tsr]
 mode = "tsr_only"

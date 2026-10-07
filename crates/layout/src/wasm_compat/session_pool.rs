@@ -91,8 +91,24 @@ impl docparse_common::SessionRequest for Request {
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 mod platform {
     use super::*;
+    use crate::pp_doclayout_v3::INPUT_EDGE;
+    use crate::wasm_compat::ProfileDim;
     use docparse_common::SessionManager;
     use ort::session::{HasSelectedOutputs, Session};
+
+    /// Batched inputs and their fixed dimensions, for a single TensorRT engine per batch range.
+    static TENSORRT_INPUTS: [(&str, &[ProfileDim]); 3] = [
+        ("im_shape", &[ProfileDim::Fixed(2)]),
+        (
+            "image",
+            &[
+                ProfileDim::Fixed(3),
+                ProfileDim::Fixed(INPUT_EDGE),
+                ProfileDim::Fixed(INPUT_EDGE),
+            ],
+        ),
+        ("scale_factor", &[ProfileDim::Fixed(2)]),
+    ];
 
     /// One mutable native ORT session held by a unique lease.
     struct LayoutSession {
@@ -149,8 +165,17 @@ mod platform {
             artifacts: ModelArtifacts,
             config: Arc<ValidatedConfig>,
         ) -> Result<Arc<Self>, LayoutError> {
-            let backend =
-                crate::wasm_compat::OnnxBackend::from(config.as_ref());
+            let backend = crate::wasm_compat::OnnxBackend::from(
+                config.as_ref(),
+            )
+            .tuned(config.layout().onnx)
+            .with_tensorrt_profile(
+                crate::wasm_compat::TensorRtProfile::builder()
+                    .inputs(&TENSORRT_INPUTS)
+                    .max_batch(config.layout().batch_size)
+                    .model(crate::model_manifest::PP_DOCLAYOUT_V3_MODEL_SHA256)
+                    .build(),
+            );
             let manager = SessionManager::load(
                 "layout",
                 config.layout().session_size,

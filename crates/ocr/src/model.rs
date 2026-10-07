@@ -1,7 +1,7 @@
 //! Pinned OCR contracts and bounded output readback shared by every execution provider.
 use crate::{OcrError, decode::CtcSteps, detect::DetectionMap};
 use docparse_common::timing::TimingStage;
-use docparse_layout::ModelContract;
+use docparse_layout::{ModelContract, ProfileDim, TensorRtProfile};
 use ndarray::{Ix2, Ix3, Ix4};
 use ort::session::{Session, SessionOutputs};
 
@@ -27,6 +27,81 @@ pub(crate) struct Orientation {
 }
 
 impl ModelKind {
+    /// Shape profile so TensorRT builds one engine per model instead of rebuilding as page
+    /// and line sizes change; detector and recognizer bounds follow the configured limits.
+    pub(crate) fn tensorrt_profile(
+        self,
+        config: &docparse_config::OcrConfig,
+    ) -> TensorRtProfile {
+        use crate::preprocess::{
+            DETECTION_ALIGN, ORIENTATION_HEIGHT, ORIENTATION_WIDTH,
+            RECOGNITION_HEIGHT, RECOGNITION_MIN_WIDTH,
+        };
+        // Typical inputs TensorRT tunes for: a portrait Letter/A4 page at the default 144 dpi
+        // after alignment, and a common line width. Measured against tuning for the configured
+        // maximum, inference time is unchanged and engine builds take about half as long.
+        const PAGE_HEIGHT: usize = 1600;
+        const PAGE_WIDTH: usize = 1216;
+        const LINE_WIDTH: usize = 1280;
+        static DETECTION: [(&str, &[ProfileDim]); 1] = [(
+            "x",
+            &[
+                ProfileDim::Fixed(3),
+                ProfileDim::Extent {
+                    min: DETECTION_ALIGN as usize,
+                    opt: PAGE_HEIGHT,
+                },
+                ProfileDim::Extent {
+                    min: DETECTION_ALIGN as usize,
+                    opt: PAGE_WIDTH,
+                },
+            ],
+        )];
+        static RECOGNITION: [(&str, &[ProfileDim]); 1] = [(
+            "x",
+            &[
+                ProfileDim::Fixed(3),
+                ProfileDim::Fixed(RECOGNITION_HEIGHT as usize),
+                ProfileDim::Extent {
+                    min: RECOGNITION_MIN_WIDTH as usize,
+                    opt: LINE_WIDTH,
+                },
+            ],
+        )];
+        static ORIENTATION: [(&str, &[ProfileDim]); 1] = [(
+            "x",
+            &[
+                ProfileDim::Fixed(3),
+                ProfileDim::Fixed(ORIENTATION_HEIGHT as usize),
+                ProfileDim::Fixed(ORIENTATION_WIDTH as usize),
+            ],
+        )];
+        let model = self.contract().model_sha256;
+        let (inputs, max_batch, extent) = match self {
+            // Detector sides are rounded to the alignment, which can exceed the configured side.
+            Self::Detection => (
+                &DETECTION,
+                config.detection.batch_size,
+                config.detection_max_side.next_multiple_of(DETECTION_ALIGN),
+            ),
+            Self::Recognition => (
+                &RECOGNITION,
+                config.recognition.batch_size,
+                config.recognition_max_width,
+            ),
+            // Orientation inputs are fixed, so no axis reads the extent.
+            Self::Orientation => {
+                (&ORIENTATION, config.orientation.batch_size, 0)
+            }
+        };
+        TensorRtProfile::builder()
+            .inputs(inputs)
+            .max_batch(max_batch)
+            .extent(extent as usize)
+            .model(&model)
+            .build()
+    }
+
     /// Uses bounded stage identities for shared queue and physical inference measurements.
     pub fn metric_name(self) -> &'static str {
         match self {

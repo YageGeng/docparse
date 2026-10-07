@@ -244,6 +244,11 @@ mod platform {
                     *root = base_directory.join(&*root);
                 }
             }
+            if let Some(cache) = &mut self.runtime.tensorrt_cache_dir
+                && cache.is_relative()
+            {
+                *cache = base_directory.join(&*cache);
+            }
             if let Some(cells) = &mut self.tsr.cell_detection {
                 for path in [
                     &mut cells.files.model_path,

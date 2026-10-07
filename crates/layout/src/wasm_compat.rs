@@ -1,10 +1,12 @@
 //! Platform-specific execution and thread bounds with explicitly scoped compatibility submodules.
 mod backend;
 mod session_pool;
+mod tensorrt;
 pub use backend::{ExecutionProvider, OnnxBackend};
 pub use docparse_common::{Elapsed, timeout};
 #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
 pub use docparse_common::{SessionManager, SessionRequest};
+pub use tensorrt::{ProfileDim, TensorRtProfile};
 
 pub(crate) use session_pool::LayoutSessionPool;
 

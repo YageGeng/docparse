@@ -11,6 +11,7 @@ description = "Independent PaddleOCR ONNX detection, orientation and recognition
 default = []
 coreml = ["docparse-layout/coreml"]
 cuda = ["docparse-layout/cuda"]
+tensorrt = ["cuda", "docparse-layout/tensorrt"]
 metal = ["docparse-layout/metal"]
 openvino = ["docparse-layout/openvino"]
 wasm = ["docparse-config/wasm", "docparse-layout/wasm"]

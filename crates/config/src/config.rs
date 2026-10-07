@@ -416,6 +416,12 @@ pub struct TexoFormulaConfig {
     pub decoder_path: PathBuf,
     /// Matching WordLevel tokenizer.
     pub tokenizer_path: PathBuf,
+    /// Execution-provider tuning for the image encoder.
+    #[builder(default)]
+    pub encoder_onnx: OnnxTuning,
+    /// Execution-provider tuning for the autoregressive decoder.
+    #[builder(default)]
+    pub decoder_onnx: OnnxTuning,
 }
 
 impl Default for TexoFormulaConfig {
@@ -445,6 +451,10 @@ pub struct LayoutConfig {
     #[serde(default = "default_session_size")]
     #[builder(default = 1)]
     pub batch_size: usize,
+    /// Execution-provider tuning for the layout detector.
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx: OnnxTuning,
 }
 
 impl Default for LayoutConfig {
@@ -476,6 +486,24 @@ pub enum OptimizationLevel {
     Level2,
     Level3,
     All,
+}
+
+/// Per-model execution-provider tuning; every default keeps the current CUDA behavior.
+/// Exhaustive convolution search and NHWC were measured too and gave no gain or regressed,
+/// so only TF32 is exposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OnnxTuning {
+    /// Allows TF32 math for FP32 convolutions and matrix products (CUDA only). ONNX Runtime
+    /// enables it by default; `false` forces full FP32 for this model.
+    pub tf32: bool,
+}
+
+impl Default for OnnxTuning {
+    /// Matches ONNX Runtime's CUDA default so an omitted table changes nothing.
+    fn default() -> Self {
+        Self { tf32: true }
+    }
 }
 
 /// Ownership of ONNX Runtime CPU compute threads across all native sessions.
@@ -521,6 +549,10 @@ pub struct RuntimeConfig {
     #[serde(default = "RuntimeConfig::default_arena_shrinkage")]
     #[builder(default = true)]
     pub onnx_arena_shrinkage: bool,
+    /// Directory for TensorRT engine and timing caches; required by `tensorrt` builds.
+    #[serde(default)]
+    #[builder(default)]
+    pub tensorrt_cache_dir: Option<PathBuf>,
 }
 
 impl RuntimeConfig {
@@ -811,6 +843,7 @@ pub enum TableCellModel {
 
 /// Independently verified detection artifacts and the acceptance threshold for cells.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[serde(deny_unknown_fields)]
 pub struct TableCellConfig {
     /// Required pending-crop capacity independent of structure-model admission.
     pub queue_size: usize,
@@ -828,6 +861,10 @@ pub struct TableCellConfig {
     #[serde(flatten)]
     pub files: ModelFiles,
     pub score_threshold: f64,
+    /// Execution-provider tuning for the cell detector.
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx: OnnxTuning,
 }
 
 impl Default for TableCellConfig {
@@ -865,6 +902,10 @@ pub struct TsrConfig {
     pub model_config_path: PathBuf,
     pub model_manifest_path: PathBuf,
     pub mode: TableMode,
+    /// Execution-provider tuning for the structure model.
+    #[serde(default)]
+    #[builder(default)]
+    pub onnx: OnnxTuning,
     /// Maximum ready crops combined into one structure call; the model queue provides backpressure.
     #[serde(default = "TsrConfig::default_batch_size")]
     #[builder(default = Self::default_batch_size())]

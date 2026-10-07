@@ -10,7 +10,7 @@ const PP_DOCLAYOUT_V3_REPOSITORY: &str = "PaddlePaddle/PP-DocLayoutV3_onnx";
 pub const PP_DOCLAYOUT_V3_REVISION: &str =
     "46bbdf188bb0a772c08aed74882ce7e51a8f1ea6";
 const PP_DOCLAYOUT_V3_LICENSE: &str = "Apache-2.0";
-const PP_DOCLAYOUT_V3_MODEL_SHA256: &str =
+pub(crate) const PP_DOCLAYOUT_V3_MODEL_SHA256: &str =
     "45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba";
 const PP_DOCLAYOUT_V3_CONFIG_SHA256: &str =
     "506fcfac13b3b546ae40d7886b44126420f392adb694e3f8bb6a6286a1f90fdc";

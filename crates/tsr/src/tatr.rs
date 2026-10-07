@@ -1,5 +1,6 @@
 //! Microsoft TATR tensor adaptation and geometry-only table topology reconstruction.
 //! Text assignment and independent cell detection remain in the existing pipeline.
+use crate::artifacts::TATR_EDGE;
 use crate::{TsrError, TsrPrediction};
 use docparse_layout::PageImage;
 use ndarray::{Array2, Array3, Array4, Axis, Ix3};
@@ -15,17 +16,19 @@ pub(crate) struct TatrInput {
 impl TryFrom<&PageImage> for TatrInput {
     type Error = TsrError;
 
-    /// Resizes the longest edge to 800 with antialiased bilinear interpolation and RGB normalization.
+    /// Resizes the longest edge to `TATR_EDGE` with antialiased bilinear interpolation and RGB normalization.
     #[allow(
         clippy::cast_sign_loss,
         reason = "image dimensions and resize scale are nonnegative"
     )]
     fn try_from(image: &PageImage) -> Result<Self, Self::Error> {
-        let scale = 800.0 / f64::from(image.width().max(image.height()));
+        let scale =
+            TATR_EDGE as f64 / f64::from(image.width().max(image.height()));
         let width = (f64::from(image.width()) * scale).round_ties_even() as u32;
         let height =
             (f64::from(image.height()) * scale).round_ties_even() as u32;
-        if width == 0 || height == 0 || width > 800 || height > 800 {
+        let edge = TATR_EDGE as u32;
+        if width == 0 || height == 0 || width > edge || height > edge {
             return Err(TsrError::InvalidInput {
                 reason: "invalid TATR image dimensions".into(),
             });
@@ -77,8 +80,8 @@ impl TatrInput {
                     || channels != 3
                     || height == 0
                     || width == 0
-                    || height > 800
-                    || width > 800
+                    || height > TATR_EDGE
+                    || width > TATR_EDGE
                     || input.mask.dim() != (1, height, width)
             })
         {
