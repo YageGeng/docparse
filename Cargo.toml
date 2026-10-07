@@ -107,7 +107,7 @@ tower-http = { version = "0.7", features = ["catch-panic", "compression-gzip", "
 url = "2"
 
 # static assets
-rust-embed = "8.12"
+rust-embed = "8"
 
 # api documentation
 utoipa = { version = "6", features = ["uuid"] }
