@@ -4,6 +4,11 @@ Native Linux/macOS HTTP service with durable PDF parsing jobs. API instances and
 workers share PostgreSQL and a mounted file directory. HTTP connections never own
 the job: refreshes, SSE disconnects, and API replacement do not cancel parsing.
 
+For model downloads, the complete build sequence, runtime packaging, and smoke
+checks, see the [deployment guide](../../DEPLOYMENT.md#web-server-and-http-workbench)
+([中文](../../DEPLOYMENT.zh-CN.md#web-server-与-http-工作台)). This README focuses on
+the server contract and worker lifecycle.
+
 ## Structure
 
 - `crates/migration`: CLI-generated SeaORM 2.0 migrations, edited with SeaQuery
@@ -23,9 +28,11 @@ The separate administration migration CLI still reads `DATABASE_URL`. Supply cre
 through your deployment environment rather than checked-in files or CLI arguments.
 
 ```bash
-rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
-rtk cargo run -p docparse-server --release --features embed-web -- \
-  --storage-dir /srv/docparse/shared --config docparse.toml
+rtk npm ci --prefix packages/web
+rtk npm run build --prefix packages/web
+rtk cargo build -p docparse-core --locked --release --features pdfium-ipc --bin docparse-pdfium-worker
+rtk cargo build -p docparse-server --locked --release --features embed-web
+rtk proxy ./target/release/docparse-server --storage-dir /srv/docparse/shared --config docparse.toml
 ```
 
 The shipped `docparse.toml` selects `webui = "embedded"`, so the build needs
@@ -37,17 +44,22 @@ The default listener uses `server.host = "127.0.0.1"` and `server.port = 8080`.
 health probes, OpenAPI and Scalar. Set it to a literal path such as `/service/docparse/v2`,
 or use `""` or `"/"` for root routes. Non-root prefixes must not end with `/` or
 contain empty segments, captures, query strings or fragments. Environment overrides
-use `DOCPARSE_SERVER__API_PREFIX`. Examples below use the default `/api` prefix.
+use `DOCPARSE_SERVER__API_PREFIX`. The checked-in `docparse.toml` selects
+`/api/v1/docparse`, and the examples below use that prefix.
 Host names and IPv4/IPv6 addresses are supported. Native backend selection is
 fixed at compilation; model configuration has no `execution_provider` field.
-The server exposes four backend features: `coreml`, `cuda`, `metal`, and
-`openvino`. Each forwards core's unified backend for layout, OCR, TSR, and
+The server exposes five backend features: `coreml`, `cuda`, `tensorrt`, `metal`,
+and `openvino`. Each forwards core's unified backend for layout, OCR, TSR, and
 formula. Select one accelerator feature for a build, or none for CPU. CUDA builds use:
 
 ```bash
-rtk cargo build -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker --release
-rtk cargo build -p docparse-server --release --features cuda
+rtk proxy env CARGO_TARGET_DIR=target/cuda cargo build -p docparse-core --locked --release --features pdfium-ipc,cuda --bin docparse-pdfium-worker
+rtk proxy env CARGO_TARGET_DIR=target/cuda cargo build -p docparse-server --locked --release --features embed-web,cuda
 ```
+
+Build the frontend first as above. Both CUDA executables are in
+`target/cuda/release/`; keeping backends in separate directories avoids mixing
+copied runtime libraries. Disk/API-only UI configurations may omit `embed-web`.
 
 `render.workers` is required and bounds all PDFium children, including startup
 and cleanup. `render.queue_size` bounds unfinished pages across all documents:
@@ -92,9 +104,12 @@ same directory. Worker startup fails on missing or incompatible artifacts; there
 is no configurable worker path or silent in-process fallback. For a local install:
 
 ```bash
-rtk cargo install --path crates/core --features pdfium-ipc --bin docparse-pdfium-worker --locked
-rtk cargo install --path crates/server --locked --features cuda
+rtk cargo install --path crates/core --features pdfium-ipc,cuda --bin docparse-pdfium-worker --locked
+rtk cargo install --path crates/server --locked --features embed-web,cuda
 ```
+
+PATH installation still needs the separate models/config and native runtime
+files; see [native packaging](../../DEPLOYMENT.md#package-native-artifacts).
 
 Cancellation aborts the owned render producer and retires uncertain document
 sessions. Replacements start only after the old PID and bridge are reaped. Repeated
@@ -118,7 +133,7 @@ server without interrupting PDFium directly. The server handles the signal, drai
 accepted jobs, and closes its workers through the same IPC shutdown sequence.
 
 Run the same binary with `--role api`, `--role worker`, or `--role all` (default).
-API-only instances do not load models or start PDFium children, and do not require the worker executable. `/api/ready` checks the task schema as well as
+API-only instances do not load models or start PDFium children, and do not require the worker executable. `/api/v1/docparse/ready` checks the task schema as well as
 shared storage, including detecting schema damage after startup. Every API and worker must use the same
 database and shared directory contents, even if their mount paths differ. The
 filesystem must provide coherent cross-host reads, atomic publication, and file
@@ -149,7 +164,7 @@ profile, and `DOCPARSE_` environment values. For example, use
 `--database-url`/`DATABASE_URL` remain optional overrides of the merged configuration;
 explicit CLI arguments take priority over their legacy environment equivalents.
 `SERVER_ROLE` and `SERVER_STORAGE_DIR` continue to control process role and storage.
-Run `rtk cargo run -p docparse-server -- --help` for CLI process limits; the PDFium ceiling is configured in `[server]`.
+Run `rtk cargo run -p docparse-server -- --help` for CLI process limits; the PDFium ceiling is configured in `[render]`.
 
 The API assumes a trusted deployment boundary. Put authentication, authorization,
 and any browser CORS policy at your ingress. UUID job IDs are identifiers, not a
@@ -162,8 +177,8 @@ The [HTTP workbench](../../packages/web/README.md) uses this API for uploads,
 durable history, progress recovery and PDF/result inspection. Starting the updated
 server automatically applies the `add_job_file_metadata` migration when pending.
 
-Open `http://127.0.0.1:8080/api/docs` for the interactive Scalar reference, or download
-`http://127.0.0.1:8080/api/openapi.json` for the OpenAPI 3.1 document. Both are available
+Open `http://127.0.0.1:8080/api/v1/docparse/docs` for the interactive Scalar reference, or download
+`http://127.0.0.1:8080/api/v1/docparse/openapi.json` for the OpenAPI 3.1 document. Both are available
 on API-only and combined instances. Scalar's default page loads its JavaScript
 from jsDelivr.
 
@@ -186,17 +201,18 @@ can be recovered by querying that UUID.
 
 ```bash
 rtk curl -i -H 'Idempotency-Key: 07bd9078-a15f-4b41-bbca-e341047db61e' \
-  -F 'file=@document.pdf;type=application/pdf' http://127.0.0.1:8080/api/jobs
-rtk curl 'http://127.0.0.1:8080/api/jobs/status?id=07bd9078-a15f-4b41-bbca-e341047db61e'
-rtk proxy curl -N 'http://127.0.0.1:8080/api/jobs/events?id=07bd9078-a15f-4b41-bbca-e341047db61e'
-rtk curl 'http://127.0.0.1:8080/api/jobs/result?id=07bd9078-a15f-4b41-bbca-e341047db61e'
-rtk curl 'http://127.0.0.1:8080/api/jobs/list?limit=20&status=succeeded'
-rtk curl -H 'Range: bytes=0-65535' 'http://127.0.0.1:8080/api/jobs/source?id=07bd9078-a15f-4b41-bbca-e341047db61e'
+  -F 'file=@document.pdf;type=application/pdf' http://127.0.0.1:8080/api/v1/docparse/jobs
+rtk curl 'http://127.0.0.1:8080/api/v1/docparse/jobs/status?id=07bd9078-a15f-4b41-bbca-e341047db61e'
+rtk proxy curl -N 'http://127.0.0.1:8080/api/v1/docparse/jobs/events?id=07bd9078-a15f-4b41-bbca-e341047db61e'
+rtk curl 'http://127.0.0.1:8080/api/v1/docparse/jobs/result?id=07bd9078-a15f-4b41-bbca-e341047db61e'
+rtk curl 'http://127.0.0.1:8080/api/v1/docparse/jobs/list?limit=20&status=succeeded'
+rtk curl -H 'Range: bytes=0-65535' 'http://127.0.0.1:8080/api/v1/docparse/jobs/source?id=07bd9078-a15f-4b41-bbca-e341047db61e'
 ```
 
 The multipart body must contain exactly one `file` field starting with `%PDF-`.
-The default PDF limit is 512 MiB, with at most four concurrent uploads per API and
-a 300-second upload deadline. Files are streamed to disk. File names supplied by
+The default PDF limit is 512 MiB with a 300-second upload deadline. The upload
+concurrency code default is four per API; the checked-in configuration sets 100.
+Files are streamed to disk. File names supplied by
 clients do not affect storage paths. Uploading the same bytes with the same key
 returns the existing task; different bytes with that key return `4091001`.
 
@@ -206,13 +222,13 @@ directory components/control characters, and never used as a filesystem path.
 Metadata is inserted with the task and is not changed by an idempotent replay.
 Jobs created before the metadata migration have null filename and size fields.
 
-`GET /api/jobs/list` accepts an optional status, literal case-insensitive filename
+`GET /api/v1/docparse/jobs/list` accepts an optional status, literal case-insensitive filename
 search, limit (1–100; default 20), and UUID cursor. Its envelope contains `items`
 and `next_cursor`; keep filters unchanged when following that cursor. History is
 ordered by descending creation time and UUID. Invalid/missing cursor anchors are
 reported as `4001002`.
 
-`GET /api/jobs/source?id=<uuid>` streams the immutable input independently of
+`GET /api/v1/docparse/jobs/source?id=<uuid>` streams the immutable input independently of
 parse status. HEAD, byte ranges and conditional requests use tower-http's file
 service. Unsatisfiable ranges return 416 with the file size in Content-Range.
 Successful range/file responses contain binary PDF data rather than a JSON envelope.
@@ -223,8 +239,8 @@ Ordinary success responses use:
 {"success":true,"message":"Success","data":{"id":"...","filename":"document.pdf","size_bytes":1024,"created_at":"2026-09-13T00:00:00Z","updated_at":"2026-09-13T00:00:00Z","status":"queued","version":1,"attempts":0,"progress":null,"error":null}}
 ```
 
-`POST /api/jobs` returns HTTP 202 with a `Location` header pointing to
-`/api/jobs/status?id=<uuid>`. `GET /api/jobs/status?id=<uuid>` returns
+`POST /api/v1/docparse/jobs` returns HTTP 202 with a `Location` header pointing to
+`/api/v1/docparse/jobs/status?id=<uuid>`. `GET /api/v1/docparse/jobs/status?id=<uuid>` returns
 HTTP 200. The result endpoint returns the same success envelope with the complete
 configured `DocumentResult` in `data`. It streams the persisted file instead of
 allocating another full JSON document in the API process. Worker serialization
@@ -237,7 +253,7 @@ retain their original encoding. Full JSON and cached Markdown stream with 256 Ki
 read buffers. Results use weak ETags and `Cache-Control: private, no-cache` so
 repeat reads can return 304 after checking that the task remains visible.
 
-`GET /api/jobs/result?id=<uuid>&page=1` returns an `ApiResponse<Pagenation<PageResult>>` containing
+`GET /api/v1/docparse/jobs/result?id=<uuid>&page=1` returns an `ApiResponse<Pagenation<PageResult>>` containing
 `page_count`, `errors`, and `page` (null for a failed/missing source page). Page
 numbers outside 1..=page_count and combining page with Markdown return 400.
 The first page request creates a small byte-offset index beside the immutable JSON;
@@ -293,7 +309,7 @@ There is no middleware that reclassifies completed HTTP responses. Errors use:
 
 ## SSE reconnect semantics
 
-`POST /api/jobs/delete?id=<uuid>` removes a completed or failed task from all public
+`POST /api/v1/docparse/jobs/delete?id=<uuid>` removes a completed or failed task from all public
 reads and deletes its result JSON. The original PDF remains available to other jobs
 sharing its content hash. Repeated deletion succeeds; active tasks return `4091004`.
 Internal tombstones preserve pagination anchors and prevent reuse of deleted
@@ -323,7 +339,7 @@ Clients may deduplicate by version and must close `EventSource` when status is
 
 ```js
 const jobId = localStorage.getItem("docparse-job-id");
-const events = new EventSource(`/api/jobs/events?id=${encodeURIComponent(jobId)}`);
+const events = new EventSource(`/api/v1/docparse/jobs/events?id=${encodeURIComponent(jobId)}`);
 events.addEventListener("job", ({ data }) => {
   const job = JSON.parse(data).data;
   if (job.status === "succeeded" || job.status === "failed") events.close();
@@ -348,11 +364,12 @@ fresh UUID fencing token, increments `attempts`/`version`, and clears previous
 attempt progress. PostgreSQL's clock controls all lease checks and deadlines.
 The default lease is 60 seconds, renewed at least every 20 seconds. Old workers
 cannot publish progress or success once the lease expires or another worker owns
-the task. Defaults are two concurrent documents per worker, three attempts, and a
-one-hour deadline per attempt; tune `render.workers`, `--lease-seconds`,
+the task. Defaults are three attempts and a one-hour deadline per attempt.
+Document admission is bounded by `render.workers + render.queue_size`, not a
+separate fixed job count; tune both render settings, `--lease-seconds`,
 `--max-attempts`, and `--job-timeout-seconds` for your documents and hardware.
 
-SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/ready` to return 503, close SSE subscriptions,
+SIGINT/Ctrl+C and SIGTERM stop new claims, cause `/api/v1/docparse/ready` to return 503, close SSE subscriptions,
 and drains active parses. Configure the deployment's termination grace period to
 allow normal work to finish. If a process is forcibly stopped, another worker
 reclaims the task after lease expiry. Recovery re-parses the document from the
@@ -541,7 +558,7 @@ disconnects, heartbeat renewal, draining, and cross-instance persistence.
 
 ## Formula recognition output
 
-`GET /api/jobs/result?id=<uuid>&format=markdown` projects the stored document into
+`GET /api/v1/docparse/jobs/result?id=<uuid>&format=markdown` projects the stored document into
 `text/markdown; charset=utf-8` without running inference again. Default
 `format=json` remains the streamed success envelope. Enabled formula recognition
 stores both `latex` and `markdown` in `pages[].formulas[]`; Markdown uses those

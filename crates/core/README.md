@@ -39,7 +39,34 @@ refinement and model inference.
 
 DocParse's native PDF text extraction, document context, layout/text fusion, asynchronous parser, stable schema, relations, and JSON/Markdown/SVG output crate.
 
-主要入口是 `DocParser`/`DocParserBuilder`。自定义 layout/OCR 通过 `Arc<dyn LayoutEngine>` 与 `Arc<dyn OcrEngine>` 注入；默认解析运行 production PP-DocLayoutV3。完整 API 和 E2E 命令见仓库根目录 `README.md`。
+The main entry points are `DocParser` and `DocParserBuilder`. Inject custom layout
+or OCR engines through `Arc<dyn LayoutEngine>` and `Arc<dyn OcrEngine>`; the built-in
+layout path uses the pinned PP-DocLayoutV3 model. See the root
+[README](../../README.md) for library usage, the [deployment guide](../../DEPLOYMENT.md)
+for model/backend preparation, and [Python tools](../../scripts/README.md) for E2E.
+
+## Text ownership and region geometry
+
+Model regions are candidates, not final block identities. Ownership is assigned
+at the `TextItem` boundary, attaching unambiguous scripts to their parent before
+model assignment. Residual XY-cut preserves column gutters before line assembly.
+Page normalization merges content only when one bounding box fully contains the
+other, including identical boxes, then computes reading order. Each native fact
+remains owned exactly once.
+
+`reference` is a visual annotation: it owns no text and never obstructs XY-cut,
+merges with content, or enters body reading order. Bibliography text uses
+`reference_content`. Partial content intersections remain separate and produce
+`ContentLayoutOverlap` with `content.overlap.*` diagnostics; reference outlines and
+detached watermarks are exempt. Merged regions retain primary `source_region`
+and contributing `source_regions`, whose labels preserve model semantics.
+
+Watermarks are detached before body statistics, assignment, paragraph assembly,
+formula attachment and reading order, and remain independent end-of-page blocks.
+PDFium marks and Watermark annotations precede conservative fallback rules; a
+generic `Artifact` mark is insufficient, and annotation `Contents` is not invented
+appearance text. Native rotated bounds retain a conservative `bbox` and precise
+`polygon` when available. Detection still sees the original page raster.
 
 ## Body list recovery
 

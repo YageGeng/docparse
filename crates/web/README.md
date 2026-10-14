@@ -12,6 +12,11 @@ Use `createParser` from `packages/wasm-web` to manage the Worker, pinned runtime
 
 See the [Web package guide](../../packages/wasm-web/README.md) for build, deployment, configuration, and real-browser acceptance instructions. Models are not included in the crate.
 
+The Cargo command above is only the Rust build. Use the package's npm build to
+produce the deployable SDK with wasm-bindgen glue, the Worker, ORT assets and
+licenses; see the [deployment guide](../../DEPLOYMENT.md#wasm-browser-sdk)
+([中文](../../DEPLOYMENT.zh-CN.md#wasm-浏览器-sdk)).
+
 JavaScript calls are centralized in `src/js.rs`. The pinned js-sys property and
 callback APIs are safe Rust APIs with caught JS exceptions; business code does
 not need unsafe blocks. `ValueExt` checks property writes and normalizes thrown

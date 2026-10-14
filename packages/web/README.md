@@ -4,6 +4,11 @@ A React and TypeScript workbench for the native Axum server. Parsing runs on
 `docparse-server`; PDF.js renders the persisted original PDF. The separate
 [`@docparse/wasm-web`](../wasm-web/README.md) package provides browser-local inference.
 
+The [deployment guide](../../DEPLOYMENT.md#web-server-and-http-workbench)
+([中文](../../DEPLOYMENT.zh-CN.md#web-server-与-http-工作台)) covers models,
+PostgreSQL, the two native executables, and production packaging. This guide
+covers workbench development and UI behavior.
+
 ## Run
 
 Run every shell command in this guide from the repository root. Select the
@@ -11,20 +16,26 @@ workbench with `--prefix packages/web`.
 
 Create the PostgreSQL database and configure the server's database connection
 before starting. The server automatically applies pending migrations on that
-connection, including upload metadata and the task-history index. Start the
-native server in one terminal, choosing the backend feature for your host:
+connection, including upload metadata and the task-history index. Build the
+workbench before embedding it and build the sibling PDFium worker explicitly.
+The following CPU baseline starts the native server in one terminal:
 
 ```sh
-rtk cargo run -p docparse-server --release --features cuda --features embed-web
+rtk npm ci --prefix packages/web
+rtk npm run build --prefix packages/web
+rtk cargo build --locked --release -p docparse-core --features pdfium-ipc --bin docparse-pdfium-worker
+rtk cargo build --locked --release -p docparse-server --features embed-web
+rtk proxy ./target/release/docparse-server --config docparse.toml
 ```
 
 The extra `embed-web` feature matches the shipped `docparse.toml`, which serves the
 workbench compiled into the binary; drop it while `webui = { disk = "..." }` is set.
+For CUDA or another accelerator, use the complete backend-specific server/worker
+build steps in the deployment guide. Install both matching executables together.
 
-In a second terminal, install and start the workbench:
+In a second terminal, start the development workbench:
 
 ```sh
-rtk npm ci --prefix packages/web
 rtk npm run dev --prefix packages/web
 ```
 
@@ -59,7 +70,7 @@ webui = { disk = "packages/web/dist" }
 webui = "embedded"
 ```
 
-The server mounts the WebUI at `{api_prefix}/webui`, so with the default prefix the
+The server mounts the WebUI at `{api_prefix}/webui`, so with the checked-in prefix the
 application lives at `/api/v1/docparse/webui/` and `/` redirects there. Navigations such
 as `/api/v1/docparse/webui/document` return `index.html`, missing hashed assets stay
 `404`, and every path outside the mount keeps the typed JSON error envelope, so an API

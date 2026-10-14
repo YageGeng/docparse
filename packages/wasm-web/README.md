@@ -6,9 +6,18 @@ Run every shell command in this guide from the repository root. Select this
 package with `--prefix packages/wasm-web`; use its npm scripts for builds,
 checks, and the interactive example.
 
+For the end-to-end setup and the differences from CLI/HTTP deployment, start with
+the [deployment guide](../../DEPLOYMENT.md#wasm-browser-sdk)
+([中文](../../DEPLOYMENT.zh-CN.md#wasm-浏览器-sdk)). This guide covers the SDK API
+and model-specific behavior in more detail.
+
 ## Build
 
 Prepare the pinned model and tools from the repository root:
+
+On macOS, follow the [TATR platform steps](../../DEPLOYMENT.md#tatr-on-macos)
+([中文](../../DEPLOYMENT.zh-CN.md#macos-上的-tatr)) first. The model catalog includes
+TATR, whose current first-time exporter has no compatible macOS wheel.
 
 ```sh
 rtk rustup target add wasm32-unknown-unknown
@@ -575,7 +584,7 @@ The fixed presets fetch these same-origin assets:
 Provision the server-side files once; the example server exposes both routes:
 
 ```sh
-rtk python3 crates/formula-texo/examples/download.py models/texo
+rtk uv run --locked scripts/download_models.py --model texo
 rtk uv run --locked scripts/download_models.py --model pp-formulanet-plus-s
 ```
 
@@ -669,12 +678,11 @@ its ONNX/config/manifest through `tsrArtifacts`. Cell detection continues to use
 `tsrCellArtifacts` independently. To use SLANet+ explicitly, set
 `config.tsr.model = "slanet_plus"` and supply the matching SLANet+ artifacts.
 
-Formula CPU/GPU session counts share one queue. The browser defaults to CPU=0,
-GPU=1; native library defaults are CPU=1, GPU=0. Explicit `executionProvider:
-"wasm"` or an authorized WebGPU fallback converts all requested formula owners
-to CPU owners. Mixed WebGPU/WASM owners retain the existing browser inference
-and readback guard, so this does not promise simultaneous browser GPU/CPU calls.
-The old formula `session_size` field is rejected; other model counts are unchanged.
+Formula consumers use `formula.engine[].worker_size` (default 1) and share one
+queue. All local consumers use the selected `executionProvider`; explicit
+`"wasm"` or authorized WebGPU fallback selects CPU. Separate CPU/GPU consumer
+counts and the old formula `session_size` field are rejected. ORT Web retains its
+global inference/readback guard; extra consumers do not bypass serialization.
 
 ### Mixed formula consumers and preloading
 

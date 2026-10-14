@@ -1,5 +1,11 @@
 # docparse-config
 
-DocParse 的实例级 Figment 配置加载、profile/环境覆盖和强类型校验 crate。相对模型路径按主配置文件目录解析；库调用方显式提供配置路径，不向父目录搜索。
+Instance-scoped Figment configuration loading, profile/environment overrides,
+and typed validation for DocParse. Relative model paths resolve beside the primary
+configuration file. Library callers supply configuration explicitly; the CLI does
+not search parent directories.
 
-配置层次、默认字段和运行命令见仓库根目录 `README.md` 与 `docparse.toml`。
+See [configuration and resource limits](../../DEPLOYMENT.md#configuration-and-resource-limits)
+([中文](../../DEPLOYMENT.zh-CN.md#配置与资源限制)) and the complete
+[docparse.toml](../../docparse.toml) example. Native backend selection belongs to
+Cargo features; browser callers supply model artifacts and JavaScript options.
