@@ -39,9 +39,58 @@ impl WebError {
 /// Owned model bytes shared by table and OCR artifact boundaries.
 #[derive(Deserialize)]
 struct ArtifactBytes {
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     model: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     config: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     manifest: Vec<u8>,
+}
+
+/// Accepts both host Uint8Array buffers and sequences buffered by internally tagged formula variants.
+fn deserialize_artifact_bytes<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<u8>, D::Error> {
+    // Serde buffers tagged variants as bytes, while Vec's default visitor accepts only sequences.
+    struct Bytes;
+    impl<'de> serde::de::Visitor<'de> for Bytes {
+        type Value = Vec<u8>;
+
+        /// Describes the accepted artifact representation in deserialization errors.
+        fn expecting(
+            &self,
+            formatter: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            formatter.write_str("model bytes or a byte sequence")
+        }
+
+        /// Takes ownership of the buffer without a second model-sized copy.
+        fn visit_byte_buf<E: serde::de::Error>(
+            self,
+            bytes: Vec<u8>,
+        ) -> Result<Self::Value, E> {
+            Ok(bytes)
+        }
+
+        /// Copies borrowed input once so model ownership outlives the ABI call.
+        fn visit_bytes<E: serde::de::Error>(
+            self,
+            bytes: &[u8],
+        ) -> Result<Self::Value, E> {
+            Ok(bytes.to_vec())
+        }
+
+        /// Retains compatibility with ordinary arrays and JSON artifact representations.
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            sequence: A,
+        ) -> Result<Self::Value, A::Error> {
+            Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(
+                sequence,
+            ))
+        }
+    }
+    deserializer.deserialize_byte_buf(Bytes)
 }
 
 impl From<ArtifactBytes> for ModelArtifacts {
@@ -102,8 +151,11 @@ impl From<FormulaEngineBytes> for docparse_core::FormulaModelArtifacts {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TexoArtifactBytes {
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     encoder: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     decoder: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_artifact_bytes")]
     tokenizer: Vec<u8>,
 }
 
@@ -198,7 +250,7 @@ impl WebParser {
             WebError::value("RuntimeInitializationFailed", error)
         })?;
         ort::set_api(api);
-        ort::init().with_telemetry(false).commit();
+        // The shared backend now builds the explicit rc.15 environment with telemetry disabled.
         js::configure_runtime().map_err(|error| {
             WebError::value(
                 "RuntimeInitializationFailed",

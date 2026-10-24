@@ -5,7 +5,6 @@ use docparse_common::timing::TimingContext;
 use docparse_common::timing::{StageTimer, TimingStage, Timings};
 use docparse_config::ValidatedConfig;
 use ort::session::{OutputSelector, RunOptions};
-use ort::value::TensorRef;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -95,6 +94,7 @@ mod platform {
     use crate::wasm_compat::ProfileDim;
     use docparse_common::SessionManager;
     use ort::session::{HasSelectedOutputs, Session};
+    use ort::value::TensorRef;
 
     /// Batched inputs and their fixed dimensions, for a single TensorRT engine per batch range.
     static TENSORRT_INPUTS: [(&str, &[ProfileDim]); 3] = [
@@ -653,10 +653,11 @@ mod platform {
                                 .collect();
                             let result = async {
                             let inputs = ModelInputs::try_from(requests.iter().map(|request| &request.inputs).collect::<Vec<_>>().as_slice())?;
+                            // rc.15 retains owned inputs across awaits; moving these arrays avoids a copy.
                             let mut outputs = session.run_async(ort::inputs! {
-                                "im_shape" => TensorRef::from_array_view(&inputs.image_size)?,
-                                "image" => TensorRef::from_array_view(&inputs.image)?,
-                                "scale_factor" => TensorRef::from_array_view(&inputs.scale_factor)?,
+                                "im_shape" => ort::value::Tensor::from_array(inputs.image_size)?,
+                                "image" => ort::value::Tensor::from_array(inputs.image)?,
+                                "scale_factor" => ort::value::Tensor::from_array(inputs.scale_factor)?,
                             }, &options).await?;
                             ort_web::sync_outputs(&mut outputs).await.map_err(|error| LayoutError::Engine { message: error.to_string() })?;
                             ModelOutputs::from_batch(&outputs, requests.len())

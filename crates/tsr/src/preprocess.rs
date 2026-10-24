@@ -242,30 +242,31 @@ impl ModelInput {
             Err(invalid())
         }
     }
+}
 
-    /// Borrows mixed float/int tensors so TATR masks share the native and browser session path.
-    pub(crate) fn values(
-        &self,
-    ) -> Result<
-        Vec<(
-            std::borrow::Cow<'static, str>,
-            ort::session::SessionInputValue<'_>,
-        )>,
-        ort::Error,
-    > {
-        use ort::value::TensorRef;
-        Ok(match self {
-            Self::Structure(input) => {
-                ort::inputs!["x" => TensorRef::from_array_view(&input.0)?]
+impl TryFrom<ModelInput>
+    for Vec<(
+        std::borrow::Cow<'static, str>,
+        ort::session::SessionInputValue<'static>,
+    )>
+{
+    type Error = ort::Error;
+
+    /// Moves each batch into rc.15 asynchronous inputs without copying float tensors or masks.
+    fn try_from(input: ModelInput) -> Result<Self, Self::Error> {
+        use ort::value::Tensor;
+        Ok(match input {
+            ModelInput::Structure(input) => {
+                ort::inputs!["x" => Tensor::from_array(input.0)?]
             }
-            Self::Cells(input) => ort::inputs![
-                "image" => TensorRef::from_array_view(&input.image)?,
-                "im_shape" => TensorRef::from_array_view(&input.image_shape)?,
-                "scale_factor" => TensorRef::from_array_view(&input.scale_factor)?,
+            ModelInput::Cells(input) => ort::inputs![
+                "image" => Tensor::from_array(input.image)?,
+                "im_shape" => Tensor::from_array(input.image_shape)?,
+                "scale_factor" => Tensor::from_array(input.scale_factor)?,
             ],
-            Self::Tatr(input) => ort::inputs![
-                "pixel_values" => TensorRef::from_array_view(&input.pixels)?,
-                "pixel_mask" => TensorRef::from_array_view(&input.mask)?,
+            ModelInput::Tatr(input) => ort::inputs![
+                "pixel_values" => Tensor::from_array(input.pixels)?,
+                "pixel_mask" => Tensor::from_array(input.mask)?,
             ],
         })
     }
@@ -276,6 +277,22 @@ mod tests {
     use super::*;
     use docparse_layout::{PageImageInput, PixelFormat};
     use std::sync::Arc;
+
+    /// Owned asynchronous inputs retain the batch allocation rather than copying its image pixels.
+    #[test]
+    fn owned_inputs_retain_the_original_batch_storage() {
+        let pixels = ndarray::Array4::from_elem((1, 3, 2, 2), 0.25_f32);
+        let address = pixels.as_ptr();
+        let input = ModelInput::Structure(SlanetInput(pixels));
+        let values: Vec<_> = input.try_into().expect("owned inputs");
+        let (name, value) = values.first().expect("image input");
+        let (shape, data) =
+            value.try_extract_tensor::<f32>().expect("tensor data");
+        assert_eq!(name, "x");
+        assert_eq!(shape.as_ref(), &[1, 3, 2, 2]);
+        assert_eq!(data.as_ptr(), address);
+        assert_eq!(data, &[0.25_f32; 12]);
+    }
 
     /// Batched tensors preserve crop order and keep each detector's resize metadata attached to its image.
     #[test]

@@ -45,7 +45,7 @@ uv sync --locked
 
 The default Python environment has no third-party dependencies. TATR's first download additionally runs an isolated, pinned CPU ONNX exporter via uv and needs network access for its Python dependencies. Model provisioning does not require installing PaddleOCR, Python ONNX Runtime, or CUDA into the root environment.
 
-Native build scripts obtain pinned PDFium `chromium/8028` and ONNX Runtime when no local override is supplied. The Cargo-locked `ort 2.0.0-rc.13` distribution table uses native ONNX Runtime 1.28; browser packaging separately pins `onnxruntime-web 1.27.0`. Model downloads do not install either runtime. Initial builds need network access to dependency registries and runtime download hosts. Preserve the caches/artifacts when preparing an offline build.
+Native build scripts obtain pinned PDFium `chromium/8028` and ONNX Runtime when no local override is supplied. The Cargo-locked `ort 2.0.0-rc.15` distribution table uses native ONNX Runtime 1.31; browser packaging separately pins `onnxruntime-web 1.30.0`. Model downloads do not install either runtime. Initial builds need network access to dependency registries and runtime download hosts. Preserve the caches/artifacts when preparing an offline build.
 
 PDFium defaults to pregenerated bindings: libclang is needed only if its optional `bindgen` feature is enabled. To provide an unpacked PDFium SDK at build time, set both `PDFIUM_LIB_PATH` and `PDFIUM_INCLUDE_PATH` to its `lib` and `include` directories. WASM builds verify the pinned static-library checksums and reject an incompatible SDK.
 
@@ -168,7 +168,7 @@ ORT_LIB_LOCATION=/opt/onnxruntime/lib ORT_PREFER_DYNAMIC_LINK=1 \
   -p docparse-cli --features openvino
 ```
 
-The runtime must expose the required native API (API 28 for these crates) and contain the requested provider. Install its provider dependencies and include its dynamic libraries in the deployment. Merely installing a Python `onnxruntime` wheel does not configure this Rust build.
+The runtime must expose the required native API (API 31 for these crates) and contain the requested provider. Install its provider dependencies and include its dynamic libraries in the deployment. Merely installing a Python `onnxruntime` wheel does not configure this Rust build.
 
 TensorRT runs supported layout, OCR, table and Texo encoder graphs, with CUDA fallback for unsupported parts; Texo's merged decoder, PP-FormulaNet and SLANet+/SLANeXt remain on CUDA. The first startup builds engines and can take minutes. Later starts reuse `runtime.tensorrt_cache_dir`. Rebuild caches after changing GPU model, ONNX Runtime or TensorRT. The generated provider library's dependencies determine the required CUDA/cuDNN/TensorRT ABI; inspect them with `ldd` on Linux instead of copying a version from an old benchmark. See the official [CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider#requirements) and [TensorRT requirements and cache guidance](https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html#requirements).
 

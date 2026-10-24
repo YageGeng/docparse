@@ -45,7 +45,7 @@ uv sync --locked
 
 默认 Python 环境没有第三方依赖。首次准备 TATR 会通过 uv 在独立、版本固定的 CPU 环境中导出 ONNX，需要联网获取其 Python 依赖。模型准备不要求在根环境中安装 PaddleOCR、Python ONNX Runtime 或 CUDA。
 
-未指定本地覆盖时，原生构建脚本会获取固定版本的 PDFium `chromium/8028` 和 ONNX Runtime。Cargo 锁定的 `ort 2.0.0-rc.13` 发行包表使用原生 ONNX Runtime 1.28；浏览器打包独立固定为 `onnxruntime-web 1.27.0`。模型下载不会安装这两个 runtime。首次构建需要访问依赖 registry 和 runtime 下载地址；准备离线构建时应保留相应缓存与产物。
+未指定本地覆盖时，原生构建脚本会获取固定版本的 PDFium `chromium/8028` 和 ONNX Runtime。Cargo 锁定的 `ort 2.0.0-rc.15` 发行包表使用原生 ONNX Runtime 1.31；浏览器打包独立固定为 `onnxruntime-web 1.30.0`。模型下载不会安装这两个 runtime。首次构建需要访问依赖 registry 和 runtime 下载地址；准备离线构建时应保留相应缓存与产物。
 
 PDFium 默认使用预生成 bindings，仅启用可选 `bindgen` feature 时需要 libclang。构建时若提供已解包的 PDFium SDK，需要同时设置 `PDFIUM_LIB_PATH` 和 `PDFIUM_INCLUDE_PATH`，指向其 `lib` 和 `include` 目录。WASM 构建会校验固定静态库的 checksum，拒绝不兼容的 SDK。
 
@@ -166,7 +166,7 @@ ORT_LIB_LOCATION=/opt/onnxruntime/lib ORT_PREFER_DYNAMIC_LINK=1 \
   -p docparse-cli --features openvino
 ```
 
-runtime 必须提供这些 crate 要求的原生 API（API 28），并包含所选 provider。需要安装其 provider 依赖，将动态库随部署交付。只安装 Python `onnxruntime` wheel 不会配置这个 Rust 构建。
+runtime 必须提供这些 crate 要求的原生 API（API 31），并包含所选 provider。需要安装其 provider 依赖，将动态库随部署交付。只安装 Python `onnxruntime` wheel 不会配置这个 Rust 构建。
 
 TensorRT 处理支持的版面、OCR、表格和 Texo encoder 图，不支持的部分回退到 CUDA；Texo merged decoder、PP-FormulaNet、SLANet+/SLANeXt 继续使用 CUDA。首次启动会生成 engine，可能需要数分钟；后续复用 `runtime.tensorrt_cache_dir`。改变 GPU 型号、ONNX Runtime 或 TensorRT 后需要重建缓存。生成的 provider 库依赖决定所需 CUDA/cuDNN/TensorRT ABI，应在 Linux 使用 `ldd` 检查，不应直接照搬旧性能报告的版本。参阅官方 [CUDA 要求](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider#requirements)和 [TensorRT 要求及缓存说明](https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html#requirements)。
 

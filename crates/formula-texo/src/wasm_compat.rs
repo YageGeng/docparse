@@ -21,6 +21,29 @@ mod session_manager;
 mod platform {
     pub(crate) use super::session_manager::SessionManager as SessionRunner;
     use super::*;
+    use crate::model::CACHE_NAMES;
+    use ort::session::SessionInputValue;
+    use ort::value::Tensor;
+    use std::borrow::Cow;
+
+    // Native decoding borrows values; browser decoding temporarily owns them across awaits.
+    impl Generation {
+        /// Borrows hidden features and cached tensors without cloning or copying their data.
+        pub(crate) fn inputs(
+            &self,
+        ) -> Result<Vec<(Cow<'static, str>, SessionInputValue<'_>)>, FormulaError>
+        {
+            let mut inputs = ort::inputs![
+                "input_ids" => Tensor::from_array(([self.next.len(), 1], self.next.clone()))?,
+                "encoder_hidden_states" => &self.hidden,
+                "use_cache_branch" => Tensor::from_array(([1], vec![self.step > 0]))?,
+            ];
+            for (name, value) in CACHE_NAMES.into_iter().zip(&self.cache) {
+                inputs.push((Cow::Borrowed(name), value.into()));
+            }
+            Ok(inputs)
+        }
+    }
 
     impl TexoEngine {
         /// Uses the configured encoder path, its sibling merged decoder, and configured tokenizer.
@@ -100,6 +123,69 @@ mod platform {
     use ort::{session::builder::SessionBuilder, value::Tensor};
     use ort_web::{SyncDirection, ValueExt};
 
+    impl Generation {
+        /// Moves decoder inputs into an owned slice, then restores hidden states and KV caches unchanged.
+        async fn run_decoder(
+            mut self,
+            decoder: &mut ort::session::Session,
+            input_order: &[usize; 11],
+            options: &ort::session::RunOptions,
+        ) -> Result<(Self, StepOutput), FormulaError> {
+            use crate::model::CACHE_NAMES;
+            use ort::session::SessionInputValue;
+            if self.cache.len() != CACHE_NAMES.len() {
+                return Err(FormulaError::Invalid(
+                    "missing retained Texo cache".into(),
+                ));
+            }
+            // Canonical slots are token IDs, hidden states, cache flag, then the eight KV tensors.
+            let values = [
+                Tensor::from_array(([self.next.len(), 1], self.next.clone()))?
+                    .into_dyn(),
+                self.hidden,
+                Tensor::from_array(([1], vec![self.step > 0]))?.into_dyn(),
+            ]
+            .into_iter()
+            .chain(self.cache.drain(..));
+            let mut inputs: [Option<SessionInputValue<'static>>; 11] =
+                std::array::from_fn(|_| None);
+            for (&index, value) in input_order.iter().zip(values) {
+                *inputs.get_mut(index).expect("validated Texo input index") =
+                    Some(SessionInputValue::Owned(value));
+            }
+            // Initialization validates a complete permutation; the cache-length check fills every slot.
+            let inputs =
+                inputs.map(|input| input.expect("validated Texo input slot"));
+            let output = StepOutput::try_from(
+                decoder.run_async(inputs.as_slice(), options).await?,
+            )?;
+            // Recover only owned handles by their validated indices, without touching GPU storage.
+            let mut retained = inputs.map(|input| match input {
+                SessionInputValue::Owned(value) => Some(value),
+                _ => None,
+            });
+            self.hidden = retained
+                .get_mut(input_order[1])
+                .and_then(Option::take)
+                .ok_or_else(|| {
+                    FormulaError::Invalid("missing Texo hidden states".into())
+                })?;
+            // Reuse the drained cache allocation for every autoregressive step.
+            for &index in &input_order[3..] {
+                self.cache.push(
+                    retained.get_mut(index).and_then(Option::take).ok_or_else(
+                        || {
+                            FormulaError::Invalid(
+                                "missing retained Texo cache".into(),
+                            )
+                        },
+                    )?,
+                );
+            }
+            Ok((self, output))
+        }
+    }
+
     /// One bounded crop queue is shared by all callers in the browser Worker.
     pub(crate) struct SessionRunner;
 
@@ -160,6 +246,39 @@ mod platform {
                 let decoder = decoder_builder
                     .commit_from_memory(&artifacts.decoder)
                     .await?;
+                // Input names never change within a session; resolve canonical slots once per worker.
+                let mut input_order = [usize::MAX; 11];
+                for (index, outlet) in decoder.inputs().iter().enumerate() {
+                    let slot = [
+                        "input_ids",
+                        "encoder_hidden_states",
+                        "use_cache_branch",
+                    ]
+                    .into_iter()
+                    .chain(crate::model::CACHE_NAMES)
+                    .position(|name| name == outlet.name())
+                    .ok_or_else(|| {
+                        FormulaError::Invalid(format!(
+                            "unexpected Texo decoder input {}",
+                            outlet.name()
+                        ))
+                    })?;
+                    let position = input_order
+                        .get_mut(slot)
+                        .expect("known Texo input slot");
+                    if *position != usize::MAX {
+                        return Err(FormulaError::Invalid(format!(
+                            "duplicate Texo decoder input {}",
+                            outlet.name()
+                        )));
+                    }
+                    *position = index;
+                }
+                if input_order.contains(&usize::MAX) {
+                    return Err(FormulaError::Invalid(
+                        "Texo decoder is missing required inputs".into(),
+                    ));
+                }
                 let mut sessions = ModelSessions {
                     encoder,
                     decoder,
@@ -203,8 +322,9 @@ mod platform {
                         let mut generation = Generation::new(hidden, batch)?;
                         for _ in 1..MAX_LENGTH {
                             if generation.cancel(requests.iter().map(FormulaRequest::cancelled)) { return Err(FormulaError::Invalid("Texo batch canceled".into())); }
-                            let outputs = sessions.decoder.run_async(generation.inputs()?, &options).await?;
-                            let mut output = StepOutput::try_from(outputs)?;
+                            // Own the existing GPU handles across the await without cloning their buffers.
+                            let (retained, mut output) = generation.run_decoder(&mut sessions.decoder, &input_order, &options).await?;
+                            generation = retained;
                             // KV caches remain on the device throughout merged browser requests.
                             output.logits.sync(SyncDirection::Rust).await.map_err(|error| FormulaError::Invalid(format!("Texo logits readback failed: {error}")))?;
                             if generation.advance(output)? { break; }

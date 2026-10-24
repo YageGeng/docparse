@@ -82,7 +82,10 @@ async function main() {
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
   try {
     const { chromium } = await import("playwright");
-    browser = await chromium.launch({ headless: !values.headed, channel: values.channel });
+    // Linux headless defaults can select SwiftShader; enable the desktop GL/Vulkan path for WebGPU checks.
+    const args = values.provider === "webgpu" && process.platform === "linux"
+      ? ["--enable-unsafe-webgpu", "--use-angle=gl", "--enable-features=Vulkan", "--ignore-gpu-blocklist"] : [];
+    browser = await chromium.launch({ headless: !values.headed, channel: values.channel, args });
     if (interrupted) throw new Error("E2E run interrupted");
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     page = await context.newPage();

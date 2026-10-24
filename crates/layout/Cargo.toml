@@ -68,12 +68,12 @@ workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # inference and image
-ort = { workspace = true, features = ["api-28", "copy-dylibs", "download-binaries", "tls-rustls"] }
+ort = { workspace = true, features = ["api-31", "copy-dylibs", "download-binaries", "tls-rustls"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # inference and image
 # Keep browser acceleration local to the WASM dependency graph.
-ort = { workspace = true, features = ["api-17", "alternative-backend", "webgpu"] }
+ort = { workspace = true, features = ["api-24", "alternative-backend", "webgpu"] }
 
 # browser
 js-sys.workspace = true

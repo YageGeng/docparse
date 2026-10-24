@@ -137,6 +137,11 @@ rtk node crates/formula-texo/tests/browser.mjs wasm
 rtk node crates/formula-texo/tests/browser.mjs webgpu
 ```
 
+Pass `reordered` as the third argument to verify inference with reversed decoder
+input metadata. The `missing`, `duplicate`, and `unknown` modes verify rejection
+during loading. These modes alter only reported metadata and retain the real model
+and runtime.
+
 This crate and its adapted preprocessing are AGPL-3.0-only. See `NOTICE.md` and
 `LICENSE` for provenance. The ORT graphs are separate model artifacts.
 

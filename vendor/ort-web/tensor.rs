@@ -1,138 +1,302 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, ffi::CString, vec::Vec};
 use core::{ffi::c_void, ptr::NonNull, slice};
 
-use js_sys::Uint8Array;
+use js_sys::{Array, Uint8Array};
 use ort::{AsPointer, value::ValueTypeMarker};
+use ort_sys::{OrtErrorCode, stub::Error as SysError};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{HtmlImageElement, ImageBitmap, ImageData};
 
-pub use crate::binding::{ImageFormat, ImageNorm, ImageTensorLayout};
+pub use crate::binding::{
+    ImageFormat, ImageNorm, ImageNormOption, ImageTensorLayout,
+};
 use crate::{
     Error,
     binding::{self, DataType, ImageDataType},
-    memory::MemoryInfo,
-    util::num_elements,
+    memory::{HostBuffer, MemoryInfo},
+    util::{num_elements, value_to_string},
 };
 
-pub const TENSOR_SENTINEL: [u8; 4] = [0xFC, 0x86, 0xA5, 0x39];
+pub(crate) const TENSOR_SENTINEL: [u8; 4] = [0xFC, 0x86, 0xA5, 0x39];
 
-pub enum TensorData {
+pub(crate) enum TensorData {
     /// Data is stored in WASM linear memory and can be immediately accessed.
-    RustView { ptr: *mut c_void, byte_len: usize },
+    RustView {
+        ptr: *mut c_void,
+        byte_len: usize,
+        _owned: Option<HostBuffer>,
+    },
     /// Data is stored outside of WASM linear memory (i.e. session output, or a tensor created from anything other than
     /// a Rust slice) and would need to be retrieved if we try to extract this tensor.
-    External { buffer: Option<Box<[u8]>> },
+    External { buffer: Option<HostBuffer> },
 }
 
 #[repr(C)]
-pub struct Tensor {
+pub(crate) struct Tensor {
     sentinel: [u8; 4],
-    pub js: binding::Tensor,
-    pub data: TensorData,
-    pub memory_info: MemoryInfo,
+    pub(crate) js: binding::Tensor,
+    pub(crate) data: TensorData,
+    pub(crate) memory_info: MemoryInfo,
+    pub(crate) shape: Vec<i64>,
+    dispose_on_drop: bool,
 }
 
 impl Tensor {
-    pub unsafe fn from_ptr(
+    pub(crate) unsafe fn from_ptr(
         dtype: binding::DataType,
         ptr: *mut c_void,
         byte_len: usize,
         dims: &[i32],
     ) -> Result<Self, JsValue> {
+        if dims.iter().any(|d| *d < 0)
+            || tensor_byte_size(dtype, num_elements(dims)) != Some(byte_len)
+        {
+            return Err(JsValue::from_str(&format!(
+                "buffer of {byte_len} bytes does not match tensor shape {dims:?} of type {dtype:?}"
+            )));
+        }
+
+        // Metadata needs only a temporary view; snapshot once when a run actually retains the input.
         let tensor = binding::Tensor::new_from_buffer(
             dtype,
-            unsafe { buffer_from_ptr(dtype, ptr, byte_len) },
+            unsafe { buffer_from_ptr(dtype, ptr, byte_len)? },
             dims,
         )?;
         Ok(Self {
             sentinel: TENSOR_SENTINEL,
-            memory_info: MemoryInfo {
-                location: tensor.location(),
-            },
+            memory_info: MemoryInfo::from_location(tensor.location()),
+            shape: tensor.dims(),
             js: tensor,
-            data: TensorData::RustView { ptr, byte_len },
+            data: TensorData::RustView {
+                ptr,
+                byte_len,
+                _owned: None,
+            },
+            // This wrapper owns the JS tensor even though Rust owns its backing allocation.
+            dispose_on_drop: true,
         })
     }
 
-    pub fn from_tensor(tensor: binding::Tensor) -> Self {
+    pub(crate) fn new_owned(
+        dtype: binding::DataType,
+        dims: &[i32],
+    ) -> Result<Self, JsValue> {
+        if dims.iter().any(|d| *d < 0) {
+            return Err(JsValue::from_str(&format!("invalid shape {dims:?}")));
+        }
+
+        if dtype == binding::DataType::String {
+            let data: Array = (0..num_elements(dims))
+                .map(|_| JsValue::from_str(""))
+                .collect();
+            return Ok(Self::from_tensor(binding::Tensor::new_from_buffer(
+                dtype,
+                data.into(),
+                dims,
+            )?));
+        }
+
+        let byte_len = tensor_byte_size(dtype, num_elements(dims))
+            .ok_or_else(|| JsValue::from_str("invalid data type"))?;
+        let buffer = HostBuffer::new_zeroed(byte_len)
+            .map_err(|e| JsValue::from_str(e.message()))?;
+        let mut tensor = unsafe {
+            Self::from_ptr(dtype, buffer.as_ptr().cast(), byte_len, dims)
+        }?;
+        tensor.data = TensorData::RustView {
+            ptr: buffer.as_ptr().cast(),
+            byte_len,
+            _owned: Some(buffer),
+        };
+        Ok(tensor)
+    }
+
+    /// Owns a newly created runtime tensor; callers borrowing an existing GPU value opt out of disposal.
+    pub(crate) fn from_tensor(tensor: binding::Tensor) -> Self {
         Self {
             sentinel: TENSOR_SENTINEL,
-            memory_info: MemoryInfo {
-                location: tensor.location(),
-            },
+            memory_info: MemoryInfo::from_location(tensor.location()),
+            shape: tensor.dims(),
             js: tensor,
             data: TensorData::External { buffer: None },
+            dispose_on_drop: true,
         }
     }
 
-    pub async fn sync(
+    pub(crate) fn from_session_output(tensor: binding::Tensor) -> Self {
+        let mut tensor = Self::from_tensor(tensor);
+        tensor.dispose_on_drop = true;
+        tensor
+    }
+
+    pub(crate) fn dtype(&self) -> DataType {
+        self.js.dtype()
+    }
+
+    /// Own temporary feed wrappers so every success or failure releases them after inference.
+    pub(crate) fn as_runnable(&self) -> Result<Self, JsValue> {
+        let dims: Vec<i32> = self.shape.iter().map(|x| *x as i32).collect();
+        match &self.data {
+            TensorData::RustView { ptr, byte_len, .. } => {
+                // This is the sole retention boundary for Rust-backed inputs, including after heap growth.
+                let data = binding::stable_tensor_data(unsafe {
+                    buffer_from_ptr(self.dtype(), *ptr, *byte_len)?
+                });
+                binding::Tensor::new_from_buffer(self.dtype(), data, &dims)
+                    .map(Self::from_tensor)
+            }
+            TensorData::External {
+                buffer: Some(buffer),
+            } if self.memory_info.is_cpu() => {
+                let dtype = self.dtype();
+                binding::Tensor::new_from_buffer(
+                    dtype,
+                    copy_buffer(dtype, buffer.as_slice())?,
+                    &dims,
+                )
+                .map(Self::from_tensor)
+            }
+            TensorData::External { .. } => {
+                // GPU buffers still belong to the original value; disposing this alias would invalidate its cache.
+                let mut alias =
+                    Self::from_tensor(self.js.clone().unchecked_into());
+                alias.dispose_on_drop = false;
+                Ok(alias)
+            }
+        }
+    }
+
+    pub(crate) fn data_ptr(&mut self) -> Result<*mut c_void, SysError> {
+        if self.dtype() == DataType::String {
+            return Err(SysError::new(
+                OrtErrorCode::ORT_INVALID_ARGUMENT,
+                "GetTensorMutableData does not support string tensors",
+            ));
+        }
+        let is_cpu = self.memory_info.is_cpu();
+        match &mut self.data {
+            TensorData::RustView { ptr, .. } => Ok(*ptr),
+            TensorData::External {
+                buffer: Some(buffer),
+            } => Ok(buffer.as_ptr().cast()),
+            TensorData::External { buffer } if is_cpu => {
+                let data = self.js.data().map_err(|e| {
+                    SysError::new(OrtErrorCode::ORT_FAIL, value_to_string(&e))
+                })?;
+                let bytes = bytes_view(&data);
+                let mut new =
+                    HostBuffer::new_zeroed(bytes.byte_length() as usize)?;
+                bytes.copy_to(new.as_mut_slice());
+                Ok(buffer.insert(new).as_ptr().cast())
+            }
+            TensorData::External { buffer: None } => Err(SysError::new(
+                OrtErrorCode::ORT_FAIL,
+                "External data is not synchronized; you should call `TensorExt::sync` first.",
+            )),
+        }
+    }
+
+    pub(crate) fn string_array(&self) -> Result<Array, SysError> {
+        if self.dtype() != DataType::String {
+            return Err(SysError::new(
+                OrtErrorCode::ORT_INVALID_ARGUMENT,
+                "tensor is not a string tensor",
+            ));
+        }
+        self.js.data().map(Array::unchecked_from_js).map_err(|e| {
+            SysError::new(OrtErrorCode::ORT_FAIL, value_to_string(&e))
+        })
+    }
+
+    pub(crate) fn strings(&self) -> Result<Vec<String>, SysError> {
+        Ok(self
+            .string_array()?
+            .iter()
+            .map(|s| s.as_string().unwrap_or_default())
+            .collect())
+    }
+
+    pub(crate) async fn copy_from(
+        &mut self,
+        src: &binding::Tensor,
+    ) -> Result<(), SysError> {
+        let (src_dtype, src_dims) = (src.dtype(), src.dims());
+        if src_dtype != self.dtype() || src_dims != self.shape {
+            return Err(SysError::new(
+                OrtErrorCode::ORT_INVALID_ARGUMENT,
+                format!(
+                    "shape mismatch when attempting to reuse tensor buffer; expected {:?} ({:?}), got {src_dims:?} ({src_dtype:?})",
+                    self.shape,
+                    self.dtype()
+                ),
+            ));
+        }
+
+        let data = src.get_data().await.map_err(|e| {
+            SysError::new(OrtErrorCode::ORT_FAIL, value_to_string(&e))
+        })?;
+        if src_dtype == DataType::String {
+            let dst = self.string_array()?;
+            for (i, value) in Array::unchecked_from_js(data).iter().enumerate()
+            {
+                dst.set(i as u32, value);
+            }
+            return Ok(());
+        }
+
+        let bytes = bytes_view(&data);
+        match &mut self.data {
+            TensorData::RustView { ptr, byte_len, .. } => {
+                bytes.copy_to(unsafe {
+                    slice::from_raw_parts_mut(ptr.cast(), *byte_len)
+                });
+            }
+            TensorData::External { buffer } => {
+                if let Some(buffer) = buffer {
+                    bytes.copy_to(buffer.as_mut_slice());
+                }
+                if let Ok(dst) = self.js.data() {
+                    bytes_view(&dst).set(&bytes, 0);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn sync(
         &mut self,
         direction: SyncDirection,
     ) -> crate::Result<()> {
+        if self.dtype() == DataType::String {
+            return Ok(());
+        }
+
+        // Rust-backed storage is authoritative; each run rebuilds its view instead of reading stale JS metadata.
+        let TensorData::External { buffer } = &mut self.data else {
+            return Ok(());
+        };
         match direction {
             SyncDirection::Rust => {
                 let data = self.js.get_data().await?;
-
-                // cast to some kind of typed array first, then convert to uint8array so we can properly copy
-                let generic_typed_array = Uint8Array::unchecked_from_js(data);
-                let bytes = Uint8Array::new_with_byte_offset_and_length(
-                    &generic_typed_array.buffer(),
-                    generic_typed_array.byte_offset(),
-                    generic_typed_array.byte_length(),
-                );
-                match &mut self.data {
-                    TensorData::RustView { ptr, byte_len } => {
-                        bytes.copy_to(unsafe {
-                            core::slice::from_raw_parts_mut(
-                                ptr.cast(),
-                                *byte_len,
-                            )
-                        });
-                    }
-                    TensorData::External { buffer } => {
-                        let buffer = match buffer {
-                            Some(buffer) => buffer,
-                            None => {
-                                *buffer = Some(
-                                    vec![
-                                        0;
-                                        generic_typed_array.byte_length()
-                                            as usize
-                                    ]
-                                    .into_boxed_slice(),
-                                );
-                                unsafe { buffer.as_mut().unwrap_unchecked() }
-                            }
-                        };
-                        bytes.copy_to(buffer);
-                    }
-                }
+                let bytes = bytes_view(&data);
+                let buffer = match buffer {
+                    Some(buffer) => buffer,
+                    None => buffer.insert(
+                        HostBuffer::new_zeroed(bytes.byte_length() as usize)
+                            .map_err(|e| Error::new(e.message()))?,
+                    ),
+                };
+                bytes.copy_to(buffer.as_mut_slice());
             }
             SyncDirection::Runtime => {
-                let Ok(generic_typed_array) =
-                    self.js.data().map(Uint8Array::unchecked_from_js)
-                else {
-                    // we have a download function, but no upload...
+                let Ok(data) = self.js.data() else {
                     return Err(Error::new(
                         "Cannot synchronize Rust data to a runtime tensor that is not on the CPU; modify the WebGPU/WebGL buffer directly.",
                     ));
                 };
-                let bytes = Uint8Array::new_with_byte_offset_and_length(
-                    &generic_typed_array.buffer(),
-                    generic_typed_array.byte_offset(),
-                    generic_typed_array.byte_length(),
-                );
-                bytes.copy_from(match &self.data {
-                    TensorData::RustView { ptr, byte_len } => unsafe {
-                        core::slice::from_raw_parts(ptr.cast(), *byte_len)
-                    },
-                    TensorData::External { buffer } => {
-                        let Some(buffer) = buffer else {
-                            return Ok(());
-                        };
-                        &*buffer
-                    }
-                });
+                if let Some(buffer) = buffer {
+                    bytes_view(&data).copy_from(buffer.as_slice());
+                }
             }
         }
         Ok(())
@@ -140,74 +304,72 @@ impl Tensor {
 }
 
 impl Drop for Tensor {
-    /// Disposes externally owned runtime buffers when the final Rust value is released.
+    /// Dispose owned runtime buffers exactly once, retaining borrowed GPU cache aliases.
     fn drop(&mut self) {
-        if let Err(error) = self.js.dispose() {
-            #[allow(unused_unsafe)]
-            unsafe {
+        if self.dispose_on_drop {
+            if let Err(error) = self.js.dispose() {
                 web_sys::console::error_1(&error);
             }
         }
     }
 }
 
-pub fn create_buffer(dtype: binding::DataType, shape: &[i32]) -> JsValue {
-    let numel = num_elements(shape) as u32;
-    match dtype {
-        binding::DataType::Bool | binding::DataType::Uint8 => {
-            js_sys::Uint8Array::new_with_length(numel).into()
-        }
-        binding::DataType::Int8 => {
-            js_sys::Int8Array::new_with_length(numel).into()
-        }
-        binding::DataType::Uint16 => {
-            js_sys::Uint16Array::new_with_length(numel).into()
-        }
-        binding::DataType::Int16 => {
-            js_sys::Int16Array::new_with_length(numel).into()
-        }
-        binding::DataType::Uint32 => {
-            js_sys::Uint32Array::new_with_length(numel).into()
-        }
-        binding::DataType::Int32 => {
-            js_sys::Int32Array::new_with_length(numel).into()
-        }
-        binding::DataType::Uint64 => {
-            js_sys::BigUint64Array::new_with_length(numel).into()
-        }
-        binding::DataType::Int64 => {
-            js_sys::BigInt64Array::new_with_length(numel).into()
-        }
-        binding::DataType::Float32 => {
-            js_sys::Float32Array::new_with_length(numel).into()
-        }
-        binding::DataType::Float64 => {
-            js_sys::Float64Array::new_with_length(numel).into()
-        }
-        binding::DataType::Int4
-        | binding::DataType::Uint4
-        | binding::DataType::Float16
-        | binding::DataType::String => unimplemented!(),
-        binding::DataType::__Invalid => unreachable!(),
-    }
+fn bytes_view(data: &JsValue) -> Uint8Array {
+    let generic_typed_array = Uint8Array::unchecked_from_js_ref(data);
+    Uint8Array::new_with_byte_offset_and_length(
+        &generic_typed_array.buffer(),
+        generic_typed_array.byte_offset(),
+        generic_typed_array.byte_length(),
+    )
 }
 
-/// Borrows growable Rust memory, with safe input snapshots on older browser engines.
-///
-/// Resizable WASM buffers retain their identity across heap growth, so asynchronous ORT
-/// can safely keep these views. Detachable buffers require an intermediate snapshot.
-/// The Rust tensor owner must retain the backing allocation until inference completes.
+pub(crate) fn tensor_byte_size(
+    dtype: binding::DataType,
+    num_elements: usize,
+) -> Option<usize> {
+    Some(match dtype {
+        binding::DataType::Int4 | binding::DataType::Uint4 => {
+            num_elements.div_ceil(2)
+        }
+        binding::DataType::Bool
+        | binding::DataType::Uint8
+        | binding::DataType::Int8 => num_elements,
+        binding::DataType::Uint16
+        | binding::DataType::Int16
+        | binding::DataType::Float16 => num_elements * 2,
+        binding::DataType::Uint32
+        | binding::DataType::Int32
+        | binding::DataType::Float32 => num_elements * 4,
+        binding::DataType::Uint64
+        | binding::DataType::Int64
+        | binding::DataType::Float64 => num_elements * 8,
+        binding::DataType::String | binding::DataType::__Invalid => {
+            return None;
+        }
+    })
+}
+
+// hope you like match arms
+
+/// Creates a temporary view of Rust storage without allocating an input snapshot.
 ///
 /// # Safety
-/// `ptr` must be aligned for `dtype` and readable for `byte_len` bytes while JavaScript
-/// retains the returned view. Its backing allocation must outlive asynchronous inference.
-pub unsafe fn buffer_from_ptr(
+/// The caller must keep the aligned allocation alive while the view is accessed. Heap growth
+/// may detach it, so asynchronous consumers must stabilize a fresh view before retaining it.
+pub(crate) unsafe fn buffer_from_ptr(
     dtype: binding::DataType,
     ptr: *mut c_void,
     byte_len: usize,
-) -> JsValue {
+) -> Result<JsValue, JsValue> {
+    if byte_len == 0 {
+        return copy_buffer(dtype, &[]);
+    }
+
     let view = match dtype {
-        binding::DataType::Bool | binding::DataType::Uint8 => unsafe {
+        binding::DataType::Bool
+        | binding::DataType::Uint8
+        | binding::DataType::Int4
+        | binding::DataType::Uint4 => unsafe {
             js_sys::Uint8Array::view(slice::from_raw_parts(
                 ptr.cast(),
                 byte_len,
@@ -218,7 +380,8 @@ pub unsafe fn buffer_from_ptr(
             js_sys::Int8Array::view(slice::from_raw_parts(ptr.cast(), byte_len))
         }
         .into(),
-        binding::DataType::Uint16 => unsafe {
+        // hoping uint16array works for float16
+        binding::DataType::Uint16 | binding::DataType::Float16 => unsafe {
             js_sys::Uint16Array::view(slice::from_raw_parts(
                 ptr.cast(),
                 byte_len / 2,
@@ -274,20 +437,100 @@ pub unsafe fn buffer_from_ptr(
             ))
         }
         .into(),
-        binding::DataType::Int4
-        | binding::DataType::Uint4
-        | binding::DataType::Float16
-        | binding::DataType::String => unimplemented!(),
-        binding::DataType::__Invalid => unreachable!(),
+        binding::DataType::String | binding::DataType::__Invalid => {
+            return Err(JsValue::from_str("invalid or unsupported data type"));
+        }
     };
-
-    #[allow(unused_unsafe)]
-    unsafe {
-        binding::stable_tensor_data(view)
-    }
+    Ok(view)
 }
 
-pub fn dtype_to_onnx(
+fn copy_buffer(
+    dtype: binding::DataType,
+    bytes: &[u8],
+) -> Result<JsValue, JsValue> {
+    let copy = Uint8Array::new_from_slice(bytes);
+    let buffer = copy.buffer();
+    let len = bytes.len() as u32;
+    Ok(match dtype {
+        binding::DataType::Bool
+        | binding::DataType::Uint8
+        | binding::DataType::Int4
+        | binding::DataType::Uint4 => copy.into(),
+        binding::DataType::Int8 => {
+            js_sys::Int8Array::new_with_byte_offset_and_length(&buffer, 0, len)
+                .into()
+        }
+        binding::DataType::Uint16 | binding::DataType::Float16 => {
+            js_sys::Uint16Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 2,
+            )
+            .into()
+        }
+        binding::DataType::Int16 => {
+            js_sys::Int16Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 2,
+            )
+            .into()
+        }
+        binding::DataType::Uint32 => {
+            js_sys::Uint32Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 4,
+            )
+            .into()
+        }
+        binding::DataType::Int32 => {
+            js_sys::Int32Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 4,
+            )
+            .into()
+        }
+        binding::DataType::Uint64 => {
+            js_sys::BigUint64Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 8,
+            )
+            .into()
+        }
+        binding::DataType::Int64 => {
+            js_sys::BigInt64Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 8,
+            )
+            .into()
+        }
+        binding::DataType::Float32 => {
+            js_sys::Float32Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 4,
+            )
+            .into()
+        }
+        binding::DataType::Float64 => {
+            js_sys::Float64Array::new_with_byte_offset_and_length(
+                &buffer,
+                0,
+                len / 8,
+            )
+            .into()
+        }
+        binding::DataType::String | binding::DataType::__Invalid => {
+            return Err(JsValue::from_str("invalid or unsupported data type"));
+        }
+    })
+}
+
+pub(crate) fn dtype_to_onnx(
     dtype: binding::DataType,
 ) -> ort_sys::ONNXTensorElementDataType {
     match dtype {
@@ -306,11 +549,11 @@ pub fn dtype_to_onnx(
 		binding::DataType::Float64 => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE,
 		binding::DataType::Int4 => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4,
 		binding::DataType::Uint4 => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4,
-		binding::DataType::__Invalid => unreachable!()
+		binding::DataType::__Invalid => ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED
 	}
 }
 
-pub fn onnx_to_dtype(
+pub(crate) fn onnx_to_dtype(
     dtype: ort_sys::ONNXTensorElementDataType,
 ) -> Option<binding::DataType> {
     match dtype {
@@ -333,46 +576,76 @@ pub fn onnx_to_dtype(
 	}
 }
 
-pub struct TypeInfo {
-    pub dtype: ort_sys::ONNXTensorElementDataType,
-    pub shape: Vec<i32>,
+pub(crate) struct TypeInfo {
+    pub(crate) dtype: ort_sys::ONNXTensorElementDataType,
+    pub(crate) shape: Option<Vec<i64>>,
+    pub(crate) symbolic_dims: Vec<CString>,
 }
 
 impl TypeInfo {
-    pub fn new_sys_from_tensor(tensor: &Tensor) -> *mut ort_sys::OrtTypeInfo {
-        Self::new_sys(tensor.js.dtype(), tensor.js.dims())
+    pub(crate) fn new(
+        dtype: ort_sys::ONNXTensorElementDataType,
+        shape: Vec<i64>,
+    ) -> Self {
+        Self {
+            dtype,
+            symbolic_dims: vec![CString::default(); shape.len()],
+            shape: Some(shape),
+        }
     }
 
-    pub fn new_sys_from_value_metadata(
+    pub(crate) fn from_tensor(tensor: &Tensor) -> Self {
+        Self::new(dtype_to_onnx(tensor.dtype()), tensor.shape.clone())
+    }
+
+    pub(crate) fn from_value_metadata(
         metadata: &binding::ValueMetadata,
-    ) -> *mut ort_sys::OrtTypeInfo {
-        Self::new_sys(
-            metadata.r#type.unwrap(),
-            metadata
-                .shape
-                .as_ref()
-                .unwrap()
+    ) -> Self {
+        let dtype = metadata
+			.r#type
+			.map_or(ort_sys::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED, dtype_to_onnx);
+        let Some(shape) = &metadata.shape else {
+            return Self {
+                dtype,
+                shape: None,
+                symbolic_dims: Vec::new(),
+            };
+        };
+
+        Self {
+            dtype,
+            shape: Some(
+                shape
+                    .iter()
+                    .map(|el| match el {
+                        binding::ShapeElement::Value(v) => *v,
+                        binding::ShapeElement::Named(_) => -1,
+                    })
+                    .collect(),
+            ),
+            symbolic_dims: shape
                 .iter()
                 .map(|el| match el {
-                    binding::ShapeElement::Value(v) => *v as i32,
-                    binding::ShapeElement::Named(_) => -1,
+                    binding::ShapeElement::Value(_) => CString::default(),
+                    binding::ShapeElement::Named(name) => {
+                        CString::new(name.as_str()).unwrap_or_default()
+                    }
                 })
                 .collect(),
-        )
+        }
     }
 
-    pub fn new_sys(
-        dtype: DataType,
-        shape: Vec<i32>,
-    ) -> *mut ort_sys::OrtTypeInfo {
-        (Box::leak(Box::new(Self {
-            dtype: dtype_to_onnx(dtype),
-            shape,
-        })) as *mut TypeInfo)
-            .cast()
+    pub(crate) fn shape(&self) -> &[i64] {
+        self.shape.as_deref().unwrap_or_default()
     }
 
-    pub unsafe fn consume_sys(ptr: *mut ort_sys::OrtTypeInfo) -> Box<TypeInfo> {
+    pub(crate) fn into_sys(self) -> *mut ort_sys::OrtTypeInfo {
+        (Box::leak(Box::new(self)) as *mut TypeInfo).cast()
+    }
+
+    pub(crate) unsafe fn consume_sys(
+        ptr: *mut ort_sys::OrtTypeInfo,
+    ) -> Box<TypeInfo> {
         unsafe { Box::from_raw(ptr.cast::<TypeInfo>()) }
     }
 }
@@ -399,19 +672,33 @@ impl<T: ValueTypeMarker> ValueExt for ort::value::Value<T> {
     private_impl!();
 
     async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()> {
-        let ptr = self.ptr_mut();
-        // definitely safe regardless of what backend is used since it's highly improbable that a backend's tensor would be
-        // smaller than 4 bytes (which is pointer size on wasm32)
-        let sentinel: [u8; 4] = unsafe { core::ptr::read(ptr.cast()) };
-        if sentinel != TENSOR_SENTINEL {
-            return Err(Error::new(
-                "Cannot synchronize Value that was not created by ort-web",
-            ));
-        }
-
-        let tensor: &mut Tensor = unsafe { &mut *ptr.cast() };
-        tensor.sync(direction).await
+        unsafe { sync_value(self.ptr_mut(), direction) }.await
     }
+}
+
+impl<T: ValueTypeMarker> ValueExt for ort::value::ValueRefMut<'_, T> {
+    private_impl!();
+
+    async fn sync(&mut self, direction: SyncDirection) -> crate::Result<()> {
+        unsafe { sync_value((**self).ptr().cast_mut(), direction) }.await
+    }
+}
+
+async unsafe fn sync_value(
+    ptr: *mut ort_sys::OrtValue,
+    direction: SyncDirection,
+) -> crate::Result<()> {
+    // definitely safe regardless of what backend is used since it's highly improbable that a backend's tensor would
+    // be smaller than 4 bytes (which is pointer size on wasm32)
+    let sentinel: [u8; 4] = unsafe { core::ptr::read(ptr.cast()) };
+    if sentinel != TENSOR_SENTINEL {
+        return Err(Error::new(
+            "Cannot synchronize Value that was not created by ort-web",
+        ));
+    }
+
+    let tensor: &mut Tensor = unsafe { &mut *ptr.cast() };
+    tensor.sync(direction).await
 }
 
 #[derive(Default)]

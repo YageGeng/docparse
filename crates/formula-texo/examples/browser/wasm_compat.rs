@@ -26,11 +26,12 @@ mod browser {
             runtime_url: String,
             webgpu: bool,
         ) -> Result<BrowserTexo, JsValue> {
+            // Match the ESM assets packaged with ORT Web 1.30 for module Workers.
             let dist =
                 ort_web::Dist::new(runtime_url).with_script_name(if webgpu {
-                    "ort.webgpu.min.js"
+                    "ort.webgpu.min.mjs"
                 } else {
-                    "ort.wasm.min.js"
+                    "ort.wasm.min.mjs"
                 });
             ort::set_api(
                 ort_web::api(dist)

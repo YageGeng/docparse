@@ -34,7 +34,7 @@ rtk npm run build --prefix packages/wasm-web
 
 `npm run build --prefix packages/wasm-web` uses Cargo's release profile, runs wasm-bindgen, then runs the pinned npm Binaryen 132.0.0 `wasm-opt -O4`. No system `wasm-opt` installation is required. Optimization preserves SIMD, bulk memory, reference types, and PDFium exception handling; invalid output fails the build. The manifest records optimization flags, before/after byte sizes, elapsed optimization time, and the hash of the optimized artifact. ORT's own prebuilt WASM files are copied unchanged.
 
-`packages/wasm-web/dist/` contains the ES module API, Worker, Rust WASM, ORT 1.27.0 assets, WASI adapter, and licenses. Its `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
+`packages/wasm-web/dist/` contains the ES module API, Worker, Rust WASM, ORT 1.30.0 assets, WASI adapter, and licenses. Its `build-manifest.json` records versions, file SHA-256 values, PDFium library checksums, and final WASM imports. The build verifies the pinned PDFium chromium/8028 libraries and real setjmp runtime; arbitrary replacement SDKs are rejected.
 
 The SDK build excludes the example and its presentation dependencies. `src/types.ts` contains public data and option contracts; `src/protocol.ts` contains the private typed Worker messages. The example lives under `packages/wasm-web/example/src`, consumes the built public SDK, and emits only to `packages/wasm-web/example/dist`.
 

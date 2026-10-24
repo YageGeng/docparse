@@ -97,6 +97,8 @@ const base = new URL("../../../", import.meta.url);
 const options = { artifacts: { kind: "urls", model: new URL("models/pp-doclayout-v3/inference.onnx", base).href, config: new URL("models/pp-doclayout-v3/inference.yml", base).href, manifest: new URL("models/pp-doclayout-v3/model-manifest.json", base).href } };
 options.tsrArtifacts = { kind: "urls", model: new URL("models/tatr-v1.1-all/inference.onnx", base).href, config: new URL("models/tatr-v1.1-all/inference.yml", base).href, manifest: new URL("models/tatr-v1.1-all/model-manifest.json", base).href };
 options.config = { render: { workers: 1, queue_size: 2 }, layout: { queue_size: 1 }, tsr: { queue_size: 1, cell_detection: { queue_size: 1 }, mode: "rules_only" }, ocr: { detection: { queue_size: 1 }, recognition: { queue_size: 16 }, orientation: { queue_size: 16 } }, formula: { queue_size: 4, inline_enabled: false, display_enabled: false } };
+// Compare the same diagnostic output policy as the native reference instead of silently omitting its fields.
+options.config.output = { include_diagnostics: true };
 options.executionProvider = parameters.get("provider") === "webgpu" ? "webgpu" : "wasm";
 if (parameters.has("fallback")) options.allowCpuFallback = true;
 let parser;
@@ -143,6 +145,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
   }
   if (parameters.has("legacyMemory")) {
     assert(!inferenceMetrics.resizableMemory && inferenceMetrics.copiedInputBytes > 0 && inferenceMetrics.borrowedInputBytes === 0, "Legacy memory did not use safe input snapshots");
+    assert(inferenceMetrics.copiedInputBytes === inferenceMetrics.runtimeInputBytes, `Legacy input snapshots were duplicated: copied ${inferenceMetrics.copiedInputBytes}, submitted ${inferenceMetrics.runtimeInputBytes}`);
     report.tests.push("PASS: legacy memory retains safe inputs across heap growth");
   }
   const actualProviders = inferenceMetrics.providers.map(provider => typeof provider === "string" ? provider : provider.name);
@@ -179,6 +182,7 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
     assert(differences(repeated, document).length === 0, "Repeated parsing changed canonical output");
     const metrics = report.metrics.at(-1);
     assert(metrics.liveTensors === 0, `Runtime tensors retained: ${metrics.liveTensors}`);
+    if (parameters.has("legacyMemory")) assert(metrics.copiedInputBytes === metrics.runtimeInputBytes, "Repeated parsing duplicated input snapshots");
     assert(metrics.sessions === 1, `Unexpected live session count: ${metrics.sessions}`);
     assert(JSON.stringify(metrics.fetches.sort()) === '["fetch_name_0","fetch_name_1"]', "Rust fetches were not forwarded to the runtime");
     assert(JSON.stringify(metrics.outputs.sort()) === '["fetch_name_0","fetch_name_1"]', "Unneeded mask returned by runtime");
@@ -195,10 +199,11 @@ if (gpuUnavailable && options.executionProvider === "webgpu" && !options.allowCp
     onTiming: event => { lateEvent ||= settled; timingEvents.push(event); },
   });
   settled = true;
-  const pageStages = ["text_extract", "pdf_render", "layout_preprocess", "layout_queue", "layout_inference", "layout_readback", "layout_postprocess", "text_prepare", "text_finish", "preview_encode"];
+  // The current session owner includes output readback in layout_inference rather than a separate timer.
+  const pageStages = ["text_extract", "pdf_render", "layout_preprocess", "layout_queue", "layout_inference", "layout_postprocess", "text_prepare", "text_finish", "preview_encode"];
   for (const page of [1, 2, 3]) for (const stage of pageStages) {
-    // The staged pipeline composes text before TSR and completes the page afterward, each measured as text_finish.
-    const expectedRuns = stage === "text_finish" ? 2 : 1;
+    // Layout measures admission and session wait separately; text finishes before TSR and at page completion.
+    const expectedRuns = ["text_finish", "layout_queue"].includes(stage) ? 2 : 1;
     const runs = timingEvents.filter(event => event.stage === stage && event.page_number === page).length;
     assert(runs === expectedRuns, `Page ${page} timing ${stage}: expected ${expectedRuns}, received ${runs}`);
   }

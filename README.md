@@ -98,6 +98,25 @@ let document = parser.parse_path("input.pdf").await?;
 
 Reuse the parser so models stay loaded. Native asynchronous APIs require Tokio; use `parse_path_blocking` only outside an existing Tokio runtime. `DocParserBuilder` supports injected layout, OCR, table, and glyph engines. Browser applications should use the SDK lifecycle API, which initializes PDFium, WASI, and ORT Web in the same Worker.
 
+If the host already uses the same `ort` version, register its environment before creating any DocParse sessions:
+
+```rust,no_run
+# /// Shares one host-owned ONNX Runtime environment with DocParse.
+# fn register_host_runtime() -> Result<(), Box<dyn std::error::Error>> {
+let threads = ort::environment::GlobalThreadPoolOptions::default()
+    .with_spin_control(false)?;
+let environment = ort::init()
+    .with_telemetry(false)
+    .with_global_thread_pool(threads)
+    .build()?;
+docparse_layout::OnnxBackend::use_environment(environment.clone())?;
+// The host can keep using `environment` for its other ONNX sessions.
+# Ok(())
+# }
+```
+
+Registration retains a shared handle and is idempotent for the same environment. Host global thread-pool and telemetry settings remain in effect; DocParse cannot add a global pool to an already-created environment. DocParse still selects its compiled execution provider and honors independent per-session thread settings. Standalone CLI/server users do not need to register an environment.
+
 ## Repository map
 
 | Path | Responsibility |

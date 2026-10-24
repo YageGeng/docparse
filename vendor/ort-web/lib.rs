@@ -29,9 +29,9 @@ mod util;
 pub use self::{
     session::sync_outputs,
     tensor::{
-        ImageFormat, ImageNorm, ImageTensorLayout, SyncDirection,
-        TensorFromImage, TensorFromImageOptions, TensorFromUrlOptions,
-        ValueExt,
+        ImageFormat, ImageNorm, ImageNormOption, ImageTensorLayout,
+        SyncDirection, TensorFromImage, TensorFromImageOptions,
+        TensorFromUrlOptions, ValueExt,
     },
 };
 
@@ -92,7 +92,8 @@ pub const FEATURE_WEBNN: u8 = FEATURE_WEBGPU;
 /// 	// This must be called at least once before using any `ort` API.
 /// 	ort::set_api(ort_web::api(FEATURE_WEBGL | FEATURE_WEBGPU).await?);
 ///
-/// 	let session = Session::builder()?.commit_from_url("https://...").await?;
+/// 	let env = ort::init().build()?;
+/// 	let session = Session::builder(&env)?.commit_from_url("https://...").await?;
 /// 	Ok(session)
 /// }
 /// ```
@@ -103,10 +104,11 @@ pub const FEATURE_WEBNN: u8 = FEATURE_WEBGPU;
 /// use ort_web::Dist;
 ///
 /// async fn init_model() -> anyhow::Result<Session> {
-/// 	let dist = Dist::new("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/")
+/// 	let dist = Dist::new("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/")
 /// 		// load the WebGPU build
 /// 		.with_script_name("ort.webgpu.min.js");
 /// 	ort::set_api(ort_web::api(dist).await?);
+/// 	# todo!()
 /// }
 /// ```
 pub async fn api<L: Loadable>(config: L) -> Result<ort_sys::OrtApi> {

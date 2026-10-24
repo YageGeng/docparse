@@ -5,7 +5,7 @@ if (preferredLayout !== null && !["NCHW", "NHWC"].includes(preferredLayout)) thr
 if (new URL(location.href).searchParams.has("noGpu")) Object.defineProperty(navigator, "gpu", {value: undefined, configurable: true});
 // Exercise older engines at the capability boundary while retaining the actual parser and ORT.
 if (new URL(location.href).searchParams.has("legacyMemory")) Object.defineProperty(WebAssembly.Memory.prototype, "toResizableBuffer", {value: undefined, configurable: true});
-const metrics = { calls: 0, liveTensors: 0, sessions: 0, fetches: [], outputs: [], memoryBytes: [], providers: [], models: [], gpuSubmissions: 0, inferenceMs: [], borrowedInputBytes: 0, copiedInputBytes: 0 };
+const metrics = { calls: 0, liveTensors: 0, sessions: 0, fetches: [], outputs: [], memoryBytes: [], providers: [], models: [], gpuSubmissions: 0, inferenceMs: [], borrowedInputBytes: 0, copiedInputBytes: 0, runtimeInputBytes: 0 };
 const toResizableBuffer = WebAssembly.Memory.prototype.toResizableBuffer;
 if (toResizableBuffer) {
   /** Observes conversion without allocating or replacing the real module memory. */
@@ -61,8 +61,9 @@ Object.defineProperty(globalThis, "ort", {
       /** Measures intermediate input storage at the actual ORT boundary without retaining it. */
       construct(target, args) {
         const data = args[1];
-        if (ArrayBuffer.isView(data)) {
-          metrics[data.buffer === rustMemory?.buffer ? "borrowedInputBytes" : "copiedInputBytes"] += data.byteLength;
+        // Count every allocated snapshot, including redundant copies that never reach a run.
+        if (ArrayBuffer.isView(data) && data.buffer !== rustMemory?.buffer) {
+          metrics.copiedInputBytes += data.byteLength;
         }
         return observe(Reflect.construct(target, args));
       },
@@ -78,7 +79,8 @@ Object.defineProperty(globalThis, "ort", {
         throw new Error("Injected WebGPU session initialization failure");
       }
       const session = await create.apply(this, args);
-      if (benchmarkParameters.has("benchmark") && !metrics.adapter) {
+      // Report the device actually used by ORT so software adapters cannot masquerade as hardware validation.
+      if (!metrics.adapter && metrics.providers.some(provider => (provider.name ?? provider) === "webgpu")) {
         const device = await value.env.webgpu.device;
         const info = device.adapterInfo;
         metrics.adapter = info ? { vendor: info.vendor, architecture: info.architecture, device: info.device, description: info.description, isFallbackAdapter: info.isFallbackAdapter } : null;
@@ -95,6 +97,15 @@ Object.defineProperty(globalThis, "ort", {
       session.release = async function (...args) { const result = await release.apply(this, args); metrics.sessions--; return result; };
       const run = session.run;
       session.run = async function (...args) {
+        // Borrowing is a run-boundary property; temporary metadata views are not retained by inference.
+        for (const tensor of Object.values(args[0])) {
+          if (!["cpu", "cpu-pinned"].includes(tensor.location)) continue;
+          const data = tensor.data;
+          if (ArrayBuffer.isView(data)) {
+            metrics.runtimeInputBytes += data.byteLength;
+            if (data.buffer === rustMemory?.buffer) metrics.borrowedInputBytes += data.byteLength;
+          }
+        }
         if (new URL(location.href).searchParams.has("growMemory")) {
           if (!rustMemory) throw new Error("DocParse memory was not observed");
           // Grow the actual parser heap after input creation, just as PDFium prefetch can

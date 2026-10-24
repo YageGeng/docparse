@@ -11,14 +11,15 @@
 
 [package]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.92"
 name = "ort-web"
-version = "0.3.0+1.27"
+version = "0.5.0+1.30"
 authors = ["pyke.io <contact@pyke.io>"]
 build = false
 include = [
     "*.rs",
     "/*.js",
+    "!/tests/*.rs",
 ]
 autolib = false
 autobins = false
@@ -53,18 +54,18 @@ path = "lib.rs"
 version = "0.3.87"
 
 [dependencies.ort]
-version = "=2.0.0-rc.13"
+version = "=2.0.0-rc.15"
 features = [
     "alternative-backend",
-    "api-17",
+    "api-24",
 ]
 default-features = false
 
 [dependencies.ort-sys]
-version = "=2.0.0-rc.13"
+version = "=2.0.0-rc.15"
 features = [
     "disable-linking",
-    "api-17",
+    "api-24",
 ]
 default-features = false
 
@@ -91,6 +92,12 @@ features = [
     "WebGlTexture",
     "GpuBuffer",
 ]
+
+[dev-dependencies.anyhow]
+version = "1"
+
+[dev-dependencies.wasm-bindgen-test]
+version = "0.3"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

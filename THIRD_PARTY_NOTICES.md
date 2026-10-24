@@ -69,7 +69,7 @@ The model files are not committed or packaged. Redistributors who bundle them mu
 
 ## ort and ONNX Runtime
 
-DocParse uses Rust crate `ort` version `2.0.0-rc.13`, which dynamically loads the separately downloaded ONNX Runtime binary selected by `ort-sys`.
+DocParse uses Rust crate `ort` version `2.0.0-rc.15` with the separately downloaded ONNX Runtime distribution selected by `ort-sys`. Accelerator providers also require their matching shared libraries at runtime.
 
 - ort source: [pykeio/ort](https://github.com/pykeio/ort)
 - ort license: MIT OR Apache-2.0
@@ -97,9 +97,9 @@ PaddleOCR 3.6.0, PaddleX, OpenCV, NumPy, Python ONNX Runtime, psutil, and pypdf 
 
 ## Browser runtime and test fonts
 
-The browser package uses the pinned `ort-web` 0.3.0+1.27 source in `vendor/ort-web`, with documented Worker, fetch-selection, and resource-release changes. Its MIT and Apache-2.0 license texts are retained there and copied into the browser distribution.
+The browser package uses the pinned `ort-web` 0.5.0+1.30 source in `vendor/ort-web`, with documented Worker, fetch-selection, and resource-release changes. Its MIT and Apache-2.0 license texts are retained there and copied into the browser distribution.
 
-ONNX Runtime Web 1.27.0 is installed through the npm lockfile. Its MIT license and third-party notices are retained under `packages/wasm-web/licenses` and copied to `dist/ort`. The browser package also redistributes the pinned PDFium SDK's complete license directory.
+ONNX Runtime Web 1.30.0 is installed through the npm lockfile. Its MIT license and third-party notices are retained under `packages/wasm-web/licenses` and copied to `dist/ort`. The browser package also redistributes the pinned PDFium SDK's complete license directory.
 
 The embedded-font integration PDF includes a subset of Bitstream Vera from ReportLab. The accompanying notice is `crates/core/tests/fixtures/pdf/embedded_layout.LICENSE.txt`. This font is a test-fixture dependency, not a bundled production font replacement.
 

@@ -30,6 +30,12 @@ export async function* runExportRaceE2E(page, cdp) {
       await page.getByRole("button", { name: "Show page 1", exact: true }).click();
       await page.locator("#download").click();
       await page.locator("#export-dialog").waitFor({ state: "visible" });
+      // Opening the dialog precedes bitmap decoding; wait until the old PNG callback is actually pending.
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (await inspect(cdp, `window.__docparseExportTiming.pending.length === ${offset + 1}`)) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(await inspect(cdp, "window.__docparseExportTiming.pending.length"), offset + 1, "The older PNG encode did not start");
       if (mode === "older-first") await page.locator("#export-dialog").press("Escape");
       else await page.locator("#close-export").click();
       assert.equal(await page.locator("#export-dialog").isVisible(), false);

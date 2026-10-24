@@ -7,7 +7,7 @@ use crate::{
 use docparse_common::timing::TimingContext;
 use docparse_common::timing::{StageTimer, TimingStage, Timings};
 use docparse_layout::wasm_compat::OnnxBackend;
-use ort::{session::builder::SessionBuilder, value::TensorRef};
+use ort::session::builder::SessionBuilder;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -124,6 +124,7 @@ impl SessionRunner {
 mod platform {
     use super::*;
     use docparse_common::SessionManager;
+    use ort::value::TensorRef;
 
     /// Each OCR stage owns independent sessions consuming one shared ready-input queue.
     pub(crate) struct SessionRunner {
@@ -250,7 +251,8 @@ mod platform {
                                 let result = async {
                                 let input = ImageTensor::try_from(requests.iter().map(|request| &request.input).collect::<Vec<_>>().as_slice())?;
                                 let timers = timings.start_unique(kind.timing());
-                                let outputs = session.run_async(ort::inputs! { "x" => TensorRef::from_array_view(&input.0)? }, &options).await;
+                                // Move the batch into rc.15 so asynchronous execution owns its backing allocation.
+                                let outputs = session.run_async(ort::inputs! { "x" => ort::value::Tensor::from_array(input.0)? }, &options).await;
                                 drop(timers);
                                 let mut outputs = outputs?;
                                 let timers = timings.start_unique(TimingStage::OcrReadback);

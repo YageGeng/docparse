@@ -54,14 +54,16 @@ try {
       const formula = ["pp", "texo"].includes(kind);
       const parser = await createParser({
         executionProvider: "wasm", artifacts: artifacts(""),
-        ...(kind === "tsr" ? { tsrArtifacts: artifacts("slanet-plus/"), tsrCellArtifacts: artifacts("rtdetr-table-cell-wireless/") } : {}),
+        // Match the current default TATR contract instead of supplying retired default-model artifacts.
+        ...(kind === "tsr" ? { tsrArtifacts: artifacts("tatr-v1.1-all/"), tsrCellArtifacts: artifacts("rtdetr-table-cell-wireless/") } : {}),
         ...(kind === "ocr" ? { ocrArtifacts: { detection: artifacts("pp-ocrv6-medium-det/"), recognition: artifacts("pp-ocrv6-medium-rec/"), orientation: artifacts("pp-lcnet-textline-ori/") } } : {}),
         config: {
           ...(level === undefined ? {} : { runtime: { optimization_level: level, memory_pattern: memoryPattern } }),
           render: { workers: 1, queue_size: 1 }, layout: { session_size: 1, queue_size: 1 },
           tsr: { session_size: 1, queue_size: 1, mode: kind === "tsr" ? "tsr_only" : "rules_only", cell_detection: { session_size: 1, queue_size: 1 } },
           ocr: { policy: kind === "ocr" ? "always" : "disabled", classify_orientation: true, detection: { session_size: 1, queue_size: 1 }, recognition: { session_size: 1, queue_size: 1 }, orientation: { session_size: 1, queue_size: 1 } },
-          formula: { queue_size: 1, engine: { type: formula ? kind : "pp", session_size: 1 }, inline_enabled: formula, display_enabled: formula },
+          // Exercise the current consumer-list schema so this regression reaches real model initialization.
+          formula: { queue_size: 1, engine: [{ type: formula ? kind : "pp", worker_size: 1, batch_size: 1 }], inline_enabled: formula, display_enabled: formula },
         },
       });
       try { return window.sessionMetrics.models; }

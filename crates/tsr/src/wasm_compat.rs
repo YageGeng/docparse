@@ -219,6 +219,36 @@ mod platform {
     use super::*;
     use crate::TsrArtifacts;
 
+    // Native runs still borrow batches; only browser awaits require owned inputs.
+    impl ModelInput {
+        /// Borrows mixed float/int tensors so TATR masks share the native and browser session path.
+        pub(crate) fn values(
+            &self,
+        ) -> Result<
+            Vec<(
+                std::borrow::Cow<'static, str>,
+                ort::session::SessionInputValue<'_>,
+            )>,
+            ort::Error,
+        > {
+            use ort::value::TensorRef;
+            Ok(match self {
+                Self::Structure(input) => {
+                    ort::inputs!["x" => TensorRef::from_array_view(&input.0)?]
+                }
+                Self::Cells(input) => ort::inputs![
+                    "image" => TensorRef::from_array_view(&input.image)?,
+                    "im_shape" => TensorRef::from_array_view(&input.image_shape)?,
+                    "scale_factor" => TensorRef::from_array_view(&input.scale_factor)?,
+                ],
+                Self::Tatr(input) => ort::inputs![
+                    "pixel_values" => TensorRef::from_array_view(&input.pixels)?,
+                    "pixel_mask" => TensorRef::from_array_view(&input.mask)?,
+                ],
+            })
+        }
+    }
+
     use docparse_common::SessionManager;
 
     /// Independent structure or detector owners consume the same bounded model queue.
@@ -401,8 +431,10 @@ mod platform {
                                     .map(|request| &request.input)
                                     .collect::<Vec<_>>(),
                             )?;
+                            // The async runtime owns the moved arrays until inference completes.
+                            let values: Vec<_> = input.try_into()?;
                             let mut outputs = session
-                                .run_async(input.values()?, &options)
+                                .run_async(values, &options)
                                 .await?;
                             ort_web::sync_outputs(&mut outputs).await.map_err(
                             |error| TsrError::Inference {

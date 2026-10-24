@@ -6,10 +6,10 @@ use docparse_config::ValidatedConfig;
 use docparse_formula::{FormulaEngine, FormulaError};
 use docparse_layout::PageImage;
 use ort::{
-    session::{Session, SessionInputValue, SessionOutputs},
+    session::{Session, SessionOutputs},
     value::{DynValue, Tensor},
 };
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 /// Maximum sequence length, including BOS, from the pinned generation configuration.
@@ -219,22 +219,6 @@ impl Generation {
             .finished(vec![false; batch])
             .step(0)
             .build())
-    }
-
-    /// Borrows hidden features and cached tensors without cloning or copying their data.
-    pub(crate) fn inputs(
-        &self,
-    ) -> Result<Vec<(Cow<'static, str>, SessionInputValue<'_>)>, FormulaError>
-    {
-        let mut inputs = ort::inputs![
-            "input_ids" => Tensor::from_array(([self.next.len(), 1], self.next.clone()))?,
-            "encoder_hidden_states" => &self.hidden,
-            "use_cache_branch" => Tensor::from_array(([1], vec![self.step > 0]))?,
-        ];
-        for (name, value) in CACHE_NAMES.into_iter().zip(&self.cache) {
-            inputs.push((Cow::Borrowed(name), value.into()));
-        }
-        Ok(inputs)
     }
 
     /// Updates greedy predictions and replaces only the KV tensors the selected branch produced.

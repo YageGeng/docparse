@@ -90,54 +90,6 @@ impl OnnxThreading {
         }
     }
 
-    /// Installs the process-wide ORT pool once, before any session creates the default environment.
-    fn install_global_pool(self) -> Result<(), LayoutError> {
-        static INSTALLED: std::sync::OnceLock<(usize, bool)> =
-            std::sync::OnceLock::new();
-        let requested = (self.global_threads(), self.spinning);
-        let installed = match INSTALLED.get() {
-            Some(installed) => *installed,
-            None => {
-                let options =
-                    ort::environment::GlobalThreadPoolOptions::default()
-                        .with_intra_threads(requested.0)?
-                        // Models run sequential graphs; inter-op parallelism would only add idle threads.
-                        .with_inter_threads(1)?
-                        .with_spin_control(requested.1)?;
-                // OnceLock serializes concurrent first callers, so exactly one of them commits.
-                *INSTALLED.get_or_init(|| {
-                    if ort::init().with_global_thread_pool(options).commit() {
-                        tracing::info!(
-                            "installed ONNX global thread pool with {} intra-op threads ({}), spinning {}",
-                            requested.0,
-                            if self.intra_threads == 0 {
-                                "auto"
-                            } else {
-                                "configured"
-                            },
-                            requested.1
-                        );
-                    } else {
-                        tracing::warn!(
-                            "ONNX environment was initialized before the global thread pool; sessions keep their own pools"
-                        );
-                    }
-                    requested
-                })
-            }
-        };
-        if installed != requested {
-            tracing::warn!(
-                "ONNX global thread pool already uses {} threads (spinning {}); ignoring {} threads (spinning {})",
-                installed.0,
-                installed.1,
-                requested.0,
-                requested.1
-            );
-        }
-        Ok(())
-    }
-
     /// Applies this policy to one builder; global sessions inherit the shared pool automatically.
     fn apply(
         self,
@@ -146,6 +98,10 @@ impl OnnxThreading {
         match self.pool {
             OnnxThreadPool::Global => Ok(builder),
             OnnxThreadPool::Session => {
+                // rc.15 inherits the environment pool unless explicitly opting out for this session.
+                let builder = builder
+                    .with_independent_thread_pool()
+                    .map_err(ort::Error::from)?;
                 let builder = match self.intra_threads {
                     0 => builder,
                     threads => builder
@@ -160,6 +116,83 @@ impl OnnxThreading {
     }
 }
 
+/// The shared environment may belong to the host, whose global policy must remain untouched.
+struct SharedEnvironment {
+    environment: ort::environment::Environment,
+    threading: Option<OnnxThreading>,
+}
+
+// Both host registration and lazy CLI/server initialization use the same synchronized owner.
+static ENVIRONMENT: std::sync::Mutex<Option<SharedEnvironment>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TryFrom<OnnxThreading> for ort::environment::Environment {
+    type Error = ort::Error;
+
+    /// Builds the default native environment without owning process-wide registration.
+    fn try_from(threading: OnnxThreading) -> Result<Self, Self::Error> {
+        let builder = ort::init();
+        let builder = if threading.pool == OnnxThreadPool::Global {
+            let options = ort::environment::GlobalThreadPoolOptions::default()
+                .with_intra_threads(threading.global_threads())?
+                .with_inter_threads(1)?
+                .with_spin_control(threading.spinning)?;
+            builder.with_global_thread_pool(options)
+        } else {
+            builder
+        };
+        builder.build()
+    }
+}
+
+impl SharedEnvironment {
+    /// Reuses the registered host environment or lazily installs the existing standalone policy.
+    fn get_or_init(
+        threading: OnnxThreading,
+    ) -> Result<ort::environment::Environment, LayoutError> {
+        let mut shared =
+            ENVIRONMENT.lock().map_err(|error| LayoutError::Engine {
+                message: format!(
+                    "ONNX environment initialization lock failed: {error}"
+                ),
+            })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let requested = OnnxThreading {
+            intra_threads: threading.global_threads(),
+            ..threading
+        };
+        #[cfg(target_arch = "wasm32")]
+        let requested = threading;
+        if let Some(installed) = shared.as_ref() {
+            if threading.pool == OnnxThreadPool::Global
+                && let Some(policy) = installed.threading
+                && policy != requested
+            {
+                tracing::warn!(
+                    "ONNX environment already uses {:?}; ignoring requested global policy {:?}",
+                    policy,
+                    requested
+                );
+            }
+            return Ok(installed.environment.clone());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let environment = ort::environment::Environment::try_from(requested)?;
+        #[cfg(target_arch = "wasm32")]
+        let environment = ort::init().with_telemetry(false).build()?;
+        tracing::info!(
+            "initialized shared ONNX environment with {:?}",
+            requested
+        );
+        *shared = Some(Self {
+            environment: environment.clone(),
+            threading: Some(requested),
+        });
+        Ok(environment)
+    }
+}
+
 /// Carries the provider and parser-wide graph, memory and threading policies to every session constructor.
 #[derive(Debug, Clone, Copy, typed_builder::TypedBuilder)]
 pub struct OnnxBackend {
@@ -169,6 +202,7 @@ pub struct OnnxBackend {
     #[builder(default)]
     threading: OnnxThreading,
     // Matches the runtime configuration default so ad-hoc builders share GPU memory the same way.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     #[builder(default = true)]
     arena_shrinkage: bool,
     // Per-model provider tuning; the shared backend keeps defaults until a model applies its own.
@@ -186,6 +220,36 @@ pub struct OnnxBackend {
 }
 
 impl OnnxBackend {
+    /// Registers a host-created ORT environment before any DocParse sessions are initialized.
+    ///
+    /// The host retains control of global thread pools and telemetry. Re-registering the same
+    /// environment is harmless; an active environment is never replaced. DocParse retains a
+    /// shared handle, so dropping the host's handle does not invalidate later parser creation.
+    pub fn use_environment(
+        environment: ort::environment::Environment,
+    ) -> Result<(), LayoutError> {
+        use ort::AsPointer;
+        let mut shared =
+            ENVIRONMENT.lock().map_err(|error| LayoutError::Engine {
+                message: format!(
+                    "ONNX environment initialization lock failed: {error}"
+                ),
+            })?;
+        if let Some(installed) = shared.as_ref() {
+            if !std::ptr::eq(installed.environment.ptr(), environment.ptr()) {
+                return Err(LayoutError::Engine {
+                    message: "register the host ONNX environment before initializing DocParse sessions".into(),
+                });
+            }
+        } else {
+            *shared = Some(SharedEnvironment {
+                environment,
+                threading: None,
+            });
+        }
+        Ok(())
+    }
+
     /// Reports the selected backend without exposing a runtime mutation mechanism.
     pub const fn execution_provider(self) -> ExecutionProvider {
         self.provider
@@ -293,13 +357,12 @@ impl OnnxBackend {
             OptimizationLevel::Level3 => GraphOptimizationLevel::Level3,
             OptimizationLevel::All => GraphOptimizationLevel::All,
         };
-        // The shared pool must exist before the first builder lazily creates ORT's default environment.
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.threading.pool == OnnxThreadPool::Global {
-            self.threading.install_global_pool()?;
-        }
-        // Every model inherits this switch; ORT Web independently forces it off for WebGPU.
-        let builder = Session::builder()?
+        // rc.15 requires an explicit environment; its shared handle outlives all parser instances.
+        let environment = SharedEnvironment::get_or_init(self.threading)?;
+        // Host execution-provider defaults must not override the parser's compiled backend.
+        let builder = Session::builder(&environment)?
+            .with_no_environment_execution_providers()
+            .map_err(ort::Error::from)?
             .with_optimization_level(level)
             .map_err(ort::Error::from)?
             .with_memory_pattern(self.memory_pattern)
@@ -462,6 +525,34 @@ mod tests {
     /// Well-formed stand-in for a pinned model digest.
     const DIGEST: &str =
         "45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba";
+
+    /// Recreating parsers after idle gaps and concurrent loads must reuse ORT's sole environment.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn environment_survives_idle_gaps_and_concurrent_builders() {
+        use ort::AsPointer;
+
+        let policy = OnnxThreading::default();
+        let environment =
+            SharedEnvironment::get_or_init(policy).expect("first environment");
+        let address = environment.ptr() as usize;
+        drop(environment);
+        let workers = (0..4)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    let environment = SharedEnvironment::get_or_init(policy)
+                        .expect("shared environment");
+                    let builder = Session::builder(&environment)
+                        .expect("session builder");
+                    drop(builder);
+                    environment.ptr() as usize
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            assert_eq!(worker.join().expect("builder thread"), address);
+        }
+    }
     /// Every native model receives the compiled backend even when built from code-default configuration.
     #[test]
     #[cfg(not(target_arch = "wasm32"))]

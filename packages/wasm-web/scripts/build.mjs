@@ -126,5 +126,6 @@ await copyFile(join(sdkRoot, "LICENSE"), join(dist, "pdfium/LICENSE"));
 await copyFile(join(sdkRoot, "VERSION"), join(dist, "pdfium/VERSION"));
 await cp(join(sdkRoot, "licenses"), join(dist, "pdfium/licenses"), { recursive: true });
 const pdfiumLibraries = Object.fromEntries((await readFile(join(root, "crates/pdfium-sys/wasm-libraries.sha256"), "utf8")).trim().split("\n").map(line => { const [hash, name] = line.split(/\s+/); return [name, hash]; }));
-await writeFile(join(dist, "build-manifest.json"), JSON.stringify({ rustTarget: "wasm32-unknown-unknown", ort: "2.0.0-rc.13", ortWeb: "0.3.0+1.27", onnxruntimeWeb: "1.27.0", wasmBindgen: "0.2.125", pdfium: "chromium/8028", pdfiumLibraries, optimization, imports, hashes }, null, 2) + "\n");
+// Record the matched native bindings and browser runtime after the rc.15 migration.
+await writeFile(join(dist, "build-manifest.json"), JSON.stringify({ rustTarget: "wasm32-unknown-unknown", ort: "2.0.0-rc.15", ortWeb: "0.5.0+1.30", onnxruntimeWeb: "1.30.0", wasmBindgen: "0.2.125", pdfium: "chromium/8028", pdfiumLibraries, optimization, imports, hashes }, null, 2) + "\n");
 console.log(`Built browser package at ${dist}; verified ${imports.length} WASM imports`);

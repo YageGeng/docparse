@@ -27,7 +27,7 @@ serde.workspace = true
 typed-builder.workspace = true
 
 # inference and image
-ort = { workspace = true, features = ["api-17", "alternative-backend"] }
+ort = { workspace = true, features = ["api-24", "alternative-backend"] }
 
 # cli and diagnostics
 tracing.workspace = true
